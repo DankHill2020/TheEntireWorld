@@ -20,5 +20,6 @@ Instructions for first time using:
 #To Launch tool
 
 from maya_tools.Cinematics.SequenceUI import sequence_ui
+
 sequence_ui.show_animation_manager()
 
