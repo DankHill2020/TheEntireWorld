@@ -8,6 +8,7 @@ Instructions for first time using:
 2. After that point you should be able to open maya vanilla without the bat file, and the tool should open up and prompt you to select a Uproject
 
 3. You *Must* have an unreal project set up currently for the exports to be added and exported as the tool relies on valid skeleton assets for the rigs you want to export, and it has been developed for 5.5 (future updates will support more versions)
+If you need help with getting skeletons in engine, feel free to reach out until I have a quick tutorial for this linked
 
 4. Inside Unreal, there is one part that is needed if you want to have the sequence importer work with the Engine open
   
