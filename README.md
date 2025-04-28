@@ -12,7 +12,7 @@ If you need help with getting skeletons in engine, feel free to reach out until 
 
 4. Inside Unreal, there is one part that is needed if you want to have the sequence importer work with the Engine open
   
-5. Edit > Project Settings > Python > Startup Scripts > Add an Array Element > set the path for the new index to be whatever your local path of  //tools/unreal_tools/http_server.py is... on my PC this is C:/depot/tools/unreal_tools/http_server.py
+5. Edit > Project Settings > Python > Startup Scripts > Add an Array Element > set the path for the new index to be whatever your local path of  //tools/unreal_tools/http_server.py is... on my PC this is C:/depot/tools/unreal_tools/http_server.py. If this is not there by default, you may have to Load the Python Scripting related Plugins
    
 6. I walk through the functionality and how to get this setup in a few vimeo videos, though some updates have happened since then to the UI and the setup... this part is defined there : https://vimeo.com/user58067839 ; https://vimeo.com/user58067839
 
