@@ -18,6 +18,7 @@ Instructions for first time using:
 7. Beyond that once you have the UI open, the videos above show how to use the interface and I will be adding a paper documentation shortly
 
 #To Launch tool
+
 from maya_tools.Cinematics.SequenceUI import sequence_ui
 sequence_ui.show_animation_manager()
 
