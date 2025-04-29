@@ -2,13 +2,12 @@ import json
 import os
 import unreal
 
-script_dir = os.path.dirname(__file__)
+'''script_dir = os.path.dirname(__file__)
 tools_dir = os.path.dirname(script_dir)
 art_source_dir = tools_dir.replace("tools", "ArtSource").replace("\\", "/")
 content_dir = "/Game"
-
-
-def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessable=None):
+'''
+def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessable=None, namespace=None):
     """
     Adds a blueprint actor and its components to a level sequence, creating and binding the actor and components.
 
@@ -16,6 +15,7 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
     :param asset_path: The path to the blueprint or skeletal mesh asset to load and spawn.
     :param actor: The actor to be added to the sequence (optional). If not provided, the actor will be spawned.
     :param possessable: The possessable to bind to the actor (optional). If not provided, it will be created.
+    :param namespace: The namespace to use for the actor (optional). If not provided, it will be use the SK mesh name
 
     :return: A list containing the possessable, the actor, and the component list (if any).
     """
@@ -35,6 +35,7 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
             actor, possessable, component_list = find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=asset_path, skeletal_mesh_path=None,
                                                      shot_sequence=level_sequence)
             if not actor:
+
                 actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
 
         elif isinstance(asset, unreal.SkeletalMesh):
@@ -42,11 +43,19 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
             all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
 
             for a in all_actors:
-                if isinstance(a, unreal.SkeletalMeshActor):
-                    sm_comp = a.get_editor_property("skeletal_mesh_component")
-                    if sm_comp and sm_comp.get_editor_property("skeletal_mesh") == asset:
-                        actor = a
-                        break
+                if namespace:
+                    if isinstance(a, unreal.SkeletalMeshActor):
+                        if namespace in a.get_actor_label():
+                            actor = a
+                            break
+
+            if not actor:
+                for a in all_actors:
+                    if isinstance(a, unreal.SkeletalMeshActor):
+                        sm_comp = a.get_editor_property("skeletal_mesh_component")
+                        if sm_comp and sm_comp.get_editor_property("skeletal_mesh") == asset:
+                            actor = a
+                            break
 
             if not actor:
                 actor_rotation = unreal.Rotator(0.0, 0.0, 0.0)
@@ -54,7 +63,11 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
                                                                          unreal.Vector(0, 0, 0), actor_rotation)
                 sm_comp = actor.get_editor_property("skeletal_mesh_component")
                 sm_comp.set_editor_property("skeletal_mesh", asset)
-                skeletal_mesh_name = asset.get_name()
+
+                if namespace:
+                    skeletal_mesh_name = namespace
+                else:
+                    skeletal_mesh_name = asset.get_name()
                 actor.set_actor_label(skeletal_mesh_name)
         else:
             unreal.log_error(f"Unsupported asset type for spawning: {asset}")
@@ -1396,7 +1409,7 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
 
                         skeletal_mesh = skeletal_meshes[0]
                         skeletal_mesh_path = find_uasset_path(skeletal_mesh.get_name())
-                        actor, possessable = add_actor_to_level_sequence(shot_sequence_path, skeletal_mesh_path, actor=actor)
+                        actor, possessable = add_actor_to_level_sequence(shot_sequence_path, skeletal_mesh_path, actor=actor, namespace=namespace)
                         component_list = add_skeletal_mesh_components_to_level_sequence(actor, possessable)
 
                     if "FacialSliders" not in export_path:
@@ -1466,7 +1479,7 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                                                             unreal.log_error("FBX Import to Control Rig failed.")
                                                         break
                 actor.modify()
-                unreal.EditorLevelLibrary.save_current_level()
+            unreal.EditorLevelLibrary.save_current_level()
             update_asset_registry_and_save(shot_sequence_dir, shot_sequence_path)
     except:
         unreal.SystemLibrary.collect_garbage()
@@ -1482,7 +1495,7 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
 
     return sequence_path
 
-'''test_dict_path = "C:/depot/ArtSource/Exports\Animation/Cinematics/Metahuman_Cine_Test/JSON/Metahuman_Cine_Test.json"
-create_cinematic_sequence_from_json(test_dict_path, destination_path="/Game/Cinematics", from_cmd=False)'''
+test_dict_path = "C:/depot/ArtSource/Exports/Animation/Cinematics/Test/JSON/DS_ANIMTEST_SEQ000_SHOT160_v27_JD.json"
+create_cinematic_sequence_from_json(test_dict_path, destination_path="/Game/Cinematics", from_cmd=False)
 
 
