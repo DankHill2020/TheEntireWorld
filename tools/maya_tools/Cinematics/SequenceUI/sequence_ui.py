@@ -71,6 +71,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.duplicate_button = QtWidgets.QPushButton("Duplicate Animations")
         self.delete_button = QtWidgets.QPushButton("Delete Animations")
         self.unreal_checkbox = QtWidgets.QCheckBox("Import into Unreal")
+        self.unreal_checkbox.setChecked(True)
         self.export_button = QtWidgets.QPushButton("Export Animations")
         self.export_cinematics_button = QtWidgets.QPushButton("Export For Cinematic")
         self.anim_dict = dict()
@@ -949,8 +950,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             else:
                 nodes = [n.strip() for n in nodes.split(",")]
             ref_paths = anim_utils.find_references_from_namespace(namespace)
-            print("FOUND PATHS")
-            print(ref_paths)
+
             proc = anim_ec.export_animation_to_fbx(export_path, namespace, start_widget.value(), end_widget.value(),
                                                    nodes=nodes, reference_paths=ref_paths)
 
