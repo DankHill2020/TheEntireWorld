@@ -8,12 +8,12 @@ art_source_dir = tools_dir.replace("tools", "ArtSource").replace("\\", "/")
 content_dir = "/Game"
 
 
-def add_actor_to_level_sequence(sequence_path, blueprint_path, actor=None, possessable=None):
+def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessable=None):
     """
     Adds a blueprint actor and its components to a level sequence, creating and binding the actor and components.
 
     :param sequence_path: The level sequence path to which the actor and components will be added.
-    :param blueprint_path: The path to the blueprint or skeletal mesh asset to load and spawn.
+    :param asset_path: The path to the blueprint or skeletal mesh asset to load and spawn.
     :param actor: The actor to be added to the sequence (optional). If not provided, the actor will be spawned.
     :param possessable: The possessable to bind to the actor (optional). If not provided, it will be created.
 
@@ -24,28 +24,27 @@ def add_actor_to_level_sequence(sequence_path, blueprint_path, actor=None, posse
         unreal.log_error(f"Failed to load level sequence at {sequence_path}")
         return [None, None]
 
-    bp_asset = unreal.load_asset(blueprint_path)
-    if not bp_asset:
-        unreal.log_error(f"Failed to load asset at {blueprint_path}")
+    asset = unreal.load_asset(asset_path)
+    if not asset:
+        unreal.log_error(f"Failed to load asset at {asset_path}")
         return [None, None]
 
     if not actor:
-        if isinstance(bp_asset, unreal.Blueprint):
+        if isinstance(asset, unreal.Blueprint):
 
-            actor, possessable, component_list = find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=blueprint_path, skeletal_mesh_path=None,
+            actor, possessable, component_list = find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=asset_path, skeletal_mesh_path=None,
                                                      shot_sequence=level_sequence)
             if not actor:
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
 
-                actor = unreal.EditorLevelLibrary.spawn_actor_from_object(bp_asset, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
-
-        elif isinstance(bp_asset, unreal.SkeletalMesh):
+        elif isinstance(asset, unreal.SkeletalMesh):
             skeletal_mesh_actor_class = unreal.SkeletalMeshActor
             all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
 
             for a in all_actors:
                 if isinstance(a, unreal.SkeletalMeshActor):
                     sm_comp = a.get_editor_property("skeletal_mesh_component")
-                    if sm_comp and sm_comp.get_editor_property("skeletal_mesh") == bp_asset:
+                    if sm_comp and sm_comp.get_editor_property("skeletal_mesh") == asset:
                         actor = a
                         break
 
@@ -54,13 +53,15 @@ def add_actor_to_level_sequence(sequence_path, blueprint_path, actor=None, posse
                 actor = unreal.EditorLevelLibrary.spawn_actor_from_class(skeletal_mesh_actor_class,
                                                                          unreal.Vector(0, 0, 0), actor_rotation)
                 sm_comp = actor.get_editor_property("skeletal_mesh_component")
-                sm_comp.set_editor_property("skeletal_mesh", bp_asset)
+                sm_comp.set_editor_property("skeletal_mesh", asset)
+                skeletal_mesh_name = asset.get_name()
+                actor.set_actor_label(skeletal_mesh_name)
         else:
-            unreal.log_error(f"Unsupported asset type for spawning: {bp_asset}")
+            unreal.log_error(f"Unsupported asset type for spawning: {asset}")
             return [None, None]
 
     if not actor:
-        unreal.log_error(f"Failed to spawn actor from asset {blueprint_path}")
+        unreal.log_error(f"Failed to spawn actor from asset {asset_path}")
         return [None, None]
 
     possessable = possessable or level_sequence.add_possessable(actor)
