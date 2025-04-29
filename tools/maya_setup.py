@@ -34,8 +34,7 @@ def update_maya_script_path(new_path):
 
 def find_or_create_user_setup():
     """
-    Looks for an existing userSetup.py in MAYA_SCRIPT_PATH.
-    If not found, creates a new one in the first writable scripts folder.
+    Finds an existing userSetup.py or creates one without overwriting any existing ones.
     Returns the full path to userSetup.py.
     """
     maya_script_path = os.environ.get('MAYA_SCRIPT_PATH', '')
@@ -49,12 +48,14 @@ def find_or_create_user_setup():
     for path in search_paths:
         if os.path.isdir(path) and os.access(path, os.W_OK):
             user_setup_path = os.path.join(path, 'userSetup.py')
-            try:
-                with open(user_setup_path, 'w') as f:
-                    f.write("# Auto-generated userSetup.py\n")
-                return user_setup_path
-            except Exception as e:
-                print(f"Failed to create userSetup.py at {path}: {e}")
+            if not os.path.exists(user_setup_path):
+                try:
+                    with open(user_setup_path, 'w') as f:
+                        f.write("# Auto-generated userSetup.py\n\n")
+                    print(f"Created new userSetup.py at: {user_setup_path}")
+                except Exception as e:
+                    print(f"Failed to create userSetup.py at {path}: {e}")
+            return user_setup_path
 
     return None
 
@@ -67,19 +68,20 @@ def add_tools_to_user_setup(tools_dir):
         print("No userSetup.py found. Skipping.")
         return
 
-    sys_path_line = f"import sys\nsys.path.append(r'{tools_dir}')\n"
+    import_line = "import sys"
+    sys_path_line = f"sys.path.append(r'{tools_dir}')\n"
 
     try:
         with open(user_setup_path, 'r') as f:
             contents = f.read()
         if tools_dir in contents:
-            print("Tools path already in userSetup.py. Skipping.")
             return
 
-        with open(user_setup_path, 'w') as f:
-            if not contents.endswith('\n'):
-                f.write('\n')
-            f.write('\n' + sys_path_line)
+        with open(user_setup_path, 'a') as f:
+
+            if import_line not in contents:
+                f.write(import_line + '\n')
+            f.write(sys_path_line + '\n')
 
         print(f"Added tools path to {user_setup_path}")
     except Exception as e:
