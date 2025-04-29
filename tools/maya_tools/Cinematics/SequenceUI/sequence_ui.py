@@ -83,7 +83,9 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.add_button = QtWidgets.QPushButton("Add Animation")
         self.duplicate_button = QtWidgets.QPushButton("Duplicate Animations")
         self.delete_button = QtWidgets.QPushButton("Delete Animations")
-        self.export_button = QtWidgets.QPushButton("Export Selected Animations")
+        self.unreal_checkbox = QtWidgets.QCheckBox("Import into Unreal")
+        self.export_button = QtWidgets.QPushButton("Export Animations")
+        self.export_cinematics_button = QtWidgets.QPushButton("Export For Cinematic")
         self.anim_dict = dict()
         self.skeletons = None
         self.uproject = ''
@@ -180,11 +182,14 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.duplicate_button.clicked.connect(self.duplicate_animation)
         self.delete_button.clicked.connect(self.delete_animation)
         self.export_button.clicked.connect(self.export_animation)
+        self.export_cinematics_button.clicked.connect(self.export_cinematic)
 
         right_layout.addWidget(self.add_button)
         right_layout.addWidget(self.duplicate_button)
         right_layout.addWidget(self.delete_button)
+        right_layout.addWidget(self.unreal_checkbox)
         right_layout.addWidget(self.export_button)
+        right_layout.addWidget(self.export_cinematics_button)
 
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -892,12 +897,18 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.selected_color = item_color
         self.update_color_button(item_color)
 
-    def export_animation(self):
+    def export_cinematic(self):
         """
         Exports the selected animations and imports the data into Unreal.
         :return:
         """
-        cinematic = False
+        self.export_animation(cinematic=True)
+
+    def export_animation(self, cinematic = False):
+        """
+        Exports the selected animations and imports the data into Unreal.
+        :return:
+        """
         selected_anim_dict = dict()
         selected_rows = self.table_widget.selectionModel().selectedRows()
         export_paths = []
@@ -962,8 +973,6 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             export_processes.append(proc)
             selected_anim_dict[export_path] = [start_widget.value(), end_widget.value(), namespace, skeleton, color,
                                                nodes]
-            if CINEMATIC_FOLDER in export_path:
-                cinematic = True
 
             QtWidgets.QApplication.processEvents()
 
@@ -1001,11 +1010,13 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                 if cinematic:
                     sequence_dict = sequence_utils.generate_sequence_dict_from_anim_dict(selected_anim_dict)
                     json_data.save_dict_to_json(sequence_dict, json_path)
-                    usp.run_create_cinematic_sequence(json_path, "/Game/" + CINEMATIC_FOLDER,
+                    if self.unreal_checkbox.isChecked():
+                        usp.run_create_cinematic_sequence(json_path, "/Game/" + CINEMATIC_FOLDER,
                                                       self.uproject, self.log_path, self.cmd_path)
                 else:
                     json_data.save_dict_to_json(selected_anim_dict, json_path)
-                    usp.run_import_gameplay_animations(json_path, self.uproject, self.log_path, self.cmd_path)
+                    if self.unreal_checkbox.isChecked():
+                        usp.run_import_gameplay_animations(json_path, self.uproject, self.log_path, self.cmd_path)
 
         thread = threading.Thread(target=launch_unreal_after_export, args=(export_processes, export_path))
         thread.start()
