@@ -4,14 +4,7 @@ import maya.cmds as cmds
 import maya.mel as mel
 import os
 import sys
-anim_export_dir = os.path.dirname(__file__).replace("\\", "/")
-tools_dir = os.path.dirname(os.path.dirname(os.path.dirname(anim_export_dir)))
-if tools_dir not in sys.path:
-    sys.path.append(tools_dir)
-
 from maya_tools.Animation.anim_export import anim_export_utils
-import importlib
-importlib.reload(anim_export_utils)
 from maya_tools.Utilities import joints
 
 
