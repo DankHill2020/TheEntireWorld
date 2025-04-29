@@ -30,4 +30,4 @@ sequence_ui.show_animation_manager()
 To test the tool, I have included free Mannequin rigs I found online so the skeleton to test will already be included in your project once you open it up.
 The rigs were found here: https://gumroad.com/d/27fecce80492ca58d194844412cc370b
 
-They exist in depot/ArtSource/Rigs inside The download from GitHub
+They exist in /ArtSource/Rigs inside The download from GitHub
