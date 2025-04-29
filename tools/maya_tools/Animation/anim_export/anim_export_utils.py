@@ -80,43 +80,62 @@ def open_scene_with_specific_references(maya_file, reference_list):
 
 def find_references_from_namespace(namespace):
     """
-    Find all reference nodes (including sub-references) associated with a given namespace.
-    This ensures that each ref_node and ref_path is included only once.
+    Find all reference nodes (including sub-references and constraint dependencies)
+    associated with a given namespace.
 
     :param namespace: The namespace you want to check, e.g., 'Test:sub_rig'.
-    :return: List of dictionaries with "ref_node" and "ref_path" for each matching reference node.
+    :return: List of [ref_path, ref_node] pairs.
     """
-    reference_info = []
-    ref_nodes = cmds.ls(type="reference")
 
+    reference_info = []
     seen_ref_nodes = set()
     seen_ref_paths = set()
 
-    for ref_node in ref_nodes:
+    all_ref_nodes = cmds.ls(type="reference") or []
+
+    def add_reference(ref_path, ref_node):
+        clean_path = ref_path.split('{')[0]
+        if ref_node not in seen_ref_nodes and clean_path not in seen_ref_paths:
+            reference_info.append([clean_path, ref_node])
+            seen_ref_nodes.add(ref_node)
+            seen_ref_paths.add(clean_path)
+
+    def get_ref_node(node):
         try:
-            ref_namespace = cmds.referenceQuery(ref_node, namespace=True)
-            ref_namespace_clean = ref_namespace.lstrip(':')
-            if ref_namespace_clean.startswith(namespace):
+            return cmds.referenceQuery(node, referenceNode=True)
+        except:
+            return None
+
+    for ref_node in all_ref_nodes:
+        try:
+            ref_namespace = cmds.referenceQuery(ref_node, namespace=True).lstrip(':')
+            if ref_namespace.startswith(namespace):
                 ref_path = cmds.referenceQuery(ref_node, filename=True, unresolvedName=False)
+                add_reference(ref_path, ref_node)
 
-                if ref_node not in seen_ref_nodes and ref_path not in seen_ref_paths:
-                    reference_info.append([ref_path.split('{')[0], ref_node])
-                    seen_ref_nodes.add(ref_node)
-                    seen_ref_paths.add(ref_path.split('{')[0])
-
-                all_ref_nodes = cmds.ls(type="reference")
+                # Also get sub-reference nodes using same file
                 for other_ref_node in all_ref_nodes:
                     try:
-                        other_ref_path = cmds.referenceQuery(other_ref_node, filename=True, unresolvedName=False)
-                        if other_ref_path == ref_path and other_ref_node != ref_node:
-                            if other_ref_node not in seen_ref_nodes and other_ref_path not in seen_ref_paths:
-                                reference_info.append([other_ref_path.split('{')[0], other_ref_node])
-                                seen_ref_nodes.add(other_ref_node)
-                                seen_ref_paths.add(other_ref_path.split('{')[0])
-                    except Exception as e:
+                        other_path = cmds.referenceQuery(other_ref_node, filename=True, unresolvedName=False)
+                        if other_path == ref_path and other_ref_node != ref_node:
+                            add_reference(other_path, other_ref_node)
+                    except:
                         continue
 
-        except Exception as e:
+                # Find constraint dependencies
+                nodes = cmds.referenceQuery(ref_node, nodes=True, dp=True) or []
+                for node in nodes:
+                    incoming = cmds.listConnections(node, source=True, destination=False, plugs=False) or []
+                    for src_node in incoming:
+                        if cmds.nodeType(src_node).endswith("Constraint"):
+                            drivers = cmds.listConnections(src_node + ".target[0].targetParentMatrix", source=True, destination=False) or []
+                            for driver in drivers:
+                                driver_ref_node = get_ref_node(driver)
+                                if driver_ref_node and driver_ref_node not in seen_ref_nodes:
+                                    driver_ref_path = cmds.referenceQuery(driver_ref_node, filename=True, unresolvedName=False)
+                                    add_reference(driver_ref_path, driver_ref_node)
+
+        except:
             continue
 
     return reference_info
