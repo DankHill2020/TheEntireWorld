@@ -1,9 +1,12 @@
 import maya.standalone
-maya.standalone.initialize()
+
 import maya.cmds as cmds
 import maya.mel as mel
 import os
 import sys
+tools_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+print(tools_dir)
+sys.path.append(tools_dir)
 from maya_tools.Animation.anim_export import anim_export_utils
 from maya_tools.Utilities import joints
 
@@ -21,7 +24,10 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
     :return:
     """
     full_ns = namespace + ':'
-    reference_paths = eval(reference_paths[0])
+    if reference_paths:
+        reference_paths = eval(reference_paths[0])
+    else:
+        reference_paths = []
     if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
         try:
             cmds.loadPlugin("fbxmaya")
@@ -30,16 +36,18 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
     try:
         if not reference_paths:
             if cmds.file(query=True, sceneName=True).replace('\\', '/') != maya_file:
-                cmds.file(maya_file, open=True, force=True)
+
+                cmds.file(maya_file, open=True, force=True, loadReferenceDepth="none", prompt=False)
         else:
             anim_export_utils.open_scene_with_specific_references(maya_file, reference_paths)
-        roots = joints.find_skinned_or_top_joints(full_ns)
-        root=None
+        roots = None
+        if namespace != "CAM":
+            roots = joints.find_skinned_or_top_joints(full_ns)
+        root = None
         root_joint = None
         if roots:
             root = roots[0]
             root_joint = root.split(":")[-1]
-
         if not nodes:
             if roots and len(roots) > 1:
                 children = cmds.listRelatives(root, c=1, ad=1) or []
@@ -70,28 +78,32 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
                 if root_joint not in nodes:
                     nodes.insert(0, root_joint)
 
-        if cmds.objExists(root):
+        if root and cmds.objExists(root):
             cmds.parent(root, w=1)
         export_path = export_path.replace("\\", "/")
-        export_dir = os.path.dirname(export_path)
 
+        export_dir = os.path.dirname(export_path)
         if not os.path.exists(export_dir):
             os.makedirs(export_dir)
-
         if 'FacialSliders' in nodes and cmds.objExists('FacialControls'):
 
-            export_metahuman_sliders_as_fbx(slider_set='FacialControls', fbx_path=export_path, start_frame=start_frame, end_frame=end_frame)
+            export_metahuman_sliders_as_fbx(slider_set='FacialControls', fbx_path=export_path, start_frame=start_frame,
+                                            end_frame=end_frame)
         else:
-            try:
-                cmds.select(nodes)
-            except:
-                cmds.select(d=1)
-                for node in nodes:
-                    if cmds.objExists(node):
-                        cmds.select(node, add=True)
-                    else:
-                        if cmds.objExists(node.split('|')[-1]):
-                            cmds.select(node.split('|')[-1], add=1)
+            if root_joint and cmds.objExists(root_joint.split(":")[-1]):
+                children = get_all_joint_children(root_joint.split(":")[-1])
+                cmds.select(root_joint.split(":")[-1], children)
+            else:
+                try:
+                    cmds.select(nodes)
+                except:
+                    cmds.select(d=1)
+                    for node in nodes:
+                        if cmds.objExists(node):
+                            cmds.select(node, add=True)
+                        else:
+                            if cmds.objExists(node.split('|')[-1]):
+                                cmds.select(node.split('|')[-1], add=1)
 
             bake_all_keyable_attributes(cmds.ls(sl=True), start_frame, end_frame)
             mel.eval("FBXResetExport;")
@@ -105,6 +117,20 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
         print(f"Export failed: {e}", file=sys.stderr)
     finally:
         cmds.quit(force=True)
+
+
+def get_all_joint_children(root_joint):
+    """
+    Returns a list of all child joints (recursively) under the given root joint.
+    """
+    if not cmds.objExists(root_joint):
+        return []
+
+    joint_children = []
+    all_descendants = cmds.listRelatives(root_joint, allDescendents=True, type='joint') or []
+
+    joint_children.extend(all_descendants)
+    return joint_children
 
 
 def bake_all_keyable_attributes(nodes, start_frame, end_frame):
@@ -318,6 +344,7 @@ def sort_reverse_hierarchy(node_list):
 if __name__ == "__main__":
     import argparse
 
+    maya.standalone.initialize()
     parser = argparse.ArgumentParser(description="Export animation to FBX in Maya.")
     parser.add_argument("--maya_file", required=True)
     parser.add_argument("--export_path", required=True)
@@ -337,5 +364,4 @@ if __name__ == "__main__":
         args.end_frame,
         args.nodes,
         args.reference_paths
-
     )

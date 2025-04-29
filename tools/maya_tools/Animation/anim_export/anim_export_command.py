@@ -18,6 +18,7 @@ def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, node
     :return:
     """
     print(f"Starting export for {namespace} from frame {start_frame} to {end_frame}")
+
     maya_file = cmds.file(q=True, sceneName=True)
     if not maya_file:
         raise ValueError("Scene must be saved before exporting.")
@@ -41,7 +42,6 @@ def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, node
         "--start_frame", str(int(start_frame)),
         "--end_frame", str(int(end_frame))
     ]
-
     if nodes:
         if isinstance(nodes, str):
             nodes = [nodes]
@@ -49,7 +49,6 @@ def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, node
 
     if reference_paths:
         cmd += ["--reference_paths", (str(reference_paths))]
-
     # Set environment variables
     maya_env = os.environ.copy()
     maya_env["MAYA_SCRIPT_PATH"] = os.path.join("C:/Program Files", "Autodesk", f"Maya{maya_version}","scripts")
@@ -72,7 +71,8 @@ def run_export(cmd, maya_env, export_path):
         process = subprocess.Popen(cmd, env=maya_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         stdout, stderr = process.communicate()
-
+        print(stdout)
+        print(stderr)
         if process.returncode == 0:
             print(f"Animation exported successfully to {export_path}")
         else:

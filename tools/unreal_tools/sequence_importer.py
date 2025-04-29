@@ -1399,8 +1399,9 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                         component_list = add_skeletal_mesh_components_to_level_sequence(actor, possessable)
 
                     if "FacialSliders" not in export_path:
+                        root, ext = os.path.splitext(export_path)
                         animation_asset_path = import_animation(export_path, skeleton_path, shot_sequence_dir,
-                                                            os.path.basename(export_path.split('.')[0]))
+                                                            os.path.basename(export_path.replace(ext, "")))
 
                         update_asset_registry_and_save(shot_sequence_dir, animation_asset_path)
 

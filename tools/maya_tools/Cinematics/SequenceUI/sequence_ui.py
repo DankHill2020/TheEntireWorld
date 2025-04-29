@@ -949,18 +949,14 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             else:
                 nodes = [n.strip() for n in nodes.split(",")]
             ref_paths = anim_utils.find_references_from_namespace(namespace)
-
-            if len(ref_paths):
-                reference_paths = ref_paths
-            else:
-                reference_paths = None
-
+            print("FOUND PATHS")
+            print(ref_paths)
             proc = anim_ec.export_animation_to_fbx(export_path, namespace, start_widget.value(), end_widget.value(),
-                                                   nodes=nodes, reference_paths=reference_paths)
+                                                   nodes=nodes, reference_paths=ref_paths)
+
             export_processes.append(proc)
             selected_anim_dict[export_path] = [start_widget.value(), end_widget.value(), namespace, skeleton, color,
                                                nodes]
-
             QtWidgets.QApplication.processEvents()
 
         def launch_unreal_after_export(export_processes, export_path):
@@ -970,17 +966,22 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             """
             total_exports = len(export_processes)
 
-            while any(prc.is_alive() for prc in export_processes):
+            while export_processes and any(prc.is_alive() for prc in export_processes):
                 remaining = sum(1 for prc in export_processes if prc.is_alive())
                 progress_percent = int((total_exports - remaining) / total_exports * 100)
 
+                finished_processes = []
                 for i, prc in enumerate(export_processes):
-
                     if not prc.is_alive():
                         local_path = export_paths[i]
                         helper.progress_update.emit(progress_percent)
                         helper.progress_update_text.emit(f"Exporting Completed for Animation: {local_path}")
-                        export_processes.remove(prc)
+                        finished_processes.append(prc)
+
+                # Now safely remove after iteration
+                for prc in finished_processes:
+                    export_processes.remove(prc)
+
                 QtWidgets.QApplication.processEvents()
 
             helper.finished.emit()

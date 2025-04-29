@@ -72,7 +72,10 @@ def open_scene_with_specific_references(maya_file, reference_list):
         ref_node = ref[1]
 
         if not cmds.referenceQuery(ref_node, isLoaded=True) and ref_node in all_refs:
-            cmds.file(ref_path, loadReference=ref_node)
+            try:
+                cmds.file(ref_path, loadReference=ref_node)
+            except:
+                print("LOAD FAILED")
 
 
 def find_references_from_namespace(namespace):
@@ -93,7 +96,7 @@ def find_references_from_namespace(namespace):
         try:
             ref_namespace = cmds.referenceQuery(ref_node, namespace=True)
             ref_namespace_clean = ref_namespace.lstrip(':')
-            if namespace.startswith(ref_namespace_clean):
+            if ref_namespace_clean.startswith(namespace):
                 ref_path = cmds.referenceQuery(ref_node, filename=True, unresolvedName=False)
 
                 if ref_node not in seen_ref_nodes and ref_path not in seen_ref_paths:
@@ -105,7 +108,6 @@ def find_references_from_namespace(namespace):
                 for other_ref_node in all_ref_nodes:
                     try:
                         other_ref_path = cmds.referenceQuery(other_ref_node, filename=True, unresolvedName=False)
-
                         if other_ref_path == ref_path and other_ref_node != ref_node:
                             if other_ref_node not in seen_ref_nodes and other_ref_path not in seen_ref_paths:
                                 reference_info.append([other_ref_path.split('{')[0], other_ref_node])

@@ -41,7 +41,7 @@ class BrowseDirectory(QtWidgets.QWidget):
     def get_dir(self, widget, directory):
         dir_name = QtWidgets.QFileDialog.getExistingDirectory(
             self,
-            self.tr('Select Batch Directory'),
+            self.tr('Select Export Directory'),
             directory,
             QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks
         )
