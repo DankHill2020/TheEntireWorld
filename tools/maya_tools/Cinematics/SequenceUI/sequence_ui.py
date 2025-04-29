@@ -15,21 +15,8 @@ from maya_tools.Animation.anim_export import anim_export_command as anim_ec
 from maya_tools.Animation.anim_export import anim_export_utils as anim_utils
 from maya_tools.Cinematics.SequenceUI import sequence_utils
 import threading
-import importlib
 import os
 
-import sys
-tools_dir = os.path.dirname(__file__).replace("\\", "/")
-if tools_dir not in sys.path:
-    sys.path.append(tools_dir)
-
-importlib.reload(sequence_utils)
-importlib.reload(custom_widgets)
-importlib.reload(anim_ec)
-importlib.reload(json_data)
-importlib.reload(usp)
-importlib.reload(upd)
-importlib.reload(anim_utils)
 script_dir = os.path.dirname(__file__).replace('\\', '/')
 
 CINEMATIC_FOLDER = "Cinematics"
