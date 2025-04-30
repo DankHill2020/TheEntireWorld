@@ -45,6 +45,9 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         :param parent: the actual Maya window
         """
         super(MayaAnimationManagerUI, self).__init__(parent)
+        self.setWindowFlags(QtCore.Qt.Window |
+                            QtCore.Qt.WindowMinimizeButtonHint |
+                            QtCore.Qt.WindowCloseButtonHint)
         self.setWindowTitle("Animation Manager")
         self.setMinimumSize(1100, 450)
 
