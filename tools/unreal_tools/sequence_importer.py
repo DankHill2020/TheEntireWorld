@@ -2,11 +2,12 @@ import json
 import os
 import unreal
 
-'''script_dir = os.path.dirname(__file__)
+script_dir = os.path.dirname(__file__)
 tools_dir = os.path.dirname(script_dir)
 art_source_dir = tools_dir.replace("tools", "ArtSource").replace("\\", "/")
 content_dir = "/Game"
-'''
+
+
 def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessable=None, namespace=None):
     """
     Adds a blueprint actor and its components to a level sequence, creating and binding the actor and components.
@@ -33,27 +34,23 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
         if isinstance(asset, unreal.Blueprint):
 
             actor, possessable, component_list = find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=asset_path, skeletal_mesh_path=None,
-                                                     shot_sequence=level_sequence)
+                                                     shot_sequence=level_sequence, namespace=namespace)
             if not actor:
-
                 actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
-
+                if namespace:
+                    tags = actor.tags
+                    tags.append(namespace)
+                    actor.tags = tags
         elif isinstance(asset, unreal.SkeletalMesh):
             skeletal_mesh_actor_class = unreal.SkeletalMeshActor
             all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-
             for a in all_actors:
+
                 if namespace:
                     if isinstance(a, unreal.SkeletalMeshActor):
-                        if namespace in a.get_actor_label():
-                            actor = a
-                            break
+                        tags = a.tags
 
-            if not actor:
-                for a in all_actors:
-                    if isinstance(a, unreal.SkeletalMeshActor):
-                        sm_comp = a.get_editor_property("skeletal_mesh_component")
-                        if sm_comp and sm_comp.get_editor_property("skeletal_mesh") == asset:
+                        if namespace in a.get_actor_label() or namespace in tags:
                             actor = a
                             break
 
@@ -66,9 +63,13 @@ def add_actor_to_level_sequence(sequence_path, asset_path, actor=None, possessab
 
                 if namespace:
                     skeletal_mesh_name = namespace
+                    tags = actor.tags
+                    tags.append(namespace)
+                    actor.tags = tags
                 else:
                     skeletal_mesh_name = asset.get_name()
                 actor.set_actor_label(skeletal_mesh_name)
+
         else:
             unreal.log_error(f"Unsupported asset type for spawning: {asset}")
             return [None, None]
@@ -1103,7 +1104,7 @@ def find_uasset_path(file_name):
     return None
 
 
-def find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=None, skeletal_mesh_path=None, shot_sequence=None):
+def find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=None, skeletal_mesh_path=None, shot_sequence=None, namespace=None):
     """
     Helper function to find an actor in the current level by its blueprint or directly by SkeletalMeshActor.
     It also returns the possessable for the found actor and the actor's components.
@@ -1124,7 +1125,15 @@ def find_actor_by_blueprint_or_skeletal_mesh(blueprint_path=None, skeletal_mesh_
             actors = unreal.GameplayStatics.get_all_actors_of_class(world, generated_class)
 
             if actors:
-                actor = actors[0]
+                if namespace:
+                    for a in actors:
+                        tags = a.tags
+                        if namespace in tags:
+                            actor = a
+                    if not actor:
+                        actor = actors[0]
+                else:
+                    actor = actors[0]
                 possessable = find_possessable_for_actor(actor, shot_sequence)
                 if possessable:
                     component_list = actor.get_components_by_class(unreal.ActorComponent)
@@ -1397,9 +1406,9 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
 
                             actor = get_actor_from_binding(shot_sequence_path, possessable)
                             actor, possessable = add_actor_to_level_sequence(shot_sequence_path, blueprint_path, actor=actor,
-                                                                                             possessable=binding)
+                                                                                             possessable=binding, namespace=namespace)
                         else:
-                            actor, possessable = add_actor_to_level_sequence(shot_sequence_path, blueprint_path)
+                            actor, possessable = add_actor_to_level_sequence(shot_sequence_path, blueprint_path, namespace=namespace)
                         component_list = add_blueprint_mesh_components_to_level_sequence(blueprint_path,
                                                                                      shot_sequence_path,
                                                                                      actor=actor,
@@ -1478,8 +1487,6 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                                                         if not success:
                                                             unreal.log_error("FBX Import to Control Rig failed.")
                                                         break
-                actor.modify()
-            unreal.EditorLevelLibrary.save_current_level()
             update_asset_registry_and_save(shot_sequence_dir, shot_sequence_path)
     except:
         unreal.SystemLibrary.collect_garbage()
@@ -1495,7 +1502,7 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
 
     return sequence_path
 
-test_dict_path = "C:/depot/ArtSource/Exports/Animation/Cinematics/Test/JSON/DS_ANIMTEST_SEQ000_SHOT160_v27_JD.json"
-create_cinematic_sequence_from_json(test_dict_path, destination_path="/Game/Cinematics", from_cmd=False)
+'''test_dict_path = "C:/depot/ArtSource/Exports/Animation/Cinematics/Test/JSON/DS_ANIMTEST_SEQ000_SHOT160_v27_JD.json"
+create_cinematic_sequence_from_json(test_dict_path, destination_path="/Game/Cinematics", from_cmd=False)'''
 
 
