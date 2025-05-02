@@ -18,7 +18,7 @@ If you need help with getting skeletons in engine, feel free to reach out until 
 
 7. Beyond that once you have the UI open, the videos above show how to use the interface and I will be adding a paper documentation shortly
 
-8. The only thing we ask is that if you do use our tools in your production, that you credit our studio for your tooling support.
+8. The only thing we ask is that if you do use our tools in your production, that you credit our studio for your tooling support, to help get our name out there.
 
 #To Launch tool
 
