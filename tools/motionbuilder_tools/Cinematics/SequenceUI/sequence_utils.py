@@ -30,6 +30,9 @@ def remove_file_open_callback():
 
 
 def get_main_window_pointer():
+    """
+    :return: Main Window for Motionbuilder
+    """
     return fb.FBGetMainWindow()
 
 
@@ -51,8 +54,9 @@ def get_camera_sequencer_data():
 def get_story_camera_shots():
     """
     Retrieves all clips in the Shot Track (kFBStoryTrackShot), including camera assignments.
-    Returns a list of tuples: (clip_name, start_frame, end_frame, camera_name)
+    :return: a list of tuples: (clip_name, start_frame, end_frame, camera_name)
     """
+
     shot_data = []
     story = fb.FBStory()
 
@@ -86,11 +90,21 @@ def export_node_exists():
 
 
 def get_display_range():
+    """
+        Gets the motionbuilder range to match the start and end frame listed
+    :return: start and end frame
+    """
     player = fb.FBPlayerControl()
     return [player.LoopStart.GetFrame(), player.LoopStop.GetFrame()]
 
 
 def set_display_range(start_frame, end_frame):
+    """
+    Sets the motionbuilder range to match the start and end frame listed
+    :param start_frame: start frame to set the time slider with
+    :param end_frame: end frame to set the time slider with
+    :return:
+    """
     start_time = fb.FBTime()
     start_time.SetFrame(start_frame)
 
@@ -104,10 +118,17 @@ def set_display_range(start_frame, end_frame):
 
 
 def display_warning(warning):
+    """
+    :param warning: Text to warn user with
+    :return:
+    """
     fb.FBMessageBox("Warning", warning, "OK")
 
 
 def get_cameras_from_selection():
+    """
+    :return: Cameras in selection
+    """
     selected = fb.FBModelList()
     fb.FBGetSelectedModels(selected)
     for model in selected:
@@ -117,6 +138,10 @@ def get_cameras_from_selection():
 
 
 def get_scene_path():
+    """
+
+    :return: Actual saved file name currently open
+    """
     return fb.FBApplication().FBXFileName
 
 
@@ -240,6 +265,10 @@ def generate_sequence_dict_from_anim_dict(anim_dict):
 
 
 def get_motionbuilder_fps():
+    """
+
+    :return: Which playback fps the scene is set with
+    """
     time_mode_to_fps = {
         fb.FBTimeMode.kFBTimeModeCustom: 30.0,
         fb.FBTimeMode.kFBTimeMode24Frames: 24.0,
@@ -256,7 +285,14 @@ def get_motionbuilder_fps():
     return time_mode_to_fps.get(fps_mode)
 
 
-def create_property(model, prop_name, value):
+def create_string_property(model, prop_name, value):
+    """
+
+    :param model: The actual object you want to add the property to
+    :param prop_name: name of property
+    :param value: value to define the property with
+    :return:
+    """
     existing_prop = model.PropertyList.Find(prop_name)
     if existing_prop:
         existing_prop.Data = value
@@ -286,11 +322,11 @@ def create_and_populate_export_node(anim_dict, skeletons, uproject, log_path, cm
     else:
         if export_node not in fb.FBSystem().Scene.Components:
             fb.FBSystem().Scene.Components.append(export_node)
-    create_property(export_node, 'anims', str(anim_dict))
-    create_property(export_node, 'skeletons', str(skeletons))
-    create_property(export_node, 'uproject', f"{uproject},{log_path},{cmd_path}")
-    create_property(export_node, 'export_directory', export_directory)
-    create_property(export_node, 'namespace_map', str(namespace_skeleton_map))
+    create_string_property(export_node, 'anims', str(anim_dict))
+    create_string_property(export_node, 'skeletons', str(skeletons))
+    create_string_property(export_node, 'uproject', f"{uproject},{log_path},{cmd_path}")
+    create_string_property(export_node, 'export_directory', export_directory)
+    create_string_property(export_node, 'namespace_map', str(namespace_skeleton_map))
 
     return export_node
 
