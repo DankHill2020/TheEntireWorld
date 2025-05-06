@@ -10,9 +10,9 @@ Instructions for first time using:
 3. You *Must* have an unreal project set up currently for the exports to be added and exported as the tool relies on valid skeleton assets for the rigs you want to export, and it has been developed for 5.5 (future updates will support more versions)
 If you need help with getting skeletons in engine, feel free to reach out until I have a quick tutorial for this linked
 
-4. Inside Unreal, there is one part that is needed if you want to have the sequence importer work with the Engine open
+4. This part is now automated when you select the uproject with the UI, you can ignore (Inside Unreal, there is one part that is needed if you want to have the sequence importer work with the Engine open)
   
-5. Edit > Project Settings > Python > Startup Scripts > Add an Array Element > set the path for the new index to be whatever your local path of  //tools/unreal_tools/http_server.py is... on my PC this is C:/depot/tools/unreal_tools/http_server.py. If this is not there by default, you may have to Load the Python Scripting related Plugins
+5. This part is now automated when you select the uproject with the UI, you can ignore (Edit > Project Settings > Python > Startup Scripts > Add an Array Element > set the path for the new index to be whatever your local path of  //tools/unreal_tools/http_server.py is... on my PC this is C:/depot/tools/unreal_tools/http_server.py. If this is not there by default, you may have to Load the Python Scripting related Plugins)
    
 6. I walk through the functionality and how to get this setup in a few vimeo videos, though some updates have happened since then to the UI and the setup... this part is defined there : https://vimeo.com/user58067839 ; https://vimeo.com/user58067839
 
