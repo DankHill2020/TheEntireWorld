@@ -22,7 +22,7 @@ If you need help with getting skeletons in engine, feel free to reach out until 
 
 #To Launch tool
 
-Using the bat files, you should have a menu in maya and motionbuilder on startup titled "The Entire World Tools"... but if you prefer to run manually or on your own shelf:
+Using the bat files, you should have a menu in maya and motionbuilder on startup titled "The Entire World Tools" with a Sequence UI item in the menu... but if you prefer to run manually or on your own shelf:
 from maya_tools.Cinematics.SequenceUI import sequence_ui
 sequence_ui.show_animation_manager()
 
