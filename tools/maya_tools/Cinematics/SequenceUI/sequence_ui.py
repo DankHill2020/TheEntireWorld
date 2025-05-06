@@ -13,6 +13,7 @@ from utilities import json_data
 from unreal_tools import unreal_subprocess as usp
 from unreal_tools import unreal_project_data as upd
 
+
 def is_maya():
     try:
         import maya.cmds
@@ -67,7 +68,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
             parent = QtWidgets.QApplication.activeWindow()
         """
         Creates the UI with a table, context menu, and right-side controls.
-        :param parent: the actual Maya window
+        :param parent: the actual Maya or motionbuilder window
         """
         super(AnimationManagerUI, self).__init__(parent)
         self.setWindowFlags(QtCore.Qt.Window |
@@ -114,7 +115,6 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
         self.init_ui()
         self.file_opened.connect(self._on_file_open_completed)
-
 
         sequence_utils.add_file_open_callback(self)
 
@@ -230,6 +230,9 @@ class AnimationManagerUI(QtWidgets.QDialog):
         if not self.skeletons:
             if not self.uproject or os.path.exists(os.path.dirname(self.uproject)):
                 self.uproject = self.get_uproject("C:/")
+                http_server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "unreal_tools", "http_server.py").replace('\\', '/')
+
+                upd.add_unreal_startup_script(self.uproject, http_server_path)
             if self.uproject:
                 self.log_path = upd.get_latest_unreal_log(self.uproject)
                 self.cmd_path = upd.get_unreal_cmd_exe(self.uproject)

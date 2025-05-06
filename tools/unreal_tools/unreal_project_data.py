@@ -2,6 +2,7 @@ import os
 import json
 import winreg
 import glob
+import re
 
 
 def get_engine_association(uproject_path):
@@ -108,4 +109,60 @@ def get_latest_unreal_log(uproject_path):
     # Get the most recently modified log file
     latest_log = max(log_files, key=os.path.getmtime)
     return latest_log
+
+
+def add_unreal_startup_script(uproject_path, script_path):
+    """
+    Adds a startup script to DefaultEngine.ini for a given Unreal project.
+    Appends to StartupScripts[N]=... under [PythonScriptPlugin.PythonScriptPluginSettings].
+
+    :param uproject_path: actual uproject path
+    :param script_path: Full path to the Python script to add
+    """
+    if not os.path.isfile(uproject_path):
+        raise FileNotFoundError(f"uproject not found: {uproject_path}")
+    if not os.path.isfile(script_path):
+        raise FileNotFoundError(f"Script not found: {script_path}")
+
+    project_dir = os.path.dirname(uproject_path)
+    ini_path = os.path.join(project_dir, "Config", "DefaultEngine.ini")
+    if not os.path.exists(ini_path):
+        raise FileNotFoundError(f"DefaultEngine.ini not found at: {ini_path}")
+
+    with open(ini_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    section_header = "[/Script/PythonScriptPlugin.PythonScriptPluginSettings]"
+    startup_script_key = "StartupScripts"
+    existing_indices = []
+
+    section_start = None
+    for i, line in enumerate(lines):
+        if line.strip() == section_header:
+            section_start = i
+            break
+
+    if section_start is None:
+        lines.append(f"\n{section_header}\n")
+        section_start = len(lines) - 1
+
+    section_end = len(lines)
+    for i in range(section_start + 1, len(lines)):
+        if lines[i].startswith('['):
+            section_end = i
+            break
+        match = re.match(rf"{re.escape(startup_script_key)}\[(\d+)\]", lines[i])
+        if match:
+            existing_indices.append(int(match.group(1)))
+
+    new_index = max(existing_indices, default=-1) + 1
+    cleaned_path = re.sub(r"[\"']", "", script_path.replace(os.sep, '/'))
+    new_line = f"{startup_script_key}[{new_index}]={cleaned_path}\n"
+    lines.insert(section_end, new_line)
+    with open(ini_path, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
+
+
+
 
