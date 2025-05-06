@@ -30,7 +30,7 @@ def remove_file_open_callback():
         print("Failed to remove callbacks:", e)
 
 
-def get_maya_main_window_pointer():
+def get_main_window_pointer():
     """
     Get the Maya main window pointer
     :return:
@@ -276,6 +276,7 @@ def get_export_node_data():
     export_dir = None
     if cmds.objExists('ExportData'):
         anim_dict = eval(cmds.getAttr('ExportData.anims'))
+
         skeletons = eval(cmds.getAttr('ExportData.skeletons'))
         namespace_skeleton_map = eval(cmds.getAttr('ExportData.namespace_map'))
         uproject, log_path, cmd_path = eval(cmds.getAttr('ExportData.uproject'))

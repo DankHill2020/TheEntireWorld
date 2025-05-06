@@ -71,8 +71,7 @@ def run_export(cmd, maya_env, export_path):
         process = subprocess.Popen(cmd, env=maya_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         stdout, stderr = process.communicate()
-        print(stdout)
-        print(stderr)
+
         if process.returncode == 0:
             print(f"Animation exported successfully to {export_path}")
         else:

@@ -63,26 +63,28 @@ def add_tools_to_user_setup(tools_dir):
     """
     Adds sys.path.append for the tools_dir into userSetup.py if not already present.
     """
+    tools_dir = tools_dir.replace('\\', '/')
     user_setup_path = find_or_create_user_setup()
     if not user_setup_path:
         print("No userSetup.py found. Skipping.")
         return
 
-    import_line = "import sys"
-    sys_path_line = f"sys.path.append(r'{tools_dir}')\n"
+    import_line = "import sys\n"
+    sys_path_line = f"sys.path.append('{tools_dir}')\n"
+    call_menu_line = "from maya_tools import maya_menu; maya_menu.create_menu_once()"
 
     try:
         with open(user_setup_path, 'r') as f:
             contents = f.read()
-        if tools_dir in contents:
-            return
 
         with open(user_setup_path, 'a') as f:
 
             if import_line not in contents:
                 f.write(import_line + '\n')
-            f.write(sys_path_line + '\n')
-
+            if sys_path_line not in contents:
+                f.write(sys_path_line + '\n')
+            if call_menu_line not in contents:
+                f.write(call_menu_line + '\n')
         print(f"Added tools path to {user_setup_path}")
     except Exception as e:
         pass
@@ -103,3 +105,4 @@ except:
 
 update_maya_script_path(tools_dir)
 add_tools_to_user_setup(tools_dir)
+from maya_tools import maya_menu; maya_menu.create_menu_once()

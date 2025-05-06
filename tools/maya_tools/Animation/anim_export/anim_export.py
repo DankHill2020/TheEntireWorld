@@ -5,7 +5,6 @@ import maya.mel as mel
 import os
 import sys
 tools_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-print(tools_dir)
 sys.path.append(tools_dir)
 from maya_tools.Animation.anim_export import anim_export_utils
 from maya_tools.Utilities import joints

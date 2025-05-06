@@ -32,13 +32,11 @@ def run_get_skeletons(unreal_project_path, log_file_path,
             "-script=" + script_dir + "/get_skeletons.py"
         ]
 
-        # Run the command
         try:
             result = subprocess.run(unreal_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-            # Print both stdout and stderr for debugging purposes
-            print("STDOUT:\n", result.stdout)
-            print("STDERR:\n", result.stderr)
+            '''print("STDOUT:\n", result.stdout)
+            print("STDERR:\n", result.stderr)'''
 
             time.sleep(5)
 
@@ -98,8 +96,8 @@ def run_create_cinematic_sequence(anim_dict_path, destination_path, unreal_proje
 
         try:
             result = subprocess.run(unreal_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            print("STDOUT:\n", result.stdout)
-            print("STDERR:\n", result.stderr)
+            '''print("STDOUT:\n", result.stdout)
+            print("STDERR:\n", result.stderr)'''
 
             time.sleep(5)
 
@@ -149,8 +147,8 @@ def run_import_gameplay_animations(anim_dict_path, unreal_project_path, log_file
 
         try:
             result = subprocess.run(unreal_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            print("STDOUT:\n", result.stdout)
-            print("STDERR:\n", result.stderr)
+            '''print("STDOUT:\n", result.stdout)
+            print("STDERR:\n", result.stderr)'''
 
             time.sleep(5)
 

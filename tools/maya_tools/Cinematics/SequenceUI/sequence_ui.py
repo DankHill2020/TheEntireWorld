@@ -6,22 +6,43 @@ except:
     from PySide2 import QtWidgets, QtCore, QtGui
     from shiboken2 import wrapInstance
     PYQT_VERSION = 2
-
+import threading
+import os
 from custom_qt import custom_widgets
 from utilities import json_data
 from unreal_tools import unreal_subprocess as usp
 from unreal_tools import unreal_project_data as upd
-from maya_tools.Animation.anim_export import anim_export_command as anim_ec
-from maya_tools.Animation.anim_export import anim_export_utils as anim_utils
-from maya_tools.Cinematics.SequenceUI import sequence_utils
-import threading
-import os
+
+def is_maya():
+    try:
+        import maya.cmds
+        return True
+    except ImportError:
+        return False
+
+def is_motionbuilder():
+    try:
+        import pyfbsdk
+
+        return True
+    except ImportError:
+        return False
+
+if is_maya():
+    from maya_tools.Animation.anim_export import anim_export_command as anim_ec
+    from maya_tools.Animation.anim_export import anim_export_utils as anim_utils
+    from maya_tools.Cinematics.SequenceUI import sequence_utils
+    print("Running in Maya")
+
+elif is_motionbuilder():
+    from motionbuilder_tools.Animation.anim_export import anim_export as anim_ec
+    from motionbuilder_tools.Cinematics.SequenceUI import sequence_utils
+    print("Running in MotionBuilder")
 
 script_dir = os.path.dirname(__file__).replace('\\', '/')
 
 CINEMATIC_FOLDER = "Cinematics"
 GAMEPLAY_FOLDER = "Gameplay"
-
 
 class ExportHelper(QtCore.QObject):
     progress_update = QtCore.Signal(int)
@@ -37,14 +58,18 @@ class AnimationEntryError(Exception):
     pass
 
 
-class MayaAnimationManagerUI(QtWidgets.QDialog):
+class AnimationManagerUI(QtWidgets.QDialog):
     file_opened = QtCore.Signal()
-    def __init__(self, parent=wrapInstance(sequence_utils.get_maya_main_window_pointer(), QtWidgets.QMainWindow)):
+    def __init__(self, parent=None):
+        if is_maya():
+            parent = wrapInstance(sequence_utils.get_main_window_pointer(), QtWidgets.QMainWindow)
+        elif is_motionbuilder():
+            parent = QtWidgets.QApplication.activeWindow()
         """
         Creates the UI with a table, context menu, and right-side controls.
         :param parent: the actual Maya window
         """
-        super(MayaAnimationManagerUI, self).__init__(parent)
+        super(AnimationManagerUI, self).__init__(parent)
         self.setWindowFlags(QtCore.Qt.Window |
                             QtCore.Qt.WindowMinimizeButtonHint |
                             QtCore.Qt.WindowCloseButtonHint)
@@ -79,15 +104,18 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.export_cinematics_button = QtWidgets.QPushButton("Export For Cinematic")
         self.anim_dict = dict()
         self.skeletons = None
-        self.uproject = ''
+        self.uproject = None
         self.export_dir = ''
         self.log_path = ''
         self.cmd_path = ''
         self.namespace_skeleton_map = {}
         self.export_node = sequence_utils.export_node_exists()
+        self.menu_bar = QtWidgets.QMenuBar(self)
 
         self.init_ui()
         self.file_opened.connect(self._on_file_open_completed)
+
+
         sequence_utils.add_file_open_callback(self)
 
     def init_ui(self):
@@ -97,7 +125,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         """
         main_layout = QtWidgets.QHBoxLayout(self)
         self.setLayout(main_layout)
-
+        main_layout.setMenuBar(self.menu_bar)
         self.table_widget.setColumnCount(7)
         self.table_widget.setHorizontalHeaderLabels(self.headers)
         header = self.table_widget.horizontalHeader()
@@ -200,7 +228,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             self.anim_dict, self.skeletons, self.uproject, self.export_dir = self.load_data()
 
         if not self.skeletons:
-            if not os.path.exists(os.path.dirname(self.uproject)):
+            if not self.uproject or os.path.exists(os.path.dirname(self.uproject)):
                 self.uproject = self.get_uproject("C:/")
             if self.uproject:
                 self.log_path = upd.get_latest_unreal_log(self.uproject)
@@ -215,6 +243,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             self.directory_widget.dir_name.setText("C:/")
             self.export_dir = "C:/"
         self.directory_widget.dir_name.textChanged.connect(self.store_data)
+        self.create_file_menu()
 
     def on_item_changed(self, item):
         self.store_data()
@@ -266,10 +295,8 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
 
     def _on_file_open_completed(self, *args):
         """Internal method triggered when a new scene is opened."""
-        print("Scene opened, loading data...")
         self.table_widget.clear()
         self.load_data()
-        self.table_widget.repaint()
         self.table_widget.setHorizontalHeaderLabels(self.headers)
 
     def show_context_menu(self, pos):
@@ -289,8 +316,13 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         add_shot_action = context_menu.addAction("Add Animations for Shots")
         add_selected_action = context_menu.addAction("Add Animations for Selected")
         add_all_rigs_action = context_menu.addAction("Add Animations for All Rigs")
-        add_facial_sliders_action = context_menu.addAction("Add Facial Sliders As Separate Export")
-        add_facial_joints_action = context_menu.addAction("Add Facial Joints As Separate Export")
+        if is_maya():
+            add_facial_sliders_action = context_menu.addAction("Add Facial Sliders As Separate Export")
+            add_facial_joints_action = context_menu.addAction("Add Facial Joints As Separate Export")
+        else:
+            add_facial_sliders_action = ""
+            add_facial_joints_action = ""
+
         select_all_namespace_action = context_menu.addAction("Select All with Namespace")
         refresh_skeletons_action = context_menu.addAction("Refresh Skeletons for uproject")
         update_uproject_path_action = context_menu.addAction("Select new uproject path")
@@ -319,10 +351,14 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             self.add_animations_for_selection(True)
         elif action == add_all_rigs_action:
             self.add_animations_for_selection(False)
+
         elif action == add_facial_sliders_action:
-            self.add_facial_export_row_for_selected(joints=False)
+            if is_maya():
+                self.add_facial_export_row_for_selected(joints=False)
         elif action == add_facial_joints_action:
-            self.add_facial_export_row_for_selected(joints=True)
+            if is_maya():
+
+                self.add_facial_export_row_for_selected(joints=True)
         elif action == select_all_namespace_action:
             self.select_all_with_namespace()
         elif action == refresh_skeletons_action:
@@ -333,6 +369,10 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             self.update_export_directory_for_row()
 
     def update_export_directory_for_row(self):
+        """
+        Function updates the export directory for any number of selected rows
+        :return:
+        """
         selected_rows = list(set(index.row() for index in self.table_widget.selectedIndexes()))
 
         if not selected_rows:
@@ -350,6 +390,10 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             self.apply_row_colors(color_to_use)
 
     def update_skeleton_list(self):
+        """
+        Function to reload the skeleton list from the uproject without having to reselect project
+        :return:
+        """
         current_skel = self.skeleton_input.currentText()
         skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
         if type(skel_data) == str:
@@ -365,6 +409,10 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                 self.skeleton_input.setCurrentIndex(index)
 
     def update_project(self):
+        """
+        Function to reload the skeleton list after selecting the uproject
+        :return:
+        """
         uproject = self.uproject
         self.uproject = self.get_uproject(os.path.dirname(self.uproject))
         refresh_skeletons = True
@@ -908,7 +956,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                                        self.table_widget.item(r.row(), 0).text() + '.fbx').replace('\\', '/')
             export_paths.append(path)
         progress_bar = custom_widgets.ListProgressBar(export_paths,
-                                                      parent=wrapInstance(sequence_utils.get_maya_main_window_pointer(),
+                                                      parent=wrapInstance(sequence_utils.get_main_window_pointer(),
                                                                           QtWidgets.QMainWindow))
         progress_bar.resize(400, 120)
         progress_bar.show()
@@ -933,6 +981,7 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         export_processes = []
         scene_path = sequence_utils.get_scene_path()
         export_paths = []
+        #Actual Export logic is in this for loop
         for row in selected_rows:
 
             row_index = row.row()
@@ -952,11 +1001,15 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                 nodes = None
             else:
                 nodes = [n.strip() for n in nodes.split(",")]
-            ref_paths = anim_utils.find_references_from_namespace(namespace)
+            if is_maya():
+                ref_paths = anim_utils.find_references_from_namespace(namespace)
 
-            proc = anim_ec.export_animation_to_fbx(export_path, namespace, start_widget.value(), end_widget.value(),
-                                                   nodes=nodes, reference_paths=ref_paths)
-
+                proc = anim_ec.export_animation_to_fbx(export_path, namespace, start_widget.value(), end_widget.value(),
+                                                       nodes=nodes, reference_paths=ref_paths)
+            else:
+                proc = anim_ec.export_animation(scene_path, export_path, namespace, start_widget.value(), end_widget.value(),
+                                                       nodes=nodes)
+                progress_bar.update_progress()
             export_processes.append(proc)
             selected_anim_dict[export_path] = [start_widget.value(), end_widget.value(), namespace, skeleton, color,
                                                nodes]
@@ -967,30 +1020,29 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
             Waits for all export processes to finish and then launches Unreal
             :param export_processes: list of subprocess.Popen processes
             """
-            total_exports = len(export_processes)
+            if is_maya():
+                total_exports = len(export_processes)
 
-            while export_processes and any(prc.is_alive() for prc in export_processes):
-                remaining = sum(1 for prc in export_processes if prc.is_alive())
-                progress_percent = int((total_exports - remaining) / total_exports * 100)
+                while export_processes and any(prc.is_alive() for prc in export_processes):
+                    remaining = sum(1 for prc in export_processes if prc.is_alive())
+                    progress_percent = int((total_exports - remaining) / total_exports * 100)
 
-                finished_processes = []
-                for i, prc in enumerate(export_processes):
-                    if not prc.is_alive():
-                        local_path = export_paths[i]
-                        helper.progress_update.emit(progress_percent)
-                        helper.progress_update_text.emit(f"Exporting Completed for Animation: {local_path}")
-                        finished_processes.append(prc)
+                    finished_processes = []
+                    for i, prc in enumerate(export_processes):
+                        if not prc.is_alive():
+                            local_path = export_paths[i]
+                            helper.progress_update.emit(progress_percent)
+                            helper.progress_update_text.emit(f"Exporting Completed for Animation: {local_path}")
+                            finished_processes.append(prc)
 
-                # Now safely remove after iteration
-                for prc in finished_processes:
-                    export_processes.remove(prc)
+                    for prc in finished_processes:
+                        export_processes.remove(prc)
 
-                QtWidgets.QApplication.processEvents()
+                    QtWidgets.QApplication.processEvents()
 
             helper.finished.emit()
             # Once all exports are done, then launches unreal. Maya File must be a saved path.
             # Since the maya exports are on their own thread, we need to wait for them to finish
-
             if scene_path:
                 export_dir = os.path.dirname(export_path)
                 json_dir = os.path.join(export_dir, "JSON")
@@ -1009,9 +1061,11 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                     if self.unreal_checkbox.isChecked():
                         usp.run_import_gameplay_animations(json_path, self.uproject, self.log_path, self.cmd_path)
 
-        thread = threading.Thread(target=launch_unreal_after_export, args=(export_processes, export_path))
-        thread.start()
-
+        if len(export_processes) and is_maya():
+            thread = threading.Thread(target=launch_unreal_after_export, args=(export_processes, export_path))
+            thread.start()
+        else:
+            launch_unreal_after_export(export_processes, export_path)
 
     def load_data(self):
         """
@@ -1021,16 +1075,28 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
         self.table_widget.setRowCount(0)
         export_data = sequence_utils.get_export_node_data()
         anim_dict, skeletons, namespace_skeleton_map, uproject, log_path, cmd_path, export_dir = export_data
+        if not is_maya():
+            if self.uproject and not skeletons:
+                skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
+                if type(skel_data) == str:
+                    self.skeletons = eval(skel_data)
+                else:
+                    self.skeletons = skel_data
+            else:
+                self.skeletons = skeletons
+        else:
+            self.skeletons = skeletons
+
         if anim_dict:
-            self.anim_dict, self.skeletons, self.namespace_skeleton_map, self.uproject, self.log_path, self.cmd_path, \
+            self.anim_dict, skeletons, self.namespace_skeleton_map, self.uproject, self.log_path, self.cmd_path, \
             self.export_dir = export_data
+
         else:
             anim_dict = {}
             return [anim_dict, self.skeletons, self.uproject, self.export_dir]
 
         self.directory_widget.dir_name.setText(self.export_dir)
 
-        anim_dict = self.anim_dict
         for export_path in anim_dict:
             directory = os.path.dirname(export_path)
             anim = os.path.basename(export_path).split('.')[0]
@@ -1066,6 +1132,66 @@ class MayaAnimationManagerUI(QtWidgets.QDialog):
                                                                      self.log_path, self.cmd_path,
                                                                      self.directory_widget.directory,
                                                                      self.namespace_skeleton_map)
+    def create_file_menu(self):
+        """
+        Creates File Menu at top of Window
+        :return:
+        """
+        file_menu = self.menu_bar.addMenu("File")
+
+        export_action = file_menu.addAction("Export Data")
+        export_action.triggered.connect(self.export_data)
+
+        import_action = file_menu.addAction("Import Data")
+        import_action.triggered.connect(self.import_data)
+
+    def export_data(self):
+        """
+        Exports the UI Animations for loading into another file or package
+        :return:
+        """
+
+        scene_path=sequence_utils.get_scene_path()
+        scene_name = os.path.splitext(os.path.basename(scene_path))[0]
+        default_filename = f"{scene_name}.json"
+
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Animation Data",
+            default_filename,
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            file_path = file_path.replace("\\", "/")
+
+            json_data.save_dict_to_json(self.anim_dict, file_path)
+
+
+    def import_data(self):
+        """
+        Imports Data from exported json (using the Export Data File Menu option, not the Export Animation option)
+        :return:
+        """
+        scene_path=sequence_utils.get_scene_path()
+        scene_name = os.path.splitext(os.path.basename(scene_path))[0]
+        default_filename = f"{scene_name}.json"
+
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Export Animation Data",
+            default_filename,
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            file_path = file_path.replace("\\", "/")
+            self.anim_dict = json_data.load_json_as_dict(file_path)
+            sequence_utils.create_and_populate_export_node(self.anim_dict, self.skeletons, self.uproject,
+                                                                         self.log_path, self.cmd_path,
+                                                                         self.directory_widget.directory,
+                                                                         self.namespace_skeleton_map)
+            self.load_data()
 
     def get_uproject(self, directory):
         file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Unreal Project", directory,
@@ -1080,14 +1206,14 @@ def show_animation_manager():
     Launches the Animation Manager UI in Maya.
     :return:
     """
-    global maya_ui_instance
+    global anim_manager
     try:
-        maya_ui_instance.close()
+        anim_manager.close()
     except:
         pass
 
-    maya_ui_instance = MayaAnimationManagerUI()
-    maya_ui_instance.show()
+    anim_manager = AnimationManagerUI()
+    anim_manager.show()
 
 
 if __name__ == "__main__":
