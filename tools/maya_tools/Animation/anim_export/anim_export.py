@@ -133,6 +133,13 @@ def get_all_joint_children(root_joint):
 
 
 def bake_all_keyable_attributes(nodes, start_frame, end_frame):
+    """
+
+    :param nodes: nodes to bake
+    :param start_frame: start of range to bake
+    :param end_frame: end of range to bake
+    :return:
+    """
     all_attrs_to_bake = []
 
     for node in nodes:
