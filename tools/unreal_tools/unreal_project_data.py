@@ -2,12 +2,14 @@ import os
 import json
 import winreg
 import glob
-import configparser
-import stat
-import shutil
 
 
 def get_engine_association(uproject_path):
+    """
+    Returns the Engine Version for the uproject
+    :param uproject_path: actual uproject path
+    :return: If found, returns the Engine Version for the unreal version
+    """
     with open(uproject_path, "r") as f:
         uproject = json.load(f)
     return uproject.get("EngineAssociation", None)
@@ -94,14 +96,14 @@ def get_latest_unreal_log(uproject_path):
     log_dir = os.path.join(proj_dir, "Saved", "Logs")
 
     if not os.path.exists(log_dir):
-        return None  # Log directory doesn't exist
+        return None
 
     # Find all logs that match the project's base name
     log_pattern = os.path.join(log_dir, f"{proj_base_name}*.log")
     log_files = glob.glob(log_pattern)
 
     if not log_files:
-        return None  # No log files found
+        return None
 
     # Get the most recently modified log file
     latest_log = max(log_files, key=os.path.getmtime)
