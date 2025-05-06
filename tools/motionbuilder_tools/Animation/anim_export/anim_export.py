@@ -88,6 +88,11 @@ def export_animation(motionbuilder_file, export_path, namespace, start_frame, en
 
 
 def list_joints_by_namespace(namespace):
+    """
+    Finds all joints in a namespace
+    :param namespace: namespace to find joints for
+    :return:
+    """
     return [
         model for model in fb.FBSystem().Scene.Components
         if model.ClassName() == "FBModelSkeleton" and f"{namespace}:" in model.LongName
@@ -95,6 +100,11 @@ def list_joints_by_namespace(namespace):
 
 
 def get_all_descendants(model):
+    """
+    Gets all children of a selected model
+    :param model: Model to search for children under
+    :return:
+    """
     all_models = []
     for child in model.Children:
         all_models.append(child)
@@ -175,6 +185,10 @@ def deselect_all_models():
 
 
 def select_models(models):
+    """
+    :param models: List of models
+    :return:
+    """
     deselect_all_models()
 
     for model in models:
@@ -184,6 +198,8 @@ def select_models(models):
 def plot_selected_models(models, start_frame, end_frame):
     """
     :param models: models to plot
+    :param start_frame: start frame to plot
+    :param end_frame: end frame to plot
     :return:
     """
     selected = get_selected_models()
