@@ -266,7 +266,6 @@ def import_reference_and_strip_namespace_test(namespace, root):
 
     if not import_reference_nodes:
         cmds.warning(f"No reference nodes found for namespace '{namespace}' or its nested namespaces.")
-        return []
 
     for ref_node in import_reference_nodes:
         try:
