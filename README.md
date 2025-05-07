@@ -3,7 +3,7 @@ Downloadable Tools for DCC and Content Creation Pipelines; Starting with Animati
 
 Instructions for first time using:
 
-1. inside of tools, there will be a .bat file for the version of Maya you use (2023 - 2025 officially tests) or the version of Motionbuilder you use (2023 - 2026 officially working). It is recommended to run the first time as this will make sure you have the requests module... you may also opt to run maya_setup.py directly
+1. inside of tools, there will be a .bat file for the version of Maya you use (2023 - 2025 officially tests) or the version of Motionbuilder you use (2023 - 2026 officially working). It is recommended to run the first time as this will make sure you have the requests module... you may also opt to run maya_setup.py directly or motionbuilder_setup.py respectively
    
 2. After that point you should be able to open maya or motionbuilder vanilla without the bat file, and the tool should open up and prompt you to select a Uproject
 
