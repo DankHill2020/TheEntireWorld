@@ -1078,6 +1078,19 @@ class AnimationManagerUI(QtWidgets.QDialog):
         self.table_widget.setRowCount(0)
         export_data = sequence_utils.get_export_node_data()
         anim_dict, skeletons, namespace_skeleton_map, uproject, log_path, cmd_path, export_dir = export_data
+        if not anim_dict:
+            anim_dict = {}
+        for anim in anim_dict:
+            anim_info = anim_dict.get(anim)
+            if "PySide2." in anim_info[4] or "PySide6." in anim_info[4]:
+                new_string = anim_info[4].replace("PySide2.", "")
+                new_string = new_string.replace("PySide6.", "")
+                anim_info.pop(4)
+                anim_info.insert(4, new_string)
+                anim_dict[anim] = anim_info
+
+        export_data.pop(0)
+        export_data.insert(0, anim_dict)
         if not is_maya():
             if self.uproject and not skeletons:
                 skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
@@ -1127,6 +1140,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
             skeleton = self.table_widget.item(row, 5).text()
             color_str = str(self.table_widget.item(row, 0).background().color())
             color = color_str.replace("PySide6.", "")
+            color = color.replace("PySide2.", "")
             nodes = self.table_widget.item(row, 6).text()
 
             self.anim_dict[export_path] = [start_value, end_value, namespace, skeleton, color, nodes]
