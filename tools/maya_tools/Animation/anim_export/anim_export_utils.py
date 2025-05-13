@@ -127,13 +127,29 @@ def find_references_from_namespace(namespace):
                 for node in nodes:
                     incoming = cmds.listConnections(node, source=True, destination=False, plugs=False) or []
                     for src_node in incoming:
-                        if cmds.nodeType(src_node).endswith("Constraint"):
-                            drivers = cmds.listConnections(src_node + ".target[0].targetParentMatrix", source=True, destination=False) or []
+                        node_type = cmds.nodeType(src_node)
+                        if node_type.endswith("Constraint"):
+                            # Direct constraint, process as before
+                            drivers = cmds.listConnections(src_node + ".target[0].targetParentMatrix", source=True,
+                                                           destination=False) or []
                             for driver in drivers:
                                 driver_ref_node = get_ref_node(driver)
                                 if driver_ref_node and driver_ref_node not in seen_ref_nodes:
-                                    driver_ref_path = cmds.referenceQuery(driver_ref_node, filename=True, unresolvedName=False)
+                                    driver_ref_path = cmds.referenceQuery(driver_ref_node, filename=True,
+                                                                          unresolvedName=False)
                                     add_reference(driver_ref_path, driver_ref_node)
+
+                        elif node_type == "pairBlend":
+                            downstream_constraints = cmds.listConnections(src_node, source=True, destination=False,
+                                                                          type="constraint") or []
+                            for constraint_node in downstream_constraints:
+                                drivers = cmds.listConnections(constraint_node, source=True, destination=False) or []
+                                for driver in drivers:
+                                    driver_ref_node = get_ref_node(driver)
+                                    if driver_ref_node and driver_ref_node not in seen_ref_nodes:
+                                        driver_ref_path = cmds.referenceQuery(driver_ref_node, filename=True,
+                                                                              unresolvedName=False)
+                                        add_reference(driver_ref_path, driver_ref_node)
 
         except:
             continue
