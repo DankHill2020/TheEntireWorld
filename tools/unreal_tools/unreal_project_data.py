@@ -147,6 +147,7 @@ def add_unreal_startup_script(uproject_path, script_path):
         section_start = len(lines) - 1
 
     section_end = len(lines)
+    cleaned_path = re.sub(r"[\"']", "", script_path.replace(os.sep, '/'))
     for i in range(section_start + 1, len(lines)):
         if lines[i].startswith('['):
             section_end = i
@@ -155,9 +156,12 @@ def add_unreal_startup_script(uproject_path, script_path):
         if match:
             existing_indices.append(int(match.group(1)))
 
+        if cleaned_path in lines[i]:
+            return
+
     new_index = max(existing_indices, default=-1) + 1
-    cleaned_path = re.sub(r"[\"']", "", script_path.replace(os.sep, '/'))
     new_line = f"{startup_script_key}[{new_index}]={cleaned_path}\n"
+
     lines.insert(section_end, new_line)
     with open(ini_path, 'w', encoding='utf-8') as f:
         f.writelines(lines)
