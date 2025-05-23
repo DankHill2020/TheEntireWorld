@@ -1,6 +1,7 @@
 import maya.cmds as cmds
 import maya.utils
 from maya_tools.Cinematics.SequenceUI import sequence_ui
+from maya_tools.Rigging.mocap import hik_ui
 
 def create_maya_menu():
     # Avoid duplicate menus
@@ -12,6 +13,7 @@ def create_maya_menu():
 
     # Add a menu item that calls your animation manager
     cmds.menuItem("sequenceUIItem", label="Sequence UI", parent=main_menu, command=lambda *args: sequence_ui.show_animation_manager())
+    cmds.menuItem("hikUIItem", label="Human IK UI", parent=main_menu, command=lambda *args: hik_ui.launch_hik_ui())
 
 def create_menu_once():
     create_maya_menu()
