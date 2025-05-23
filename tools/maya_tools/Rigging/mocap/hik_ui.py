@@ -8,7 +8,7 @@ from maya_tools.Rigging.mocap import setup_hik
 import copy
 
 DEFAULT_JOINT_MAP = {
-    "Reference": {"index": 0, "joint": "origin"},
+    "Reference": {"index": 0, "joint": ""},
     "Hips": {"index": 1, "joint": ""},
     "LeftUpLeg": {"index": 2, "joint": ""},
     "LeftLeg": {"index": 3, "joint": ""},
@@ -363,7 +363,6 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             name = jnt.lower()
 
             def set_slot(slot):
-                # Only update the 'joint' if the slot exists in joint_map
                 if slot in joint_map and not joint_map[slot].get("joint"):
                     joint_map[slot]["joint"] = jnt
 
