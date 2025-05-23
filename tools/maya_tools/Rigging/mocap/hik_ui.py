@@ -321,7 +321,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 data = json.load(f)
                 for key in self.default_map:
                     # Load joint name only; keep index intact
-                    joint_name = data.get(key, "")
+                    joint_name = data.get(key).get("joint")
                     self.default_map[key]["joint"] = joint_name
                     self.fields[key] = joint_name
                     self.update_button_color(key)
