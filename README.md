@@ -13,7 +13,7 @@ Instructions for first time using:
 
 5. The only thing we ask is that if you do use our tools in your production, that you credit our studio for your tooling support, to help get our name out there. Honor system, please don't abuse the help we provide without helping us in return :)
 
-6. I've recently added a Human IK Character Builder, which t poses the rig and does some autodetection for joint names as well
+6. I've recently added a Human IK Character Builder, which t poses the rig and does some autodetection for joint names as well: https://vimeo.com/1087030142
 
 #To Launch tool
 
