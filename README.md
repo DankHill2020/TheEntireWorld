@@ -7,7 +7,7 @@ Instructions for first time using:
    
 2. After that point you should be able to open maya or motionbuilder vanilla without the bat file, and the tool should open up and prompt you to select a Uproject, which once you select will update your unreal to be able to be sent commands from Maya and Motionbuilder.
    
-3. I walk through the functionality and how to get this setup in a few vimeo videos, though some updates have happened since then to the UI and the setup... this part is defined there : https://vimeo.com/user58067839 ; https://vimeo.com/user58067839
+3. I walk through the functionality of our Animation Manager (with exports for Unreal Sequencer) and how to get this setup in a few vimeo videos, though some updates have happened since then to the UI and the setup... this part is defined there : https://vimeo.com/user58067839 ; https://vimeo.com/user58067839 . This tool also handles Metahuman on top of any base rigs you have for your project (must have skeleton in engine to define in DCC )
 
 4. Beyond that once you have the UI open, the videos above show how to use the interface and I will be adding a paper documentation shortly
 
