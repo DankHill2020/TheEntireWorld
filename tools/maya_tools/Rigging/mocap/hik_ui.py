@@ -455,6 +455,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
                         joint_map[key]["joint"] = joints_sorted[num]
 
+        self.default_map = joint_map
         return joint_map
 
     def create_hik_character(self):
