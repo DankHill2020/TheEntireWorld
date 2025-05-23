@@ -6,11 +6,23 @@ import math
 
 
 def get_world_position(obj):
+    """
+    Gets the world position
+    :param obj: name of object
+    :return:
+    """
     pos = cmds.xform(obj, q=True, ws=True, t=True)
     return om.MVector(pos)
 
 
 def align_clavicle_Y_by_rotateY(clavicle_joint, sample_range=30.0, step=0.1):
+    """
+    Rotates Y up until the upper arm and clavicle are as close to the same in Translate Y world position
+    :param clavicle_joint: joint name
+    :param sample_range: how far of rotation range to test against base pose
+    :param step: how small of increments to test
+    :return:
+    """
     children = cmds.listRelatives(clavicle_joint, type="joint", children=True, fullPath=True)
     if not children:
         print(f"No child joint found for {clavicle_joint}")
@@ -40,6 +52,11 @@ def align_clavicle_Y_by_rotateY(clavicle_joint, sample_range=30.0, step=0.1):
 
 
 def aim_joint_x_axis_to_world_x(joint_name):
+    """
+    Aligns the joint to +X or -X
+    :param joint_name: joint to align
+    :return:
+    """
     dup_joint = cmds.duplicate(joint_name, parentOnly=True, name=joint_name + "_worldAlignTemp")[0]
 
     cmds.parent(dup_joint, world=True)
@@ -89,6 +106,18 @@ def aim_joint_x_axis_to_world_x(joint_name):
     cmds.delete(dup_joint)
 
 def t_pose_character(l_upperarm, r_upperarm, l_clav, r_clav, l_elbow, r_elbow, l_hand, r_hand):
+    """
+    Tposes the arms, currently pointed down X
+    :param l_upperarm: actual joint name for slot
+    :param r_upperarm: actual joint name for slot
+    :param l_clav: actual joint name for slot
+    :param r_clav: actual joint name for slot
+    :param l_elbow: actual joint name for slot
+    :param r_elbow: actual joint name for slot
+    :param l_hand: actual joint name for slot
+    :param r_hand: actual joint name for slot
+    :return:
+    """
     align_clavicle_Y_by_rotateY(l_clav)
     align_clavicle_Y_by_rotateY(r_clav)
     aim_joint_x_axis_to_world_x(l_upperarm)
@@ -113,11 +142,13 @@ def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
     """
     Setup a HIK character definition and export to FBX for MotionBuilder.
 
-    Parameters:
-        character_name (str): Name of the HIK character to create.
-        joint_map (dict): Mapping of HIK slots to joint names.
-        fbx_export_path (str): Full path to export the FBX file.
+    :param character_name: Name of the HIK character to create.
+    :param joint_map: Mapping of HIK slots to joint names.
+    :param fbx_export_path: Full path to export the FBX file.
+    :param namespace: namespace to apply on export
+    :return:
     """
+
     mel.eval("DisableAll")
     for grp_name in ["DNT", "do_not_touch", "rig"]:
         if cmds.objExists(grp_name):
