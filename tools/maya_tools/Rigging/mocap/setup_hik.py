@@ -222,6 +222,7 @@ def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
     mel.eval('FBXExportConstraints -v false')
     mel.eval('FBXExport -f "{}" -s;'.format(fbx_export_path.replace('\\', '/')))
     print(f"[Maya] Character exported to: {fbx_export_path}")
+    return joint_map
 
 
 joint_map = {
@@ -232,15 +233,15 @@ joint_map = {
     "RightUpLeg": "r_thigh",
     "RightLeg": "r_knee",
     "RightFoot": "r_ankle",
-    "Spine": "spine_01",
-    "Spine1": "spine_02",
+    "Spine": "spine_1",
+    "Spine1": "spine3",
     "Neck": "neck",
     "Head": "head",
     "LeftArm": "l_upperarm",
-    "LeftForeArm": "l_forearm",
+    "LeftForeArm": "l_lowerarm",
     "LeftHand": "l_hand",
     "RightArm": "r_upperarm",
-    "RightForeArm": "r_forearm",
+    "RightForeArm": "r_lowerarm",
     "RightHand": "r_hand"
 }
 

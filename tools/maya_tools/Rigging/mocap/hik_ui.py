@@ -5,7 +5,15 @@ from maya import OpenMayaUI as omui
 from shiboken6 import wrapInstance
 from PySide6 import QtWidgets, QtCore, QtGui
 from maya_tools.Rigging.mocap import setup_hik
-import copy
+from unreal_tools import unreal_subprocess as usp
+from unreal_tools import unreal_project_data as upd
+from maya_tools.Utilities import joints
+import importlib
+importlib.reload(usp)
+importlib.reload(upd)
+
+script_dir = os.path.dirname(__file__).replace('\\', '/')
+
 
 DEFAULT_JOINT_MAP = {
     "Reference": {"index": 0, "joint": ""},
@@ -103,6 +111,49 @@ def get_main_window_pointer():
     return int(main_window_ptr)
 
 
+class ControlRigPopup(QtWidgets.QDialog):
+    def __init__(self, skeletal_meshes, joint_map, uproject, parent=None):
+        super(ControlRigPopup, self).__init__(parent)
+        self.setWindowTitle("Create Control Rig")
+        self.skeletal_meshes = skeletal_meshes
+        self.joint_map = joint_map
+        self.uproject = uproject
+        self.log_path = upd.get_latest_unreal_log(uproject)
+        self.cmd_path = upd.get_unreal_cmd_exe(uproject)
+        layout = QtWidgets.QVBoxLayout(self)
+
+        layout.addWidget(QtWidgets.QLabel("Skeletal Meshes:"))
+        self.mesh_filter_input = QtWidgets.QLineEdit()
+        self.mesh_filter_input.setPlaceholderText("Filter Skeletal Meshes...")
+        layout.addWidget(self.mesh_filter_input)
+
+        self.mesh_input = QtWidgets.QComboBox()
+        self.mesh_input.addItems(self.skeletal_meshes)
+        layout.addWidget(self.mesh_input)
+
+        self.mesh_filter_input.textChanged.connect(self.filter_meshes)
+
+        # Control Rig Name
+        layout.addWidget(QtWidgets.QLabel("Control Rig Name:"))
+        self.cr_name_input = QtWidgets.QLineEdit()
+        self.cr_name_input.setPlaceholderText("Enter Control Rig Name")
+        layout.addWidget(self.cr_name_input)
+
+        # Create Button
+        self.create_button = QtWidgets.QPushButton("Create Control Rig")
+        self.create_button.clicked.connect(self.create_control_rig)
+        layout.addWidget(self.create_button)
+
+    def filter_meshes(self, text):
+        self.mesh_input.clear()
+        filtered = [s for s in self.skeletal_meshes if text.lower() in s.lower()]
+        self.mesh_input.addItems(filtered)
+
+    def create_control_rig(self):
+        selected_mesh = self.mesh_input.currentText()
+        rig_name = self.cr_name_input.text().strip()
+        usp.run_create_modular_control_rig(selected_mesh, rig_name, self.joint_map,self.uproject, self.log_path, self.cmd_path)
+
 class HIKDefinitionUI(QtWidgets.QDialog):
     def __init__(self, parent=None):
         if parent is None:
@@ -116,7 +167,6 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.export_path = QtWidgets.QLineEdit(get_default_export_path())
         namespace = os.path.basename(self.export_path.text()).rsplit('.')[0] + "_retarget"
         self.namespace = QtWidgets.QLineEdit(namespace)
-
         self.fields = {key: "" for key in DEFAULT_JOINT_MAP.keys()}
         self.buttons = {}
         self.default_map = DEFAULT_JOINT_MAP
@@ -258,12 +308,15 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         save_btn.clicked.connect(self.save_definition)
         detect_btn = QtWidgets.QPushButton("Auto Detect")
         detect_btn.clicked.connect(self.auto_detect)
+        self.unreal_checkbox = QtWidgets.QCheckBox("Create Unreal Rig")
+
         create_btn = QtWidgets.QPushButton("Create HIK Character")
         create_btn.clicked.connect(self.create_hik_character)
 
         btn_layout.addWidget(load_btn)
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(detect_btn)
+        btn_layout.addWidget(self.unreal_checkbox)
         btn_layout.addWidget(create_btn)
 
         self.layout().addLayout(btn_layout)
@@ -334,19 +387,25 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 json.dump(data, f, indent=4)
 
     def auto_detect(self):
-        root_joint = "origin"  # You can replace this with a prompt if needed
+        root_joint = joints.find_skinned_or_top_joints(namespace='')[0]
         joint_map = self.guess_joint_map_from_root(root_joint)
         for slot in self.default_map:
             if slot in joint_map:
                 self.fields[slot] = joint_map[slot].get("joint")
             self.update_button_color(slot)
 
+    def get_uproject(self, directory):
+        file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Unreal Project", directory,
+                                                             "Unreal Project (*.uproject)")
+        if file_name:
+            return file_name.replace('\\', '/')
+        return None
+
     def guess_joint_map_from_root(self, root_joint):
         if not cmds.objExists(root_joint):
             return {}
 
-        joint_map = copy.deepcopy(self.default_map)
-
+        joint_map = self.default_map
         all_joints = cmds.listRelatives(root_joint, ad=True, type="joint") or []
         all_joints = list(reversed(all_joints))
         all_joints.insert(0, root_joint)
@@ -369,46 +428,46 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             if "spine" in name or "spn" in name:
                 spines.append(jnt)
 
-            elif "origin" in name:
+            elif "origin" in name or "root" in name:
                 set_slot("Reference")
 
             elif "pelvis" in name:
                 set_slot("Hips")
 
-            elif "l_clavicle" in name:
+            elif "l_clavicle" in name or "clavicle_l" in name:
                 set_slot("LeftShoulder")
-            elif "l_upperarm" in name:
+            elif "l_upperarm" in name or "l_shoulder" in name or "upperarm_l" in name:
                 set_slot("LeftArm")
-            elif name == "l_lowerarm":
+            elif name == "l_lowerarm" or "l_elbow" in name or "lowerarm_l" in name:
                 set_slot("LeftForeArm")
-            elif "l_hand" in name:
+            elif "l_hand" in name or "hand_l" in name and "ik" not in name:
                 set_slot("LeftHand")
 
-            elif "r_clavicle" in name:
+            elif "r_clavicle" in name or "clavicle_r" in name:
                 set_slot("RightShoulder")
-            elif "r_upperarm" in name:
+            elif "r_upperarm" in name or "r_shoulder" in name or "upperarm_r" in name:
                 set_slot("RightArm")
-            elif name == "r_lowerarm":
+            elif name == "r_lowerarm" or "r_elbow" in name or "lowerarm_r" in name:
                 set_slot("RightForeArm")
-            elif "r_hand" in name:
+            elif "r_hand" in name or "hand_r" in name and "ik" not in name:
                 set_slot("RightHand")
 
-            elif "l_thigh" in name:
+            elif "l_thigh" in name or "thigh_l" in name or "l_upperleg" in name:
                 set_slot("LeftUpLeg")
-            elif "l_knee" in name:
+            elif "l_knee" in name or name == "knee_l" or name == "calf_l" or "l_lowerleg" in name:
                 set_slot("LeftLeg")
-            elif "l_ankle" in name:
+            elif "l_ankle" in name or "ankle_l" in name or "foot_l" in name and "ik" not in name:
                 set_slot("LeftFoot")
-            elif "l_toe" in name and "tip" not in name:
+            elif "l_toe" in name and "tip" not in name or "ball_l" in name:
                 set_slot("LeftToeBase")
 
-            elif "r_thigh" in name:
+            elif "r_thigh" in name or "thigh_r" in name or "r_upperleg" in name:
                 set_slot("RightUpLeg")
-            elif "r_knee" in name:
+            elif "r_knee" in name or name == "knee_l" or name == "calf_r" or "r_lowerleg" in name:
                 set_slot("RightLeg")
-            elif "r_ankle" in name:
+            elif "r_ankle" in name or "ankle_r" in name or "foot_r" in name and "ik" not in name:
                 set_slot("RightFoot")
-            elif "r_toe" in name and "tip" not in name:
+            elif "r_toe" in name and "tip" not in name or "ball_r" in name:
                 set_slot("RightToeBase")
 
             if "neck" in name:
@@ -421,6 +480,15 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                     for finger in fingers[side].keys():
                         if finger.lower() in name:
                             fingers[side][finger].append(jnt)
+                elif name.endswith("_" + side[0].lower()):
+                    for finger in fingers[side].keys():
+                        if not len(fingers[side][finger]):
+                            if cmds.objExists(f"{finger.lower()}_metacarpal_{side[0].lower()}"):
+                                fingers[side][finger].append(f"{finger.lower()}_metacarpal_{side[0].lower()}")
+                            if cmds.objExists(f"{finger.lower()}_01_{side[0].lower()}"):
+                                fingers[side][finger].append(f"{finger.lower()}_01_{side[0].lower()}")
+                                fingers[side][finger].append(f"{finger.lower()}_02_{side[0].lower()}")
+                                fingers[side][finger].append(f"{finger.lower()}_03_{side[0].lower()}")
 
         for i, spine in enumerate(spines):
             key = "Spine" if i == 0 else f"Spine{i}"
@@ -437,14 +505,19 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 joints = fingers[side][finger]
                 if not joints:
                     continue
-                joints_sorted = sorted(joints, key=lambda x: x.lower())
-
+                if "_metacarpal_" not in joints[0]:
+                    joints_sorted = sorted(joints, key=lambda x: x.lower())
+                else:
+                    joints_sorted = joints
                 if "Thumb" not in finger:
                     in_hand_key = f"{side}InHand{finger}"
                     if in_hand_key in joint_map and not joint_map[in_hand_key].get("joint"):
                         joint_map[in_hand_key]["joint"] = joints_sorted[0]
                 else:
-                    thumb4_key = f"{side}Hand{finger}4"
+                    if len(joints) > 4:
+                        thumb4_key = f"{side}Hand{finger}4"
+                    else:
+                        thumb4_key = f"{side}Hand{finger}3"
                     joint_map[thumb4_key]["joint"] = joints_sorted[-1]
                 for i in range(1, min(5, len(joints_sorted))):
                     num = i
@@ -455,8 +528,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
                         joint_map[key]["joint"] = joints_sorted[num]
 
-        self.default_map = joint_map
         return joint_map
+
 
     def create_hik_character(self):
         char_name = self.char_name.text()
@@ -465,8 +538,18 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         if len(joint_map) < 5:
             cmds.warning("Not enough joints assigned to create a valid character.")
             return
-
         setup_hik.setup_hik_character(char_name, joint_map, export_path, self.namespace.text())
+        if self.unreal_checkbox.isChecked():
+            uproject = self.get_uproject("C:/")
+            if uproject:
+                http_server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))),
+                                                "unreal_tools", "http_server.py").replace('\\', '/')
+                upd.add_unreal_startup_script(uproject, http_server_path)
+                log_path = upd.get_latest_unreal_log(uproject)
+                cmd_path = upd.get_unreal_cmd_exe(uproject)
+                skel_meshes = usp.run_get_skeletons(uproject, log_path, cmd_path, "SkeletalMesh")
+                self.popup = ControlRigPopup(skel_meshes, joint_map, uproject)
+                self.popup.exec_()
 
 
 def launch_hik_ui():
