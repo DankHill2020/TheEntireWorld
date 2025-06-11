@@ -7,8 +7,10 @@ import requests
 
 def run_get_skeletons(unreal_project_path, log_file_path,
                               unreal_command_path="C:/Program Files/Epic "
-                                                  "Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"):
+                                                  "Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe",
+                      asset_type="Skeleton"):
     """
+    :param asset_type: type of asset to search for
     :param unreal_project_path: path to the unreal project
     :param log_file_path: log file path for returning output (function exists to find this in unreal_project_data.py)
     :param unreal_command_path: unreal cmd exe for version of editor (function exists to find this in unreal_project_data.py)
@@ -17,7 +19,7 @@ def run_get_skeletons(unreal_project_path, log_file_path,
     try:
         payload = {
             "function": "unreal_tools.get_skeletons.get_all_assets_of_type",
-            "args": ["Skeleton", "/Game/"]
+            "args": [asset_type, "/Game/"]
             }
 
         response = requests.post("http://127.0.0.1:12347", json=payload)
@@ -43,7 +45,7 @@ def run_get_skeletons(unreal_project_path, log_file_path,
             with open(log_file_path, "r") as log_file:
                 log_data = log_file.read()
 
-                if "'class_name': 'Skeleton'" in log_data:
+                if f"'class_name': {asset_type}" in log_data:
                     start_index = log_data.find("{")
                     end_index = log_data.rfind("}") + 1
 
@@ -60,6 +62,15 @@ def run_get_skeletons(unreal_project_path, log_file_path,
 
 def run_create_cinematic_sequence(anim_dict_path, destination_path, unreal_project_path, log_file_path,
                                   unreal_command_path="C:/Program Files/Epic Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"):
+    """
+
+    :param anim_dict_path: Path of Json data
+    :param destination_path: Path to save Cinematic
+    :param unreal_project_path: path to the unreal project
+    :param log_file_path: log file path for returning output (function exists to find this in unreal_project_data.py)
+    :param unreal_command_path: unreal cmd exe for version of editor (function exists to find this in unreal_project_data.py)
+    :return:
+    """
     try:
         payload = {
             "function": "unreal_tools.sequence_importer.create_cinematic_sequence_from_json",
@@ -115,6 +126,14 @@ def run_create_cinematic_sequence(anim_dict_path, destination_path, unreal_proje
 
 def run_import_gameplay_animations(anim_dict_path, unreal_project_path, log_file_path,
                                   unreal_command_path="C:/Program Files/Epic Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"):
+    """
+
+    :param anim_dict_path: Path of Json data
+    :param unreal_project_path: path to the unreal project
+    :param log_file_path: log file path for returning output (function exists to find this in unreal_project_data.py)
+    :param unreal_command_path: unreal cmd exe for version of editor (function exists to find this in unreal_project_data.py)
+    :return:
+    """
     try:
         payload = {
             "function": "unreal_tools.sequence_importer.import_gameplay_animations_from_json",
@@ -136,6 +155,69 @@ def run_import_gameplay_animations(anim_dict_path, unreal_project_path, log_file
         with open(temp_args_file, "w") as f:
             json.dump({
                 "anim_dict_path": anim_dict_path,
+            }, f)
+
+        unreal_cmd = [
+            unreal_command_path,
+            unreal_project_path,
+            "-run=pythonscript",
+            "-script=" + script_path
+        ]
+
+        try:
+            result = subprocess.run(unreal_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            '''print("STDOUT:\n", result.stdout)
+            print("STDERR:\n", result.stderr)'''
+
+            time.sleep(5)
+
+            if os.path.exists(log_file_path):
+                with open(log_file_path, "r") as log_file:
+                    log_data = log_file.read()
+                    print("Log Output:\n", log_data)
+                    return log_data
+
+            return "Log file not found."
+
+        except subprocess.CalledProcessError as e:
+            return f"Error: {e.stderr}"
+
+
+def run_create_modular_control_rig(skeletal_mesh_name, rig_name, joint_map, unreal_project_path, log_file_path,
+                                  unreal_command_path="C:/Program Files/Epic Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"):
+    """
+
+    :param joint_map: Joint Map from HumanIK UI, for clear mapping for biped body parts
+    :param rig_name: control rig asset name (saved to same folder as skeletal mesh)
+    :param skeletal_mesh_name: skeletal mesh to assign to rig
+    :param unreal_project_path: path to the unreal project
+    :param log_file_path: log file path for returning output (function exists to find this in unreal_project_data.py)
+    :param unreal_command_path: unreal cmd exe for version of editor (function exists to find this in unreal_project_data.py)
+    :return:
+    """
+    try:
+        payload = {
+            "function": "unreal_tools.control_rig.build_modular_fk_control_rig",
+            "args": [skeletal_mesh_name, rig_name, joint_map]
+            }
+
+        response = requests.post("http://127.0.0.1:12347", json=payload)
+        print(response.json())
+        return response.json()
+    except:
+        script_dir = os.path.dirname(__file__)
+        script_path = os.path.join(script_dir, "gameplay_import_func.py").replace('\\', '/')
+
+        # Write arguments to a temp file
+        temp_args_file = "C:/temp/modular_rig_args.json"
+
+        os.makedirs(os.path.dirname(temp_args_file), exist_ok=True)
+
+        with open(temp_args_file, "w") as f:
+            json.dump({
+                "skeletal_mesh_name": skeletal_mesh_name,
+                "rig_name": rig_name,
+                "joint_map": joint_map,
             }, f)
 
         unreal_cmd = [
