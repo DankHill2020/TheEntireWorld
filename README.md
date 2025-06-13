@@ -1,5 +1,5 @@
 # TheEntireWorld
-Downloadable Tools for DCC and Content Creation Pipelines; Starting with Animation and Cinematic Exporter for Maya and Motionbuilder with imports into Unreal 5.5, adding Human IK Builder for maya in the most recent version
+Downloadable Tools for DCC and Content Creation Pipelines; Starting with Animation and Cinematic Exporter for Maya and Motionbuilder with imports into Unreal 5.5, adding Human IK Builder for maya in the most recent version, Which also can generate the unreal modular control rig
 
 Instructions for first time using:
 
