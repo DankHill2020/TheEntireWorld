@@ -4,15 +4,6 @@ import maya.api.OpenMaya as om
 import math
 from maya_tools.Rigging.mocap import setup_hik
 
-def get_world_position(obj):
-    """
-    Gets the world position
-    :param obj: name of object
-    :return:
-    """
-    pos = cmds.xform(obj, q=True, ws=True, t=True)
-    return om.MVector(pos)
-
 
 def create_diamond_ctrl(name, size=1.0, normal=(0, 1, 0)):
     """
