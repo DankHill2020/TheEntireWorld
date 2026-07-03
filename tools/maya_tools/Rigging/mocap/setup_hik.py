@@ -4,6 +4,206 @@ import maya.cmds as cmds
 import maya.api.OpenMaya as om
 import math
 
+DEFAULT_FACE_JOINT_MAP = {
+
+    # ---------- BROWS (up to 5 per side) ----------
+    "LeftBrow": {
+        "index": 0,
+        "joints": []   # e.g. l_brow1 → l_brow5
+    },
+    "RightBrow": {
+        "index": 1,
+        "joints": []   # e.g. r_brow1 → r_brow5
+    },
+
+    # ---------- EYELIDS ----------
+    "LeftEyelid": {
+        "index": 10,
+        "outer": {"joint": ""},
+        "upper": {"joints": []},
+        "inner": {"joint": ""},
+        "lower": {"joints": []},
+        "joints": []
+    },
+
+    "RightEyelid": {
+        "index": 20,
+        "outer": {"joint": ""},
+        "upper": {"joints": []},
+        "inner": {"joint": ""},
+        "lower": {"joints": []},
+        "joints": []
+    },
+
+    "LeftEye": {"index": 70, "joint": ""},
+    "RightEye": {"index": 71, "joint": ""},
+
+    # ---------- LIPS ----------
+    "LipChain": {
+        "index": 30,
+        "joints": []
+    },
+
+    "UpperLipCenter": {"index": 31, "joint": ""},
+    "LowerLipCenter": {"index": 32, "joint": ""},
+    "LeftLipCorner":  {"index": 33, "joint": ""},
+    "RightLipCorner": {"index": 34, "joint": ""},
+
+    # ---------- JAW ----------
+    "Jaw": {"index": 40, "joint": ""},
+
+    # ---------- TONGUE ----------
+    "TongueChain": {
+        "index": 50,
+        "joints": []   # tongue1 → tongueN
+    },
+
+    # ---------- TEETH ----------
+    "UpperTeeth": {"index": 60, "joint": ""},
+    "LowerTeeth": {"index": 61, "joint": ""},
+
+    # ---------- NOSE ----------
+    "NoseRoot": {"index": 80, "joint": ""},
+
+    # ---------- EVERYTHING ELSE ----------
+    "OtherFaceJoints": {
+        "index": 100,
+        "joints": []
+    }
+}
+
+DEFAULT_JOINT_MAP = {
+    "Reference": {"index": 0, "joint": ""},
+    "Hips": {"index": 1, "joint": ""},
+    "LeftUpLeg": {"index": 2, "joint": ""},
+    "LeftLeg": {"index": 3, "joint": ""},
+    "LeftFoot": {"index": 4, "joint": ""},
+    "LeftToeBase": {"index": 16, "joint": ""},
+    "RightUpLeg": {"index": 5, "joint": ""},
+    "RightLeg": {"index": 6, "joint": ""},
+    "RightFoot": {"index": 7, "joint": ""},
+    "RightToeBase": {"index": 17, "joint": ""},
+    "Spine": {"index": 8, "joint": ""},
+    "Spine1": {"index": 23, "joint": ""},
+    "Spine2": {"index": 24, "joint": ""},
+    "Spine3": {"index": 25, "joint": ""},
+    "Neck": {"index": 20, "joint": ""},
+    "Neck1": {"index": 32, "joint": ""},
+    "Head": {"index": 15, "joint": ""},
+    "LeftShoulder": {"index": 18, "joint": ""},
+    "LeftArm": {"index": 9, "joint": ""},
+    "LeftForeArm": {"index": 10, "joint": ""},
+    "LeftHand": {"index": 11, "joint": ""},
+    "LeftInHandIndex": {"index": 147, "joint": ""},
+    "LeftInHandMiddle": {"index": 148, "joint": ""},
+    "LeftInHandRing": {"index": 149, "joint": ""},
+    "LeftInHandPinky": {"index": 150, "joint": ""},
+    "LeftHandThumb1": {"index": 50, "joint": ""},
+    "LeftHandIndex1": {"index": 54, "joint": ""},
+    "LeftHandMiddle1": {"index": 58, "joint": ""},
+    "LeftHandRing1": {"index": 62, "joint": ""},
+    "LeftHandPinky1": {"index": 66, "joint": ""},
+    "LeftHandThumb2": {"index": 51, "joint": ""},
+    "LeftHandIndex2": {"index": 55, "joint": ""},
+    "LeftHandMiddle2": {"index": 59, "joint": ""},
+    "LeftHandRing2": {"index": 63, "joint": ""},
+    "LeftHandPinky2": {"index": 67, "joint": ""},
+    "LeftHandThumb3": {"index": 52, "joint": ""},
+    "LeftHandIndex3": {"index": 56, "joint": ""},
+    "LeftHandMiddle3": {"index": 60, "joint": ""},
+    "LeftHandRing3": {"index": 64, "joint": ""},
+    "LeftHandPinky3": {"index": 68, "joint": ""},
+    "LeftHandThumb4": {"index": 53, "joint": ""},
+    "LeftHandIndex4": {"index": 57, "joint": ""},
+    "LeftHandMiddle4": {"index": 61, "joint": ""},
+    "LeftHandRing4": {"index": 65, "joint": ""},
+    "LeftHandPinky4": {"index": 69, "joint": ""},
+    "RightShoulder": {"index": 19, "joint": ""},
+    "RightArm": {"index": 12, "joint": ""},
+    "RightForeArm": {"index": 13, "joint": ""},
+    "RightHand": {"index": 14, "joint": ""},
+    "RightInHandIndex": {"index": 153, "joint": ""},
+    "RightInHandMiddle": {"index": 154, "joint": ""},
+    "RightInHandRing": {"index": 155, "joint": ""},
+    "RightInHandPinky": {"index": 156, "joint": ""},
+    "RightHandThumb1": {"index": 74, "joint": ""},
+    "RightHandIndex1": {"index": 78, "joint": ""},
+    "RightHandMiddle1": {"index": 82, "joint": ""},
+    "RightHandRing1": {"index": 86, "joint": ""},
+    "RightHandPinky1": {"index": 90, "joint": ""},
+    "RightHandThumb2": {"index": 75, "joint": ""},
+    "RightHandIndex2": {"index": 79, "joint": ""},
+    "RightHandMiddle2": {"index": 83, "joint": ""},
+    "RightHandRing2": {"index": 87, "joint": ""},
+    "RightHandPinky2": {"index": 91, "joint": ""},
+    "RightHandThumb3": {"index": 76, "joint": ""},
+    "RightHandIndex3": {"index": 80, "joint": ""},
+    "RightHandMiddle3": {"index": 84, "joint": ""},
+    "RightHandRing3": {"index": 88, "joint": ""},
+    "RightHandPinky3": {"index": 92, "joint": ""},
+    "RightHandThumb4": {"index": 77, "joint": ""},
+    "RightHandIndex4": {"index": 81, "joint": ""},
+    "RightHandMiddle4": {"index": 85, "joint": ""},
+    "RightHandRing4": {"index": 89, "joint": ""},
+    "RightHandPinky4": {"index": 93, "joint": ""},
+
+    "LeftArmRoll": {"index": 45, "joint": ""},
+    "LeafLeftArmRoll1": {"index": 176, "joint": ""},
+    "LeafLeftArmRoll2": {"index": 184, "joint": ""},
+    "LeafLeftArmRoll3": {"index": 192, "joint": ""},
+
+    "RightArmRoll": {"index": 47, "joint": ""},
+    "LeafRightArmRoll1": {"index": 178, "joint": ""},
+    "LeafRightArmRoll2": {"index": 186, "joint": ""},
+    "LeafRightArmRoll3": {"index": 194, "joint": ""},
+
+    "LeftForeArmRoll": {"index": 46, "joint": ""},
+    "LeafLeftForearmRoll1": {"index": 177, "joint": ""},
+    "LeafLeftForearmRoll2": {"index": 185, "joint": ""},
+    "LeafLeftForearmRoll3": {"index": 193, "joint": ""},
+
+    "RightForeArmRoll": {"index": 48, "joint": ""},
+    "LeafRightForearmRoll1": {"index": 179, "joint": ""},
+    "LeafRightForearmRoll2": {"index": 187, "joint": ""},
+    "LeafRightForearmRoll3": {"index": 195, "joint": ""},
+
+    "LeftUpLegRoll": {"index": 41, "joint": ""},
+    "LeafLeftUpLegRoll1": {"index": 172, "joint": ""},
+    "LeafLeftUpLegRoll2": {"index": 180, "joint": ""},
+    "LeafLeftUpLegRoll3": {"index": 188, "joint": ""},
+
+    "RightUpLegRoll": {"index": 43, "joint": ""},
+    "LeafRightUpLegRoll1": {"index": 174, "joint": ""},
+    "LeafRightUpLegRoll2": {"index": 182, "joint": ""},
+    "LeafRightUpLegRoll3": {"index": 190, "joint": ""},
+
+    "LeftLegRoll": {"index": 42, "joint": ""},
+    "LeafLeftLegRoll1": {"index": 173, "joint": ""},
+    "LeafLeftLegRoll2": {"index": 181, "joint": ""},
+
+    "RightLegRoll": {"index": 44, "joint": ""},
+    "LeafRightLegRoll1": {"index": 175, "joint": ""},
+    "LeafRightLegRoll2": {"index": 183, "joint": ""}
+
+}
+
+
+def get_descendant_joints(root_joint):
+    """Returns all descendant joints of root_joint (including root)."""
+    if not root_joint or not cmds.objExists(root_joint):
+        return []
+    return [root_joint] + cmds.listRelatives(root_joint, allDescendents=True, type="joint") or []
+
+
+def find_face_joints(pattern, face_joints):
+    """Return joints in the scene matching the pattern that are descendants of the face root."""
+    all_matches = cmds.ls(pattern, type="joint") or []
+    return [j for j in all_matches if j in face_joints]
+
+
+def _exists(j):
+    return j if j and cmds.objExists(j) else None
+
 
 def get_world_position(obj):
     """

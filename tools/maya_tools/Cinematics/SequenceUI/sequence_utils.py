@@ -92,14 +92,13 @@ def display_warning(warning):
 
 
 def get_cameras_from_selection():
-    sel = cmds.ls(sl=True)
+    sel = cmds.ls(sl=True) or []
     camera = None
     for each in sel:
-        shapes = cmds.listRelatives(each, s=1)
-        if shapes:
-            for shape in shapes:
-                if cmds.objectType(shape) == 'camera':
-                    return each
+        shapes = cmds.listRelatives(each, s=1) or []
+        for shape in shapes:
+            if cmds.objectType(shape) == 'camera':
+                return each
     return camera
 
 
@@ -116,7 +115,7 @@ def get_rig_namespaces(selection = True):
     """
     namespaces = set()
     if selection:
-        selected = cmds.ls(selection=True)
+        selected = cmds.ls(selection=True) or []
         for obj in selected:
             if ":" in obj:
                 namespace = obj.split(":")[0]
@@ -125,7 +124,7 @@ def get_rig_namespaces(selection = True):
                     if top_joint:
                         namespaces.add(namespace)
     else:
-        assembly_nodes = cmds.ls(assemblies=True)
+        assembly_nodes = cmds.ls(assemblies=True) or []
         for node in assembly_nodes:
             namespace = node.split(":")[0]
             if namespace not in namespaces:
@@ -259,11 +258,14 @@ def create_and_populate_export_node(anim_dict, skeletons, uproject, log_path, cm
         cmds.addAttr('ExportData', longName='export_directory', dataType="string")
         cmds.addAttr('ExportData', longName='namespace_map', dataType="string")
 
-    cmds.setAttr('ExportData.anims', anim_dict, type="string")
-    cmds.setAttr('ExportData.skeletons', skeletons, type="string")
-    cmds.setAttr('ExportData.uproject', [uproject, log_path, cmd_path], type="string")
-    cmds.setAttr('ExportData.export_directory', export_directory, type="string")
-    cmds.setAttr('ExportData.namespace_map', namespace_skeleton_map, type="string")
+    try:
+        cmds.setAttr('ExportData.anims', anim_dict, type="string")
+        cmds.setAttr('ExportData.skeletons', skeletons, type="string")
+        cmds.setAttr('ExportData.uproject', [uproject, log_path, cmd_path], type="string")
+        cmds.setAttr('ExportData.export_directory', export_directory, type="string")
+        cmds.setAttr('ExportData.namespace_map', namespace_skeleton_map, type="string")
+    except Exception as e:
+        display_warning(f"Failed to populate ExportData node: {e}")
 
 
 def get_export_node_data():
@@ -275,10 +277,38 @@ def get_export_node_data():
     cmd_path = None
     export_dir = None
     if cmds.objExists('ExportData'):
-        anim_dict = eval(cmds.getAttr('ExportData.anims'))
+        try:
+            anims_val = cmds.getAttr('ExportData.anims')
+            anim_dict = eval(anims_val) if anims_val else {}
+        except Exception as e:
+            display_warning(f"Failed to parse 'anims' from ExportData: {e}")
+            anim_dict = {}
 
-        skeletons = eval(cmds.getAttr('ExportData.skeletons'))
-        namespace_skeleton_map = eval(cmds.getAttr('ExportData.namespace_map'))
-        uproject, log_path, cmd_path = eval(cmds.getAttr('ExportData.uproject'))
+        try:
+            skel_val = cmds.getAttr('ExportData.skeletons')
+            skeletons = eval(skel_val) if skel_val else []
+        except Exception as e:
+            display_warning(f"Failed to parse 'skeletons' from ExportData: {e}")
+            skeletons = []
+
+        try:
+            ns_map_val = cmds.getAttr('ExportData.namespace_map')
+            namespace_skeleton_map = eval(ns_map_val) if ns_map_val else {}
+        except Exception as e:
+            display_warning(f"Failed to parse 'namespace_map' from ExportData: {e}")
+            namespace_skeleton_map = {}
+
+        try:
+            uproj_val = cmds.getAttr('ExportData.uproject')
+            uproject_data = eval(uproj_val) if uproj_val else [None, None, None]
+            if isinstance(uproject_data, list) and len(uproject_data) >= 3:
+                uproject, log_path, cmd_path = uproject_data[:3]
+            else:
+                uproject, log_path, cmd_path = None, None, None
+        except Exception as e:
+            display_warning(f"Failed to parse 'uproject' from ExportData: {e}")
+            uproject, log_path, cmd_path = None, None, None
+
         export_dir = cmds.getAttr('ExportData.export_directory')
+
     return [anim_dict, skeletons, namespace_skeleton_map, uproject, log_path, cmd_path, export_dir]

@@ -1,8 +1,33 @@
 import re
+import os
+import json
 import maya.cmds as cmds
 import maya.api.OpenMaya as om
 import math
+from PySide2 import QtWidgets, QtCore
 from maya_tools.Rigging.mocap import setup_hik
+from maya_tools.Rigging import enum_attrs
+MODULE_STORE_NODE = "rig_module_store"
+GLOBAL_RIG_STORE = {}
+
+
+def _get_joint(body_joint_map, slot, default=None):
+    """
+        Safely retrieves a joint name from the body_joint_map dictionary.
+    :param body_joint_map: body joint mapping dictionary
+    :param slot: HIK slot name to retrieve
+    :param default: fallback joint name
+    :return: str or None
+    """
+    if not body_joint_map:
+        return default
+    val = body_joint_map.get(slot)
+    if val is None:
+        return default
+    if isinstance(val, dict):
+        jnt = val.get("joint")
+        return jnt if jnt else default
+    return val if val else default
 
 
 def create_diamond_ctrl(name, size=1.0, normal=(0, 1, 0)):
@@ -104,40 +129,40 @@ def create_cube_ctrl(name, size=1.5):
     return ctrl
 
 
-def snap_ctrl_cvs_to_child(ctrl, child_joint, flip_direction=False):
+def snap_ctrl_cvs_to_child(ctrl, child_joint, axis="x", flip_direction=False):
     """
-        Snaps control CVs so that:
-      - Child-facing CVs align to the child joint X
-      - Opposite CVs align to the control pivot X
-    :param ctrl: ctrl to edit
-    :param child_joint: child joint to offset cvs towards
-    :param flip_direction: If True, reverses which side is considered child-facing (useful for legs or mirrored controls)
-    :return:
+    Snaps control CVs toward the child joint along a local axis.
+
+    :param ctrl: control transform
+    :param child_joint: child joint or pad
+    :param axis: 'x', 'y', or 'z' (local axis to operate on)
+    :param flip_direction: reverse child-facing side
     """
 
-    # Get the control pivot position in world space
-    ctrl_pos = cmds.xform(ctrl, q=True, ws=True, t=True)
+    axis_index = {"x": 0, "y": 1, "z": 2}[axis]
 
-    # Get child joint position in world space
-    child_pos = cmds.xform(child_joint, q=True, ws=True, t=True)
+    # Get matrices
+    ctrl_mtx = om.MMatrix(cmds.xform(ctrl, q=True, ws=True, m=True))
+    ctrl_mtx_inv = ctrl_mtx.inverse()
 
-    # Compute child X relative to control pivot
-    target_x = child_pos[0] - ctrl_pos[0]
+    child_pos_ws = om.MPoint(*cmds.xform(child_joint, q=True, ws=True, t=True))
+    child_pos_ls = child_pos_ws * ctrl_mtx_inv
 
-    if abs(target_x) < 1e-5:
+    target = child_pos_ls[axis_index]
+
+    if abs(target) < 1e-5:
         return
 
-    direction = 1 if target_x > 0 else -1
+    direction = 1 if target > 0 else -1
     if flip_direction:
         direction *= -1
 
-    # Get all CVs
+    # Gather CVs
     shapes = cmds.listRelatives(ctrl, s=True, ni=True) or []
     cvs = []
     for shape in shapes:
-        if cmds.nodeType(shape) != "nurbsCurve":
-            continue
-        cvs.extend(cmds.ls(f"{shape}.cv[*]", fl=True))
+        if cmds.nodeType(shape) == "nurbsCurve":
+            cvs.extend(cmds.ls(f"{shape}.cv[*]", fl=True))
 
     if not cvs:
         cmds.warning(f"No CVs found under {ctrl}")
@@ -145,12 +170,19 @@ def snap_ctrl_cvs_to_child(ctrl, child_joint, flip_direction=False):
 
     # Snap CVs
     for cv in cvs:
-        cv_pos = cmds.pointPosition(cv, local=True)
-        if cv_pos[0] * direction > 0:
-            delta_x = target_x - cv_pos[0]
+        pos = cmds.pointPosition(cv, local=True)
+        axis_val = pos[axis_index]
+
+        if axis_val * direction > 0:
+            delta = target - axis_val
         else:
-            delta_x = -cv_pos[0]
-        cmds.xform(cv, relative=True, translation=(delta_x, 0, 0))
+            delta = -axis_val
+
+        move = [0, 0, 0]
+        move[axis_index] = delta
+
+        cmds.xform(cv, relative=True, translation=move)
+
 
 
 def create_sphere_ctrl(name, radius=1.5):
@@ -220,6 +252,105 @@ def create_bi_arrow_ctrl(name, size=1.2):
     return ctrl
 
 
+def setup_show_twist_ctrls(side, limb, attr_nice_name="Show Twist Ctrls"):
+    """
+        Adds a boolean attr to the side's switch control and connects it to the visibility of that limb's twist ctrl pads.
+    :param side: side "l" or "r"
+    :param limb: limb "arm" or "leg"
+    :param attr_nice_name: Nice name shown in Maya channel box
+    :return: dict
+    """
+
+    side = side.lower()
+    limb = limb.lower()
+
+    if side not in ["l", "r"]:
+        cmds.error("side must be 'l' or 'r'")
+
+    if limb not in ["arm", "leg"]:
+        cmds.error("limb must be 'arm' or 'leg'")
+
+    # Determine switch ctrl
+    if limb == "leg":
+        switch_ctrl = "{}_ankle_switch_ctrl".format(side)
+        twist_pads = []
+        for term in ["knee", "thigh"]:
+            for i in range(1, 5):
+                for suffix in ["_ctrl_pad", "_main_ctrl_pad"]:
+                    pad = f"{side}_{term}_twist{i}{suffix}"
+                    if cmds.objExists(pad):
+                        twist_pads.append(pad)
+    else:
+        switch_ctrl = "{}_hand_switch_ctrl".format(side)
+        twist_pads = []
+        for term in ["upperarm", "lowerarm"]:
+            for i in range(1, 5):
+                for suffix in ["_ctrl_pad", "_main_ctrl_pad"]:
+                    pad = f"{side}_{term}_twist{i}{suffix}"
+                    if cmds.objExists(pad):
+                        twist_pads.append(pad)
+
+    if not cmds.objExists(switch_ctrl):
+        cmds.error("Switch control does not exist: {}".format(switch_ctrl))
+
+    attr_name = "showTwistCtrls"
+    full_attr = "{}.{}".format(switch_ctrl, attr_name)
+
+    # Add attr if missing
+    if not cmds.attributeQuery(attr_name, node=switch_ctrl, exists=True):
+        cmds.addAttr(
+            switch_ctrl,
+            longName=attr_name,
+            niceName=attr_nice_name,
+            attributeType="bool",
+            defaultValue=0,
+            keyable=True
+        )
+    else:
+        # Make sure it's visible/keyable if it already exists
+        try:
+            cmds.setAttr(full_attr, e=True, keyable=True)
+        except Exception:
+            pass
+
+    existing_pads = []
+    missing_pads = []
+
+    for pad in twist_pads:
+        if cmds.objExists(pad):
+            existing_pads.append(pad)
+        else:
+            missing_pads.append(pad)
+
+    if missing_pads:
+        cmds.warning(
+            "Missing twist pads for {} {}: {}".format(
+                side, limb, ", ".join(missing_pads)
+            )
+        )
+
+    # Connect attr to visibility
+    for pad in existing_pads:
+        vis_attr = "{}.visibility".format(pad)
+
+        # Remove existing incoming visibility connections if present
+        incoming = cmds.listConnections(vis_attr, s=True, d=False, plugs=True) or []
+        for src in incoming:
+            try:
+                cmds.disconnectAttr(src, vis_attr)
+            except Exception:
+                pass
+
+        if not cmds.isConnected(full_attr, vis_attr):
+            cmds.connectAttr(full_attr, vis_attr, force=True)
+
+    return {
+        "switch_ctrl": switch_ctrl,
+        "attr": full_attr,
+        "twist_pads": existing_pads
+    }
+
+
 def create_ik_fk_limb(sel, root_parent):
     """
         Creates an IK/FK limb from either:
@@ -286,11 +417,7 @@ def create_ik_fk_limb(sel, root_parent):
     for i, jnt in enumerate(fk_joints):
         if joint_count > 3:
             if jnt != fk_joints[-1]:
-                snap_ctrl_cvs_to_child(fk_ctrls[i]["ctrl"], fk_ctrls[i + 1]["pad"], flip_direction=True)
-                if jnt != fk_joints[-2]:
-                    scale_ctrl_cvs_local(fk_ctrls[i]["ctrl"], scale=(1500, 1.0, 1.0))
-                else:
-                    scale_ctrl_cvs_local(fk_ctrls[i]["ctrl"], [-2.5, 1, 1])
+                snap_ctrl_cvs_to_child(fk_ctrls[i]["ctrl"], fk_ctrls[i + 1]["pad"], flip_direction=False)
             else:
                 cmds.delete(fk_ctrls[i]["pad"])
         else:
@@ -361,8 +488,10 @@ def create_ik_fk_limb(sel, root_parent):
         cmds.delete(wrist_con)
 
     blend_constraints = []
+    blend_scale_constraints = []
+
     for i in range(joint_count):
-        con = cmds.orientConstraint(
+        orient_con = cmds.orientConstraint(
             fk_joints[i],
             ik_joints[i],
             driver_joints[i],
@@ -370,16 +499,18 @@ def create_ik_fk_limb(sel, root_parent):
             n=f"{driver_joints[i]}_orientConstraint"
         )[0]
 
-        # Set shortest rotation path
-        cmds.setAttr(f"{con}.interpType", 2)
+        cmds.setAttr(f"{orient_con}.interpType", 2)
 
-        cmds.scaleConstraint(
+        scale_con = cmds.scaleConstraint(
             fk_joints[i],
             ik_joints[i],
             driver_joints[i],
-            mo=False
-        )
-        blend_constraints.append(con)
+            mo=False,
+            n=f"{driver_joints[i]}_scaleConstraint"
+        )[0]
+
+        blend_constraints.append(orient_con)
+        blend_scale_constraints.append(scale_con)
 
     for i in range(joint_count):
         cmds.parentConstraint(driver_joints[i], sel[i], mo=False)
@@ -411,18 +542,26 @@ def create_ik_fk_limb(sel, root_parent):
 
     # add float attribute for blending
     if not cmds.attributeQuery("ikFkBlend", node=switch_ctrl_name, exists=True):
-        cmds.addAttr(switch_ctrl_name, longName="ikFkBlend", attributeType="float", min=0, max=1, dv=0)
+        cmds.addAttr(switch_ctrl_name, longName="ikFkBlend", attributeType="float", min=0, max=1, dv=1.0)
         cmds.setAttr(f"{switch_ctrl_name}.ikFkBlend", e=True, keyable=True)
+    cmds.setAttr(f"{switch_ctrl_name}.ikFkBlend", 1.0)
 
     # connect to all orient constraints
     for con in blend_constraints:
         weights = cmds.orientConstraint(con, q=True, weightAliasList=True)
-
         if weights and len(weights) >= 2:
             rev_node = cmds.createNode("reverse", n=f"{con}_rev")
             cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{rev_node}.inputX")
-            cmds.connectAttr(f"{rev_node}.outputX", f"{con}.{weights[0]}")
-            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{con}.{weights[1]}")
+            cmds.connectAttr(f"{rev_node}.outputX", f"{con}.{weights[0]}", force=True)
+            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{con}.{weights[1]}", force=True)
+
+    for con in blend_scale_constraints:
+        weights = cmds.scaleConstraint(con, q=True, weightAliasList=True)
+        if weights and len(weights) >= 2:
+            rev_node = cmds.createNode("reverse", n=f"{con}_rev")
+            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{rev_node}.inputX")
+            cmds.connectAttr(f"{rev_node}.outputX", f"{con}.{weights[0]}", force=True)
+            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{con}.{weights[1]}", force=True)
 
     for ctrl_pad in [ik_ctrl_dict["pad"], pv_ctrl_dict["pad"]]:
         cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{ctrl_pad}.visibility")
@@ -464,6 +603,11 @@ def set_sdk(driver, driven_attr, keys):
 
 
 def ensure_rfl_attrs(ik_leg_ctrl):
+    """
+        Ensures the reverse foot setup attributes exist on the IK leg control.
+    :param ik_leg_ctrl: name of the IK leg control node
+    :return: None
+    """
     # float driver attrs
     float_attrs = {
         "footRoll": (-1, 1, 0),
@@ -574,8 +718,6 @@ def setup_rfl_sdks(ik_leg_ctrl, rfl_joints):
     show_rfl_ctrls = f"{ik_leg_ctrl}.showRFLCtrls"
     heel_pad = f"{rfl_joints['heel']}_ctrl_pad"
     cmds.connectAttr(show_rfl_ctrls, heel_pad + ".visibility")
-    print("[RFL] Set driven keys created successfully.")
-
 
 def build_rfl_ik_and_constraints(
         side,
@@ -648,7 +790,6 @@ def build_rfl_ik_and_constraints(
                        "innerBank": side + "_innerBank_RFL", "outerBank": side + "_outerBank_RFL", }
 
     setup_rfl_sdks(ik_leg_ctrl, rfl_joints_dict)
-    print(f"[RFL] IK, controls, and constraints built for {side}")
 
 
 def find_ik_handle_constrained_by_ctrl(ctrl):
@@ -677,6 +818,67 @@ def snap_to_joint_matrix(jnt, node):
     """
     m = cmds.xform(jnt, q=True, ws=True, m=True)
     cmds.xform(node, ws=True, m=m)
+
+
+def orient_control_pad_to_world_safely(ctrl, jnt):
+    """
+    Safely orients the control's pad to world coordinate space without moving the joint,
+    unparenting children first, resetting world rotation on the pad, recreating parent/scale
+    constraints, and then reparenting the children back under the control.
+    """
+    if not cmds.objExists(ctrl) or not cmds.objExists(jnt):
+        return
+
+    pad = ctrl + "_pad"
+    if not cmds.objExists(pad):
+        parents = cmds.listRelatives(ctrl, p=True)
+        pad = parents[0] if parents else None
+
+    if not pad or not cmds.objExists(pad):
+        return
+
+    # 1. Store and unparent any children of the control to avoid moving them
+    children = cmds.listRelatives(ctrl, children=True, type="transform") or []
+    # Only keep DAG nodes that are not shapes
+    children = [c for c in children if not cmds.objectType(c, isType="shape")]
+    for c in children:
+        cmds.parent(c, w=True)
+
+    # 2. Store and delete any existing parent/scale constraints driving the joint from the control
+    constraints = []
+    con_nodes = cmds.listConnections(jnt, type="constraint") or []
+    for con in con_nodes:
+        targets = []
+        if cmds.nodeType(con) == "parentConstraint":
+            targets = cmds.parentConstraint(con, q=True, targetList=True) or []
+        elif cmds.nodeType(con) == "scaleConstraint":
+            targets = cmds.scaleConstraint(con, q=True, targetList=True) or []
+        if ctrl in targets:
+            constraints.append((cmds.nodeType(con), con))
+
+    for c_type, con in constraints:
+        if cmds.objExists(con):
+            cmds.delete(con)
+
+    # 3. Keep joint position but reset world rotation of the pad to world aligned
+    pos = cmds.xform(jnt, q=True, ws=True, t=True)
+    cmds.xform(pad, ws=True, ro=[0, 0, 0])
+    cmds.xform(pad, ws=True, t=pos)
+
+    # 4. Recreate parent and scale constraints from control to joint with maintainOffset=True
+    cmds.parentConstraint(ctrl, jnt, mo=True)
+    cmds.scaleConstraint(ctrl, jnt, mo=True)
+
+    # 5. Reparent children back under the control
+    for c in children:
+        cmds.parent(c, ctrl)
+
+    # 6. Rotate the control transform and freeze rotation to bake it into the shape CVs
+    try:
+        cmds.xform(ctrl, r=True, ro=[0, 0, 90])
+        cmds.makeIdentity(ctrl, apply=True, t=False, r=True, s=False)
+    except Exception as e:
+        print(f"[Warning] Failed to freeze rotation on {ctrl}: {e}")
 
 
 def apply_side_color_override(node):
@@ -925,11 +1127,22 @@ def offset_pv_pad(pad, side, amount=5.0):
 
 
 def normalize(v):
+    """
+        Normalises a 3D vector.
+    :param v: input 3D vector
+    :return: list[float]
+    """
     mag = math.sqrt(sum(x * x for x in v))
     return [x / mag for x in v] if mag else [0, 0, 0]
 
 
 def cross(a, b):
+    """
+        Computes the cross product of two 3D vectors.
+    :param a: first 3D vector
+    :param b: second 3D vector
+    :return: list[float]
+    """
     return [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -958,7 +1171,8 @@ def create_surface_from_joints_original(
     joint_positions = [cmds.xform(jnt, q=True, ws=True, t=True) for jnt in joint_chain]
 
     # Create a curve through the joint positions
-    curve = cmds.curve(p=joint_positions, degree=3, name=name + "_crv")
+    deg = 3 if len(joint_positions) >= 4 else 1
+    curve = cmds.curve(p=joint_positions, degree=deg, name=name + "_crv")
 
     offset = 0.1
     curves_to_loft = [curve]
@@ -968,7 +1182,7 @@ def create_surface_from_joints_original(
         curves_to_loft.append(dup_curve)
 
     # Loft the curves to create a surface
-    loft_surf = cmds.loft(curves_to_loft, ch=True, u=True, c=False, ar=True, d=3, ss=1, rn=False, po=0, name=name)[0]
+    loft_surf = cmds.loft(curves_to_loft, ch=True, u=True, c=False, ar=True, d=deg, ss=1, rn=False, po=0, name=name)[0]
 
     # Delete the curves if you want to clean up
     cmds.delete(curves_to_loft)
@@ -1042,7 +1256,8 @@ def create_loft_surface_with_follicle_joints(joint_chain, name="surface", offset
     bwd_crv = cmds.curve(p=backward_points, degree=1, name=f"{name}_bwd_crv")
 
     # Loft surface
-    loft_surf = cmds.loft(fwd_crv, bwd_crv, ch=True, u=True, c=False, ar=True, d=3, ss=1, name=f"{name}_surf")[0]
+    deg = 3 if len(joint_chain) >= 4 else 1
+    loft_surf = cmds.loft(fwd_crv, bwd_crv, ch=True, u=True, c=False, ar=True, d=deg, ss=1, name=f"{name}_surf")[0]
 
     # Optional: delete curves
     cmds.delete(fwd_crv, bwd_crv)
@@ -1122,6 +1337,9 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
         loft_surf, follicle_joints = create_surface_from_joints_original(joint_chain, name=loft_name)
 
     group = cmds.group(loft_surf, n=loft_surf + "_surface_grp")
+    if not cmds.objExists("Do_Not_Touch"):
+        dnt = cmds.group(em=True, name="Do_Not_Touch")
+        cmds.setAttr(dnt + ".visibility", 0)
     cmds.parent(group, "Do_Not_Touch")
     for fj in follicle_joints:
         parent = cmds.listRelatives(fj, p=1, ap=1)[0]
@@ -1150,7 +1368,7 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                 aimVector=(1, 0, 0),
                 upVector=(0, 1, 0),
                 worldUpType="objectrotation",
-                worldUpObject=side + "_eye1",
+                worldUpObject=root_parent,
                 worldUpVector=(0, -1, 0),
                 mo=True
             )
@@ -1162,17 +1380,18 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                     cmds.delete(c)
         else:
             control_shape = "circle"
+            local_root_parent = root_parent
             if region == "mouth":
                 if "upper" in joint:
-                    root_parent = "head1_ctrl"
+                    local_root_parent = root_parent or "head1_ctrl"
                 else:
-                    root_parent = "jaw_ctrl"
+                    local_root_parent = "jaw_ctrl" if cmds.objExists("jaw_ctrl") else (root_parent or "head1_ctrl")
             elif "twist" in region:
                 control_shape = "arrow"
             ctrl_data = create_joint_controls(
                 joint_list=[joint],
                 control_shape=control_shape,
-                root_parent=root_parent,
+                root_parent=local_root_parent,
                 sub_ctrls=False,
                 keep_constraint=True
             )
@@ -1189,7 +1408,7 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
             base_size=1.0,
             multiplier=1.0
         )
-    if not region == "eyelid":
+    if region not in ("eyelid", "mouth"):
         ctrl_data = create_joint_controls(
             joint_list=[joint_chain[-1]],
             control_shape="circle",
@@ -1207,6 +1426,13 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
             multiplier=1.0
         )
 
+    # Clean up the temporary joint used for closed loops
+    if region in ("eyelid", "mouth") and cmds.objExists(temp_joint):
+        try:
+            cmds.delete(temp_joint)
+        except Exception:
+            pass
+
     return loft_surf, follicle_joints, joint_to_ctrl
 
 
@@ -1217,56 +1443,96 @@ def setup_surface_rig_with_drivers(
         driver_follicle_indices=None,
         side="r",
         region="eyelid",
-        root_parent=None
+        root_parent=None,
+        face_joint_map=None
 ):
     """
         Sets up a driver based surface rig (great for Mouth and eyelid setups)
     :param joint_list: list of joints
     :param loft_name: surface name
     :param offset: amount to offset curves to loft from joints
-    :param driver_follicle_indices: mapping indices; see example ( driver_indices = [0, 9, 6, 3, 12, 15, 18, 20])
+    :param driver_follicle_indices: mapping indices; if None, they are auto-detected
     :param side: right or left
-    :param region: mouth ,eyelid, or other(doesnt matter name)
+    :param region: mouth, eyelid, or other
     :param root_parent: what to parent system to
-    :return:
+    :param face_joint_map: dictionary containing face mapping data
+    :return: tuple
     """
+    N = len(joint_list)
     if region == "eyelid":
-        driver_index_map = {
-            0: side + "_inner_eyelid",
-            3: side + "_upper_inner_eyelid",
-            6: side + "_upper_eyelid",
-            9: side + "_upper_outer_eyelid",
-            12: side + "_outer_eyelid",
-            15: side + "_lower_outer_eyelid",
-            18: side + "_lower_eyelid",
-            20: side + "_lower_inner_eyelid",
-        }
+        if driver_follicle_indices is None:
+            default_indices = [0, 3, 6, 9, 12, 15, 18, 20]
+            scaled_indices = [int(round(idx * (N - 1) / 20.0)) for idx in default_indices]
+            driver_follicle_indices = scaled_indices
+            
+            driver_index_map = {
+                scaled_indices[0]: side + "_inner_eyelid",
+                scaled_indices[1]: side + "_upper_inner_eyelid",
+                scaled_indices[2]: side + "_upper_eyelid",
+                scaled_indices[3]: side + "_upper_outer_eyelid",
+                scaled_indices[4]: side + "_outer_eyelid",
+                scaled_indices[5]: side + "_lower_outer_eyelid",
+                scaled_indices[6]: side + "_lower_eyelid",
+                scaled_indices[7]: side + "_lower_inner_eyelid",
+            }
+        else:
+            driver_index_map = {
+                0: side + "_inner_eyelid",
+                3: side + "_upper_inner_eyelid",
+                6: side + "_upper_eyelid",
+                9: side + "_upper_outer_eyelid",
+                12: side + "_outer_eyelid",
+                15: side + "_lower_outer_eyelid",
+                18: side + "_lower_eyelid",
+                20: side + "_lower_inner_eyelid",
+            }
     elif region == "mouth":
-        driver_index_map = {
-            0: "c_upper_lip_main",
-            2: "r_upper_lip_main",
-            5: "r_lip_corner_main",
-            8: "r_lower_lip_main",
-            10: "c_lower_lip_main",
-            12: "l_lower_lip_main",
-            15: "l_lip_corner_main",
-            18: "l_upper_lip_main",
-        }
+        c_up = "c_upper_lip"
+        c_lo = "c_lower_lip"
+        l_co = "l_lip_corner1"
+        r_co = "r_lip_corner1"
+        
+        if face_joint_map:
+            c_up = face_joint_map.get("UpperLipCenter", {}).get("joint") or c_up
+            c_lo = face_joint_map.get("LowerLipCenter", {}).get("joint") or c_lo
+            l_co = face_joint_map.get("LeftLipCorner", {}).get("joint") or l_co
+            r_co = face_joint_map.get("RightLipCorner", {}).get("joint") or r_co
+            
+        def lip_name(idx, default_base):
+            if idx < len(joint_list) and joint_list[idx]:
+                return joint_list[idx] + "_main"
+            return default_base
+
+        if driver_follicle_indices is None:
+            default_indices = [0, 2, 5, 8, 10, 12, 15, 18]
+            scaled_indices = [int(round(idx * (N - 1) / 19.0)) for idx in default_indices]
+            driver_follicle_indices = scaled_indices
+            
+            driver_index_map = {
+                scaled_indices[0]: f"{c_up}_main",
+                scaled_indices[1]: lip_name(scaled_indices[1], "r_upper_lip_main"),
+                scaled_indices[2]: f"{r_co}_main",
+                scaled_indices[3]: lip_name(scaled_indices[3], "r_lower_lip_main"),
+                scaled_indices[4]: f"{c_lo}_main",
+                scaled_indices[5]: lip_name(scaled_indices[5], "l_lower_lip_main"),
+                scaled_indices[6]: f"{l_co}_main",
+                scaled_indices[7]: lip_name(scaled_indices[7], "l_upper_lip_main"),
+            }
+        else:
+            driver_index_map = {
+                0: f"{c_up}_main",
+                2: lip_name(2, "r_upper_lip_main"),
+                5: f"{r_co}_main",
+                8: lip_name(8, "r_lower_lip_main"),
+                10: f"{c_lo}_main",
+                12: lip_name(12, "l_lower_lip_main"),
+                15: f"{l_co}_main",
+                18: lip_name(18, "l_upper_lip_main"),
+            }
     else:
+        if driver_follicle_indices is None:
+            driver_follicle_indices = list(range(len(joint_list)))
         driver_index_map = {i: joint_list[i] + "_main" for i in range(len(joint_list))}
-    """
-    Sets up eyelid rig with:
-      - Lofted surface
-      - Follicles + follicle joints
-      - Controls aimed at follicle joints
-      - Driver joints duplicated from specific follicle joints
-        - Semantic renaming
-        - World parent
-        - Side-based orientation
-        - Skinned to loft surface
-        - Controls created
-        - Driver-pair constraints to PADs
-    """
 
     loft_surf, follicle_joints, joint_to_ctrl = setup_surface_rig(
         joint_list, loft_name=loft_name, offset=offset, region=region, root_parent=root_parent
@@ -1407,88 +1673,205 @@ def setup_surface_rig_with_drivers(
             )
 
     elif region == "mouth":
+        c_up_main = f"{c_up}_main"
+        c_lo_main = f"{c_lo}_main"
+        l_co_main = f"{l_co}_main"
+        r_co_main = f"{r_co}_main"
+        
+        r_up_main = lip_name(2, "r_upper_lip_main")
+        r_lo_main = lip_name(8, "r_lower_lip_main")
+        l_lo_main = lip_name(12, "l_lower_lip_main")
+        l_up_main = lip_name(18, "l_upper_lip_main")
 
-        if "r_upper_lip_main" in driver_data:
+        if r_up_main in driver_data:
             con = constrain_pad(
-                driver_data["r_upper_lip_main"]["pad"],
+                driver_data[r_up_main]["pad"],
                 [
-                    driver_data["c_upper_lip_main"]["ctrl"],
-                    driver_data["r_lip_corner_main"]["ctrl"],
+                    driver_data[c_up_main]["ctrl"],
+                    driver_data[r_co_main]["ctrl"],
                 ]
             )
             weights = cmds.parentConstraint(con, q=True, wal=True)
 
-            center_w = [w for w in weights if "c_upper_lip_main" in w][0]
-            corner_w = [w for w in weights if "lip_corner" in w][0]
+            center_w = [w for w in weights if c_up_main in w][0]
+            corner_w = [w for w in weights if r_co_main in w or "lip_corner" in w][0]
 
             cmds.setAttr(f"{con}.{center_w}", 0.9)
             cmds.setAttr(f"{con}.{corner_w}", 0.1)
 
-        if "l_upper_lip_main" in driver_data:
+        if l_up_main in driver_data:
             con = constrain_pad(
-                driver_data["l_upper_lip_main"]["pad"],
+                driver_data[l_up_main]["pad"],
                 [
-                    driver_data["c_upper_lip_main"]["ctrl"],
-                    driver_data["l_lip_corner_main"]["ctrl"],
+                    driver_data[c_up_main]["ctrl"],
+                    driver_data[l_co_main]["ctrl"],
                 ]
             )
             weights = cmds.parentConstraint(con, q=True, wal=True)
 
-            center_w = [w for w in weights if "c_upper_lip_main" in w][0]
-            corner_w = [w for w in weights if "lip_corner" in w][0]
+            center_w = [w for w in weights if c_up_main in w][0]
+            corner_w = [w for w in weights if l_co_main in w or "lip_corner" in w][0]
 
             cmds.setAttr(f"{con}.{center_w}", 0.9)
             cmds.setAttr(f"{con}.{corner_w}", 0.1)
 
-        if "r_lower_lip_main" in driver_data:
+        if r_lo_main in driver_data:
             con = constrain_pad(
-                driver_data["r_lower_lip_main"]["pad"],
+                driver_data[r_lo_main]["pad"],
                 [
-                    driver_data["c_lower_lip_main"]["ctrl"],
-                    driver_data["r_lip_corner_main"]["ctrl"],
+                    driver_data[c_lo_main]["ctrl"],
+                    driver_data[r_co_main]["ctrl"],
                 ]
             )
             weights = cmds.parentConstraint(con, q=True, wal=True)
 
-            center_w = [w for w in weights if "c_lower_lip_main" in w][0]
-            corner_w = [w for w in weights if "lip_corner" in w][0]
+            center_w = [w for w in weights if c_lo_main in w][0]
+            corner_w = [w for w in weights if r_co_main in w or "lip_corner" in w][0]
 
             cmds.setAttr(f"{con}.{center_w}", 0.7)
             cmds.setAttr(f"{con}.{corner_w}", 0.3)
 
-        if "l_lower_lip_main" in driver_data:
+        if l_lo_main in driver_data:
             con = constrain_pad(
-                driver_data["l_lower_lip_main"]["pad"],
+                driver_data[l_lo_main]["pad"],
                 [
-                    driver_data["c_lower_lip_main"]["ctrl"],
-                    driver_data["l_lip_corner_main"]["ctrl"],
+                    driver_data[c_lo_main]["ctrl"],
+                    driver_data[l_co_main]["ctrl"],
                 ]
             )
             weights = cmds.parentConstraint(con, q=True, wal=True)
 
-            center_w = [w for w in weights if "c_lower_lip_main" in w][0]
-            corner_w = [w for w in weights if "lip_corner" in w][0]
+            center_w = [w for w in weights if c_lo_main in w][0]
+            corner_w = [w for w in weights if l_co_main in w or "lip_corner" in w][0]
 
             cmds.setAttr(f"{con}.{center_w}", 0.7)
             cmds.setAttr(f"{con}.{corner_w}", 0.3)
 
-        cmds.parent("c_upper_lip_ctrl_pad", driver_data["c_upper_lip_main"]["ctrl"])
-        cmds.parent("c_lower_lip_ctrl_pad", driver_data["c_lower_lip_main"]["ctrl"])
-        cmds.parent("l_lip_corner1_ctrl_pad", driver_data["l_lip_corner_main"]["ctrl"])
-        cmds.parent("r_lip_corner1_ctrl_pad", driver_data["r_lip_corner_main"]["ctrl"])
-        for each in ["c_upper_lip_ctrl_pad_parentConstraint1",
-                     "c_lower_lip_ctrl_pad_parentConstraint1",
-                     "r_lip_corner1_ctrl_pad_parentConstraint1",
-                     "l_lip_corner1_ctrl_pad_parentConstraint1"]:
-            cmds.delete(each)
+        if cmds.objExists(f"{c_up}_ctrl_pad") and c_up_main in driver_data:
+            cmds.parent(f"{c_up}_ctrl_pad", driver_data[c_up_main]["ctrl"])
+        if cmds.objExists(f"{c_lo}_ctrl_pad") and c_lo_main in driver_data:
+            cmds.parent(f"{c_lo}_ctrl_pad", driver_data[c_lo_main]["ctrl"])
+        if cmds.objExists(f"{l_co}_ctrl_pad") and l_co_main in driver_data:
+            cmds.parent(f"{l_co}_ctrl_pad", driver_data[l_co_main]["ctrl"])
+        if cmds.objExists(f"{r_co}_ctrl_pad") and r_co_main in driver_data:
+            cmds.parent(f"{r_co}_ctrl_pad", driver_data[r_co_main]["ctrl"])
+
+        for each in [f"{c_up}_ctrl_pad_parentConstraint1",
+                     f"{c_lo}_ctrl_pad_parentConstraint1",
+                     f"{r_co}_ctrl_pad_parentConstraint1",
+                     f"{l_co}_ctrl_pad_parentConstraint1"]:
+            if cmds.objExists(each):
+                cmds.delete(each)
 
     return loft_surf, follicle_joints, joint_to_ctrl, driver_data
 
 
-def create_finger_rigs(finger_joints):
+def constrain_controls_to_two_parents(
+    controls,
+    parent1,
+    parent2,
+    parent1_value=1.0,
+    parent2_value=0.0,
+    maintain_offset=True
+):
+    """
+        Apply a parentConstraint to each control in the list using parent1 and parent2 as drivers.
+    :param controls: Controls to constrain
+    :param parent1: First parent/driver
+    :param parent2: Second parent/driver
+    :param parent1_value: Weight value for parent1
+    :param parent2_value: Weight value for parent2
+    :param maintain_offset: Whether to maintain offset
+    :return: list[str]
+    """
+
+    if not controls:
+        cmds.error("No controls were provided.")
+
+    for node in [parent1, parent2]:
+        if not cmds.objExists(node):
+            cmds.error("Driver does not exist: {}".format(node))
+
+    created_constraints = []
+
+    for ctrl in controls:
+        if not cmds.objExists(ctrl):
+            cmds.warning("Skipping missing control: {}".format(ctrl))
+            continue
+
+        # Create parent constraint
+        constraint = cmds.parentConstraint(
+            parent1,
+            parent2,
+            ctrl,
+            mo=maintain_offset
+        )[0]
+
+        if cmds.attributeQuery("interpType", node=constraint, exists=True):
+            cmds.setAttr("{}.interpType".format(constraint), 2)
+
+        # Set weight values
+        weight_aliases = cmds.parentConstraint(constraint, q=True, weightAliasList=True) or []
+        targets = cmds.parentConstraint(constraint, q=True, targetList=True) or []
+
+        target_to_weight_attr = dict(zip(targets, weight_aliases))
+
+        if parent1 in target_to_weight_attr:
+            cmds.setAttr(
+                "{}.{}".format(constraint, target_to_weight_attr[parent1]),
+                parent1_value
+            )
+
+        if parent2 in target_to_weight_attr:
+            cmds.setAttr(
+                "{}.{}".format(constraint, target_to_weight_attr[parent2]),
+                parent2_value
+            )
+
+        created_constraints.append(constraint)
+
+    return created_constraints
+
+
+def bake_joint_orient_to_rotate(joints=None):
+    """
+        Moves jointOrient values into rotate channels while preserving world-space pose.
+    :param joints: list of joints to bake; all joints if None
+    :return: None
+    """
+
+    if joints is None:
+        joints = cmds.ls(type="joint")
+
+    for jnt in joints:
+        if not cmds.objExists(jnt):
+            continue
+
+        # Get DAG path
+        sel = om.MSelectionList()
+        sel.add(jnt)
+        dag = sel.getDagPath(0)
+        fn = om.MFnTransform(dag)
+
+        # Store world transform
+        world_matrix = fn.transformation().asMatrix()
+
+        # Zero joint orient
+        cmds.setAttr(jnt + ".jointOrientX", 0)
+        cmds.setAttr(jnt + ".jointOrientY", 0)
+        cmds.setAttr(jnt + ".jointOrientZ", 0)
+
+        # Restore world transform
+        fn.setTransformation(om.MTransformationMatrix(world_matrix))
+
+    cmds.select(joints)
+
+
+def create_finger_rigs(finger_joints, hand_driver=None):
     """
         Creates IK driven FK system for finger joints
     :param finger_joints: finger joints
+    :param hand_driver: parent transform/joint name to parent finger rigs under
     :return:
     """
     finger_names = ['thumb', 'index', 'middle', 'ring', 'pinky']
@@ -1508,56 +1891,56 @@ def create_finger_rigs(finger_joints):
         return None
 
     def rename_finger_chain_from_source(source_chain, dup_chain, suffix, side):
-        """
-        Renames duplicated finger joints using the ORIGINAL joint names,
-        preserving finger indices like _01, _02, _03 exactly.
-        """
         new_chain = []
 
-        for src, dup in zip(source_chain, dup_chain):
+        dup_chain = dup_chain[:len(source_chain)]
+
+        for i, (src, dup) in enumerate(zip(source_chain, dup_chain), start=1):
             src_short = src.split("|")[-1]
 
-            # Detect side
             base = src_short
             if side and src_short.startswith(f"{side}_"):
                 base = src_short[len(side) + 1:]
 
-            # Extract finger name and index (thumb_01)
-            match = re.match(r"(.*?)(_\d+)$", base)
+            base = base.replace("_jnt", "")
+            base = re.sub(r"_(fk|ik|driver)$", "", base)
+
+            match = re.match(r"(.*?)(?:_(\d+))?$", base)
             if match:
                 name_part = match.group(1)
-                index_part = match.group(2)
+                index_part = match.group(2) or str(i)
             else:
                 name_part = base
-                index_part = ""
+                index_part = str(i)
 
-            new_name = f"{side}_{name_part}{index_part}_{suffix}"
-            new_name = new_name.replace("__", "_")
+            new_name = f"{side}_{name_part}_{index_part}_{suffix}".replace("__", "_")
 
-            if cmds.objExists(new_name):
-                cmds.delete(new_name)
+            for existing in cmds.ls(new_name, long=True) or []:
+                cmds.delete(existing)
 
             new_chain.append(cmds.rename(dup, new_name))
 
         return new_chain
 
     for finger in finger_names:
-        fk_chain = [j for j in finger_joints if f"_{finger}_" in j]
+        fk_chain = [j for j in finger_joints if finger in j.lower()]
         fk_chain.reverse()
         if not fk_chain:
             continue
 
         side = get_side_prefix(fk_chain[0])
+        
+        actual_hand_driver = hand_driver if hand_driver else f"{side}_hand_driver"
+        if not cmds.objExists(actual_hand_driver):
+            if cmds.objExists(f"{side}_hand"):
+                actual_hand_driver = f"{side}_hand"
+            else:
+                actual_hand_driver = None
+        ik_root, ik_chain = duplicate_static_hierarchy(fk_chain, suffix="ik")
 
-        ik_chain = cmds.duplicate(fk_chain, rc=True)
-        cmds.parent(ik_chain[0], f"{side}_hand_driver")
+        if actual_hand_driver:
+            cmds.parent(ik_chain[0], actual_hand_driver)
 
-        ik_chain = rename_finger_chain_from_source(
-            source_chain=fk_chain,
-            dup_chain=ik_chain,
-            suffix="ik",
-            side=side
-        )
         for jnt in ik_chain:
             if cmds.objExists(jnt):
                 cmds.setAttr(f"{jnt}.drawStyle", 2)
@@ -1579,7 +1962,7 @@ def create_finger_rigs(finger_joints):
             # Zero joint orient
             cmds.setAttr(f"{jnt}.jointOrient", 0, 0, 0)
 
-        fk_ctrls = create_joint_controls(fk_chain, control_shape="cube", root_parent=side + "_hand_driver")
+        fk_ctrls = create_joint_controls(fk_chain, control_shape="cube", root_parent=actual_hand_driver)
         for i, jnt in enumerate(fk_chain):
             if jnt != fk_chain[-1]:
 
@@ -1588,7 +1971,7 @@ def create_finger_rigs(finger_joints):
                 cmds.delete(fk_ctrls[i]["pad"])
 
         pv_joint = ik_chain[1] if finger == "thumb" else ik_chain[2]
-        pv_ctrl_info = create_joint_controls([pv_joint], control_shape="diamond", root_parent=side + "_hand_driver")[0]
+        pv_ctrl_info = create_joint_controls([pv_joint], control_shape="diamond", root_parent=actual_hand_driver)[0]
         pv_ctrl = pv_ctrl_info['ctrl']
 
         for c in cmds.listRelatives(pv_joint, type="constraint") or []:
@@ -1614,7 +1997,8 @@ def create_finger_rigs(finger_joints):
             ws=True,
             t=cmds.xform(ik_handle, q=True, ws=True, t=True)
         )
-        cmds.parent(ik_ctrl_info['pad'], side + "_hand_driver")
+        if actual_hand_driver:
+            cmds.parent(ik_ctrl_info['pad'], actual_hand_driver)
         cmds.parent(ik_handle, ik_ctrl_info['ctrl'])
         cmds.poleVectorConstraint(pv_ctrl, ik_handle)
 
@@ -1642,15 +2026,15 @@ def create_finger_rigs(finger_joints):
                     cmds.connectAttr(src, dst, f=True)
 
         if "thumb" in ik_chain[0]:
-            root_ctrl = side + "_hand_driver"
+            root_ctrl = actual_hand_driver
         else:
             root_ctrl = fk_ctrls[0]["ctrl"]
         finger_pv_space = create_composite_space(
             name=pv_pad + "_space",
             parents=[ik_ctrl_info['ctrl'], root_ctrl],
-            match_to=pv_ctrl
+            match_to=pv_ctrl,
+            parent_node=actual_hand_driver
         )
-        cmds.parent(finger_pv_space, side + "_hand_driver")
         create_space_switch(
             driven=pv_ctrl,
             targets=[
@@ -1672,17 +2056,104 @@ def create_finger_rigs(finger_joints):
     return fingers
 
 
-def create_composite_space(name, parents, match_to):
+def mirror_face_joints(
+        joints,
+        search_replace=("l_", "r_"),
+        mirror_axis="YZ",
+        rotate_z_180=True
+):
     """
-    Creates a transform constrained to multiple parents,
-    matched to the driven group.
+    Mirrors face joints and optionally rotates them 180 degrees in Z (object space).
+
+    :param joints: list of joint names to mirror
+    :param search_replace: tuple (search, replace) for naming
+    :param mirror_axis: 'YZ', 'XZ', or 'XY'
+    :param rotate_z_180: bool, apply local Z 180 rotation after mirror
+    :return: list of mirrored joints
     """
+
+    if not joints:
+        return []
+
+    axis_map = {
+        "YZ": (1, 0, 0),
+        "XZ": (0, 1, 0),
+        "XY": (0, 0, 1),
+    }
+
+    if mirror_axis not in axis_map:
+        raise ValueError("mirror_axis must be 'YZ', 'XZ', or 'XY'")
+
+    mirror_vector = axis_map[mirror_axis]
+
+    mirrored_joints = []
+
+    for jnt in joints:
+        if not cmds.objExists(jnt):
+            continue
+
+        mirrored = cmds.mirrorJoint(
+            jnt,
+            mirrorBehavior=True,
+            mirrorYZ=(mirror_axis == "YZ"),
+            mirrorXZ=(mirror_axis == "XZ"),
+            mirrorXY=(mirror_axis == "XY"),
+            searchReplace=search_replace
+        )
+
+        mirrored_joints.extend(mirrored)
+
+    if rotate_z_180:
+        for jnt in mirrored_joints:
+            # Apply object-space rotation
+            cmds.rotate(
+                0, 0, 180,
+                jnt,
+                objectSpace=True,
+                relative=True
+            )
+
+    return mirrored_joints
+
+
+def create_composite_space(name, parents, match_to, parent_node=None):
+    """
+        Creates a transform constrained to multiple parents, matched to the driven group.
+    :param name: name of the composite space node to create
+    :param parents: list of parent control nodes
+    :param match_to: node to match position/orientation to
+    :param parent_node: optional node to parent the created space transform under before constraining
+    :return: str or None
+    """
+    if not match_to or not cmds.objExists(match_to):
+        return None
+    valid_parents = [p for p in parents if p and cmds.objExists(p)]
+    if not valid_parents:
+        return None
+
+    # Delete existing node if any to avoid name collisions (e.g. grp1, grp2)
+    if cmds.objExists(name):
+        try:
+            existing_nodes = cmds.ls(name, long=True) or []
+            for n in existing_nodes:
+                if cmds.objExists(n):
+                    cmds.delete(n)
+        except Exception:
+            pass
+
     grp = cmds.createNode("transform", name=name)
 
     cmds.delete(cmds.parentConstraint(match_to, grp))
-    cmds.parentConstraint(parents, grp, mo=True)
 
-    return grp
+    if parent_node and cmds.objExists(parent_node):
+        grp = cmds.parent(grp, parent_node)[0]
+
+    # Get absolute long path of the group to avoid any name resolution ambiguity in Maya
+    grp_long = cmds.ls(grp, long=True)[0]
+
+    cmds.parentConstraint(valid_parents, grp_long, mo=True)
+
+    return grp_long
 
 
 def create_space_switch(
@@ -1690,19 +2161,20 @@ def create_space_switch(
         targets,
         attr_name="space",
         dup_suffix="_spaceTarget",
-        constraint_type="parent"
+        constraint_type="parent",
+        enum_names=None
 ):
     """
-    Builds a space switch where each target gets a matched child transform,
-    and those children are the actual constraint drivers.
-
-    Constraint is applied to the driven control's parent group.
-
-    driven = "r_lowerarm_low_pv_ctrl"
-    targets = ["r_clavicle1_ctrl", "pelvis_ctrl", "origin_ctrl"]
-
-    create_space_switch(driven, targets, constraint_type="parent")
-    create_space_switch(driven, targets, constraint_type="orient")
+        Builds a space switch where each target gets a matched child transform,
+        and those children are the actual constraint drivers.
+        Constraint is applied to the driven control's parent group.
+    :param driven: control name that drives space switching (e.g. "r_lowerarm_low_pv_ctrl")
+    :param targets: list of target control names (e.g. ["r_clavicle1_ctrl", "pelvis_ctrl", "origin_ctrl"])
+    :param attr_name: name of the enum attribute created on the driven control
+    :param dup_suffix: suffix appended to duplicated space target transforms
+    :param constraint_type: type of constraint to use ("parent" or "orient")
+    :param enum_names: optional list of custom enum display names for options
+    :return: dict
     """
 
     if constraint_type not in ("parent", "orient"):
@@ -1717,27 +2189,50 @@ def create_space_switch(
 
     driven_grp = driven_parent[0]
 
-    # Create enum attribute if missing
-    if not cmds.attributeQuery(attr_name, node=driven, exists=True):
-        enum_string = ":".join([t.replace("|", "_") for t in targets])
-        cmds.addAttr(driven, ln=attr_name, at="enum", enumName=enum_string, k=True)
+    valid_targets = []
+    for t in targets:
+        if t and cmds.objExists(t) and t not in valid_targets:
+            valid_targets.append(t)
+    if not valid_targets:
+        return
+
+    # Clean up any existing space switch setup on this control first (breaks connections so attribute can be deleted safely)
+    _delete_space_switch_for_ctrl(driven, attr_name)
+
+    # Create enum attribute (recreate if exists to match current targets)
+    if cmds.attributeQuery(attr_name, node=driven, exists=True):
+        try:
+            cmds.deleteAttr(f"{driven}.{attr_name}")
+        except Exception:
+            pass
+    if enum_names and len(enum_names) == len(valid_targets):
+        enum_string = ":".join(enum_names)
     else:
-        cmds.warning(f"Attribute already exists: {driven}.{attr_name}")
+        enum_string = ":".join([t.replace("|", "_") for t in valid_targets])
+    cmds.addAttr(driven, ln=attr_name, at="enum", enumName=enum_string, k=True)
+
 
     driver_children = []
 
     # Pick constraint commands dynamically
     constraint_cmd = cmds.parentConstraint if constraint_type == "parent" else cmds.orientConstraint
 
-    for t in targets:
-        if not cmds.objExists(t):
-            cmds.error(f"Target does not exist: {t}")
+    for t in valid_targets:
+        t_short = t.split("|")[-1]
+        dup_name = f"{driven}_{t_short}{dup_suffix}"
+        # Delete existing space target transform to avoid naming collisions
+        if cmds.objExists(dup_name):
+            try:
+                cmds.delete(dup_name)
+            except Exception:
+                pass
 
         dup = cmds.createNode(
             "transform",
-            name=f"{driven}_{t}{dup_suffix}"
+            name=dup_name
         )
         dup = cmds.parent(dup, t)[0]
+
 
         # Match driven group
         cmds.delete(constraint_cmd(driven_grp, dup))
@@ -1788,72 +2283,428 @@ def create_space_switch(
     }
 
 
-def create_rig_space_switches(side):
+def _swap_first_lr_character(name):
     """
-        base space switches for each side
-    :param side: side for setups
-    :return:
+        Swaps the first character of the name if it is l, r, L, or R.
+    :param name: joint or node name
+    :return: str
+    """
+    if not name:
+        return name
+
+    first = name[0]
+    if first == "l":
+        return "r" + name[1:]
+    elif first == "r":
+        return "l" + name[1:]
+    elif first == "L":
+        return "R" + name[1:]
+    elif first == "R":
+        return "L" + name[1:]
+
+    return name
+
+
+def _get_side_enum_map(joint):
+    """
+        Gets a name-to-index mapping dictionary for the 'side' attribute enum.
+    :param joint: joint name to query
+    :return: dict
+    """
+    enum_data = cmds.attributeQuery("side", node=joint, listEnum=True)
+    if not enum_data:
+        return {}
+
+    enum_names = enum_data[0].split(":")
+    return {name: i for i, name in enumerate(enum_names)}
+
+
+def _flip_joint_label_side(joint):
+    """
+        Flips the joint label side attribute value from Left to Right or vice versa.
+    :param joint: joint name to flip
+    :return: None
+    """
+    if not cmds.attributeQuery("side", node=joint, exists=True):
+        return
+
+    enum_map = _get_side_enum_map(joint)
+    if not enum_map:
+        return
+
+    current_value = cmds.getAttr(joint + ".side")
+    left_value = enum_map.get("Left")
+    right_value = enum_map.get("Right")
+
+    if left_value is None or right_value is None:
+        return
+
+    if current_value == left_value:
+        cmds.setAttr(joint + ".side", right_value)
+    elif current_value == right_value:
+        cmds.setAttr(joint + ".side", left_value)
+
+
+def _get_joint_hierarchy(root_joint):
+    """
+        Returns all child joints under root_joint in hierarchical order.
+    :param root_joint: root joint name
+    :return: list[str]
+    """
+    joints = cmds.listRelatives(root_joint, ad=True, type="joint", fullPath=True) or []
+    joints.append(cmds.ls(root_joint, long=True)[0])
+    joints.reverse()
+    return joints
+
+
+def mirror_joint_yz_behavior_with_label_flip(root_joint=None, rename_first_char=True):
+    """
+        Mirror a joint chain across YZ using behavior mirroring.
+        Then flip joint label Side from Left<->Right on the mirrored chain.
+        Optionally swaps first character of the mirrored names: l/r/L/R.
+    :param root_joint: root joint name to mirror; sl=True if None
+    :param rename_first_char: whether to swap first character l/r
+    :return: list[str]
+    """
+
+    if not root_joint:
+        sel = cmds.ls(sl=True, type="joint", long=True)
+        if not sel:
+            cmds.error("Select a root joint or pass one in.")
+        root_joint = sel[0]
+    else:
+        found = cmds.ls(root_joint, long=True, type="joint")
+        if not found:
+            cmds.error("Joint does not exist: {0}".format(root_joint))
+        root_joint = found[0]
+
+    original_chain = _get_joint_hierarchy(root_joint)
+
+    mirrored_roots = cmds.mirrorJoint(
+        root_joint,
+        mirrorYZ=True,
+        mirrorBehavior=True
+    )
+
+    if not mirrored_roots:
+        return []
+
+    mirrored_root = cmds.ls(mirrored_roots[0], long=True)[0]
+    mirrored_chain = _get_joint_hierarchy(mirrored_root)
+
+    if rename_first_char:
+        # Rename bottom-up so parent path changes do not invalidate child paths
+        for orig_joint, mirrored_joint in zip(reversed(original_chain), reversed(mirrored_chain)):
+            if not cmds.objExists(mirrored_joint):
+                continue
+
+            orig_name = orig_joint.split("|")[-1]
+            new_name = _swap_first_lr_character(orig_name)
+
+            if new_name != mirrored_joint.split("|")[-1]:
+                cmds.rename(mirrored_joint, new_name)
+
+        # Rebuild hierarchy after renaming
+        mirrored_chain = _get_joint_hierarchy(mirrored_root.split("|")[-1])
+
+    for joint in mirrored_chain:
+        _flip_joint_label_side(joint)
+
+    return mirrored_chain
+
+
+def create_leg_space_switches(side, body_joint_map=None):
+    """
+        Builds space switches (including composite spaces) for the Leg module.
+    :param side: left or right side (l/r)
+    :param body_joint_map: optional body joint mapping dictionary
+    :return: None
     """
     pv_ctrl = side + "_knee_pv_ctrl"
     pv_grp = pv_ctrl + "_pad"
-
-    hip_ctrl = "hipswing_ctrl"
-    foot_ctrl = side + "_ankle_ik_ctrl"
+    hip_ctrl = "pelvis_ctrl"
     origin_ctrl = "origin_ctrl"
 
-    foot_hip_space = create_composite_space(
-        name=side + "_leg_pv_footHip_space",
-        parents=[foot_ctrl, hip_ctrl],
-        match_to=pv_grp
-    )
-    cmds.parent(foot_hip_space, "Do_Not_Touch")
-    create_space_switch(
-        driven=pv_ctrl,
-        targets=[
-            hip_ctrl,
-            foot_ctrl,
-            origin_ctrl,
-            foot_hip_space
-        ],
-        attr_name="space"
-    )
+    # Resolve hip_ctrl dynamically
+    hip_jnt = None
+    if body_joint_map:
+        hip_jnt = (body_joint_map.get("Hips") or {}).get("joint")
+    if hip_jnt:
+        base_name = hip_jnt.replace('_jnt', '').split(':')[-1]
+        candidates_hip = [
+            f"{hip_jnt.replace('_jnt', '')}_ctrl",
+            f"{base_name}_ctrl",
+            "pelvis_ctrl"
+        ]
+        for c in candidates_hip:
+            if cmds.objExists(c):
+                hip_ctrl = c
+                break
 
-    create_space_switch(
-        driven=side + "_clavicle_ctrl",
-        targets=[
-            "hipswing_ctrl",
-            "origin_ctrl",
-            "spine5_Tip_ctrl"
-        ],
-        attr_name="space",
-        constraint_type="orient"
-    )
-    hand_clav_space = create_composite_space(
-        name=side + "_arm_pv_handClav_space",
-        parents=[side + "_hand_ik_ctrl", side + "_clavicle_ctrl"],
-        match_to=side + "_lowerarm_pv_ctrl_pad"
-    )
-    cmds.parent(hand_clav_space, "Do_Not_Touch")
+    # Resolve origin_ctrl dynamically
+    root_jnt = None
+    if body_joint_map:
+        root_jnt = (body_joint_map.get("Root") or {}).get("joint")
+    if root_jnt:
+        base_name = root_jnt.replace('_jnt', '').split(':')[-1]
+        candidates_root = [
+            f"{root_jnt.replace('_jnt', '')}_ctrl",
+            f"{base_name}_ctrl",
+            "origin_ctrl"
+        ]
+        for c in candidates_root:
+            if cmds.objExists(c):
+                origin_ctrl = c
+                break
 
-    create_space_switch(
-        driven=side + "_lowerarm_pv_ctrl",
-        targets=[
-            "hipswing_ctrl",
-            "origin_ctrl",
-            side + "_clavicle_ctrl",
-            hand_clav_space
-        ],
-        attr_name="space"
-    )
+    module_label = "Left Leg" if side == "l" else "Right Leg"
+    meta = load_module_metadata(module_label)
+    custom_sw = meta.get("custom_space_switches", {}) if meta else {}
+
+    foot_ctrl = side + "_ankle_ik_ctrl"
+    foot_jnt = None
+    if body_joint_map:
+        foot_jnt = (body_joint_map.get("LeftFoot" if side == "l" else "RightFoot") or {}).get("joint")
+    elif meta and "joints" in meta and len(meta["joints"]) >= 3:
+        foot_jnt = meta["joints"][2]
+
+    if foot_jnt:
+        base_name = foot_jnt.replace('_jnt', '').split(':')[-1]
+        candidates = [
+            f"{foot_jnt.replace('_jnt', '')}_ik_ctrl",
+            f"{base_name}_ik_ctrl",
+            side + "_ankle_ik_ctrl"
+        ]
+        for c in candidates:
+            if cmds.objExists(c):
+                foot_ctrl = c
+                break
+
+    # Knee PV space switch & composite space
+    if cmds.objExists(pv_ctrl) and cmds.objExists(pv_grp) and cmds.objExists(foot_ctrl):
+        dnt = "Do_Not_Touch"
+        if not cmds.objExists(dnt):
+            dnt = cmds.group(em=True, name=dnt)
+            cmds.setAttr(dnt + ".visibility", 0)
+
+        foot_hip_space = create_composite_space(
+            name=side + "_leg_pv_footHip_space",
+            parents=[foot_ctrl, hip_ctrl],
+            match_to=pv_grp,
+            parent_node=dnt
+        )
+
+        pv_targets = custom_sw.get(pv_ctrl)
+        if pv_targets is None:
+            pv_targets = [hip_ctrl, foot_ctrl, origin_ctrl, foot_hip_space]
+        else:
+            pv_targets = [foot_hip_space if "footHip" in t or t == "COMPOSITE" else t for t in pv_targets]
+            
+        pv_targets = [t for t in pv_targets if cmds.objExists(t)]
+        if pv_targets:
+            create_space_switch(
+                driven=pv_ctrl,
+                targets=pv_targets,
+                attr_name="space"
+            )
+
+    # FK Thigh space switch
+    fk_thigh = side + '_thigh_fk_ctrl'
+    if cmds.objExists(fk_thigh):
+        fk_targets = custom_sw.get(fk_thigh)
+        if fk_targets is None:
+            fk_targets = ['pelvis_ctrl', 'origin_ctrl']
+        fk_targets = [t for t in fk_targets if cmds.objExists(t)]
+        if fk_targets:
+            create_space_switch(
+                fk_thigh,
+                fk_targets,
+                attr_name="space",
+                dup_suffix="_spaceTarget",
+                constraint_type="orient"
+            )
+
+    # Ankle IK space switches
+    for each in [side + '_ankle_ik_ctrl', side + '_ankle_ikHandle_ctrl']:
+        if cmds.objExists(each):
+            ik_targets = custom_sw.get(side + '_ankle_ik_ctrl') or custom_sw.get(each)
+            if ik_targets is None:
+                ik_targets = ['pelvis_ctrl', 'origin_ctrl']
+            ik_targets = [t for t in ik_targets if cmds.objExists(t)]
+            if ik_targets:
+                create_space_switch(
+                    each,
+                    ik_targets,
+                    attr_name="space",
+                    dup_suffix="_spaceTarget",
+                    constraint_type="parent"
+                )
+
+
+def create_arm_space_switches(side, body_joint_map=None):
+    """
+        Builds space switches (including composite spaces) for the Arm module.
+    :param side: left or right side (l/r)
+    :param body_joint_map: optional body joint mapping dictionary
+    :return: None
+    """
+    arm_pv_ctrl = side + "_lowerarm_pv_ctrl"
+    arm_pv_grp = arm_pv_ctrl + "_pad"
+    clav_ctrl = side + "_clavicle_ctrl"
+
+    # Resolve clav_ctrl dynamically
+    clav_jnt = None
+    if body_joint_map:
+        clav_jnt = (body_joint_map.get("LeftShoulder" if side == "l" else "RightShoulder") or {}).get("joint")
+    if clav_jnt:
+        base_name = clav_jnt.replace('_jnt', '').split(':')[-1]
+        candidates_clav = [
+            f"{clav_jnt.replace('_jnt', '')}_ctrl",
+            f"{base_name}_ctrl",
+            f"{side}_clavicle_ctrl"
+        ]
+        for c in candidates_clav:
+            if cmds.objExists(c):
+                clav_ctrl = c
+                break
+
+    module_label = "Left Arm" if side == "l" else "Right Arm"
+    meta = load_module_metadata(module_label)
+    custom_sw = meta.get("custom_space_switches", {}) if meta else {}
+
+    hand_ctrl = side + "_hand_ik_ctrl"
+    hand_jnt = None
+    if body_joint_map:
+        hand_jnt = (body_joint_map.get("LeftHand" if side == "l" else "RightHand") or {}).get("joint")
+    elif meta and "joints" in meta and len(meta["joints"]) >= 3:
+        hand_jnt = meta["joints"][2]
+
+    if hand_jnt:
+        base_name = hand_jnt.replace('_jnt', '').split(':')[-1]
+        candidates = [
+            f"{hand_jnt.replace('_jnt', '')}_ik_ctrl",
+            f"{base_name}_ik_ctrl",
+            f"{side}_arm_ik_ctrl",
+            side + "_hand_ik_ctrl"
+        ]
+        for c in candidates:
+            if cmds.objExists(c):
+                hand_ctrl = c
+                break
+
+    # Lowerarm PV space switch & composite space
+    if cmds.objExists(arm_pv_ctrl) and cmds.objExists(arm_pv_grp) and cmds.objExists(clav_ctrl) and cmds.objExists(hand_ctrl):
+        dnt = "Do_Not_Touch"
+        if not cmds.objExists(dnt):
+            dnt = cmds.group(em=True, name=dnt)
+            cmds.setAttr(dnt + ".visibility", 0)
+
+        hand_clav_space = create_composite_space(
+            name=side + "_arm_pv_handClav_space",
+            parents=[hand_ctrl, clav_ctrl],
+            match_to=arm_pv_grp,
+            parent_node=dnt
+        )
+
+        pv_targets = custom_sw.get(arm_pv_ctrl)
+        if pv_targets is None:
+            pv_targets = ["pelvis_ctrl", "origin_ctrl", clav_ctrl, hand_clav_space]
+        else:
+            pv_targets = [hand_clav_space if "handClav" in t or t == "COMPOSITE" else t for t in pv_targets]
+        
+        pv_targets = [t for t in pv_targets if cmds.objExists(t)]
+        if pv_targets:
+            create_space_switch(
+                driven=arm_pv_ctrl,
+                targets=pv_targets,
+                attr_name="space"
+            )
+
+    # FK Upperarm space switch
+    fk_upper = side + '_upperarm_fk_ctrl'
+    if cmds.objExists(fk_upper) and cmds.objExists(side + '_clavicle_ctrl'):
+        fk_targets = custom_sw.get(fk_upper)
+        if fk_targets is None:
+            fk_targets = [side + '_clavicle_ctrl', 'pelvis_ctrl', 'origin_ctrl']
+        fk_targets = [t for t in fk_targets if cmds.objExists(t)]
+        if fk_targets:
+            create_space_switch(
+                fk_upper,
+                fk_targets,
+                attr_name="space",
+                dup_suffix="_spaceTarget",
+                constraint_type="orient"
+            )
+
+    # Hand IK space switches
+    for each in [side + '_hand_ik_ctrl', side + '_hand_ikHandle_ctrl']:
+        if cmds.objExists(each) and cmds.objExists(side + '_clavicle_ctrl'):
+            ik_targets = custom_sw.get(side + '_hand_ik_ctrl') or custom_sw.get(each)
+            if ik_targets is None:
+                ik_targets = [side + '_clavicle_ctrl', 'spine5_Tip_ctrl', 'pelvis_ctrl', 'origin_ctrl']
+            ik_targets = [t for t in ik_targets if cmds.objExists(t)]
+            if ik_targets:
+                create_space_switch(
+                    each,
+                    ik_targets,
+                    attr_name="space",
+                    dup_suffix="_spaceTarget",
+                    constraint_type="parent"
+                )
+    # Ensure the hand IK joint is orient-constrained to the hand IK control
+    hand_ik_jnt = f"{side}_hand_ik"
+    if meta and "joints" in meta and len(meta["joints"]) >= 3:
+        hand_jnt = meta["joints"][2]
+        if hand_jnt:
+            base_name = hand_jnt.replace('_jnt', '').split(':')[-1]
+            candidates_ik = [
+                f"{hand_jnt.replace('_jnt', '')}_ik",
+                f"{base_name}_ik",
+                f"{side}_hand_ik"
+            ]
+            for c in candidates_ik:
+                if cmds.objExists(c):
+                    hand_ik_jnt = c
+                    break
+
+    if cmds.objExists(hand_ctrl) and cmds.objExists(hand_ik_jnt):
+        has_con = False
+        con_nodes = cmds.listConnections(hand_ik_jnt, type="orientConstraint") or []
+        for con in con_nodes:
+            targets = cmds.orientConstraint(con, q=True, targetList=True) or []
+            if hand_ctrl in targets:
+                has_con = True
+                break
+        if not has_con:
+            oc = cmds.orientConstraint(hand_ctrl, hand_ik_jnt, mo=True)[0]
+            cmds.setAttr(f"{oc}.interpType", 2)
+
+
+
+
+def create_rig_space_switches(side):
+    """
+        Builds the base space switches for both Leg and Arm modules on this side.
+    :param side: left or right side (l/r)
+    :return: None
+    """
+    create_leg_space_switches(side)
+    create_arm_space_switches(side)
 
 
 def create_eye_aim_setup(
         left_eye_joint="l_eye",
         right_eye_joint="r_eye",
-        aim_distance=25
+        aim_distance=25,
+        head_ctrl="head1_ctrl"
 ):
     """
-    Creates a standard left/right eye aim setup with a shared center aim control.
+        Creates a standard left/right eye aim setup with a shared center aim control.
+    :param left_eye_joint: left eye joint name
+    :param right_eye_joint: right eye joint name
+    :param aim_distance: local aim control distance offset
+    :param head_ctrl: head parent control name
+    :return: dict
     """
 
     for jnt in (left_eye_joint, right_eye_joint):
@@ -1862,8 +2713,8 @@ def create_eye_aim_setup(
 
     created = {}
 
-    l_eye_ctrl_dict = create_joint_controls([left_eye_joint], control_shape="circle", root_parent="head1_ctrl")
-    r_eye_ctrl_dict = create_joint_controls([right_eye_joint], control_shape="circle", root_parent="head1_ctrl")
+    l_eye_ctrl_dict = create_joint_controls([left_eye_joint], control_shape="circle", root_parent=head_ctrl)
+    r_eye_ctrl_dict = create_joint_controls([right_eye_joint], control_shape="circle", root_parent=head_ctrl)
 
     def create_eye_aim(joint, side):
         # Aim transform
@@ -1878,7 +2729,7 @@ def create_eye_aim_setup(
         # Move forward in local Z
         cmds.move(0, 0, aim_distance, aim_xform, r=True, os=True)
 
-        aim_ctrl = create_joint_controls([aim_xform], control_shape="circle", root_parent="head1_ctrl")
+        aim_ctrl = create_joint_controls([aim_xform], control_shape="circle", root_parent=head_ctrl)
 
         return aim_xform, aim_ctrl
 
@@ -1891,7 +2742,7 @@ def create_eye_aim_setup(
         aimVector=(0, 0, 1),
         upVector=(0, 1, 0),
         worldUpType="objectrotation",
-        worldUpObject="head1_ctrl",
+        worldUpObject=head_ctrl,
         worldUpVector=(0, 1, 0),
         mo=True
     )
@@ -1901,7 +2752,7 @@ def create_eye_aim_setup(
         aimVector=(0, 0, 1),
         upVector=(0, -1, 0),
         worldUpType="objectrotation",
-        worldUpObject="head1_ctrl",
+        worldUpObject=head_ctrl,
         worldUpVector=(0, 1, 0),
         mo=True
     )
@@ -1923,19 +2774,30 @@ def create_eye_aim_setup(
     ))
 
     created["eye_aim"] = center_aim
-    eye_ctrl_dict = create_joint_controls(["eye_aim"], control_shape="circle", root_parent="head1_ctrl")
-    cmds.parent(l_aim_ctrl[0]["ctrl"], r_aim_ctrl[0]["ctrl"], eye_ctrl_dict[0]["ctrl"])
+    eye_ctrl_dict = create_joint_controls(["eye_aim"], control_shape="circle", root_parent=head_ctrl)
+    cmds.parent(l_aim_ctrl[0]["pad"], r_aim_ctrl[0]["pad"], eye_ctrl_dict[0]["ctrl"])
 
     r_eye_ctrl = r_eye_ctrl_dict[0]["ctrl"]
     l_eye_ctrl = l_eye_ctrl_dict[0]["ctrl"]
-    strip_ctrl_shape_and_rename(r_eye_ctrl)
-    strip_ctrl_shape_and_rename(l_eye_ctrl)
+    new_name = strip_ctrl_shape_and_rename(r_eye_ctrl)
+    new_name1 = strip_ctrl_shape_and_rename(l_eye_ctrl)
     cmds.delete([l_aim_xform, r_aim_xform, center_aim])
-
+    print(new_name)
+    print(new_name1)
+    print(cmds.objExists(new_name))
     return created
 
 
 def strip_ctrl_shape_and_rename(ctrl):
+    """
+    Delete all shapes under the transform and rename it.
+    
+    Args:
+        ctrl (str): Control node name to process.
+        
+    Returns:
+        str: The new node name.
+    """
     if not cmds.objExists(ctrl):
         raise RuntimeError(f"Control does not exist: {ctrl}")
 
@@ -1954,9 +2816,18 @@ def strip_ctrl_shape_and_rename(ctrl):
     return new_name
 
 
-def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict):
+def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict, head_ctrl="head1_ctrl"):
     """
-    Initial setup for jaw/lip driving.
+    Initial setup for driving mouth and lips via the jaw control.
+    
+    Args:
+        jaw_ctrl (str): Name of the jaw control.
+        lip_driver_ctrls (list[str]): List of driver controls for the lips.
+        lip_ctrl_dict (dict): Dictionary mapping joints to lip controls.
+        head_ctrl (str): Name of the head control.
+        
+    Returns:
+        None
     """
 
     if not cmds.objExists(jaw_ctrl):
@@ -1976,12 +2847,12 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict):
         cmds.connectAttr(jaw_ctrl + ".lipSubControls", lip_pad + '.visibility')
     jaw_pad = jaw_ctrl + "_sdk_pad"
     cmds.setDrivenKeyframe(
-        f"{jaw_pad}.rotateZ",
+        f"{jaw_pad}.rotateY",
         cd=f"{jaw_ctrl}.jawOpen",
         dv=0, v=0
     )
     cmds.setDrivenKeyframe(
-        f"{jaw_pad}.rotateZ",
+        f"{jaw_pad}.rotateY",
         cd=f"{jaw_ctrl}.jawOpen",
         dv=1, v=-31.923
     )
@@ -1992,16 +2863,17 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict):
 
     for i, ctrl in enumerate(lip_driver_ctrls):
         upper_con = cmds.parentConstraint(
-            ['head1_ctrl', jaw_ctrl],
+            [head_ctrl, jaw_ctrl],
             ctrl + "_pad",
             mo=True
         )[0]
         cmds.setAttr(f"{upper_con}.interpType", 2)
         upper_weights = cmds.parentConstraint(upper_con, q=True, wal=True)
 
-        # Upper
-        upper_head_w = [w for w in upper_weights if "head1" in w][0]
-        upper_jaw_w = [w for w in upper_weights if "jaw" in w][0]
+        head_short = head_ctrl.split("|")[-1].split(":")[-1]
+        jaw_short = jaw_ctrl.split("|")[-1].split(":")[-1]
+        upper_head_w = [w for w in upper_weights if head_short in w or head_short.replace("_ctrl", "") in w][0]
+        upper_jaw_w = [w for w in upper_weights if jaw_short in w or jaw_short.replace("_ctrl", "") in w][0]
         jaw_attr = f"{jaw_ctrl}.lipShut"
 
         if i == 0:
@@ -2074,10 +2946,10 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict):
     main_ctrl_dict = create_joint_controls(
         [temp_grp],
         control_shape="circle",
-        root_parent="head1_ctrl"
+        root_parent=head_ctrl
     )[0]
     main_ctrl = main_ctrl_dict["ctrl"]
-    main_con = cmds.parentConstraint("head1_ctrl", jaw_ctrl, main_ctrl_dict["pad"], mo=True)[0]
+    main_con = cmds.parentConstraint(head_ctrl, jaw_ctrl, main_ctrl_dict["pad"], mo=True)[0]
     cmds.setAttr(f"{main_con}.interpType", 2)
     for each in [upper_ctrl, lower_ctrl]:
         sdk_pad = each + "_sdk_pad"
@@ -2120,6 +2992,18 @@ def create_twist_driver(driver_bone="l_thigh_driver",
                         child_bone="l_knee_driver",
                         parent="hipswing_ctrl",
                         surface="l_thigh_surface"):
+    """
+    Creates a twist driver setup for a limb segment.
+    
+    Args:
+        driver_bone (str): Name of the driver bone.
+        child_bone (str): Name of the child bone.
+        parent (str): Parent control or group name.
+        surface (str): Name of the lofted surface.
+        
+    Returns:
+        str: Name of the created twist driver joint.
+    """
     twist_bone = cmds.duplicate(driver_bone, name=driver_bone.replace("driver", "twist_driver"))[0]
     children = cmds.listRelatives(twist_bone, c=True, f=True) or []
     if children:
@@ -2129,35 +3013,66 @@ def create_twist_driver(driver_bone="l_thigh_driver",
         parent = child_bone
     cmds.pointConstraint(child_bone, twist_bone, mo=False)
 
-    x_val=1
+    x_val = 1
     if "knee" in driver_bone and driver_bone[0] == "l":
         x_val = -1
+
+    if "thigh" in driver_bone:
+        wuv = (1, 0, 0)
+    else:
+        wuv = (0, 1, 0)
+
     cmds.aimConstraint(driver_bone, twist_bone,
                        aimVector=(x_val, 0, 0),
                        upVector=(0, 1, 0),
                        worldUpType="objectrotation",
                        worldUpObject=parent,
-                       worldUpVector=(0, 1, 0),
+                       worldUpVector=wuv,
                        mo=True)
 
     if cmds.objExists(surface):
         skin = cmds.skinCluster(twist_bone, driver_bone, surface, toSelectedBones=True)[0]
 
-        cvs = cmds.ls(f"{surface}.cv[0:3][0:3]", flatten=True)
+        num_cvs = 4
 
-        num_cvs = len(cvs)
+        for i in range(num_cvs):
+            # Proper string formatting for i
+            cvs = cmds.ls(f"{surface}.cv[0:3][{i}]", flatten=True)
+            if 'lowerarm' not in driver_bone:
+                weight_twist = 1.0 - (i / float(num_cvs - 1))
+                weight_driver = 1.0 - weight_twist
+            else:
+                weight_driver = 1.0 - (i / float(num_cvs - 1))
+                weight_twist = 1.0 - weight_driver
 
-        for i, cv in enumerate(cvs):
-            weight_twist = 1.0 - (i / (num_cvs - 1))
-            weight_driver = 1.0 - weight_twist
-            cmds.skinPercent(skin, cv, transformValue=[(twist_bone, weight_twist), (driver_bone, weight_driver)])
+
+            for cv in cvs:
+                cmds.skinPercent(
+                    skin,
+                    cv,
+                    transformValue=[
+                        (twist_bone, weight_twist),
+                        (driver_bone, weight_driver)
+                    ]
+                )
 
     return twist_bone
 
 
-def hik_map_to_rig_args(joint_map):
+def hik_map_to_rig_args(body_joint_map, face_joint_map):
+    """
+    Translates character joint mappings into lists/dicts suitable for create_full_rig.
+    
+    Args:
+        body_joint_map (dict): Body joint mapping dictionary.
+        face_joint_map (dict): Face joint mapping dictionary.
+        
+    Returns:
+        dict: Translated arguments mapping slot names to joints/data.
+    """
     def j(slot):
-        return joint_map.get(slot, {}).get("joint")
+        return body_joint_map.get(slot, {}).get("joint")
+
 
     arm_joints = [
         j("LeftArm"), j("RightArm"),
@@ -2167,146 +3082,806 @@ def hik_map_to_rig_args(joint_map):
     ]
 
     leg_joints = {
-        "l": [j("LeftUpLeg"), j("LeftLeg"), j("LeftFoot"), j("LeftToeBase"), None],
-        "r": [j("RightUpLeg"), j("RightLeg"), j("RightFoot"), j("RightToeBase"), None]
+        "l": [
+            j("LeftUpLeg"),
+            j("LeftLeg"),
+            j("LeftFoot"),
+            j("LeftToeBase"),
+            cmds.listRelatives(j("LeftToeBase"), c=True, type="joint")[0]
+            if j("LeftToeBase") else None
+        ],
+        "r": [
+            j("RightUpLeg"),
+            j("RightLeg"),
+            j("RightFoot"),
+            j("RightToeBase"),
+            cmds.listRelatives(j("RightToeBase"), c=True, type="joint")[0]
+            if j("RightToeBase") else None
+        ]
     }
 
     spine_joints = [j("Spine"), j("Spine1"), j("Spine2"), j("Spine3")]
     spine_joints = [s for s in spine_joints if s]
 
-    return {
+    root_joints = [j("Reference"), j("Hips")]
+
+    body_dict = {
         "arm_joints": arm_joints,
         "leg_joints": leg_joints,
         "spine_joints": spine_joints,
-        "root_joint": j("Hips") or "pelvis"
+        "root_joints": root_joints
+    }
+
+    face_dict = {
+        # Brows
+        "brows": {
+            "left": j("LeftBrow"),
+            "right": j("RightBrow")
+        },
+
+        # Eyelids
+        "eyelids": {
+            "left": {
+                "outer": j("LeftEyeLidOuter"),
+                "upper": j("LeftEyeLidUpper"),
+                "inner": j("LeftEyeLidInner"),
+                "lower": j("LeftEyeLidLower")
+            },
+            "right": {
+                "outer": j("RightEyeLidOuter"),
+                "upper": j("RightEyeLidUpper"),
+                "inner": j("RightEyeLidInner"),
+                "lower": j("RightEyeLidLower")
+            }
+        },
+
+        # Lips
+        "lips": {
+            "chain": face_joint_map.get("LipChain", {}).get("joints", []),
+            "upper_center": j("UpperLipCenter"),
+            "lower_center": j("LowerLipCenter"),
+            "left_corner": j("LeftLipCorner"),
+            "right_corner": j("RightLipCorner")
+        },
+
+        # Jaw
+        "jaw": j("Jaw"),
+
+        # Tongue
+        "tongue": {
+            "chain": face_joint_map.get("TongueChain", {}).get("joints", [])
+        },
+
+        # Teeth
+        "teeth": {
+            "upper": j("UpperTeeth"),
+            "lower": j("LowerTeeth")
+        },
+
+        # Everything else facial
+        "other_face_joints": face_joint_map.get("OtherFaceJoints", {}).get("joints", [])
+    }
+
+    return [
+        body_dict,
+        face_dict
+    ]
+
+
+def create_brow_main_setup(side, root_parent = 'head1_ctrl'):
+    """
+        Creates the main eyebrows setup, snapping it to the middle brow control.
+    :param side: Left or right side (l/r)
+    :param root_parent: Parent control node name
+    :return: dict
+    """
+
+    if not side:
+        cmds.error("A side value is required.")
+
+    snap_target = side + "_brow3_ctrl"
+    brow_main = side + "_brow_main"
+
+    if not cmds.objExists(snap_target):
+        cmds.error("Snap target does not exist: {0}".format(snap_target))
+
+    if not cmds.objExists(root_parent):
+        cmds.error("Root parent does not exist: {0}".format(root_parent))
+
+    # Create transform if it does not already exist
+    if cmds.objExists(brow_main):
+        brow_main_transform = brow_main
+    else:
+        brow_main_transform = cmds.createNode("transform", name=brow_main)
+
+    # Snap transform to brow3 ctrl
+    tmp_constraint = cmds.parentConstraint(snap_target, brow_main_transform, mo=False)
+    if tmp_constraint:
+        cmds.delete(tmp_constraint)
+
+    # Create control setup
+    ctrl_data = create_joint_controls(
+        [brow_main_transform],
+        control_shape="circle",
+        root_parent=root_parent,
+        sub_ctrls=False,
+        keep_constraint=True
+    )
+
+    if not ctrl_data or "ctrl" not in ctrl_data[0]:
+        cmds.error("create_joint_controls did not return expected ctrl_data.")
+
+    main_ctrl = ctrl_data[0]["ctrl"]
+
+    # Scale cvs
+    scale_ctrl_cvs_local(main_ctrl, [3, 3, 3])
+
+    # Parent pads underneath the new main control
+    child_nodes = []
+
+    for i in range(1, 6):
+        child_nodes.append("{0}_brow{1}_driver_pad".format(side, i))
+    for i in range(1, 6):
+        child_nodes.append("{0}_brow{1}_ctrl_pad".format(side, i))
+
+    existing_children = [node for node in child_nodes if cmds.objExists(node)]
+    missing_children = [node for node in child_nodes if not cmds.objExists(node)]
+
+    if missing_children:
+        cmds.warning(
+            "Some brow nodes were not found and were skipped: {0}".format(", ".join(missing_children))
+        )
+
+    if existing_children:
+        cmds.parent(existing_children, main_ctrl)
+        for i in range(1, 6):
+            driver_pad = "{0}_brow{1}_driver_pad".format(side, i)
+            if cmds.objExists(driver_pad):
+                cmds.setAttr(driver_pad + ".visibility", 0)
+
+    return {
+        "group": brow_main_transform,
+        "ctrl_data": ctrl_data,
+        "parent_target": main_ctrl
     }
 
 
-def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
-        'l_clavicle', 'r_clavicle',
-        'l_lowerarm', 'r_lowerarm',
-        'l_hand', 'r_hand']):
-    setup_hik.t_pose_character(arm_joints[0], arm_joints[1], arm_joints[2], arm_joints[3], arm_joints[4], arm_joints[5],
-                               arm_joints[6], arm_joints[7])
+def _safe_rename_hierarchy_tokens(root_node, replacements, delete_shapes_on_driver=True):
+    """
+        Rename an entire hierarchy by applying ordered token replacements to every node name, leaf-to-root.
+    :param root_node: Root transform of hierarchy
+    :param replacements: Ordered string replacements list of tuples
+    :param delete_shapes_on_driver: Delete shapes under transforms containing 'driver'
+    :return: dict
+    """
+    if not cmds.objExists(root_node):
+        cmds.warning("Node does not exist, skipping: {0}".format(root_node))
+        return {}
 
-    create_joint_controls(
-        joint_list=["origin", "pelvis"],
-        control_shape="circle"
+    # Gather all descendants + root as long names
+    hierarchy = cmds.listRelatives(root_node, ad=True, fullPath=True) or []
+    hierarchy.append(cmds.ls(root_node, long=True)[0])
+
+    # Deepest first so parent renames do not invalidate child paths
+    hierarchy.sort(key=lambda x: x.count("|"), reverse=True)
+
+    rename_map = {}
+
+    for old_long in hierarchy:
+        if not cmds.objExists(old_long):
+            continue
+
+        short_name = old_long.split("|")[-1]
+        new_name = short_name
+
+        for old, new in replacements:
+            new_name = new_name.replace(old, new)
+
+        current_long = cmds.ls(old_long, long=True)
+        if not current_long:
+            continue
+        current_long = current_long[0]
+
+        final_name = current_long.split("|")[-1]
+
+        if new_name != final_name:
+            renamed = cmds.rename(current_long, new_name)
+            rename_map[old_long] = renamed
+            final_name = renamed
+        else:
+            rename_map[old_long] = final_name
+
+        # Delete shapes for transforms renamed to driver
+        if delete_shapes_on_driver and "driver" in final_name:
+            current_long_after = cmds.ls(final_name, long=True) or cmds.ls(rename_map[old_long], long=True)
+            if current_long_after:
+                current_long_after = current_long_after[0]
+                if cmds.nodeType(current_long_after) == "transform":
+                    shapes = cmds.listRelatives(current_long_after, shapes=True, fullPath=True) or []
+                    if shapes:
+                        cmds.delete(shapes)
+
+    return rename_map
+
+
+def rename_brow_pad_hierarchies(side):
+    """
+    Rename these hierarchies for the given side:
+
+    1. side_browX_ctrl_pad      -> side_browX_driver_pad
+       and rename entire hierarchy ctrl -> driver
+
+    2. side_browX_main_ctrl_pad -> side_browX_ctrl_pad
+       and rename entire hierarchy main_ctrl -> ctrl
+
+    Also deletes shapes on nodes renamed to 'driver'.
+
+    Args:
+        side (str): 'l' or 'r'
+
+    Returns:
+        dict: {
+            "ctrl_to_driver": {pad_name: rename_map, ...},
+            "main_ctrl_to_ctrl": {pad_name: rename_map, ...}
+        }
+    """
+    results = {
+        "ctrl_to_driver": {},
+        "main_ctrl_to_ctrl": {}
+    }
+
+    # Pass 1:
+    # side_brow1_ctrl_pad -> side_brow1_driver_pad
+    # hierarchy token rename: ctrl -> driver
+    for i in range(1, 6):
+        pad = "{0}_brow{1}_ctrl_pad".format(side, i)
+        if cmds.objExists(pad):
+            results["ctrl_to_driver"][pad] = _safe_rename_hierarchy_tokens(
+                pad,
+                replacements=[("ctrl", "driver")],
+                delete_shapes_on_driver=True
+            )
+
+    for i in range(1, 6):
+        pad = "{0}_brow{1}_main_ctrl_pad".format(side, i)
+        if cmds.objExists(pad):
+            results["main_ctrl_to_ctrl"][pad] = _safe_rename_hierarchy_tokens(
+                pad,
+                replacements=[("main_ctrl", "ctrl")],
+                delete_shapes_on_driver=False
+            )
+
+    return results
+
+
+def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_joints=None, root_joints=None,
+                    hip_swing="hipswing", face_joint_map=None, face_joints=None):
+    """
+        Builds the entire character rig by coordinating modular setup builders.
+    :param arm_joints: list of mapped arm joints
+    :param leg_joints: list or dict of mapped leg joints
+    :param spine_joints: list of mapped spine joints
+    :param neck_joints: list of mapped neck/head joints
+    :param root_joints: list of mapped root/pelvis joints
+    :param hip_swing: hipswing name or prefix
+    :param face_joint_map: mapping dictionary for face joints
+    :param face_joints: list of face joints
+    :return: dict
+    """
+    # 1. T-Pose setup
+    if not arm_joints:
+        arm_joints = ['l_upperarm', 'r_upperarm',
+                      'l_clavicle', 'r_clavicle',
+                      'l_lowerarm', 'r_lowerarm',
+                      'l_hand', 'r_hand']
+    arm_joints = [j for j in arm_joints if cmds.objExists(j)]
+    if len(arm_joints) >= 8:
+        setup_hik.t_pose_character(arm_joints[0], arm_joints[1], arm_joints[2], arm_joints[3], arm_joints[4], arm_joints[5],
+                                   arm_joints[6], arm_joints[7])
+
+    # Convert the inputs into unified joint maps for modules to read
+    body_joint_map = {}
+    if isinstance(leg_joints, dict):
+        body_joint_map = leg_joints
+    else:
+        # Re-construct body_joint_map from arguments for backwards compatibility
+        body_joint_map = {}
+        if root_joints and len(root_joints) >= 2:
+            body_joint_map["Root"] = {"joint": root_joints[0]}
+            body_joint_map["Hips"] = {"joint": root_joints[1]}
+        if spine_joints:
+            for i, sj in enumerate(spine_joints):
+                key = "Spine" if i == 0 else f"Spine{i}"
+                body_joint_map[key] = {"joint": sj}
+        if neck_joints:
+            for i, nj in enumerate(neck_joints):
+                if "neck" in nj.lower():
+                    key = "Neck" if i == 0 else f"Neck{i}"
+                    body_joint_map[key] = {"joint": nj}
+                elif "head" in nj.lower():
+                    body_joint_map["Head"] = {"joint": nj}
+                elif "jaw" in nj.lower():
+                    body_joint_map["Jaw"] = {"joint": nj}
+        if arm_joints and len(arm_joints) >= 8:
+            body_joint_map["LeftShoulder"] = {"joint": arm_joints[2]}
+            body_joint_map["RightShoulder"] = {"joint": arm_joints[3]}
+            body_joint_map["LeftArm"] = {"joint": arm_joints[0]}
+            body_joint_map["RightArm"] = {"joint": arm_joints[1]}
+            body_joint_map["LeftForeArm"] = {"joint": arm_joints[4]}
+            body_joint_map["RightForeArm"] = {"joint": arm_joints[5]}
+            body_joint_map["LeftHand"] = {"joint": arm_joints[6]}
+            body_joint_map["RightHand"] = {"joint": arm_joints[7]}
+
+    # Ensure face_joint_map is populated
+    if not face_joint_map:
+        face_joint_map = setup_hik.DEFAULT_FACE_JOINT_MAP
+        if face_joints:
+            face_joint_map["OtherFaceJoints"] = {"joints": face_joints}
+
+    # 2. Build Root / Origin Module
+    rig_root_module(body_joint_map)
+
+    # 3. Build Pelvis / Hips Module
+    rig_pelvis_module(body_joint_map)
+
+    # 4. Build Spine Module
+    rig_spine_module(body_joint_map)
+
+    # 5. Build Neck Module
+    rig_neck_module(body_joint_map)
+
+    # 6. Build Head Module
+    rig_head_module(body_joint_map, face_joint_map)
+
+    # Build Clavicles
+    rig_clavicle_module("l", body_joint_map)
+    rig_clavicle_module("r", body_joint_map)
+
+    # 7. Build Arms
+    rig_arm_module("l", body_joint_map)
+    rig_arm_module("r", body_joint_map)
+
+    # 8. Build Legs
+    rig_leg_module("l", body_joint_map)
+    rig_leg_module("r", body_joint_map)
+    # 9. Build Face modules
+    head_joint = (body_joint_map.get("Head") or {}).get("joint") if body_joint_map else None
+    if not head_joint or not cmds.objExists(head_joint):
+        head_joint = "head1"
+    head_ctrl = head_joint + "_ctrl" if cmds.objExists(head_joint) else "head1_ctrl"
+
+    jaw_jnt = (face_joint_map.get("Jaw") or {}).get("joint") if face_joint_map else None
+    if not jaw_jnt or not cmds.objExists(jaw_jnt):
+        jaw_jnt = "jaw"
+    jaw_ctrl = jaw_jnt + "_ctrl" if cmds.objExists(jaw_jnt) else "jaw_ctrl"
+
+    rig_brows_module("l", face_joint_map, head_ctrl)
+    rig_brows_module("r", face_joint_map, head_ctrl)
+
+    # Mouth and lips
+    rig_mouth_module(face_joint_map, head_ctrl, jaw_ctrl)
+
+    # Eyes aim setup
+    rig_eyes_module(face_joint_map, head_ctrl)
+
+    # Eyelids parent to eye_ctrl
+    rig_eyelids_module("l", face_joint_map, "l_eye1" if cmds.objExists("l_eye1") else head_ctrl)
+    rig_eyelids_module("r", face_joint_map, "r_eye1" if cmds.objExists("r_eye1") else head_ctrl)
+    # Tongue
+    rig_tongue_module(face_joint_map, jaw_ctrl if cmds.objExists(jaw_ctrl) else head_ctrl)
+
+    # Teeth
+    rig_teeth_module(face_joint_map, head_ctrl, jaw_ctrl)
+
+    # Other Face Joints
+    rig_other_face_module(face_joint_map, head_ctrl, jaw_ctrl, jaw_jnt)
+
+    # 10. Secondary/Composite constraints
+    def safe_constrain_two_parents(controls, parent1, parent2, **kwargs):
+        existing_ctrls = [c for c in controls if cmds.objExists(c)]
+        if existing_ctrls and cmds.objExists(parent1) and cmds.objExists(parent2):
+            try:
+                constrain_controls_to_two_parents(existing_ctrls, parent1, parent2, **kwargs)
+            except Exception as e:
+                print(f"[Warning] Failed to constrain {existing_ctrls} to {parent1} and {parent2}: {e}")
+
+    if cmds.objExists(head_ctrl) and cmds.objExists(jaw_ctrl):
+        safe_constrain_two_parents(
+            ['r_lower_cheek_ctrl_pad', 'l_lower_cheek_ctrl_pad'],
+            head_ctrl,
+            jaw_ctrl,
+            parent1_value=1.0,
+            parent2_value=1.0,
+            maintain_offset=True)
+    if cmds.objExists(head_ctrl) and cmds.objExists('nose_upper_ctrl'):
+        safe_constrain_two_parents(
+            ['r_upper_nose_ctrl_pad', 'l_upper_nose_ctrl_pad'],
+            head_ctrl,
+            'nose_upper_ctrl',
+            parent1_value=1.0,
+            parent2_value=1.0,
+            maintain_offset=True)
+
+    l_co = face_joint_map.get("LeftLipCorner", {}).get("joint") or "l_lip_corner1"
+    r_co = face_joint_map.get("RightLipCorner", {}).get("joint") or "r_lip_corner1"
+
+    for side in "l", "r":
+        corner_ctrl = (l_co if side == "l" else r_co) + "_main_ctrl"
+        if cmds.objExists(head_ctrl) and cmds.objExists(corner_ctrl):
+            safe_constrain_two_parents(
+                [side + '_inner_cheek_smile_ctrl_pad'],
+                head_ctrl,
+                corner_ctrl,
+                parent1_value=.5,
+                parent2_value=3.0,
+                maintain_offset=True)
+
+        if cmds.objExists(head_ctrl) and cmds.objExists(side + '_brow_main_ctrl'):
+            safe_constrain_two_parents(
+                [side + '_brow5_ctrl_pad'],
+                head_ctrl,
+                side + '_brow_main_ctrl',
+                parent1_value=.6666,
+                parent2_value=.3333,
+                maintain_offset=True)
+            safe_constrain_two_parents(
+                [side + '_brow4_ctrl_pad'],
+                head_ctrl,
+                side + '_brow_main_ctrl',
+                parent1_value=.3333,
+                parent2_value=.6666,
+                maintain_offset=True)
+
+    # 11. Restoring custom connections/space switches
+    for module in [
+        "Root / Origin", "Pelvis & Hips", "Spine", "Neck", "Head",
+        "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+        "Brows (Left)", "Brows (Right)", "Eyes Aim", "Eyelids (Left)", "Eyelids (Right)",
+        "Mouth & Lips", "Tongue", "Teeth", "Other Face Joints"
+    ]:
+        restore_rig_connections(module)
+
+    # 12. Cleanup unused scaffold and temporary nodes
+    delete_unused_scaffold_nodes()
+
+    # 12. Import enum orders
+
+    json_path = r"C:/temp/enum_orders.json"
+    if os.path.exists(json_path):
+        try:
+            enum_attrs.import_enum_orders(json_path)
+        except Exception as e:
+            print(f"[Warning] Failed to import enum orders: {e}")
+
+
+def remove_full_rig(body_joint_map, face_joint_map=None):
+    """
+        Removes all controls, rig nodes, and clears the Do_Not_Touch group.
+    :param body_joint_map: body joint mapping dictionary
+    :param face_joint_map: face joint mapping dictionary
+    :return: None
+    """
+    def safe_run(func, *args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except Exception as e:
+            print(f"[Warning] Teardown step {func.__name__} failed: {e}")
+
+    # 1. Body modules
+    safe_run(remove_arm_module, "l", body_joint_map)
+    safe_run(remove_arm_module, "r", body_joint_map)
+    safe_run(remove_clavicle_module, "l", body_joint_map)
+    safe_run(remove_clavicle_module, "r", body_joint_map)
+    safe_run(remove_leg_module, "l", body_joint_map)
+    safe_run(remove_leg_module, "r", body_joint_map)
+    safe_run(remove_head_module, body_joint_map)
+    safe_run(remove_neck_module, body_joint_map)
+    safe_run(remove_spine_module, body_joint_map)
+    safe_run(remove_pelvis_module, body_joint_map)
+    safe_run(remove_root_module, body_joint_map)
+
+    # 2. Face modules
+    safe_run(remove_brows_module, "l", face_joint_map)
+    safe_run(remove_brows_module, "r", face_joint_map)
+    safe_run(remove_eyelids_module, "l", face_joint_map)
+    safe_run(remove_eyelids_module, "r", face_joint_map)
+    safe_run(remove_mouth_module, face_joint_map)
+    safe_run(remove_eyes_module, face_joint_map)
+    safe_run(remove_teeth_module, face_joint_map)
+    safe_run(remove_tongue_module, face_joint_map)
+    safe_run(remove_other_face_module, face_joint_map)
+
+    # 3. Clean up the Do_Not_Touch group
+    if cmds.objExists("Do_Not_Touch"):
+        try:
+            cmds.delete("Do_Not_Touch")
+        except Exception as e:
+            print(f"[Warning] Failed to delete Do_Not_Touch group: {e}")
+
+
+def create_rig_from_mapping(body_joint_map, face_joint_map):
+    """
+        Runs create_full_rig using the mapped joints from HIK/Face mappings.
+    :param body_joint_map: body joint mapping dictionary
+    :param face_joint_map: face joint mapping dictionary
+    :return: None
+    """
+    def j(slot):
+        return body_joint_map.get(slot, {}).get("joint")
+
+    # Arm joints
+    arm_joints = [
+        j("LeftArm"), j("RightArm"),
+        j("LeftShoulder"), j("RightShoulder"),
+        j("LeftForeArm"), j("RightForeArm"),
+        j("LeftHand"), j("RightHand")
+    ]
+    # Filter to only existing or non-empty strings
+    arm_joints = [a for a in arm_joints if a and cmds.objExists(a)]
+
+    # Spine joints
+    spine_joints = [j("Spine"), j("Spine1"), j("Spine2"), j("Spine3")]
+    spine_joints = [s for s in spine_joints if s and cmds.objExists(s)]
+
+    # Root joints
+    root_joints = [j("Reference"), j("Hips")]
+    root_joints = [r for r in root_joints if r and cmds.objExists(r)]
+
+    # Neck, Head, Jaw, Tongue joints for neck_joints
+    neck_joints = []
+    for key in sorted(body_joint_map.keys()):
+        if key.startswith("Neck"):
+            jnt = body_joint_map[key].get("joint")
+            if jnt and cmds.objExists(jnt):
+                neck_joints.append(jnt)
+
+    if j("Head") and cmds.objExists(j("Head")):
+        neck_joints.append(j("Head"))
+    if j("Jaw") and cmds.objExists(j("Jaw")):
+        neck_joints.append(j("Jaw"))
+        
+    tongue_chain = face_joint_map.get("TongueChain", {}).get("joints", [])
+    for tj in tongue_chain:
+        if tj and cmds.objExists(tj):
+            neck_joints.append(tj)
+
+    # Other face joints
+    face_joints = face_joint_map.get("OtherFaceJoints", {}).get("joints", [])
+    face_joints = [fj for fj in face_joints if fj and cmds.objExists(fj)]
+
+    # Let's run create_full_rig with these arguments
+    create_full_rig(
+        arm_joints=arm_joints if len(arm_joints) == 8 else None,
+        leg_joints=body_joint_map,
+        spine_joints=spine_joints if spine_joints else None,
+        neck_joints=neck_joints if neck_joints else None,
+        root_joints=root_joints if len(root_joints) == 2 else None,
+        face_joints=face_joints if face_joints else None,
+        face_joint_map=face_joint_map
     )
 
-    for ctrl_name in ["origin_ctrl", "pelvis_ctrl"]:
-        scale_ctrl_cvs_local(ctrl_name, [25, 25, 25])
 
-    create_joint_controls(
-        ["spine1", "spine3", "spine5"],
-        control_shape="sphere",
-        root_parent="pelvis_ctrl",
-        sub_ctrls=True
-    )
+def query_space_switches(driven):
+    """
+        Queries and returns any space switches driving 'driven' checking control and pad levels.
+    :param driven: control node to query
+    :return: list[dict]
+    """
+    if not cmds.objExists(driven):
+        return []
+    
+    nodes_to_check = [driven]
+    parents = cmds.listRelatives(driven, p=True)
+    if parents:
+        nodes_to_check.append(parents[0])
+        grandparents = cmds.listRelatives(parents[0], p=True)
+        if grandparents:
+            nodes_to_check.append(grandparents[0])
 
-    create_joint_controls(
-        ["hipswing"],
-        control_shape="sphere",
-        root_parent="spine1_ctrl"
-    )
+    for suffix in ["_sdk_pad", "_pad"]:
+        pattern = driven + suffix
+        if cmds.objExists(pattern) and pattern not in nodes_to_check:
+            nodes_to_check.append(pattern)
 
-    create_joint_controls(
-        ["spine5_Tip"],
-        control_shape="sphere",
-        root_parent="spine5_ctrl"
-    )
+    switches = []
+    seen_constraints = set()
 
-    create_joint_controls(
-        joint_list=[
-            "neck1", "neck2", "head1", "jaw",
-            "tongue1", "tongue2", "tongue3", "tongue4"
-        ],
-        control_shape="circle",
-        root_parent="spine5_Tip_ctrl"
-    )
-    create_space_switch(
-        driven="neck1_ctrl",
-        targets=[
-            "hipswing_ctrl",
-            "origin_ctrl",
-            "spine5_Tip_ctrl"
-        ],
-        attr_name="space",
-        constraint_type="orient"
-    )
-    create_space_switch(
-        driven="head1_ctrl",
-        targets=[
-            "hipswing_ctrl",
-            "origin_ctrl",
-            "neck2_ctrl",
-            "spine5_Tip_ctrl"
-        ],
-        attr_name="space",
-        constraint_type="orient"
-    )
+    for node in nodes_to_check:
+        constraints = cmds.listConnections(node, type="constraint") or []
+        for con in list(set(constraints)):
+            if con in seen_constraints:
+                continue
+            seen_constraints.add(con)
+            
+            con_type = cmds.objectType(con)
+            if con_type not in ("parentConstraint", "orientConstraint"):
+                continue
+            ctype = "parent" if con_type == "parentConstraint" else "orient"
+            
+            targets = []
+            try:
+                con_targets = []
+                if con_type == "parentConstraint":
+                    con_targets = cmds.parentConstraint(con, q=True, targetList=True) or []
+                elif con_type == "orientConstraint":
+                    con_targets = cmds.orientConstraint(con, q=True, targetList=True) or []
+                
+                for ct in con_targets:
+                    if ct.startswith(driven + "_") and "_spaceTarget" in ct:
+                        p = cmds.listRelatives(ct, p=True)
+                        if p and p[0] not in targets:
+                            targets.append(p[0])
+                    else:
+                        # Direct transform targets (like composite spaces or plain target transforms)
+                        shapes = cmds.listRelatives(ct, shapes=True, fullPath=True) or []
+                        if not shapes:
+                            if ct not in targets:
+                                targets.append(ct)
+            except Exception as e:
+                print(f"[Warning] Failed to query constraint targetList: {e}")
+                        
+            attr_name = "space"
+            weight_conn = cmds.listConnections(con, type="animCurveUA") or []
+            for curve in weight_conn:
+                plugs = cmds.listConnections(curve + ".input", plug=True) or []
+                for plug in plugs:
+                    if plug.startswith(driven + "."):
+                        attr_name = plug.split(".")[-1]
+                        break
+                        
+            # Query custom enum display names
+            enum_names = []
+            if cmds.attributeQuery(attr_name, node=driven, exists=True):
+                try:
+                    enum_str = cmds.attributeQuery(attr_name, node=driven, listEnum=True)
+                    if enum_str:
+                        enum_names = [e.strip() for e in enum_str[0].split(":") if e.strip()]
+                except Exception:
+                    pass
 
-    create_eye_aim_setup("l_eye", "r_eye")
+            target_enum_pairs = []
+            for i, t in enumerate(targets):
+                disp_name = enum_names[i] if i < len(enum_names) else t
+                target_enum_pairs.append([t, disp_name])
 
-    for side in ["l", "r"]:
-        clav_ctrl = create_joint_controls(
-            [f"{side}_clavicle"],
-            control_shape="cube",
-            root_parent="spine5_Tip_ctrl"
-        )[0]
+            if targets:
+                switches.append({
+                    "driven": driven,
+                    "target_enum_pairs": target_enum_pairs,
+                    "attr_name": attr_name,
+                    "constraint_type": ctype
+                })
+                
+    return switches
 
-        snap_ctrl_cvs_to_child(
-            clav_ctrl["ctrl"],
-            f"{side}_upperarm"
-        )
 
-        arm_chain = [
-            f"{side}_upperarm",
-            f"{side}_lowerarm",
-            f"{side}_hand"
-        ]
+def delete_unused_scaffold_nodes():
+    """
+    Finds and deletes any nodes in the scene whose names end in '_main'
+    or contain '_temp'.
+    """
+    to_delete = []
+    
+    # 1. Gather nodes ending in '_main'
+    for node in cmds.ls("*_main") or []:
+        if cmds.objExists(node):
+            nt = cmds.nodeType(node)
+            if nt == "transform":
+                shapes = cmds.listRelatives(node, shapes=True) or []
+                if not shapes:
+                    to_delete.append(node)
+                    continue
+            
+            if nt in ("transform", "joint"):
+                is_skinned = bool(cmds.listConnections(node, type="skinCluster"))
+                is_constrained = bool(cmds.listConnections(node, type="constraint"))
+                all_descendants = cmds.listRelatives(node, ad=True, fullPath=True) or []
+                has_ctrl_descendants = any("_ctrl" in desc.lower() for desc in all_descendants)
+                
+                if not is_skinned and not is_constrained and not has_ctrl_descendants:
+                    to_delete.append(node)
+            
+    # 2. Gather nodes containing '_temp'
+    for node in cmds.ls("*_temp*") or []:
+        if cmds.objExists(node):
+            nt = cmds.nodeType(node)
+            if nt == "transform":
+                shapes = cmds.listRelatives(node, shapes=True) or []
+                if not shapes:
+                    to_delete.append(node)
+                    continue
 
-        leg_chain = [
-            f"{side}_thigh",
-            f"{side}_knee",
-            f"{side}_ankle",
-            f"{side}_toe",
-            f"{side}_toeTip"
-        ]
+            if nt in ("transform", "joint"):
+                is_skinned = bool(cmds.listConnections(node, type="skinCluster"))
+                is_constrained = bool(cmds.listConnections(node, type="constraint"))
+                all_descendants = cmds.listRelatives(node, ad=True, fullPath=True) or []
+                has_ctrl_descendants = any("_ctrl" in desc.lower() for desc in all_descendants)
+                
+                if not is_skinned and not is_constrained and not has_ctrl_descendants:
+                    to_delete.append(node)
+            
+    # Delete them
+    if to_delete:
+        cmds.delete(list(set(to_delete)))
+        print(f"[cleanup] Deleted unused scaffold/temp nodes: {to_delete}")
 
-        create_ik_fk_limb(arm_chain, f"{side}_clavicle_ctrl")
-        create_ik_fk_limb(leg_chain, "hipswing_ctrl")
 
-        finger_joints = [
-            f"{side}_thumb_04", f"{side}_thumb_03", f"{side}_thumb_02", f"{side}_thumb_01",
-            f"{side}_index_05", f"{side}_index_04", f"{side}_index_03", f"{side}_index_02", f"{side}_index_01",
-            f"{side}_middle_05", f"{side}_middle_04", f"{side}_middle_03", f"{side}_middle_02", f"{side}_middle_01",
-            f"{side}_ring_05", f"{side}_ring_04", f"{side}_ring_03", f"{side}_ring_02", f"{side}_ring_01",
-            f"{side}_pinky_05", f"{side}_pinky_04", f"{side}_pinky_03", f"{side}_pinky_02", f"{side}_pinky_01"
-        ]
+def rig_brows_module(side, face_joint_map, parent_ctrl=None):
+    """
+        Builds the eyebrows setup with lofted surfaces and driver controls.
+    :param side: left or right side (l/r)
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "head1_ctrl"
+    brow_joints = []
+    if face_joint_map:
+        side_prefix_title = "Left" if side == "l" else "Right"
+        brow_joints = face_joint_map.get(f"{side_prefix_title}Brow", {}).get("joints", [])
+    if not brow_joints:
+        brow_joints = [f"{side}_brow{i}" for i in range(1, 6)]
+    brow_joints = [bj for bj in brow_joints if cmds.objExists(bj)]
 
-        create_finger_rigs(finger_joints)
-
-        build_rfl_ik_and_constraints(
+    if len(brow_joints) >= 2 and cmds.objExists(parent_ctrl):
+        setup_surface_rig_with_drivers(
+            brow_joints,
+            loft_name=f"{side}_brow",
+            offset=0.5,
             side=side,
-            ik_leg_ctrl=f"{side}_ankle_ik_ctrl",
-            ik_leg_joints=[
-                f"{side}_ankle_ik",
-                f"{side}_toe_ik",
-                f"{side}_toeTip_ik"
-            ],
-            rfl_joints=[
-                f"{side}_heel_RFL",
-                f"{side}_outerBank_RFL",
-                f"{side}_innerBank_RFL",
-                f"{side}_toe_RFL",
-                f"{side}_toeTip_RFL",
-                f"{side}_ankle_RFL"
-            ]
+            region="brow",
+            driver_follicle_indices=list(range(len(brow_joints))),
+            root_parent=parent_ctrl
         )
+        brow_rename = rename_brow_pad_hierarchies(side)
+        create_brow_main_setup(side, parent_ctrl)
 
-        create_rig_space_switches(side)
 
+def remove_brows_module(side, face_joint_map):
+    """
+        Removes all controls and constraints built for eyebrows.
+    :param side: left or right side (l/r)
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    brow_joints = []
+    if face_joint_map:
+        side_prefix_title = "Left" if side == "l" else "Right"
+        brow_joints = face_joint_map.get(f"{side_prefix_title}Brow", {}).get("joints", [])
+    if not brow_joints:
+        brow_joints = [f"{side}_brow{i}" for i in range(1, 6)]
+        
+    nodes_to_delete = [
+        f"{side}_brow_surface",
+        f"{side}_brow_follicles",
+        f"{side}_brow_driver_pad",
+        f"{side}_brow_main_ctrl_pad"
+    ]
+    for bj in brow_joints:
+        nodes_to_delete.append(f"{bj}_ctrl_pad")
+        
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_eyelids_module(side, face_joint_map, parent_ctrl=None):
+    """
+        Builds the eyelids setup with lofted surfaces and driver controls.
+    :param side: left or right side (l/r)
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or (f"{side}_eye_ctrl" if cmds.objExists(f"{side}_eye_ctrl") else "head1_ctrl")
+    eyelid_joints = []
+    if face_joint_map:
+        side_prefix_title = "Left" if side == "l" else "Right"
+        eyelid_joints = face_joint_map.get(f"{side_prefix_title}Eyelid", {}).get("joints", [])
+    if not eyelid_joints:
         eyelid_joints = [
             f"{side}_inner_eyelidTip",
             f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
@@ -2318,9 +3893,22 @@ def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
             f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
             f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
         ]
+    eyelid_joints = [ej for ej in eyelid_joints if cmds.objExists(ej)]
 
+    top_pad = f"{side}_eye_ctrl_pad"
+
+    static_root, static_nodes = duplicate_static_hierarchy(f"{side}_eye_ctrl_pad")
+
+    eye_static = f"{side}_eye1_static"
+    if cmds.objExists(eye_static):
+        parent_ctrl = eye_static
+    elif static_root and cmds.objExists(static_root):
+        parent_ctrl = static_root
+    else:
+        parent_ctrl = "head1_ctrl"
+        cmds.error(f"Static eye parent was not created for {side}. top_pad={top_pad}")
+    if len(eyelid_joints) >= 8 and cmds.objExists(parent_ctrl):
         driver_indices = [0, 9, 6, 3, 12, 15, 18, 20]
-
         setup_surface_rig_with_drivers(
             eyelid_joints,
             loft_name=f"{side}_eyelid",
@@ -2328,22 +3916,552 @@ def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
             side=side,
             offset=0.5,
             driver_follicle_indices=driver_indices,
-            root_parent=f"{side}_eye1"
+            root_parent=parent_ctrl
         )
 
-        brow_joints = [f"{side}_brow{i}" for i in range(1, 6)]
-        setup_surface_rig_with_drivers(
-            brow_joints,
-            loft_name=f"{side}_brow",
+
+def get_ordered_hierarchy(root):
+    ordered = [root]
+
+    def walk(node):
+        children = cmds.listRelatives(node, c=True, type="transform", fullPath=True) or []
+        for child in children:
+            ordered.append(child)
+            walk(child)
+
+    walk(root)
+    return ordered
+
+
+def duplicate_static_hierarchy(root, suffix="static"):
+    if isinstance(root, (list, tuple)):
+        root = root[0]
+
+    source_nodes = get_ordered_hierarchy(root)
+
+    dup_root = cmds.duplicate(root, rc=True)[0]
+    dup_root = cmds.ls(dup_root, long=True)[0]
+    dup_nodes = get_ordered_hierarchy(dup_root)
+
+    pairs = list(zip(source_nodes, dup_nodes))
+
+    renamed_by_source = {}
+
+    # Rename deepest first so DAG paths do not break
+    for source_node, dup_node in sorted(pairs, key=lambda p: p[1].count("|"), reverse=True):
+        if not cmds.objExists(dup_node):
+            continue
+
+        source_short = source_node.split("|")[-1]
+        source_short = re.sub(r"_(static|ik|fk|driver)$", "", source_short)
+
+        new_short = f"{source_short}_{suffix}"
+
+        for existing in cmds.ls(new_short, long=True) or []:
+            cmds.delete(existing)
+
+        renamed = cmds.rename(dup_node, new_short)
+        renamed_by_source[source_node] = renamed
+
+    # Return in source order: root -> child -> child
+    renamed_nodes = [renamed_by_source[s] for s in source_nodes if s in renamed_by_source]
+    renamed_root = renamed_nodes[0] if renamed_nodes else None
+
+    return renamed_root, renamed_nodes
+
+
+def remove_eyelids_module(side, face_joint_map):
+    """
+        Removes all controls and constraints built for eyelids.
+    :param side: left or right side (l/r)
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    eyelid_joints = []
+    if face_joint_map:
+        side_prefix_title = "Left" if side == "l" else "Right"
+        eyelid_joints = face_joint_map.get(f"{side_prefix_title}Eyelid", {}).get("joints", [])
+    if not eyelid_joints:
+        eyelid_joints = [
+            f"{side}_inner_eyelidTip",
+            f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
+            f"{side}_upper_eyelidTip8", f"{side}_upper_eyelidTip7", f"{side}_upper_eyelidTip6",
+            f"{side}_upper_eyelidTip5", f"{side}_upper_eyelidTip4", f"{side}_upper_eyelidTip3",
+            f"{side}_upper_eyelidTip2", f"{side}_upper_eyelidTip1",
+            f"{side}_outer_eyelidTip",
+            f"{side}_lower_eyelidTip1", f"{side}_lower_eyelidTip2", f"{side}_lower_eyelidTip3",
+            f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
+            f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
+        ]
+    nodes_to_delete = [
+        f"{side}_eyelid_surface_grp"
+    ]
+    
+    driver_semantics = [
+        side + "_inner_eyelid",
+        side + "_upper_inner_eyelid",
+        side + "_upper_eyelid",
+        side + "_upper_outer_eyelid",
+        side + "_outer_eyelid",
+        side + "_lower_outer_eyelid",
+        side + "_lower_eyelid",
+        side + "_lower_inner_eyelid",
+    ]
+    for sem in driver_semantics:
+        nodes_to_delete.append(f"{sem}_ctrl_pad")
+    for ej in eyelid_joints:
+        base = ej.replace("_jnt", "").split("|")[-1].split(":")[-1]
+        parent_base = base.replace("Tip", "") 
+        if cmds.objExists(ej):
+            parent = cmds.listRelatives(ej, p=True)
+            if parent:
+                parent_base = parent[0].replace("_jnt", "").split("|")[-1].split(":")[-1]
+        nodes_to_delete.append(f"{parent_base}_ctrl_pad")
+    
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_mouth_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None):
+    """
+        Builds the mouth setup with lofted surfaces, follicle controls, and jaw drivers.
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :param jaw_ctrl: jaw control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "head1_ctrl"
+    jaw_ctrl = jaw_ctrl or "jaw_ctrl"
+    mouth_joints = []
+    if face_joint_map:
+        mouth_joints = face_joint_map.get("LipChain", {}).get("joints", [])
+    if not mouth_joints:
+        mouth_joints = [
+            'c_upper_lip', 'r_upper_lip4', 'r_upper_lip3', 'r_upper_lip2', 'r_upper_lip1',
+            'r_lip_corner1', 'r_lower_lip1', 'r_lower_lip2', 'r_lower_lip3', 'r_lower_lip4',
+            'c_lower_lip', 'l_lower_lip4', 'l_lower_lip3', 'l_lower_lip2', 'l_lower_lip1',
+            'l_lip_corner1', 'l_upper_lip1', 'l_upper_lip2', 'l_upper_lip3', 'l_upper_lip4'
+        ]
+    mouth_joints = [mj for mj in mouth_joints if cmds.objExists(mj)]
+
+    if len(mouth_joints) >= 8 and cmds.objExists(parent_ctrl):
+        loft_surf, follicle_joints, lip_ctrls, driver_data = setup_surface_rig_with_drivers(
+            mouth_joints,
+            loft_name="mouth",
             offset=0.5,
-            side=side,
-            region="brow",
-            driver_follicle_indices=list(range(len(brow_joints))),
-            root_parent="head1_ctrl"
+            driver_follicle_indices=[0, 2, 5, 8, 10, 12, 15, 18],
+            region="mouth",
+            root_parent=parent_ctrl,
+            face_joint_map=face_joint_map
+        )
+        
+        c_up = "c_upper_lip"
+        c_lo = "c_lower_lip"
+        l_co = "l_lip_corner1"
+        r_co = "r_lip_corner1"
+        if face_joint_map:
+            c_up = face_joint_map.get("UpperLipCenter", {}).get("joint") or c_up
+            c_lo = face_joint_map.get("LowerLipCenter", {}).get("joint") or c_lo
+            l_co = face_joint_map.get("LeftLipCorner", {}).get("joint") or l_co
+            r_co = face_joint_map.get("RightLipCorner", {}).get("joint") or r_co
+            
+        drivers = [
+            f"{c_up}_main_ctrl",
+            f"{c_lo}_main_ctrl",
+            f"{r_co}_main_ctrl",
+            f"{l_co}_main_ctrl"
+        ]
+
+        if all(cmds.objExists(d) for d in drivers) and cmds.objExists(jaw_ctrl) and lip_ctrls:
+            setup_jaw_lip_driver(jaw_ctrl, drivers, lip_ctrls, head_ctrl=parent_ctrl)
+
+
+def remove_mouth_module(face_joint_map):
+    """
+        Removes all controls and constraints built for the mouth.
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    mouth_joints = []
+    if face_joint_map:
+        mouth_joints = face_joint_map.get("LipChain", {}).get("joints", [])
+    if not mouth_joints:
+        mouth_joints = [
+            'c_upper_lip', 'r_upper_lip4', 'r_upper_lip3', 'r_upper_lip2', 'r_upper_lip1',
+            'r_lip_corner1', 'r_lower_lip1', 'r_lower_lip2', 'r_lower_lip3', 'r_lower_lip4',
+            'c_lower_lip', 'l_lower_lip4', 'l_lower_lip3', 'l_lower_lip2', 'l_lower_lip1',
+            'l_lip_corner1', 'l_upper_lip1', 'l_upper_lip2', 'l_upper_lip3', 'l_upper_lip4'
+        ]
+        
+    c_up = "c_upper_lip"
+    c_lo = "c_lower_lip"
+    l_co = "l_lip_corner1"
+    r_co = "r_lip_corner1"
+    if face_joint_map:
+        c_up = face_joint_map.get("UpperLipCenter", {}).get("joint") or c_up
+        c_lo = face_joint_map.get("LowerLipCenter", {}).get("joint") or c_lo
+        l_co = face_joint_map.get("LeftLipCorner", {}).get("joint") or l_co
+        r_co = face_joint_map.get("RightLipCorner", {}).get("joint") or r_co
+
+    nodes_to_delete = [
+        "mouth_surface_grp"
+    ]
+    for mj in mouth_joints:
+        nodes_to_delete.append(f"{mj}_ctrl_pad")
+        
+    def lip_name(idx, default_base):
+        if idx < len(mouth_joints) and mouth_joints[idx]:
+            return mouth_joints[idx] + "_main"
+        return default_base
+        
+    driver_semantics = [
+        f"{c_up}_main",
+        lip_name(2, "r_upper_lip_main"),
+        f"{r_co}_main",
+        lip_name(8, "r_lower_lip_main"),
+        f"{c_lo}_main",
+        lip_name(12, "l_lower_lip_main"),
+        f"{l_co}_main",
+        lip_name(18, "l_upper_lip_main")
+    ]
+    for sem in driver_semantics:
+        nodes_to_delete.append(f"{sem}_ctrl_pad")
+        
+    nodes_to_delete.append("lip_main_ctrl_pad")
+    for mj in mouth_joints:
+        base = mj.replace("_jnt", "").split("|")[-1].split(":")[-1]
+        nodes_to_delete.append(f"{base}_ctrl_pad")
+        
+    for d in [f"{c_up}_main_ctrl", f"{c_lo}_main_ctrl", f"{r_co}_main_ctrl", f"{l_co}_main_ctrl"]:
+        if cmds.objExists(d):
+            con = cmds.listConnections(d, type="constraint") or []
+            nodes_to_delete.extend(con)
+            
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_eyes_module(face_joint_map, parent_ctrl=None):
+    """
+        Builds the eye aim control setup.
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "head1_ctrl"
+    l_eye = "l_eye"
+    r_eye = "r_eye"
+    if face_joint_map:
+        l_eye = face_joint_map.get("LeftEye", {}).get("joint") or l_eye
+        r_eye = face_joint_map.get("RightEye", {}).get("joint") or r_eye
+        
+    if cmds.objExists(l_eye) and cmds.objExists(r_eye) and cmds.objExists(parent_ctrl):
+        create_eye_aim_setup(l_eye, r_eye, head_ctrl=parent_ctrl)
+
+
+def remove_eyes_module(face_joint_map):
+    """
+        Removes all controls built for the eyes.
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    l_eye = "l_eye"
+    r_eye = "r_eye"
+    if face_joint_map:
+        l_eye = face_joint_map.get("LeftEye", {}).get("joint") or l_eye
+        r_eye = face_joint_map.get("RightEye", {}).get("joint") or r_eye
+        
+    nodes_to_delete = [
+        "eye_aim_ctrl_pad",
+        "l_eye_aim_ctrl_pad",
+        "r_eye_aim_ctrl_pad"
+    ]
+    for prefix in [l_eye, r_eye]:
+        base = prefix.replace("_jnt", "").split("|")[-1].split(":")[-1]
+        nodes_to_delete.append(f"{base}1")
+        pads = cmds.ls(f"{base}_ctrl_pad*", type="transform") or []
+        nodes_to_delete.extend(pads)
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_tongue_module(face_joint_map, parent_ctrl=None):
+    """
+        Builds the tongue controls setup.
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "jaw_ctrl"
+    tongue_chain = []
+    if face_joint_map:
+        tongue_chain = face_joint_map.get("TongueChain", {}).get("joints", [])
+    if not tongue_chain:
+        tongue_chain = ["tongue1", "tongue2", "tongue3", "tongue4"]
+    tongue_chain = [tj for tj in tongue_chain if cmds.objExists(tj)]
+    
+    if tongue_chain and cmds.objExists(parent_ctrl):
+        create_joint_controls(
+            joint_list=tongue_chain,
+            control_shape="circle",
+            root_parent=parent_ctrl
         )
 
-        upperarm_joints = [side + "_upperarm1_twist", side + "_upperarm2_twist", side + "_upperarm3_twist",
-                           side + "_upperarm4_twist"]
+
+def remove_tongue_module(face_joint_map):
+    """
+        Removes all controls built for the tongue.
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    tongue_chain = []
+    if face_joint_map:
+        tongue_chain = face_joint_map.get("TongueChain", {}).get("joints", [])
+    if not tongue_chain:
+        tongue_chain = ["tongue1", "tongue2", "tongue3", "tongue4"]
+        
+    nodes_to_delete = []
+    for tj in tongue_chain:
+        nodes_to_delete.append(f"{tj}_ctrl_pad")
+        
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_teeth_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None):
+    """
+        Builds the upper and lower teeth controls setup.
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :param jaw_ctrl: jaw control node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "head1_ctrl"
+    jaw_ctrl = jaw_ctrl or "jaw_ctrl"
+    upper_teeth = None
+    lower_teeth = None
+    if face_joint_map:
+        upper_teeth = face_joint_map.get("UpperTeeth", {}).get("joint")
+        lower_teeth = face_joint_map.get("LowerTeeth", {}).get("joint")
+    if not upper_teeth:
+        upper_teeth = "upper_teeth"
+    if not lower_teeth:
+        lower_teeth = "lower_teeth"
+        
+    if upper_teeth and cmds.objExists(upper_teeth) and cmds.objExists(parent_ctrl):
+        create_joint_controls([upper_teeth], control_shape="sphere", root_parent=parent_ctrl)
+    if lower_teeth and cmds.objExists(lower_teeth) and cmds.objExists(jaw_ctrl):
+        create_joint_controls([lower_teeth], control_shape="sphere", root_parent=jaw_ctrl)
+
+
+def remove_teeth_module(face_joint_map):
+    """
+        Removes all controls built for the teeth.
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    upper_teeth = None
+    lower_teeth = None
+    if face_joint_map:
+        upper_teeth = face_joint_map.get("UpperTeeth", {}).get("joint")
+        lower_teeth = face_joint_map.get("LowerTeeth", {}).get("joint")
+    if not upper_teeth:
+        upper_teeth = "upper_teeth"
+    if not lower_teeth:
+        lower_teeth = "lower_teeth"
+        
+    nodes_to_delete = [f"{upper_teeth}_ctrl_pad", f"{lower_teeth}_ctrl_pad"]
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_other_face_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None, jaw_joint=None):
+    """
+        Builds secondary controls for any un-rigged face joints.
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :param jaw_ctrl: jaw control node name
+    :param jaw_joint: jaw joint node name
+    :return: None
+    """
+    parent_ctrl = parent_ctrl or "head1_ctrl"
+    jaw_ctrl = jaw_ctrl or "jaw_ctrl"
+    face_joints = []
+    if face_joint_map:
+        face_joints = face_joint_map.get("OtherFaceJoints", {}).get("joints", [])
+    face_joints = [fj for fj in face_joints if cmds.objExists(fj)]
+    
+    already_rigged = []
+    if face_joint_map:
+        for slot in ["LeftBrow", "RightBrow", "LeftEyelid", "RightEyelid", "LipChain", "Jaw", "TongueChain", "UpperTeeth", "LowerTeeth", "NoseRoot"]:
+            data = face_joint_map.get(slot, {})
+            if isinstance(data, dict):
+                already_rigged.extend(data.get("joints", []))
+                if data.get("joint"):
+                    already_rigged.append(data["joint"])
+            elif isinstance(data, list):
+                already_rigged.extend(data)
+            elif isinstance(data, str):
+                already_rigged.append(data)
+                
+    already_rigged.extend(['r_chin', "l_chin", "lower_teeth", "l_mandible", "r_mandible"])
+    face_joints = [fj for fj in face_joints if fj not in already_rigged]
+    
+    if parent_ctrl and cmds.objExists(parent_ctrl):
+        for fj in face_joints:
+            target_p = parent_ctrl
+            if jaw_joint and cmds.objExists(jaw_joint) and cmds.objExists(jaw_ctrl):
+                fj_long = cmds.ls(fj, long=True)[0]
+                jaw_long = cmds.ls(jaw_joint, long=True)[0]
+                if fj_long.startswith(jaw_long + "|"):
+                    target_p = jaw_ctrl
+            
+            ctrl_data = create_joint_controls(
+                [fj],
+                control_shape="sphere",
+                root_parent=target_p,
+                sub_ctrls=False,
+                keep_constraint=True
+            )
+            scale_ctrl_cvs_local(ctrl_data[0]["ctrl"], [0.2, 0.2, 0.2])
+
+
+def remove_other_face_module(face_joint_map):
+    """
+        Removes all secondary controls built for other face joints.
+    :param face_joint_map: face joint mapping dictionary
+    :return: int
+    """
+    face_joints = []
+    if face_joint_map:
+        face_joints = face_joint_map.get("OtherFaceJoints", {}).get("joints", [])
+    nodes_to_delete = []
+    for fj in face_joints:
+        base = fj.replace("_jnt", "").split("|")[-1].split(":")[-1]
+        nodes_to_delete.append(f"{base}_ctrl_pad")
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    return deleted_count
+
+
+def rig_arm_module(side, body_joint_map, parent_ctrl=None):
+    """
+        Rigs the Arm (IK/FK limb, Fingers, and Twist surface rigs).
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    def j(slot):
+        return body_joint_map.get(slot, {}).get("joint") if body_joint_map else None
+
+    arm_chain = []
+    if side == "l":
+        arm_chain = [j("LeftArm"), j("LeftForeArm"), j("LeftHand")]
+    else:
+        arm_chain = [j("RightArm"), j("RightForeArm"), j("RightHand")]
+
+    valid_arm = [a for a in arm_chain if a and cmds.objExists(a)]
+    if len(valid_arm) < 3:
+        arm_chain = [f"{side}_upperarm", f"{side}_lowerarm", f"{side}_hand"]
+    arm_chain = [a for a in arm_chain if a and cmds.objExists(a)]
+
+    side_prefix_title = "Left" if side == "l" else "Right"
+    clav_ctrl = parent_ctrl or f"{side}_clavicle_ctrl"
+
+    # Clavicle Setup
+    clav_jnt = body_joint_map.get(f"{side_prefix_title}Shoulder", {}).get("joint") if body_joint_map else None
+    if not clav_jnt or not cmds.objExists(clav_jnt):
+        clav_jnt = f"{side}_clavicle"
+
+    if clav_jnt and cmds.objExists(clav_jnt) and not cmds.objExists(clav_ctrl):
+        # Determine spine tip to parent clavicle to
+        spine_tip = body_joint_map.get("Spine2", {}).get("joint") if body_joint_map else "spine5_Tip"
+        if not spine_tip or not cmds.objExists(spine_tip):
+            spine_tip = "spine5_Tip"
+        spine_tip_ctrl = f"{spine_tip}_ctrl" if cmds.objExists(f"{spine_tip}_ctrl") else None
+        
+        created = create_joint_controls(
+            [clav_jnt],
+            control_shape="cube",
+            root_parent=spine_tip_ctrl
+        )
+        if created:
+            clav_ctrl = created[0]["ctrl"]
+            upperarm = arm_chain[0] if arm_chain else None
+            if upperarm and cmds.objExists(upperarm):
+                snap_ctrl_cvs_to_child(clav_ctrl, upperarm)
+    
+    if len(arm_chain) >= 3 and cmds.objExists(clav_ctrl):
+        create_ik_fk_limb(arm_chain, clav_ctrl)
+
+    finger_slots = []
+    if body_joint_map:
+        for finger in ["Thumb", "Index", "Middle", "Ring", "Pinky"]:
+            temp_finger_joints = []
+            for i in range(1, 5):
+                slot_name = f"{side_prefix_title}Hand{finger}{i}"
+                jnt = j(slot_name)
+                if jnt and cmds.objExists(jnt):
+                    temp_finger_joints.append(jnt)
+            temp_finger_joints.reverse()
+            finger_slots.extend(temp_finger_joints)
+
+    if not finger_slots:
+        finger_joints = [
+            f"{side}_thumb_04", f"{side}_thumb_03", f"{side}_thumb_02", f"{side}_thumb_01",
+            f"{side}_index_05", f"{side}_index_04", f"{side}_index_03", f"{side}_index_02", f"{side}_index_01",
+            f"{side}_middle_05", f"{side}_middle_04", f"{side}_middle_03", f"{side}_middle_02", f"{side}_middle_01",
+            f"{side}_ring_05", f"{side}_ring_04", f"{side}_ring_03", f"{side}_ring_02", f"{side}_ring_01",
+            f"{side}_pinky_05", f"{side}_pinky_04", f"{side}_pinky_03", f"{side}_pinky_02", f"{side}_pinky_01"
+        ]
+    else:
+        finger_joints = finger_slots
+    finger_joints = [fj for fj in finger_joints if cmds.objExists(fj)]
+    if finger_joints:
+        bake_joint_orient_to_rotate(joints=finger_joints)
+        hand_driver = arm_chain[2] + "_driver" if len(arm_chain) >= 3 else f"{side}_hand_driver"
+        create_finger_rigs(finger_joints, hand_driver=hand_driver)
+
+    def get_twists(base_slot, count):
+        base_slot_fixed = base_slot.replace('ForeArmRoll', 'ForearmRoll')
+        slots = [base_slot] + [f"Leaf{base_slot_fixed}{i}" for i in range(1, count)]
+        if body_joint_map:
+            twist_list = [body_joint_map.get(sl, {}).get("joint") for sl in slots]
+        else:
+            twist_list = []
+        twist_list = [t for t in twist_list if t and cmds.objExists(t)]
+        if not twist_list:
+            name_base = base_slot.replace("Roll", "").lower()
+            twist_list = [f"{side}_{name_base}_twist"] + [f"{side}_{name_base}_twist{i}" for i in range(1, count)]
+            twist_list = [t for t in twist_list if cmds.objExists(t)]
+        return twist_list
+
+    upperarm_joints = get_twists("LeftArmRoll" if side == "l" else "RightArmRoll", 4)
+    if len(upperarm_joints) >= 2 and cmds.objExists(f"{side}_upperarm_driver"):
         setup_surface_rig_with_drivers(
             upperarm_joints,
             loft_name=f"{side}_upperarm_twist",
@@ -2351,11 +4469,11 @@ def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
             side=side,
             region="upperarm",
             driver_follicle_indices=None,
-            root_parent=side + "_upperarm_driver"
+            root_parent=f"{side}_upperarm_driver"
         )
 
-        lowerarm_joints = [side + "_lowerarm1_twist", side + "_lowerarm2_twist", side + "_lowerarm3_twist",
-                           side + "_lowerarm4_twist"]
+    lowerarm_joints = get_twists("LeftForeArmRoll" if side == "l" else "RightForeArmRoll", 4)
+    if len(lowerarm_joints) >= 2 and cmds.objExists(f"{side}_lowerarm_driver"):
         setup_surface_rig_with_drivers(
             lowerarm_joints,
             loft_name=f"{side}_lowerarm_twist",
@@ -2363,10 +4481,428 @@ def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
             side=side,
             region="lowerarm",
             driver_follicle_indices=None,
-            root_parent=side + "_lowerarm_driver"
+            root_parent=f"{side}_lowerarm_driver"
         )
 
-        thigh_joints = [side + "_thigh_twist1", side + "_thigh_twist2", side + "_thigh_twist3", side + "_thigh_twist4"]
+    create_arm_space_switches(side, body_joint_map)
+
+
+    if cmds.objExists(f"{side}_hand_switch_ctrl"):
+        setup_show_twist_ctrls(side, "arm")
+
+    side_label = "Left Arm" if side == "l" else "Right Arm"
+    save_module_metadata(side_label, {
+        "joints": arm_chain,
+        "twist_upper": upperarm_joints,
+        "twist_lower": lowerarm_joints,
+        "parent": clav_ctrl,
+        "built": True
+    })
+
+
+def _find_parent_joint_control(joint):
+    """
+        Walk up the joint hierarchy from joint and return the first ancestor control.
+    :param joint: joint name to search from
+    :return: str or None
+    """
+    if not joint or not cmds.objExists(joint):
+        return None
+    curr = joint
+    while True:
+        parents = cmds.listRelatives(curr, parent=True, type="joint") or []
+        if not parents:
+            # Fallback to check any transform parent
+            parents = cmds.listRelatives(curr, parent=True) or []
+            if not parents:
+                break
+        curr = parents[0]
+        # Check standard and FK control suffixes
+        for suffix in ["_ctrl", "_fk_ctrl"]:
+            ctrl_candidate = curr.split("|")[-1] + suffix
+            if cmds.objExists(ctrl_candidate):
+                return ctrl_candidate
+    return None
+
+
+def _capture_orphaned_space_switch_roles(module_controls, module_name):
+    """
+    Before removing a module, scan every OTHER control in the scene for space
+    switches that list any of module_controls as a target.
+
+    The original ordered (target, display_name) pairs are stored inside
+    GLOBAL_RIG_STORE[module_name]["orphaned_roles"], then each affected switch
+    is rebuilt without the about-to-be-removed targets so remaining entries keep
+    their original index positions.
+
+    :param module_controls: list of control nodes belonging to the module being removed
+    :param module_name:     name of the module
+    :return: list[dict]
+    """
+    if not module_controls:
+        return []
+
+    module_ctrl_set = set(module_controls)
+    all_scene_ctrls = [n for n in (cmds.ls(type="transform") or [])
+                       if n.endswith("_ctrl") and n not in module_ctrl_set]
+
+    orphan_records = []
+    for driven in all_scene_ctrls:
+        switches = query_space_switches(driven)
+        for sw in switches:
+            pairs = sw.get("target_enum_pairs", [])
+            orphan_hit = [(i, t, d) for i, (t, d) in enumerate(pairs) if t in module_ctrl_set]
+            if not orphan_hit:
+                continue
+
+            orphan_records.append({
+                "driven":             driven,
+                "attr_name":          sw["attr_name"],
+                "constraint_type":    sw["constraint_type"],
+                "full_ordered_pairs": list(pairs),
+                "orphaned_indices":   [(i, t, d) for i, t, d in orphan_hit],
+            })
+
+            remaining_targets = [t for t, d in pairs if t not in module_ctrl_set]
+            remaining_names   = [d for t, d in pairs if t not in module_ctrl_set]
+
+            if remaining_targets:
+                try:
+                    create_space_switch(
+                        driven=driven,
+                        targets=remaining_targets,
+                        attr_name=sw["attr_name"],
+                        constraint_type=sw["constraint_type"],
+                        enum_names=remaining_names
+                    )
+                    an = sw["attr_name"]
+                except Exception as e:
+                    print("[Warning] Could not rebuild space switch on " + driven + ": " + str(e))
+            else:
+                an = sw["attr_name"]
+                _delete_space_switch_for_ctrl(driven, an)
+                print("[space switch] Removed empty switch " + driven + "." + an)
+
+    if module_name not in GLOBAL_RIG_STORE:
+        GLOBAL_RIG_STORE[module_name] = {"switches": [], "constraints": [], "connections": []}
+    GLOBAL_RIG_STORE[module_name]["orphaned_roles"] = orphan_records
+
+    return orphan_records
+
+
+def _restore_orphaned_space_switch_roles(module_name, rebuilt_ctrl_map=None):
+    """
+    After a module is rebuilt, re-insert its controls into every space switch
+    that previously referenced them, restoring the original enum index order.
+
+    :param module_name:      name of the module being restored
+    :param rebuilt_ctrl_map: optional dict mapping old_target_name -> new_target_name
+    :return: int  number of restored switches
+    """
+    if rebuilt_ctrl_map is None:
+        rebuilt_ctrl_map = {}
+
+    data           = GLOBAL_RIG_STORE.get(module_name, {})
+    orphan_records = data.get("orphaned_roles", [])
+    if not orphan_records:
+        return 0
+
+    restored = 0
+    for record in orphan_records:
+        driven     = record["driven"]
+        attr_name  = record["attr_name"]
+        ctype      = record["constraint_type"]
+        full_pairs = record["full_ordered_pairs"]
+
+        if not cmds.objExists(driven):
+            continue
+
+        remapped_pairs = [[rebuilt_ctrl_map.get(t, t), d] for t, d in full_pairs]
+        valid_targets  = [t for t, d in remapped_pairs if t and cmds.objExists(t)]
+        valid_names    = [d for t, d in remapped_pairs if t and cmds.objExists(t)]
+
+        if not valid_targets:
+            continue
+
+        try:
+            create_space_switch(
+                driven=driven,
+                targets=valid_targets,
+                attr_name=attr_name,
+                constraint_type=ctype,
+                enum_names=valid_names
+            )
+            restored += 1
+        except Exception as e:
+            print("[Warning] Could not restore orphaned space switch on " + driven + ": " + str(e))
+
+    return restored
+
+
+def _delete_space_switch_for_ctrl(ctrl, attr_name="space"):
+    """
+        Remove all space-switch scaffolding for ctrl by traversing the scene graph.
+    :param ctrl: control node name
+    :param attr_name: name of the enum attribute to delete
+    :return: None
+    """
+    if not cmds.objExists(ctrl):
+        return
+
+    # Collect all groups in the pad hierarchy of this control (control, sdk_pad, pad)
+    nodes_to_check = [ctrl]
+    p1 = (cmds.listRelatives(ctrl, parent=True, fullPath=False) or [None])[0]
+    if p1 and cmds.objExists(p1):
+        nodes_to_check.append(p1)
+        p2 = (cmds.listRelatives(p1, parent=True, fullPath=False) or [None])[0]
+        if p2 and cmds.objExists(p2):
+            nodes_to_check.append(p2)
+
+    # Collect all constraint nodes that live on (or are connected to) these groups
+    constraint_types = ["parentConstraint", "orientConstraint", "pointConstraint"]
+    constraints = []
+    for node in nodes_to_check:
+        for ct in constraint_types:
+            constraints += cmds.listRelatives(node, type=ct) or []
+        for con in (cmds.listConnections(node, source=True, destination=False, type="constraint") or []):
+            if con not in constraints:
+                constraints.append(con)
+
+
+    deleted_targets = []
+    for con in constraints:
+        if not cmds.objExists(con):
+            continue
+        con_type = cmds.nodeType(con)
+        # Query the real target objects the constraint is driven by
+        try:
+            if con_type == "parentConstraint":
+                targets = cmds.parentConstraint(con, q=True, targetList=True) or []
+            elif con_type == "orientConstraint":
+                targets = cmds.orientConstraint(con, q=True, targetList=True) or []
+            elif con_type == "pointConstraint":
+                targets = cmds.pointConstraint(con, q=True, targetList=True) or []
+            else:
+                targets = []
+        except Exception:
+            targets = []
+
+        for t in targets:
+            if not cmds.objExists(t):
+                continue
+            # Only delete scaffold transforms — real controls have shape nodes.
+            # Scaffold nodes (spaceTarget dups, composite spaces) are bare transforms.
+            shapes = cmds.listRelatives(t, shapes=True, fullPath=True) or []
+            if not shapes:
+                cmds.delete(t)
+                deleted_targets.append(t)
+
+        if cmds.objExists(con):
+            cmds.delete(con)
+
+    # Strip the space enum attr so it can be re-created on rebuild
+    if cmds.objExists(ctrl) and cmds.attributeQuery(attr_name, node=ctrl, exists=True):
+        cmds.deleteAttr(f"{ctrl}.{attr_name}")
+
+    return deleted_targets
+
+
+def remove_arm_module(side, body_joint_map):
+    """
+        Remove rig nodes and space switches for the given arm side.
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+
+    _arm_ctrls = [
+        f"{side}_lowerarm_pv_ctrl",
+        f"{side}_hand_ik_ctrl",
+        f"{side}_hand_ikHandle_ctrl",
+        f"{side}_upperarm_fk_ctrl",
+    ]
+    _arm_label = "Left Arm" if side == "l" else "Right Arm"
+    _capture_orphaned_space_switch_roles(_arm_ctrls, _arm_label)
+    for ctrl in _arm_ctrls:
+        _delete_space_switch_for_ctrl(ctrl)
+
+    nodes_to_delete = [
+        f"{side}_upperarm_fk_ctrl_pad", f"{side}_lowerarm_fk_ctrl_pad", f"{side}_hand_fk_ctrl_pad",
+        f"{side}_hand_ik_ctrl_pad", f"{side}_lowerarm_pv_ctrl_pad", f"{side}_hand_switch_ctrl_pad",
+        f"{side}_upperarm_driver_pad", f"{side}_lowerarm_driver_pad", f"{side}_hand_driver_pad",
+        f"{side}_upperarm_twist_surface_grp", f"{side}_upperarm_twist_surface", f"{side}_upperarm_twist_follicles", f"{side}_upperarm_twist_driver_pad",
+        f"{side}_lowerarm_twist_surface_grp", f"{side}_lowerarm_twist_surface", f"{side}_lowerarm_twist_follicles", f"{side}_lowerarm_twist_driver_pad",
+        f"{side}_arm_pv_handClav_space"
+    ]
+    fingers = ["thumb", "index", "middle", "ring", "pinky"]
+    for f in fingers:
+        for i in range(1, 6):
+            nodes_to_delete.append(f"{side}_{f}_0{i}_ctrl_pad")
+            nodes_to_delete.append(f"{side}_{f}_0{i}_driver_pad")
+
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    side_label = "Left Arm" if side == "l" else "Right Arm"
+    clear_module_metadata(side_label)
+    return deleted_count
+
+
+class ModelessContinueDialog(QtWidgets.QDialog):
+    def __init__(self, title, message, parent=None):
+        super(ModelessContinueDialog, self).__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.setModal(False)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        lbl = QtWidgets.QLabel(message)
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+        
+        btn_layout = QtWidgets.QHBoxLayout()
+        self.continue_btn = QtWidgets.QPushButton("Continue Build")
+        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        
+        btn_layout.addWidget(self.continue_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        self.loop = QtCore.QEventLoop()
+        
+        self.continue_btn.clicked.connect(self.on_continue)
+        self.cancel_btn.clicked.connect(self.on_cancel)
+        
+        self.result_value = None
+
+    def on_continue(self):
+        self.result_value = "Continue Build"
+        self.loop.exit(0)
+        self.close()
+        
+    def on_cancel(self):
+        self.result_value = "Cancel"
+        self.loop.exit(0)
+        self.close()
+        
+    def exec_non_modal(self):
+        self.show()
+        self.loop.exec_()
+        return self.result_value
+
+
+def create_rfl_joints_template(side, ankle_jnt, toe_jnt, toe_tip_jnt):
+    """
+    Creates RFL template joints heel > outerBank > innerBank > toeTip > toe > ankle.
+    """
+    # 1. Gather positions
+    ank_pos = cmds.xform(ankle_jnt, q=True, ws=True, t=True) if ankle_jnt and cmds.objExists(ankle_jnt) else [0, 1, 0]
+    toe_pos = cmds.xform(toe_jnt, q=True, ws=True, t=True) if toe_jnt and cmds.objExists(toe_jnt) else [0, 0.2, 1]
+    tip_pos = cmds.xform(toe_tip_jnt, q=True, ws=True, t=True) if toe_tip_jnt and cmds.objExists(toe_tip_jnt) else [0, 0.1, 1.5]
+
+    # Side sign multiplier
+    x_mult = 1.0 if side == "l" else -1.0
+
+    # Positions for banks and heel (on floor Y=0 or same Y as toe)
+    floor_y = 0.0
+    heel_pos = [ank_pos[0], floor_y, ank_pos[2] - 1.5]
+    outer_pos = [toe_pos[0] - (2.5 * x_mult), floor_y, toe_pos[2]]
+    inner_pos = [toe_pos[0] + (2.5 * x_mult), floor_y, toe_pos[2]]
+    
+    # 2. Create the joint hierarchy
+    cmds.select(cl=True)
+    heel = cmds.joint(name=f"{side}_heel_RFL", p=heel_pos)
+    outer = cmds.joint(name=f"{side}_outerBank_RFL", p=outer_pos)
+    inner = cmds.joint(name=f"{side}_innerBank_RFL", p=inner_pos)
+    tip = cmds.joint(name=f"{side}_toeTip_RFL", p=tip_pos)
+    toe = cmds.joint(name=f"{side}_toe_RFL", p=toe_pos)
+    ankle = cmds.joint(name=f"{side}_ankle_RFL", p=ank_pos)
+    
+    # Orient them to world (or clean rotation)
+    for jnt in [heel, outer, inner, tip, toe, ankle]:
+        cmds.setAttr(jnt + ".jointOrientX", 0)
+        cmds.setAttr(jnt + ".jointOrientY", 0)
+        cmds.setAttr(jnt + ".jointOrientZ", 0)
+        
+    return [heel, outer, inner, tip, toe, ankle]
+
+
+def rig_leg_module(side, body_joint_map, parent_ctrl=None):
+    """
+        Rigs the Leg (IK/FK limb, Twist surface rigs, foot roll RFL, and switches).
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    def j(slot):
+        return body_joint_map.get(slot, {}).get("joint") if body_joint_map else None
+
+    leg_chain = []
+    if body_joint_map and side in body_joint_map:
+        leg_chain = body_joint_map[side]
+    else:
+        prefix = "Left" if side == "l" else "Right"
+        up_leg = j(f"{prefix}UpLeg")
+        leg = j(f"{prefix}Leg")
+        foot = j(f"{prefix}Foot")
+        toe = j(f"{prefix}ToeBase")
+        toe_tip = None
+        if toe and cmds.objExists(toe):
+            kids = cmds.listRelatives(toe, c=True, type="joint") or []
+            if kids:
+                toe_tip = kids[0]
+        leg_chain = [up_leg, leg, foot, toe, toe_tip]
+
+    valid_leg = [l for l in leg_chain if l and cmds.objExists(l)]
+    if len(valid_leg) < 3:
+        leg_chain = [
+            f"{side}_thigh",
+            f"{side}_knee",
+            f"{side}_ankle",
+            f"{side}_toe",
+            f"{side}_toeTip"
+        ]
+    else:
+        while len(leg_chain) < 5:
+            leg_chain.append(None)
+        if not leg_chain[3] or not cmds.objExists(leg_chain[3]):
+            leg_chain[3] = f"{side}_toe"
+        if not leg_chain[4] or not cmds.objExists(leg_chain[4]):
+            leg_chain[4] = f"{side}_toeTip"
+    leg_chain = [l for l in leg_chain if l and cmds.objExists(l)]
+
+    hip_ctrl = parent_ctrl
+    if not hip_ctrl:
+        if cmds.objExists("hipswing_ctrl"):
+            hip_ctrl = "hipswing_ctrl"
+        elif cmds.objExists("pelvis_ctrl"):
+            hip_ctrl = "pelvis_ctrl"
+        else:
+            hip_ctrl = "origin_ctrl"
+
+    if len(leg_chain) >= 3:
+        create_ik_fk_limb(leg_chain, hip_ctrl)
+
+    side_prefix_title = "Left" if side == "l" else "Right"
+    def get_twists(base_slot, count):
+        slots = [base_slot] + [f"Leaf{base_slot}{i}" for i in range(1, count)]
+        if body_joint_map:
+            twist_list = [body_joint_map.get(sl, {}).get("joint") for sl in slots]
+        else:
+            twist_list = []
+        twist_list = [t for t in twist_list if t and cmds.objExists(t)]
+        if not twist_list:
+            name_base = base_slot.replace("Roll", "").lower()
+            twist_list = [f"{side}_{name_base}_twist"] + [f"{side}_{name_base}_twist{i}" for i in range(1, count)]
+            twist_list = [t for t in twist_list if cmds.objExists(t)]
+        return twist_list
+
+    thigh_joints = get_twists("LeftUpLegRoll" if side == "l" else "RightUpLegRoll", 4)
+    if len(thigh_joints) >= 2 and cmds.objExists(f"{side}_thigh_driver"):
         setup_surface_rig_with_drivers(
             thigh_joints,
             loft_name=f"{side}_thigh_twist",
@@ -2374,99 +4910,784 @@ def create_full_rig(arm_joints=['l_upperarm', 'r_upperarm',
             side=side,
             region="thigh",
             driver_follicle_indices=None,
-            root_parent="hipswing_ctrl"
+            root_parent=f"{side}_thigh_driver"
         )
-        knee_joints = [side + "_knee_twist1", side + "_knee_twist2", side + "_knee_twist3"]
+
+    knee_joints = get_twists("LeftLegRoll" if side == "l" else "RightLegRoll", 3)
+    if len(knee_joints) >= 3 and cmds.objExists(f"{side}_knee_driver") and cmds.objExists(f"{side}_ankle_driver") and cmds.objExists(f"{side}_knee_surface"):
         knee_ctrl_data = create_joint_controls(
             knee_joints,
             control_shape="arrow",
-            root_parent=side + "_knee_driver",
+            root_parent=f"{side}_knee_driver",
             sub_ctrls=False,
             keep_constraint=True
         )
-        knee_twist = create_twist_driver(driver_bone=side + "_knee_driver",
-                                         child_bone=side + "_ankle_driver",
-                                         parent=side + "_thigh_driver",
-                                         surface=side + "_knee_surface")
+        knee_twist = create_twist_driver(driver_bone=f"{side}_knee_driver",
+                                         child_bone=f"{side}_ankle_driver",
+                                         parent=f"{side}_knee_driver",
+                                         surface=f"{side}_knee_surface")
         md_node = cmds.createNode("multiplyDivide", name=f"{side}_knee_twist_md")
         cmds.setAttr(f"{md_node}.operation", 1)
 
-        # Set Input2 values as in your screenshot
         cmds.setAttr(f"{md_node}.input2X", 0.333)
         cmds.setAttr(f"{md_node}.input2Y", 0.667)
         cmds.setAttr(f"{md_node}.input2Z", 1)
 
-        # Connect knee_twist.rotateX to all Input1 channels
         for idx, channel in enumerate(["X", "Y", "Z"]):
             cmds.connectAttr(f"{knee_twist}.rotateX", f"{md_node}.input1{channel}")
 
-        # Connect outputs to each corresponding knee_pad.rotateX
         for i, kj in enumerate(knee_joints):
-            knee_pad = knee_ctrl_data[i]["sdk"]
+            if i != 0:
+                knee_pad = knee_ctrl_data[i]["pad"]
+                cmds.parent(knee_pad, f"{side}_knee_driver")
+            knee_sdk = knee_ctrl_data[i]["sdk"]
             output_attr = f"output{['X', 'Y', 'Z'][i]}"
-            cmds.connectAttr(f"{md_node}.{output_attr}", f"{knee_pad}.rotateX")
+            cmds.connectAttr(f"{md_node}.{output_attr}", f"{knee_sdk}.rotateX")
 
-    mouth_joints = [
-        'c_upper_lip', 'r_upper_lip4', 'r_upper_lip3', 'r_upper_lip2', 'r_upper_lip1',
-        'r_lip_corner1', 'r_lower_lip1', 'r_lower_lip2', 'r_lower_lip3', 'r_lower_lip4',
-        'c_lower_lip', 'l_lower_lip4', 'l_lower_lip3', 'l_lower_lip2', 'l_lower_lip1',
-        'l_lip_corner1', 'l_upper_lip1', 'l_upper_lip2', 'l_upper_lip3', 'l_upper_lip4'
+    def get_ik_joint_name(jnt):
+        if not jnt:
+            return ""
+        base = jnt.split("|")[-1]
+        base = re.sub(r'\d+$', '', base)
+        base = base.replace("_jnt", "")
+        return f"{base}_ik"
+
+    rfl_joints = [
+        f"{side}_heel_RFL", f"{side}_outerBank_RFL", f"{side}_innerBank_RFL",
+        f"{side}_toeTip_RFL", f"{side}_toe_RFL", f"{side}_ankle_RFL"
     ]
+    ik_leg_joints = []
+    if len(leg_chain) >= 5:
+        ik_leg_joints = [
+            get_ik_joint_name(leg_chain[2]),
+            get_ik_joint_name(leg_chain[3]),
+            get_ik_joint_name(leg_chain[4])
+        ]
+        
+    if ik_leg_joints and cmds.objExists(f"{side}_ankle_ik_ctrl"):
+        rfl_exists = all(cmds.objExists(j) for j in rfl_joints)
+        if not rfl_exists:
+            # Create RFL template
+            create_rfl_joints_template(side, leg_chain[2], leg_chain[3], leg_chain[4])
+            
+            # Prompt the user
+            msg = (
+                f"RFL (Reverse Foot Lock) joints were not found in the scene for the {side_prefix_title} Leg.\n\n"
+                f"We have created a template joint hierarchy in the viewport.\n\n"
+                f"Please position/orient the generated RFL joints (heel, outerBank, innerBank, toeTip, toe, ankle) "
+                f"to match your character's foot pivots, then click 'Continue Build' to complete the RFL setup."
+            )
+            dialog = ModelessContinueDialog("RFL Template Created", msg)
+            res = dialog.exec_non_modal()
+            if res == "Continue Build":
+                rfl_exists = all(cmds.objExists(j) for j in rfl_joints)
+                
+        if rfl_exists and all(cmds.objExists(j) for j in ik_leg_joints):
+            build_rfl_ik_and_constraints(
+                side=side,
+                ik_leg_ctrl=f"{side}_ankle_ik_ctrl",
+                ik_leg_joints=ik_leg_joints,
+                rfl_joints=rfl_joints
+            )
 
-    loft_surf, follicle_joints, lip_ctrls, driver_data = setup_surface_rig_with_drivers(
-        mouth_joints,
-        loft_name="mouth",
-        offset=0.5,
-        driver_follicle_indices=[0, 2, 5, 8, 10, 12, 15, 18],
-        region="mouth",
-        root_parent="head1_ctrl"
-    )
+    create_leg_space_switches(side, body_joint_map)
 
-    face_joints = [
-        'r_undereye_3', 'r_undereye_4', 'r_undereye_5', 'r_undereye_1',
-        'r_ear_base1', 'r_ear_base', 'l_upper_cheek', 'r_undereye_2',
-        'l_lower_cheek', 'l_inner_cheek', 'r_upper_nose',
-        'l_inner_cheek_smile', 'r_inner_cheek_smile', 'r_inner_cheek',
-        'r_upper_cheek', 'r_lower_cheek',
-        'r_undereye_8', 'r_undereye_7', 'r_undereye_6',
-        'l_undereye_8', 'l_undereye_7', 'l_undereye_6',
-        'l_undereye_5', 'l_undereye_4', 'l_undereye_3',
-        'l_undereye_2', 'l_undereye_1', "l_mandible", "r_mandible",
-        'l_ear_base1', 'upper_teeth', 'l_upper_nose', 'l_ear_base', "nose_root"
+
+    if cmds.objExists(f"{side}_ankle_switch_ctrl"):
+        setup_show_twist_ctrls(side, "leg")
+
+    side_label = "Left Leg" if side == "l" else "Right Leg"
+    save_module_metadata(side_label, {
+        "joints": leg_chain,
+        "twist_thigh": thigh_joints,
+        "twist_knee": knee_joints,
+        "parent": hip_ctrl,
+        "built": True
+    })
+
+
+def remove_leg_module(side, body_joint_map):
+    """
+        Remove rig nodes and RFL setups for the given leg side.
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+
+    rfl_root = f"{side}_heel_RFL"
+    rfl_all = [
+        f"{side}_heel_RFL", f"{side}_outerBank_RFL", f"{side}_innerBank_RFL",
+        f"{side}_toeTip_RFL", f"{side}_toe_RFL", f"{side}_ankle_RFL"
     ]
-
-    for fj in face_joints:
-        ctrl_data = create_joint_controls(
-            [fj],
-            control_shape="sphere",
-            root_parent="head1_ctrl",
-            sub_ctrls=False,
-            keep_constraint=True
-        )
-        scale_ctrl_cvs_local(ctrl_data[0]["ctrl"], [0.2, 0.2, 0.2])
-    nose_children = cmds.listRelatives("nose_root", c=1, type="joint")
-    for fj in nose_children:
-        ctrl_data = create_joint_controls(
-            [fj],
-            control_shape="sphere",
-            root_parent="nose_root_ctrl",
-            sub_ctrls=False,
-            keep_constraint=True
-        )
-        scale_ctrl_cvs_local(ctrl_data[0]["ctrl"], [0.2, 0.2, 0.2])
-    jaw_joints =['r_chin', "l_chin", "lower_teeth", "l_mandible", "r_mandible"]
-    for jj in jaw_joints:
-        ctrl_data = create_joint_controls(
-            [jj],
-            control_shape="sphere",
-            root_parent="jaw_ctrl",
-            sub_ctrls=False,
-            keep_constraint=True
-        )
-        scale_ctrl_cvs_local(ctrl_data[0]["ctrl"], [0.2, 0.2, 0.2])
-    setup_jaw_lip_driver("jaw_ctrl",
-                         ["c_upper_lip_main_ctrl", "c_lower_lip_main_ctrl", "r_lip_corner_main_ctrl",
-                          "l_lip_corner_main_ctrl"], lip_ctrls)
+    if cmds.objExists(rfl_root):
+        # Remove any constraints on RFL joints so they're clean for rebuild
+        for rfl_jnt in rfl_all:
+            if cmds.objExists(rfl_jnt):
+                for con in (cmds.listRelatives(rfl_jnt, type="constraint") or []):
+                    if cmds.objExists(con):
+                        cmds.delete(con)
+        # Parent root to world
+        current_parent = cmds.listRelatives(rfl_root, parent=True, fullPath=False)
+        if current_parent:
+            cmds.parent(rfl_root, world=True)
 
 
-create_full_rig()
+        _leg_label = "Left Leg" if side == "l" else "Right Leg"
+    _leg_ctrls = [
+        f"{side}_thigh_fk_ctrl", f"{side}_knee_pv_ctrl",
+        f"{side}_ankle_ik_ctrl", f"{side}_ankle_switch_ctrl",
+    ]
+    _capture_orphaned_space_switch_roles(_leg_ctrls, _leg_label)
+    for ctrl in [
+        f"{side}_knee_pv_ctrl",
+        f"{side}_ankle_ik_ctrl",
+        f"{side}_ankle_ikHandle_ctrl",
+        f"{side}_thigh_fk_ctrl",
+    ]:
+        _delete_space_switch_for_ctrl(ctrl)
+
+    nodes_to_delete = [
+        f"{side}_thigh_fk_ctrl_pad", f"{side}_knee_fk_ctrl_pad", f"{side}_ankle_fk_ctrl_pad",
+        f"{side}_ankle_ik_ctrl_pad", f"{side}_knee_pv_ctrl_pad", f"{side}_ankle_switch_ctrl_pad",
+        f"{side}_thigh_driver_pad", f"{side}_knee_driver_pad", f"{side}_ankle_driver_pad",
+        f"{side}_thigh_twist_surface_grp", f"{side}_thigh_twist_surface", f"{side}_thigh_twist_follicles", f"{side}_thigh_twist_driver_pad",
+        f"{side}_knee_twist_md", f"{side}_knee_twist_loc",
+        f"{side}_ankle_toe_ik", f"{side}_toe_toeTip_ik",
+        f"{side}_leg_pv_footHip_space"
+    ]
+    side_prefix_title = "Left" if side == "l" else "Right"
+    slots = ["LeftLegRoll"] + [f"Leaf{side_prefix_title}LegRoll{i}" for i in range(1, 3)]
+    for sl in slots:
+        jnt = body_joint_map.get(sl, {}).get("joint") if body_joint_map else None
+        if jnt:
+            nodes_to_delete.append(f"{jnt}_ctrl_pad")
+
+    deleted_count = 0
+    for node in nodes_to_delete:
+        if cmds.objExists(node):
+            cmds.delete(node)
+            deleted_count += 1
+    side_label = "Left Leg" if side == "l" else "Right Leg"
+    clear_module_metadata(side_label)
+    return deleted_count
+
+
+def rig_root_module(body_joint_map):
+    """
+        Builds the root origin control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: None
+    """
+    root_jnt = (body_joint_map.get("Root") or {}).get("joint") if body_joint_map else None
+    if not root_jnt or not cmds.objExists(root_jnt):
+        root_jnt = "origin"
+    if cmds.objExists(root_jnt):
+        create_joint_controls([root_jnt], control_shape="circle")
+        ctrl_name = root_jnt + "_ctrl"
+        if cmds.objExists(ctrl_name):
+            scale_ctrl_cvs_local(ctrl_name, [25, 25, 25])
+            orient_control_pad_to_world_safely(ctrl_name, root_jnt)
+    save_module_metadata("Root / Origin", {
+        "joints": [root_jnt],
+        "parent": "",
+        "built": True
+    })
+
+
+def remove_root_module(body_joint_map):
+    """
+        Removes the root origin control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    root_jnt = (body_joint_map.get("Root") or {}).get("joint") if body_joint_map else None
+    if not root_jnt:
+        root_jnt = "origin"
+    nodes = [root_jnt + "_ctrl_pad"]
+    deleted = 0
+    for n in nodes:
+        if cmds.objExists(n):
+            cmds.delete(n)
+            deleted += 1
+    clear_module_metadata("Root / Origin")
+    return deleted
+
+
+def rig_pelvis_module(body_joint_map, parent_ctrl=None):
+    """
+        Builds the pelvis and hipswing control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    pelvis_jnt = (body_joint_map.get("Hips") or {}).get("joint") if body_joint_map else None
+    if not pelvis_jnt or not cmds.objExists(pelvis_jnt):
+        pelvis_jnt = "pelvis"
+
+    root_jnt = (body_joint_map.get("Root") or {}).get("joint") if body_joint_map else None
+    if not root_jnt:
+        root_jnt = "origin"
+    root_p = parent_ctrl or (root_jnt + "_ctrl" if cmds.objExists(root_jnt + "_ctrl") else None)
+
+    joints_used = []
+    if cmds.objExists(pelvis_jnt):
+        create_joint_controls([pelvis_jnt], control_shape="circle", root_parent=root_p)
+        ctrl_name = pelvis_jnt + "_ctrl"
+        if cmds.objExists(ctrl_name):
+            scale_ctrl_cvs_local(ctrl_name, [25, 25, 25])
+            orient_control_pad_to_world_safely(ctrl_name, pelvis_jnt)
+        joints_used.append(pelvis_jnt)
+
+    hip_swing = (body_joint_map.get("HipSwing") or {}).get("joint") if body_joint_map else None
+    if not hip_swing or not cmds.objExists(hip_swing):
+        hip_swing = "hipswing"
+
+    if cmds.objExists(hip_swing):
+        root_p_swing = pelvis_jnt + "_ctrl" if cmds.objExists(pelvis_jnt + "_ctrl") else None
+        create_joint_controls([hip_swing], control_shape="sphere", root_parent=root_p_swing)
+        swing_ctrl = hip_swing.replace("_jnt", "").split("|")[-1] + "_ctrl"
+        orient_control_pad_to_world_safely(swing_ctrl, hip_swing)
+        joints_used.append(hip_swing)
+
+    save_module_metadata("Pelvis & Hips", {
+        "joints": joints_used,
+        "parent": root_p or "",
+        "built": True
+    })
+
+
+def remove_pelvis_module(body_joint_map):
+    """
+        Removes the pelvis and hipswing control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    pelvis_jnt = (body_joint_map.get("Hips") or {}).get("joint") if body_joint_map else None
+    if not pelvis_jnt:
+        pelvis_jnt = "pelvis"
+
+    hip_swing = (body_joint_map.get("HipSwing") or {}).get("joint") if body_joint_map else None
+    if not hip_swing:
+        hip_swing = "hipswing"
+
+    nodes = [pelvis_jnt + "_ctrl_pad", hip_swing + "_ctrl_pad"]
+    deleted = 0
+    for n in nodes:
+        if cmds.objExists(n):
+            cmds.delete(n)
+            deleted += 1
+    clear_module_metadata("Pelvis & Hips")
+    return deleted
+
+
+def rig_spine_module(body_joint_map, parent_ctrl=None):
+    """
+        Builds the spine control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    spine_joints = []
+    if body_joint_map:
+        for key in sorted(body_joint_map.keys()):
+            if key.startswith("Spine") and not key.endswith("Tip"):
+                jnt = body_joint_map[key].get("joint")
+                if jnt and cmds.objExists(jnt):
+                    spine_joints.append(jnt)
+    if not spine_joints:
+        spine_joints = ["spine1", "spine3", "spine5"]
+    spine_joints = [s for s in spine_joints if cmds.objExists(s)]
+
+    pelvis_jnt = body_joint_map.get("Hips", {}).get("joint") if body_joint_map else "pelvis"
+    root_p = parent_ctrl or (pelvis_jnt + "_ctrl" if cmds.objExists(pelvis_jnt + "_ctrl") else None)
+
+    if spine_joints:
+        spine_tip = spine_joints[-1]
+        spine_base = spine_joints[:-1]
+        if spine_base:
+            create_joint_controls(spine_base, control_shape="sphere", root_parent=root_p, sub_ctrls=True)
+        tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
+        if cmds.objExists(spine_tip):
+            create_joint_controls([spine_tip], control_shape="sphere", root_parent=tip_root)
+
+    save_module_metadata("Spine", {
+        "joints": spine_joints,
+        "parent": root_p or "",
+        "built": True
+    })
+
+
+def remove_spine_module(body_joint_map):
+    """
+        Removes the spine control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    spine_joints = []
+    if body_joint_map:
+        for key in sorted(body_joint_map.keys()):
+            if key.startswith("Spine"):
+                jnt = body_joint_map[key].get("joint")
+                if jnt:
+                    spine_joints.append(jnt)
+    if not spine_joints:
+        spine_joints = ["spine1", "spine3", "spine5", "spine5_Tip"]
+    deleted = 0
+    for s in spine_joints:
+        pad = s + "_ctrl_pad"
+        if cmds.objExists(pad):
+            cmds.delete(pad)
+            deleted += 1
+    clear_module_metadata("Spine")
+    return deleted
+
+
+def rig_neck_module(body_joint_map, parent_ctrl=None):
+    """
+        Builds the neck control setup and space switches.
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    neck_joints = []
+    if body_joint_map:
+        for key in sorted(body_joint_map.keys()):
+            if key.startswith("Neck"):
+                jnt = body_joint_map[key].get("joint")
+                if jnt and cmds.objExists(jnt):
+                    neck_joints.append(jnt)
+    
+    # Auto-discover neck joints from head joint if mapping is empty
+    if not neck_joints and body_joint_map:
+        head_joint = body_joint_map.get("Head", {}).get("joint")
+        if head_joint and cmds.objExists(head_joint):
+            curr = head_joint
+            discovered_neck = []
+            stop_joint = body_joint_map.get("Spine2", {}).get("joint")
+            if not stop_joint or not cmds.objExists(stop_joint):
+                stop_joint = "spine5_Tip"
+            while True:
+                parents = cmds.listRelatives(curr, parent=True, type="joint") or []
+                if not parents:
+                    parents = cmds.listRelatives(curr, parent=True) or []
+                    if not parents:
+                        break
+                curr = parents[0]
+                if curr == stop_joint or "spine" in curr.lower():
+                    break
+                discovered_neck.append(curr)
+            if discovered_neck:
+                neck_joints = list(reversed(discovered_neck))
+
+    if not neck_joints:
+        neck_joints = ["neck1", "neck2"]
+    neck_joints = [n for n in neck_joints if cmds.objExists(n)]
+
+    spine_tip = body_joint_map.get("Spine2", {}).get("joint") if body_joint_map else "spine5_Tip"
+    if not spine_tip or not cmds.objExists(spine_tip):
+        spine_tip = "spine5_Tip"
+    root_p = parent_ctrl or (spine_tip + "_ctrl" if cmds.objExists(spine_tip + "_ctrl") else None)
+    if neck_joints:
+        create_joint_controls(joint_list=neck_joints, control_shape="circle", root_parent=root_p)
+        neck_ctrl = neck_joints[0] + "_ctrl"
+        if cmds.objExists(neck_ctrl):
+            targets = [t for t in ["pelvis_ctrl", "origin_ctrl", root_p] if t and cmds.objExists(t)]
+            if targets:
+                create_space_switch(driven=neck_ctrl, targets=targets, attr_name="space", constraint_type="orient")
+
+    save_module_metadata("Neck", {
+        "joints": neck_joints,
+        "parent": root_p or "",
+        "built": True
+    })
+
+
+def remove_neck_module(body_joint_map):
+    """
+        Removes the neck control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    neck_joints = []
+    if body_joint_map:
+        for key in sorted(body_joint_map.keys()):
+            if key.startswith("Neck"):
+                jnt = body_joint_map[key].get("joint")
+                if jnt:
+                    neck_joints.append(jnt)
+    if not neck_joints:
+        neck_joints = ["neck1", "neck2"]
+    deleted = 0
+    for n in neck_joints:
+        pad = n + "_ctrl_pad"
+        if cmds.objExists(pad):
+            cmds.delete(pad)
+            deleted += 1
+    clear_module_metadata("Neck")
+    return deleted
+
+
+def rig_head_module(body_joint_map, face_joint_map=None, parent_ctrl=None):
+    """
+        Builds the head control setup and space switches.
+    :param body_joint_map: body joint mapping dictionary
+    :param face_joint_map: face joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    head_joint = body_joint_map.get("Head", {}).get("joint") if body_joint_map else None
+    if not head_joint or not cmds.objExists(head_joint):
+        head_joint = "head1"
+
+    neck_tip = body_joint_map.get("Neck1", {}).get("joint") if body_joint_map else "neck2"
+    if not neck_tip or not cmds.objExists(neck_tip):
+        neck_tip = "neck2"
+    root_p = parent_ctrl or (neck_tip + "_ctrl" if cmds.objExists(neck_tip + "_ctrl") else None)
+
+    if cmds.objExists(head_joint):
+        create_joint_controls(joint_list=[head_joint], control_shape="circle", root_parent=root_p)
+        head_ctrl = head_joint + "_ctrl"
+        if cmds.objExists(head_ctrl):
+            targets = [t for t in ["pelvis_ctrl", "origin_ctrl", root_p] if t and cmds.objExists(t)]
+            if targets:
+                create_space_switch(driven=head_ctrl, targets=targets, attr_name="space", constraint_type="orient")
+    jaw_joint = face_joint_map.get("Jaw", {}).get("joint")
+    create_joint_controls(joint_list=[jaw_joint], control_shape="circle", root_parent=head_ctrl)
+    save_module_metadata("Head", {
+        "joints": [head_joint],
+        "parent": root_p or "",
+        "built": True
+    })
+
+
+def remove_head_module(body_joint_map):
+    """
+        Removes the head control setup.
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    head_joint = body_joint_map.get("Head", {}).get("joint") if body_joint_map else "head1"
+    nodes = [head_joint + "_ctrl_pad"]
+    deleted = 0
+    for n in nodes:
+        if cmds.objExists(n):
+            cmds.delete(n)
+            deleted += 1
+    clear_module_metadata("Head")
+    return deleted
+
+
+def _module_attr_name(module_id):
+    """
+        Normalise a module ID to a valid Maya attribute name.
+    :param module_id: unique module identifier
+    :return: str
+    """
+    name = module_id.replace(" ", "_").replace("(", "").replace(")", "")
+    name = name.replace("&", "and").replace("/", "_")
+    name = re.sub(r"[^A-Za-z0-9_]", "_", name)
+    return "module_" + name.lower()
+
+
+def save_module_metadata(module_id, data_dict):
+    """
+        Persist data_dict for module_id on the scene-level store node.
+    :param module_id: unique module identifier
+    :param data_dict: dictionary containing module properties
+    :return: None
+    """
+
+    if not cmds.objExists(MODULE_STORE_NODE):
+        cmds.createNode("network", name=MODULE_STORE_NODE)
+    attr = _module_attr_name(module_id)
+    if not cmds.attributeQuery(attr, node=MODULE_STORE_NODE, exists=True):
+        cmds.addAttr(MODULE_STORE_NODE, longName=attr, dataType="string")
+    
+    # Merge with existing metadata to preserve other keys
+    existing = load_module_metadata(module_id)
+    merged = {}
+    if existing:
+        merged.update(existing)
+    merged.update(data_dict)
+    
+    cmds.setAttr(f"{MODULE_STORE_NODE}.{attr}", json.dumps(merged), type="string")
+
+
+def load_module_metadata(module_id):
+    """
+        Return the stored dict for module_id, or {} if not found.
+    :param module_id: unique module identifier
+    :return: dict
+    """
+
+    if not cmds.objExists(MODULE_STORE_NODE):
+        return {}
+    attr = _module_attr_name(module_id)
+    if not cmds.attributeQuery(attr, node=MODULE_STORE_NODE, exists=True):
+        return {}
+    raw = cmds.getAttr(f"{MODULE_STORE_NODE}.{attr}") or "{}"
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def get_all_module_metadata():
+    """
+        Return {module_id: data_dict} for every stored module.
+    :return: dict
+    """
+    if not cmds.objExists(MODULE_STORE_NODE):
+        return {}
+    attrs = cmds.listAttr(MODULE_STORE_NODE, userDefined=True) or []
+    result = {}
+    for attr in attrs:
+        if attr.startswith("module_"):
+            raw = cmds.getAttr(f"{MODULE_STORE_NODE}.{attr}") or "{}"
+            try:
+                result[attr[len("module_"):]] = json.loads(raw)
+            except Exception:
+                result[attr[len("module_"):]] = {}
+    return result
+
+
+def clear_module_metadata(module_id):
+    """
+        Mark a module as not built while keeping its joint/parent info.
+    :param module_id: unique module identifier
+    :return: None
+    """
+    data = load_module_metadata(module_id)
+    data["built"] = False
+    save_module_metadata(module_id, data)
+
+
+def store_rig_connections(controls_list, module_name):
+    """
+        Queries space switches, external constraints, and output connections for controls_list and stores them in GLOBAL_RIG_STORE[module_name].
+    :param controls_list: list of control nodes to query
+    :param module_name: name of the module
+    :return: None
+    """
+    if module_name not in GLOBAL_RIG_STORE:
+        GLOBAL_RIG_STORE[module_name] = {
+            "switches": [],
+            "constraints": [],
+            "connections": []
+        }
+    
+    internal_nodes = set(controls_list)
+    for ctrl in controls_list:
+        internal_nodes.add(ctrl + "_sdk_pad")
+        internal_nodes.add(ctrl + "_pad")
+        
+    data = GLOBAL_RIG_STORE[module_name]
+    # Clear existing stored data for this module to avoid duplicates
+    data["switches"] = []
+    data["constraints"] = []
+    data["connections"] = []
+    
+    for ctrl in controls_list:
+        if not cmds.objExists(ctrl):
+            continue
+        if ctrl.endswith("_switch_ctrl"):
+            continue
+        
+        sw = query_space_switches(ctrl)
+        if sw:
+            data["switches"].extend(sw)
+            
+        conns = cmds.listConnections(ctrl, type="constraint") or []
+        for con in list(set(conns)):
+            if not cmds.objExists(con):
+                continue
+            con_type = cmds.objectType(con)
+            targets = []
+            if con_type == "parentConstraint":
+                targets = cmds.parentConstraint(con, q=True, tl=True) or []
+            elif con_type == "orientConstraint":
+                targets = cmds.orientConstraint(con, q=True, tl=True) or []
+            elif con_type == "pointConstraint":
+                targets = cmds.pointConstraint(con, q=True, tl=True) or []
+            elif con_type == "scaleConstraint":
+                targets = cmds.scaleConstraint(con, q=True, tl=True) or []
+                
+            if ctrl in targets:
+                driven = cmds.listRelatives(con, parent=True)
+                if driven and driven[0] not in internal_nodes:
+                    data["constraints"].append({
+                        "constraint_type": con_type,
+                        "driver": ctrl,
+                        "driven": driven[0],
+                        "con_name": con
+                    })
+                    
+        plugs = cmds.listConnections(ctrl, source=True, destination=True, connections=True, plugs=True) or []
+        for i in range(0, len(plugs), 2):
+            src = plugs[i]
+            dst = plugs[i+1]
+            if src.startswith(ctrl + "."):
+                dst_node = dst.split(".")[0]
+                if dst_node not in internal_nodes and "Constraint" not in cmds.objectType(dst_node):
+                    data["connections"].append({
+                        "src": src,
+                        "dst": dst
+                    })
+    
+    return GLOBAL_RIG_STORE[module_name]
+
+
+def rebuild_all_space_switches():
+    """
+    Rebuilds all space switches in the scene using stored connections to ensure
+    they are perfectly aligned with newly oriented controls.
+    """
+    for module in list(GLOBAL_RIG_STORE.keys()):
+        restore_rig_connections(module)
+
+
+def restore_rig_connections(module_name):
+    """
+        Restores space switches, constraints, and output connections stored for module_name.
+    :param module_name: name of the module
+    :return: int
+    """
+    data = GLOBAL_RIG_STORE.get(module_name)
+    if not data:
+        return 0
+    
+    restored_count = 0
+    
+    for sw in data["switches"]:
+        driven = sw["driven"]
+        attr_name = sw["attr_name"]
+        ctype = sw["constraint_type"]
+        
+        target_enum_pairs = sw.get("target_enum_pairs", [])
+        if not target_enum_pairs and "targets" in sw:
+            target_enum_pairs = [[t, t] for t in sw["targets"]]
+
+        if cmds.objExists(driven):
+            valid_targets = []
+            valid_enum_names = []
+            for t, disp in target_enum_pairs:
+                if t and cmds.objExists(t):
+                    valid_targets.append(t)
+                    valid_enum_names.append(disp)
+
+            if valid_targets:
+                try:
+                    create_space_switch(
+                        driven=driven,
+                        targets=valid_targets,
+                        attr_name=attr_name,
+                        constraint_type=ctype,
+                        enum_names=valid_enum_names
+                    )
+                    restored_count += 1
+                except Exception as e:
+                    print(f"[Warning] Failed to restore space switch on {driven}: {e}")
+                    
+    for con_data in data["constraints"]:
+        driver = con_data["driver"]
+        driven = con_data["driven"]
+        ctype = con_data["constraint_type"]
+        if cmds.objExists(driver) and cmds.objExists(driven):
+            try:
+                if ctype == "parentConstraint":
+                    cmds.parentConstraint(driver, driven, mo=True)
+                elif ctype == "orientConstraint":
+                    cmds.orientConstraint(driver, driven, mo=True)
+                elif ctype == "pointConstraint":
+                    cmds.pointConstraint(driver, driven, mo=True)
+                elif ctype == "scaleConstraint":
+                    cmds.scaleConstraint(driver, driven, mo=True)
+                restored_count += 1
+            except Exception as e:
+                print(f"[Warning] Failed to restore external constraint {ctype} from {driver} to {driven}: {e}")
+                
+    for conn in data["connections"]:
+        src = conn["src"]
+        dst = conn["dst"]
+        src_node = src.split(".")[0]
+        dst_node = dst.split(".")[0]
+        if cmds.objExists(src_node) and cmds.objExists(dst_node):
+            try:
+                attr = src.split(".")[-1]
+                if not cmds.attributeQuery(attr, node=src_node, exists=True):
+                    cmds.addAttr(src_node, ln=attr, at="double", k=True)
+                cmds.connectAttr(src, dst, force=True)
+                restored_count += 1
+            except Exception as e:
+                print(f"[Warning] Failed to restore connection from {src} to {dst}: {e}")
+                
+    # Re-insert this module's controls into space switches on other modules
+    _restore_orphaned_space_switch_roles(module_name)
+
+    return restored_count
+
+
+def rig_clavicle_module(side, body_joint_map, parent_ctrl=None):
+    """
+        Builds the Clavicle control setup.
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :param parent_ctrl: parent control node name
+    :return: None
+    """
+    side_prefix_title = "Left" if side == "l" else "Right"
+    clav_jnt = body_joint_map.get(f"{side_prefix_title}Shoulder", {}).get("joint") if body_joint_map else None
+    if not clav_jnt or not cmds.objExists(clav_jnt):
+        clav_jnt = f"{side}_clavicle"
+
+    if not clav_jnt or not cmds.objExists(clav_jnt):
+        return
+
+    spine_tip = body_joint_map.get("Spine2", {}).get("joint") if body_joint_map else "spine5_Tip"
+    if not spine_tip or not cmds.objExists(spine_tip):
+        spine_tip = "spine5_Tip"
+    spine_tip_ctrl = parent_ctrl or (f"{spine_tip}_ctrl" if cmds.objExists(f"{spine_tip}_ctrl") else None)
+
+    clav_ctrl = f"{side}_clavicle_ctrl"
+    if not cmds.objExists(clav_ctrl):
+        created = create_joint_controls(
+            [clav_jnt],
+            control_shape="cube",
+            root_parent=spine_tip_ctrl
+        )
+        if created:
+            clav_ctrl = created[0]["ctrl"]
+            # If arm exists, snap clavicle control to upper arm position
+            upperarm_slot = f"{side_prefix_title}Arm"
+            upperarm = body_joint_map.get(upperarm_slot, {}).get("joint") if body_joint_map else None
+            if upperarm and cmds.objExists(upperarm):
+                snap_ctrl_cvs_to_child(clav_ctrl, upperarm)
+
+    save_module_metadata(f"{side_prefix_title} Clavicle", {
+        "joints": [clav_jnt],
+        "parent": spine_tip_ctrl or "",
+        "built": True
+    })
+
+
+def remove_clavicle_module(side, body_joint_map):
+    """
+        Removes the Clavicle control setup.
+    :param side: left or right side (l/r)
+    :param body_joint_map: body joint mapping dictionary
+    :return: int
+    """
+    side_prefix_title = "Left" if side == "l" else "Right"
+    clav_jnt = body_joint_map.get(f"{side_prefix_title}Shoulder", {}).get("joint") if body_joint_map else None
+    if not clav_jnt:
+        clav_jnt = f"{side}_clavicle"
+
+    nodes = [f"{side}_clavicle_ctrl_pad"]
+    deleted = 0
+    for n in nodes:
+        if cmds.objExists(n):
+            cmds.delete(n)
+            deleted += 1
+    clear_module_metadata(f"{side_prefix_title} Clavicle")
+    return deleted
+

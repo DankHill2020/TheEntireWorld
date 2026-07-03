@@ -553,7 +553,64 @@ def find_uasset_path(file_name):
 
     return None
 
-def build_modular_fk_control_rig(skeletal_mesh_name, rig_name, joint_map):
+
+def build_modular_fk_control_rig(skeletal_mesh_name, rig_name, rig_data):
+    """
+
+    :param skeletal_mesh_name:
+    :param rig_name:
+    :param rig_data:
+    :return:
+    """
+    joint_map = rig_data["joint_map"]
+    rfl_data = rig_data.get("rfl", {})
+    skeletal_mesh_path = find_uasset_path(skeletal_mesh_name)
+    control_rig_bp_path = create_control_rig_from_asset(skeletal_mesh_path)
+    rig_output_path = os.path.join(os.path.dirname(skeletal_mesh_path), rig_name).replace('\\', '/')
+    # Step 2: Rename/move if needed
+    if control_rig_bp_path != rig_output_path:
+        if unreal.EditorAssetLibrary.does_asset_exist(rig_output_path):
+            unreal.EditorAssetLibrary.delete_asset(rig_output_path)
+        unreal.EditorAssetLibrary.rename_asset(control_rig_bp_path, rig_output_path)
+        control_rig_bp = unreal.load_asset(rig_output_path)
+    else:
+        control_rig_bp = unreal.load_asset(rig_output_path)
+
+    controller = control_rig_bp.get_modular_rig_controller()
+
+    root_joint = [value[0] for key, value in joint_map.items() if "Reference" in key][0]
+    assign_origin_to_root(controller, root_joint)
+    control_rig_bp.recompile_vm()
+    unreal.EditorAssetLibrary.save_loaded_asset(control_rig_bp)
+
+    spine_joints = [value[0] for key, value in joint_map.items() if "Hips" in key or "Spine" in key]
+    build_spine_module(controller, spine_joints)
+
+    #shoulder_joints = [value[0] for key, value in joint_map.items() if "Shoulder" in key]
+    build_shoulder_modules(controller)
+
+    neck_joints = [value[0] for key, value in joint_map.items() if "Neck" in key or "Head" in key]
+    build_neck_module(controller, neck_joints)
+
+    arm_joints = [value[0] for key, value in joint_map.items() if "ik" not in key and "Arm" in key or key.endswith("Hand")]
+    build_arm_modules(controller, arm_joints)
+
+    build_finger_modules(controller, joint_map)
+
+    leg_joints = [value[0] for key, value in joint_map.items() if "Leg" in key or key.endswith("Foot")]
+    build_leg_modules(controller, leg_joints, spine_joints)
+
+    feet_joints = [value[0] for key, value in joint_map.items() if "Toe" in key or key.endswith("Foot")]
+    build_feet_modules(controller, feet_joints)
+    if rig_data.get("control_setup", {}).get("create_rfl_controls", False):
+        build_rfl_controls(control_rig_bp, rfl_data)
+    # Step 6: Finalize rig
+    control_rig_bp.recompile_vm()
+    unreal.EditorAssetLibrary.save_loaded_asset(control_rig_bp)
+    return control_rig_bp
+
+
+def build_modular_fk_control_rig_old(skeletal_mesh_name, rig_name, joint_map):
     """
 
     :param skeletal_mesh_name:

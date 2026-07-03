@@ -548,9 +548,12 @@ class AnimationManagerUI(QtWidgets.QDialog):
                 f"File has not been saved, Animation Names will use the UI Animation Name instead of the File Name",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
             )
-            if reply != QtWidgets.QMessageBox.No:
+            if reply != QtWidgets.QMessageBox.Yes:
                 return
             animation_name = self.animation_name_input.text().strip()
+            if not animation_name:
+                QtWidgets.QMessageBox.warning(self, "Invalid Name", "Animation name cannot be empty.")
+                return
 
         start = self.start_frame_input.value()
         end = self.end_frame_input.value()
@@ -598,11 +601,13 @@ class AnimationManagerUI(QtWidgets.QDialog):
                     f"File has not been saved, Animation Names will use the UI Animation Name instead of the File Name",
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
                 )
-                if reply != QtWidgets.QMessageBox.No:
+                if reply != QtWidgets.QMessageBox.Yes:
                     return
                 animation_name = self.animation_name_input.text().strip()
-                if animation_name:
-                    dir_name = os.path.join(dir_name, animation_name).replace("\\", "/")
+                if not animation_name:
+                    QtWidgets.QMessageBox.warning(self, "Invalid Name", "Animation name cannot be empty.")
+                    return
+                dir_name = os.path.join(dir_name, animation_name).replace("\\", "/")
             camera_anim_name = f"{animation_name}_{shot_number}_{camera}"
             self.add_animation(anim=camera_anim_name, directory=dir_name,
                                start=start, end=end, namespace="CAM", skeleton="CAM", color=color, nodes=camera)
@@ -916,8 +921,13 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
         row = selected_rows[0].row()
 
-        self.animation_name_input.setText(self.table_widget.item(row, 0).text())
-        self.directory_widget.dir_name.setText(self.table_widget.item(row, 1).text())
+        item_name = self.table_widget.item(row, 0)
+        if item_name:
+            self.animation_name_input.setText(item_name.text())
+        
+        item_dir = self.table_widget.item(row, 1)
+        if item_dir:
+            self.directory_widget.dir_name.setText(item_dir.text())
 
         start_widget = self.table_widget.cellWidget(row, 2)
         end_widget = self.table_widget.cellWidget(row, 3)
@@ -926,18 +936,24 @@ class AnimationManagerUI(QtWidgets.QDialog):
         if isinstance(end_widget, custom_widgets.NonScrollingSpinBox):
             self.end_frame_input.setValue(end_widget.value())
 
-        self.namespace_input.setText(self.table_widget.item(row, 4).text())
-        skeleton_text = self.table_widget.item(row, 5).text()
-        index = self.skeleton_input.findText(skeleton_text)
+        item_ns = self.table_widget.item(row, 4)
+        if item_ns:
+            self.namespace_input.setText(item_ns.text())
+            
+        item_skel = self.table_widget.item(row, 5)
+        if item_skel:
+            skeleton_text = item_skel.text()
+            index = self.skeleton_input.findText(skeleton_text)
 
-        if index != -1:
-            self.skeleton_input.setCurrentIndex(index)
-        else:
-            print(f"'{skeleton_text}' not found in combo box.")
+            if index != -1:
+                self.skeleton_input.setCurrentIndex(index)
+            else:
+                print(f"'{skeleton_text}' not found in combo box.")
 
-        item_color = self.table_widget.item(row, 0).background().color()
-        self.selected_color = item_color
-        self.update_color_button(item_color)
+        if item_name and item_name.background():
+            item_color = item_name.background().color()
+            self.selected_color = item_color
+            self.update_color_button(item_color)
 
     def export_cinematic(self):
         """
@@ -983,21 +999,41 @@ class AnimationManagerUI(QtWidgets.QDialog):
         QtWidgets.QApplication.processEvents()
         export_processes = []
         scene_path = sequence_utils.get_scene_path()
+        scene_name = os.path.splitext(os.path.basename(scene_path))[0]
+        
+        from utilities import p4_utils
+        changelist_id = p4_utils.create_changelist(f"Export Animation: {scene_name}", cwd=os.path.dirname(scene_path))
+        
         export_paths = []
         #Actual Export logic is in this for loop
         for row in selected_rows:
 
             row_index = row.row()
-            export_path = os.path.join(self.table_widget.item(row.row(), 1).text(),
-                                       self.table_widget.item(row.row(), 0).text() + '.fbx').replace('\\', '/')
-            start_widget = self.table_widget.cellWidget(row.row(), 2)
-            end_widget = self.table_widget.cellWidget(row.row(), 3)
-            namespace = self.table_widget.item(row.row(), 4).text()
-            skeleton = self.table_widget.item(row.row(), 5).text()
-            nodes = self.table_widget.item(row.row(), 6).text()
-            color_str = str(self.table_widget.item(row_index, 0).background().color())
-            color_str = color_str.replace("PySide6.", "")
-            color = color_str.replace("PySide2.", "")
+            
+            item_name = self.table_widget.item(row_index, 0)
+            item_dir = self.table_widget.item(row_index, 1)
+            item_ns = self.table_widget.item(row_index, 4)
+            item_skel = self.table_widget.item(row_index, 5)
+            item_nodes = self.table_widget.item(row_index, 6)
+            start_widget = self.table_widget.cellWidget(row_index, 2)
+            end_widget = self.table_widget.cellWidget(row_index, 3)
+            
+            if not all([item_name, item_dir, item_ns, item_skel, item_nodes, start_widget, end_widget]):
+                sequence_utils.display_warning(f"Row {row_index} has missing data, skipping export.")
+                continue
+            
+            export_path = os.path.join(item_dir.text(), item_name.text() + '.fbx').replace('\\', '/')
+            namespace = item_ns.text()
+            skeleton = item_skel.text()
+            nodes = item_nodes.text()
+            
+            if item_name.background():
+                color_str = str(item_name.background().color())
+                color_str = color_str.replace("PySide6.", "")
+                color = color_str.replace("PySide2.", "")
+            else:
+                color = "white"
+                
             export_paths.append(export_path)
 
             if nodes == 'None':
@@ -1006,19 +1042,19 @@ class AnimationManagerUI(QtWidgets.QDialog):
                 nodes = [n.strip() for n in nodes.split(",")]
             if is_maya():
                 ref_paths = anim_utils.find_references_from_namespace(namespace)
-
+            if is_maya():
                 proc = anim_ec.export_animation_to_fbx(export_path, namespace, start_widget.value(), end_widget.value(),
-                                                       nodes=nodes, reference_paths=ref_paths)
+                                                       nodes=nodes, reference_paths=ref_paths, changelist=changelist_id)
             else:
                 proc = anim_ec.export_animation(scene_path, export_path, namespace, start_widget.value(), end_widget.value(),
-                                                       nodes=nodes)
+                                                       nodes=nodes, changelist=changelist_id)
                 progress_bar.update_progress()
             export_processes.append(proc)
             selected_anim_dict[export_path] = [start_widget.value(), end_widget.value(), namespace, skeleton, color,
                                                nodes]
             QtWidgets.QApplication.processEvents()
 
-        def launch_unreal_after_export(export_processes, export_path):
+        def launch_unreal_after_export(export_processes, export_path, cl_id):
             """
             Waits for all export processes to finish and then launches Unreal
             :param export_processes: list of subprocess.Popen processes
@@ -1055,20 +1091,20 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
                 if cinematic:
                     sequence_dict = sequence_utils.generate_sequence_dict_from_anim_dict(selected_anim_dict)
-                    json_data.save_dict_to_json(sequence_dict, json_path)
+                    json_data.save_dict_to_json(sequence_dict, json_path, changelist=cl_id)
                     if self.unreal_checkbox.isChecked():
                         usp.run_create_cinematic_sequence(json_path, "/Game/" + CINEMATIC_FOLDER,
                                                       self.uproject, self.log_path, self.cmd_path)
                 else:
-                    json_data.save_dict_to_json(selected_anim_dict, json_path)
+                    json_data.save_dict_to_json(selected_anim_dict, json_path, changelist=cl_id)
                     if self.unreal_checkbox.isChecked():
                         usp.run_import_gameplay_animations(json_path, self.uproject, self.log_path, self.cmd_path)
 
         if len(export_processes) and is_maya():
-            thread = threading.Thread(target=launch_unreal_after_export, args=(export_processes, export_path))
+            thread = threading.Thread(target=launch_unreal_after_export, args=(export_processes, export_path, changelist_id))
             thread.start()
         else:
-            launch_unreal_after_export(export_processes, export_path)
+            launch_unreal_after_export(export_processes, export_path, changelist_id)
 
     def load_data(self):
         """
@@ -1181,8 +1217,11 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
         if file_path:
             file_path = file_path.replace("\\", "/")
-
-            json_data.save_dict_to_json(self.anim_dict, file_path)
+            try:
+                json_data.save_dict_to_json(self.anim_dict, file_path)
+                QtWidgets.QMessageBox.information(self, "Export Successful", f"Animation data exported to {file_path}")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Export Failed", f"Failed to export animation data:\n{e}")
 
 
     def import_data(self):
@@ -1203,12 +1242,16 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
         if file_path:
             file_path = file_path.replace("\\", "/")
-            self.anim_dict = json_data.load_json_as_dict(file_path)
-            sequence_utils.create_and_populate_export_node(self.anim_dict, self.skeletons, self.uproject,
-                                                                         self.log_path, self.cmd_path,
-                                                                         self.directory_widget.directory,
-                                                                         self.namespace_skeleton_map)
-            self.load_data()
+            try:
+                self.anim_dict = json_data.load_json_as_dict(file_path)
+                sequence_utils.create_and_populate_export_node(self.anim_dict, self.skeletons, self.uproject,
+                                                                             self.log_path, self.cmd_path,
+                                                                             self.directory_widget.directory,
+                                                                             self.namespace_skeleton_map)
+                self.load_data()
+                QtWidgets.QMessageBox.information(self, "Import Successful", f"Animation data imported from {file_path}")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Import Failed", f"Failed to import animation data:\n{e}")
 
     def get_uproject(self, directory):
         file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Unreal Project", directory,

@@ -562,6 +562,18 @@ def find_skeletal_meshes_using_skeleton(skeleton_asset_path):
     skeletal_mesh_assets = registry.get_assets_by_class(skeletal_mesh_class_path, True)
 
     for asset_data in skeletal_mesh_assets:
+        package_str = str(asset_data.package_name)
+        # Skip engine content to prevent massive load times
+        if "/Engine/" in package_str:
+            continue
+
+        skeleton_tag = asset_data.get_tag_value('Skeleton')
+        if skeleton_tag:
+            if skeleton_asset_path in str(skeleton_tag):
+                skeletal_mesh = unreal.EditorAssetLibrary.load_asset(asset_data.get_asset().get_path_name())
+                skeletal_meshes_using_skeleton.append(skeletal_mesh)
+            continue
+
         asset = unreal.EditorAssetLibrary.load_asset(asset_data.package_name)
         skel = asset.get_editor_property('skeleton')
         if skel:
@@ -607,27 +619,35 @@ def get_blueprints_using_skeleton_cmd(skeleton_path, asset_registry=None):
     )
 
     for blueprint in blueprint_assets:
-        if "Engine" or "Maps" not in blueprint.package_name :
-            unreal.log(f"Processing Blueprint: {blueprint.package_name}")
+        package_str = str(blueprint.package_name)
+        if "/Engine/" not in package_str and "/Maps/" not in package_str:
+            unreal.log(f"Processing Blueprint: {package_str}")
             dependencies = asset_registry.get_dependencies(blueprint.package_name, dependency_options)
             if dependencies:
                 for dep in dependencies:
                     if 'Script' not in str(dep):
                         dep_asset_data = unreal.EditorAssetLibrary.find_asset_data(dep)
                         if dep_asset_data:
-                            test = dep_asset_data.get_asset()
-
-                            if isinstance(test, unreal.SkeletalMesh):
-                                asset = unreal.EditorAssetLibrary.load_asset(dep_asset_data.package_name)
-                                if not asset:
-                                    unreal.log_error(f"Failed to load asset: {dep_asset_data.package_name}")
+                            asset_class = str(dep_asset_data.asset_class_path.asset_name) if hasattr(dep_asset_data, "asset_class_path") else str(dep_asset_data.asset_class)
+                            if asset_class == "SkeletalMesh":
+                                skeleton_tag = dep_asset_data.get_tag_value("Skeleton")
+                                if skeleton_tag:
+                                    if skeleton_path in str(skeleton_tag):
+                                        cinematic_bps.append(blueprint.get_asset())
                                     continue
 
-                                skel = asset.get_editor_property('skeleton')
-                                if skel:
-                                    package_name = skel.get_path_name().split('.')[0]
-                                    if package_name == skeleton_path:
-                                        cinematic_bps.append(blueprint.get_asset())
+                                test = dep_asset_data.get_asset()
+                                if isinstance(test, unreal.SkeletalMesh):
+                                    asset = unreal.EditorAssetLibrary.load_asset(dep_asset_data.package_name)
+                                    if not asset:
+                                        unreal.log_error(f"Failed to load asset: {dep_asset_data.package_name}")
+                                        continue
+
+                                    skel = asset.get_editor_property('skeleton')
+                                    if skel:
+                                        package_name = skel.get_path_name().split('.')[0]
+                                        if package_name == skeleton_path:
+                                            cinematic_bps.append(blueprint.get_asset())
 
     unreal.log(f"Found {len(cinematic_bps)} Cinematic Blueprints.")
     return cinematic_bps
@@ -667,27 +687,44 @@ def get_blueprints_using_skeleton(skeleton_path, asset_registry=None, mesh_strin
         include_hard_management_references=False
     )
     for blueprint in blueprint_assets:
+        package_str = str(blueprint.package_name)
+        if "/Engine/" in package_str or "/Maps/" in package_str:
+            continue
+            
         dependencies = asset_registry.get_dependencies(blueprint.package_name, dependency_options)
         for dep in dependencies:
             if 'Script' not in str(dep):
                 dep_asset_data = unreal.EditorAssetLibrary.find_asset_data(dep)
 
                 if dep_asset_data:
-                    test = dep_asset_data.get_asset()
-                    if isinstance(test, unreal.SkeletalMesh):
-
-                        asset = unreal.EditorAssetLibrary.load_asset(dep_asset_data.package_name)
-                        skel = asset.get_editor_property('skeleton')
-                        if skel:
-
-                            package_name = skel.get_path_name().split('.')[0]
-                            if package_name == skeleton_path:
+                    asset_class = str(dep_asset_data.asset_class_path.asset_name) if hasattr(dep_asset_data, "asset_class_path") else str(dep_asset_data.asset_class)
+                    if asset_class == "SkeletalMesh":
+                        skeleton_tag = dep_asset_data.get_tag_value("Skeleton")
+                        if skeleton_tag:
+                            if skeleton_path in str(skeleton_tag):
                                 if mesh_string:
                                     if mesh_string in str(dep_asset_data.package_name):
                                         cinematic_bps.append(blueprint.get_asset())
                                         break
                                 else:
                                     cinematic_bps.append(blueprint.get_asset())
+                            continue
+
+                        test = dep_asset_data.get_asset()
+                        if isinstance(test, unreal.SkeletalMesh):
+
+                            asset = unreal.EditorAssetLibrary.load_asset(dep_asset_data.package_name)
+                            skel = asset.get_editor_property('skeleton')
+                            if skel:
+
+                                package_name = skel.get_path_name().split('.')[0]
+                                if package_name == skeleton_path:
+                                    if mesh_string:
+                                        if mesh_string in str(dep_asset_data.package_name):
+                                            cinematic_bps.append(blueprint.get_asset())
+                                            break
+                                    else:
+                                        cinematic_bps.append(blueprint.get_asset())
     return cinematic_bps
 
 
@@ -779,6 +816,10 @@ def import_gameplay_animations_from_json(anim_dict_path):
     :return:
     """
     anim_dict = read_dict_from_file(anim_dict_path)
+    if not anim_dict:
+        unreal.log_error(f"Failed to read animation dictionary from {anim_dict_path}")
+        return []
+
     for anim_path in anim_dict:
         anim_name = os.path.basename(anim_path).split('.')[0]
         existing_path = find_uasset_path(anim_name)
@@ -789,9 +830,19 @@ def import_gameplay_animations_from_json(anim_dict_path):
                 import_dir = "/Game/Animations"
         else:
             import_dir = os.path.dirname(existing_path)
+            
         anim_data = anim_dict[anim_path]
+        if not isinstance(anim_data, list) or len(anim_data) < 4:
+            unreal.log_error(f"Invalid animation data format for {anim_path}: {anim_data}")
+            continue
+            
         skeleton_name = anim_data[3]
         skeleton_path = get_skeleton_path_by_name(skeleton_name)
+        
+        if not skeleton_path:
+            unreal.log_error(f"Failed to find skeleton '{skeleton_name}' for {anim_name}. Skipping import.")
+            continue
+            
         import_animation(anim_path, skeleton_path, import_dir, anim_name)
 
     return anim_dict.keys()
@@ -807,6 +858,10 @@ def import_animation(anim_path, skeleton_path, destination_path, destination_nam
     :param destination_name: Name for the imported animation asset.
     :return: The path to the imported animation asset.
     """
+    if not os.path.exists(anim_path):
+        unreal.log_error(f"FBX file does not exist on disk: {anim_path}")
+        return None
+
     unreal.SystemLibrary.execute_console_command(None, "Interchange.FeatureFlags.Import.FBX 0")
 
     task = unreal.AssetImportTask()
@@ -1055,10 +1110,13 @@ def write_dict_to_file(anim_dict, file_path):
     :param file_path: Path where the file will be saved.
     :return: Path to the saved file.
     """
-    with open(file_path, 'w') as f:
-        f.write(json.dumps(anim_dict, indent=4))
-
-    return file_path
+    try:
+        with open(file_path, 'w') as f:
+            f.write(json.dumps(anim_dict, indent=4))
+        return file_path
+    except Exception as e:
+        unreal.log_error(f"Failed to write dict to {file_path}: {e}")
+        return None
 
 
 def read_dict_from_file(file_path):
@@ -1068,10 +1126,17 @@ def read_dict_from_file(file_path):
     :param file_path: Path to the JSON file.
     :return: The dictionary read from the file.
     """
-    with open(file_path, 'r') as fp:
-        anim_dict = json.loads(fp.read())
-
-    return anim_dict
+    if not os.path.exists(file_path):
+        unreal.log_error(f"JSON file does not exist: {file_path}")
+        return {}
+        
+    try:
+        with open(file_path, 'r') as fp:
+            anim_dict = json.loads(fp.read())
+        return anim_dict
+    except Exception as e:
+        unreal.log_error(f"Failed to read dict from {file_path}: {e}")
+        return {}
 
 
 def list_all_maps():
@@ -1091,15 +1156,17 @@ def find_uasset_path(file_name):
     :param file_name: The name of the asset to find.
     :return: Path to the asset if found, None otherwise.
     """
-    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
-    asset_data_list = asset_registry.get_all_assets(True)
-
-    for asset_data in asset_data_list:
-        asset_path = unreal.Paths.convert_relative_path_to_full(asset_data.package_name)
-        asset_name = os.path.basename(asset_path)
-        if "IdentityTemplate" not in asset_path:
-            if file_name.lower() == asset_name.lower():
-                return asset_path
+    all_assets = unreal.EditorAssetLibrary.list_assets("/Game", recursive=True)
+    file_name_lower = file_name.lower()
+    
+    for asset_path in all_assets:
+        if "IdentityTemplate" in asset_path:
+            continue
+            
+        # Extact just the base name (e.g. 'MyAnim' from '/Game/Animations/MyAnim.MyAnim')
+        asset_name = asset_path.split('.')[-1].lower()
+        if asset_name == file_name_lower:
+            return asset_path.split('.')[0]
 
     return None
 
