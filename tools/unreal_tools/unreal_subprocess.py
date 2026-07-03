@@ -196,39 +196,9 @@ def run_create_modular_control_rig(skeletal_mesh_name, rig_name, joint_map, unre
     :return:
     """
     try:
-        rig_data = {
-            "joint_map": joint_map,
-
-            "rfl": {
-                "l": {
-                    "heel": "l_heel_RFL",
-                    "outerBank": "l_outerBank_RFL",
-                    "innerBank": "l_innerBank_RFL",
-                    "toe": "l_toe_RFL",
-                    "toeTip": "l_toeTip_RFL",
-                    "ankle": "l_ankle_RFL",
-                },
-                "r": {
-                    "heel": "r_heel_RFL",
-                    "outerBank": "r_outerBank_RFL",
-                    "innerBank": "r_innerBank_RFL",
-                    "toe": "r_toe_RFL",
-                    "toeTip": "r_toeTip_RFL",
-                    "ankle": "r_ankle_RFL",
-                }
-            },
-
-            "control_setup": {
-                "use_maya_control_names": True,
-                "create_rfl_controls": True,
-                "create_ik_fk_switches": True,
-                "create_twist_controls": True,
-                "match_maya_hierarchy": True,
-            }
-        }
         payload = {
             "function": "unreal_tools.control_rig.build_modular_fk_control_rig",
-            "args": [skeletal_mesh_name, rig_name, rig_data]
+            "args": [skeletal_mesh_name, rig_name, joint_map]
             }
 
         response = requests.post("http://127.0.0.1:12347", json=payload)
