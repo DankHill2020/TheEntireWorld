@@ -8,10 +8,9 @@ tools_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__fi
 sys.path.append(tools_dir)
 from maya_tools.Animation.anim_export import anim_export_utils
 from maya_tools.Utilities import joints
-from utilities import p4_utils
 
 
-def export_animation(maya_file, export_path, namespace, start_frame, end_frame, nodes=None, reference_paths=None, changelist=None):
+def export_animation(maya_file, export_path, namespace, start_frame, end_frame, nodes=None, reference_paths=None):
     """
     Opens Maya file and exports animation to FBX using `mayapy`.
     :param maya_file: (str): Path to the Maya scene file.
@@ -85,10 +84,6 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
         export_dir = os.path.dirname(export_path)
         if not os.path.exists(export_dir):
             os.makedirs(export_dir)
-            
-        # P4 checkout to ensure file isn't read-only if it exists
-        p4_utils.p4_edit(export_path, changelist=changelist)
-        
         if 'FacialSliders' in nodes and cmds.objExists('FacialControls'):
 
             export_metahuman_sliders_as_fbx(slider_set='FacialControls', fbx_path=export_path, start_frame=start_frame,
@@ -113,14 +108,10 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
             mel.eval("FBXResetExport;")
             mel.eval("FBXExportCameras -v 1;")
             mel.eval('FBXExportAnimationOnly -v 0')
-            mel.eval("FBXExportBakeComplexAnimation -v 0;")
+            mel.eval("FBXExportBakeComplexAnimation -v 1;")
             mel.eval("FBXExportConstraints -v 0;")
             mel.eval("FBXExportApplyConstantKeyReducer -v 0;")
             mel.eval(f'FBXExport -f "{export_path}" -s')
-            
-        # P4 add just in case it's a new file
-        p4_utils.p4_add(export_path, changelist=changelist)
-        
     except Exception as e:
         print(f"Export failed: {e}", file=sys.stderr)
     finally:
@@ -134,7 +125,11 @@ def get_all_joint_children(root_joint):
     if not cmds.objExists(root_joint):
         return []
 
-    return cmds.listRelatives(root_joint, allDescendents=True, type='joint') or []
+    joint_children = []
+    all_descendants = cmds.listRelatives(root_joint, allDescendents=True, type='joint') or []
+
+    joint_children.extend(all_descendants)
+    return joint_children
 
 
 def bake_all_keyable_attributes(nodes, start_frame, end_frame):
@@ -148,13 +143,20 @@ def bake_all_keyable_attributes(nodes, start_frame, end_frame):
     all_attrs_to_bake = []
 
     for node in nodes:
-        if cmds.objExists(node):
-            keyable_attrs = cmds.listAttr(node, keyable=True, unlocked=True) or []
-            for attr in keyable_attrs:
-                all_attrs_to_bake.append(f"{node}.{attr}")
+        for attr in ['translateX', 'translateY', 'translateZ',
+                     'rotateX', 'rotateY', 'rotateZ',
+                     'scaleX', 'scaleY', 'scaleZ']:
+            full_attr = f"{node}.{attr}"
+            if cmds.objExists(full_attr):
+                all_attrs_to_bake.append(full_attr)
 
-    if all_attrs_to_bake:
-        cmds.bakeResults(all_attrs_to_bake, time=(start_frame, end_frame), simulation=True)
+        user_attrs = cmds.listAttr(node, userDefined=True, keyable=True) or []
+        for attr in user_attrs:
+            full_attr = f"{node}.{attr}"
+            all_attrs_to_bake.append(full_attr)
+
+    all_attrs_to_bake = list(set(all_attrs_to_bake))
+    cmds.bakeResults(all_attrs_to_bake, time=(start_frame, end_frame), simulation=True)
 
 
 def export_metahuman_sliders_as_fbx(slider_set='FacialControls', fbx_path='', start_frame=None, end_frame=None):
@@ -195,7 +197,7 @@ def export_metahuman_sliders_as_fbx(slider_set='FacialControls', fbx_path='', st
 
     cmds.select(slider_nodes, replace=True)
 
-    mel.eval('FBXExportBakeComplexAnimation -v false')
+    mel.eval('FBXExportBakeComplexAnimation -v true')
     mel.eval(f'FBXExport -f "{fbx_path}" -s')
 
     print(f"Exported facial slider animation to: {fbx_path}")
@@ -356,7 +358,7 @@ if __name__ == "__main__":
     parser.add_argument("--end_frame", type=int, required=True)
     parser.add_argument("--nodes", nargs="*", default=None)
     parser.add_argument("--reference_paths", nargs="*", default=None)
-    parser.add_argument("--changelist", default=None)
+
 
     args = parser.parse_args()
     export_animation(
@@ -366,6 +368,5 @@ if __name__ == "__main__":
         args.start_frame,
         args.end_frame,
         args.nodes,
-        args.reference_paths,
-        args.changelist
+        args.reference_paths
     )

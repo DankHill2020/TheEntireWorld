@@ -1,5 +1,6 @@
 import os
 import json
+import traceback
 import maya.cmds as cmds
 from maya import OpenMayaUI as omui
 import re
@@ -16,7 +17,7 @@ from maya_tools.Rigging import create_rig
 from maya_tools.Rigging import skinning_utils
 from unreal_tools import unreal_subprocess as usp
 from unreal_tools import unreal_project_data as upd
-from maya_tools.Utilities import joints
+from maya_tools.Utilities import joints, dag
 import importlib
 
 importlib.reload(skinning_utils)
@@ -548,12 +549,16 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         export_skin_btn.setToolTip("Export the skin weights of all selected skinned meshes to JSON files.")
         import_skin_btn = QtWidgets.QPushButton("Import Skin Weights")
         import_skin_btn.setToolTip("Import skin weights from JSON files to matching meshes in the scene.")
+        transfer_skin_btn = QtWidgets.QPushButton("Transfer Skin Weights")
+        transfer_skin_btn.setToolTip("Transfer skin weights from selected source mesh(es) to the last selected target mesh. The target must not already have a skinCluster.")
 
         export_skin_btn.clicked.connect(skinning_utils.export_skin_weights)
         import_skin_btn.clicked.connect(skinning_utils.import_skin_weights)
+        transfer_skin_btn.clicked.connect(self.transfer_skin_weights_from_selection)
 
         skin_layout.addWidget(export_skin_btn)
         skin_layout.addWidget(import_skin_btn)
+        skin_layout.addWidget(transfer_skin_btn)
 
         self.rig_layout.addWidget(skin_group)
 
@@ -1034,7 +1039,6 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
     def build_full_rig(self):
         self.create_rig_mapping()
-
         # Reset session overrides
         self._session_parent_override = None
         self._use_override_for_all = False
@@ -1085,7 +1089,6 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         skipped_modules = []
         try:
             for module in all_modules:
-                print(module)
                 # Check if joints exist in scene
                 if module in ["Brows (Left)", "Brows (Right)", "Eyes Aim", "Eyelids (Left)", "Eyelids (Right)", "Mouth & Lips", "Tongue", "Teeth", "Other Face Joints"]:
                     jnts = self._get_face_module_joints(module)
@@ -1116,7 +1119,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
             # Store connections once at the very end
             self.store_all_face_connections(silent=True)
-
+            if cmds.objExists("Do_Not_Touch"):
+                cmds.setAttr("Do_Not_Touch.visibility", 0)
             summary = f"Full Rig Build Completed!\n\nBuilt Modules ({len(built_modules)}):\n" + ", ".join(built_modules)
             if skipped_modules:
                 summary += f"\n\nSkipped Modules (joints not in scene) ({len(skipped_modules)}):\n" + ", ".join(skipped_modules)
@@ -1131,6 +1135,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             self._refresh_all_module_details()
 
     def remove_full_rig(self):
+        dag.disable_evaluation()
+
         # Synchronize default_map with fields
         for slot in self.default_map:
             self.default_map[slot]["joint"] = self.fields.get(slot, "")
@@ -1148,6 +1154,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         cmds.undoInfo(openChunk=True, chunkName="Remove Full Rig")
         try:
+
+            create_rig.store_all_control_cv_positions()
             create_rig.remove_full_rig(self.default_map, self.default_face_map)
             cmds.confirmDialog(title="Success", message="Full Rig removed successfully!", button=["OK"])
         except Exception as e:
@@ -1157,7 +1165,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
-
+            dag.enable_evaluation()
 
     def auto_detect_face_joints(self, key_path, list_widget):
         slot = key_path[0]
@@ -1223,6 +1231,36 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         except Exception as e:
             cmds.confirmDialog(title="Error", message=f"Failed to create control(s):\n{e}", button=["OK"])
             cmds.warning(f"Failed to create control(s): {e}")
+
+    def transfer_skin_weights_from_selection(self):
+        selection = cmds.ls(selection=True) or []
+        if len(selection) < 2:
+            cmds.confirmDialog(
+                title="Transfer Skin Weights",
+                message="Select one or more skinned source meshes, then select the target mesh last.",
+                button=["OK"],
+                icon="warning"
+            )
+            return
+
+        result = skinning_utils.transfer_skin_weights_from_selection()
+        if not result:
+            cmds.confirmDialog(
+                title="Transfer Skin Weights",
+                message="Skin weight transfer failed. Check the Script Editor for details.",
+                button=["OK"],
+                icon="warning"
+            )
+            return
+
+        cmds.confirmDialog(
+            title="Transfer Skin Weights",
+            message=(
+                f"Transferred skin weights to '{selection[-1]}'.\n"
+                f"Created skinCluster: {result.get('skinCluster')}"
+            ),
+            button=["OK"]
+        )
 
     def create_surface_rig_with_drivers(self):
         sel = cmds.ls(sl=True, type="joint")
@@ -1699,33 +1737,17 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
     def store_all_face_connections(self, silent=False):
         self.create_rig_mapping()
-        
-        modules_controls = {
-            "Left Arm": ["l_upperarm_fk_ctrl", "l_lowerarm_fk_ctrl", "l_hand_fk_ctrl", "l_hand_ik_ctrl", "l_lowerarm_pv_ctrl", "l_hand_switch_ctrl"],
-            "Right Arm": ["r_upperarm_fk_ctrl", "r_lowerarm_fk_ctrl", "r_hand_fk_ctrl", "r_hand_ik_ctrl", "r_lowerarm_pv_ctrl", "r_hand_switch_ctrl"],
-            "Left Leg": ["l_thigh_fk_ctrl", "l_knee_fk_ctrl", "l_ankle_fk_ctrl", "l_ankle_ik_ctrl", "l_knee_pv_ctrl", "l_ankle_switch_ctrl"],
-            "Right Leg": ["r_thigh_fk_ctrl", "r_knee_fk_ctrl", "r_ankle_fk_ctrl", "r_ankle_ik_ctrl", "r_knee_pv_ctrl", "r_ankle_switch_ctrl"],
-            "Brows (Left)": ["l_brow_main_ctrl"] + [f"l_brow{i}_ctrl" for i in range(1, 6)],
-            "Brows (Right)": ["r_brow_main_ctrl"] + [f"r_brow{i}_ctrl" for i in range(1, 6)],
-            "Eyes Aim": ["eye_aim_ctrl", "l_eye_aim_ctrl", "r_eye_aim_ctrl"],
-            "Eyelids (Left)": [f"{jnt}_ctrl" for jnt in self.default_face_map.get("LeftEyelid", {}).get("joints", [])],
-            "Eyelids (Right)": [f"{jnt}_ctrl" for jnt in self.default_face_map.get("RightEyelid", {}).get("joints", [])],
-            "Mouth & Lips": [
-                f"{self.default_face_map.get('UpperLipCenter', {}).get('joint') or 'c_upper_lip'}_main_ctrl",
-                f"{self.default_face_map.get('LowerLipCenter', {}).get('joint') or 'c_lower_lip'}_main_ctrl",
-                f"{self.default_face_map.get('LeftLipCorner', {}).get('joint') or 'l_lip_corner1'}_main_ctrl",
-                f"{self.default_face_map.get('RightLipCorner', {}).get('joint') or 'r_lip_corner1'}_main_ctrl"
-            ] + [f"{jnt}_ctrl" for jnt in self.default_face_map.get("LipChain", {}).get("joints", [])],
-            "Tongue": [f"{jnt}_ctrl" for jnt in self.default_face_map.get("TongueChain", {}).get("joints", [])],
-            "Teeth": [
-                f"{self.default_face_map.get('UpperTeeth', {}).get('joint') or 'upper_teeth'}_ctrl",
-                f"{self.default_face_map.get('LowerTeeth', {}).get('joint') or 'lower_teeth'}_ctrl"
-            ],
-            "Other Face Joints": [f"{jnt}_ctrl" for jnt in self.default_face_map.get("OtherFaceJoints", {}).get("joints", [])]
-        }
-        
+
         stored_modules = []
-        for name, ctrls in modules_controls.items():
+        for name in self._get_registered_module_ids():
+            ctrls = create_rig.get_module_controls(name)
+            if not ctrls:
+                metadata = create_rig.load_module_metadata(name) or {}
+                main_control = self._get_first_existing_ctrl(name, metadata)
+                ctrls = [main_control] if main_control else []
+            if not ctrls:
+                continue
+
             stored_data = create_rig.store_rig_connections(ctrls, name)
             if any(stored_data.values()):
                 stored_modules.append(name)
@@ -1831,28 +1853,47 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.create_rig_mapping()
         cmds.undoInfo(openChunk=True, chunkName=f"Build Body Module: {module}")
         try:
+            module_func = None
+            module_args = []
+
             if module == "Left Arm":
-                create_rig.rig_arm_module("l", self.default_map, parent)
+                module_func = create_rig.rig_arm_module
+                module_args = ("l", self.default_map, parent)
             elif module == "Right Arm":
-                create_rig.rig_arm_module("r", self.default_map, parent)
+                module_func = create_rig.rig_arm_module
+                module_args = ("r", self.default_map, parent)
             elif module == "Left Clavicle":
-                create_rig.rig_clavicle_module("l", self.default_map, parent)
+                module_func = create_rig.rig_clavicle_module
+                module_args = ("l", self.default_map, parent)
             elif module == "Right Clavicle":
-                create_rig.rig_clavicle_module("r", self.default_map, parent)
+                module_func = create_rig.rig_clavicle_module
+                module_args = ("r", self.default_map, parent)
             elif module == "Left Leg":
-                create_rig.rig_leg_module("l", self.default_map, parent)
+                module_func = create_rig.rig_leg_module
+                module_args = ("l", self.default_map, parent)
             elif module == "Right Leg":
-                create_rig.rig_leg_module("r", self.default_map, parent)
+                module_func = create_rig.rig_leg_module
+                module_args = ("r", self.default_map, parent)
             elif module == "Root / Origin":
-                create_rig.rig_root_module(self.default_map)
+                module_func = create_rig.rig_root_module
+                module_args = (self.default_map,)
             elif module == "Pelvis & Hips":
-                create_rig.rig_pelvis_module(self.default_map, parent)
+                module_func = create_rig.rig_pelvis_module
+                module_args = (self.default_map, parent)
             elif module == "Spine":
-                create_rig.rig_spine_module(self.default_map, parent)
+                module_func = create_rig.rig_spine_module
+                module_args = (self.default_map, parent)
             elif module == "Neck":
-                create_rig.rig_neck_module(self.default_map, parent)
+                module_func = create_rig.rig_neck_module
+                module_args = (self.default_map, parent)
             elif module == "Head":
-                create_rig.rig_head_module(self.default_map, self.default_face_map, parent)
+                module_func = create_rig.rig_head_module
+                module_args = (self.default_map, self.default_face_map, parent)
+
+            if module_func is None:
+                raise RuntimeError(f"Unknown body module '{module}'")
+
+            module_func(*module_args)
 
             # Recreate only the relevant module's space switches (and composite spaces)
             if module == "Left Arm":
@@ -1879,7 +1920,15 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
                 cmds.confirmDialog(title="Success", message=msg, button=["OK"])
+            create_rig.restore_all_control_cv_positions()
+            for ikh in cmds.ls(type="ikHandle") or []:
+                try:
+                    cmds.setAttr(f"{ikh}.visibility", 0)
+                except Exception:
+                    pass
         except Exception as e:
+            print(f"[ERROR] create_body_module_setup failed for module={module} parent={parent}: {e}")
+            traceback.print_exc()
             cmds.confirmDialog(title="Error", message=f"Failed to create body module setup:\n{e}", button=["OK"])
         finally:
             cmds.undoInfo(closeChunk=True)
@@ -1887,7 +1936,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             self._refresh_all_module_details()
 
     def remove_body_module_setup(self, module):
+        dag.disable_evaluation()
         self.create_rig_mapping()
+        create_rig.store_all_control_cv_positions()
         cmds.undoInfo(openChunk=True, chunkName=f"Remove Body Module: {module}")
         try:
             deleted_count = 0
@@ -1924,6 +1975,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
+            dag.enable_evaluation()
 
     def create_face_module_setup(self, module, silent=False):
         edit_info = self._module_detail_widgets.get(module)
@@ -2022,6 +2074,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
                 cmds.confirmDialog(title="Success", message=msg, button=["OK"])
+            create_rig.restore_all_control_cv_positions()
         except Exception as e:
             cmds.confirmDialog(title="Error", message=f"Failed to create face module setup:\n{e}", button=["OK"])
         finally:
@@ -2030,7 +2083,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             self._refresh_all_module_details()
 
     def remove_face_module_setup(self, module):
+        dag.disable_evaluation()
         self.create_rig_mapping()
+        create_rig.store_all_control_cv_positions()
         cmds.undoInfo(openChunk=True, chunkName=f"Remove Face Module: {module}")
         try:
             deleted_count = 0
@@ -2066,6 +2121,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
+            dag.enable_evaluation()
 
 
     def load_settings_from_selection(self):
@@ -2603,266 +2659,380 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
     def _refresh_module_detail_widget(self, module_id):
         """Query live scene state and update the detail widget for one module."""
-        info = self._module_detail_widgets.get(module_id)
-        if not info:
+        module_widgets = self._module_detail_widgets.get(module_id)
+        if not module_widgets:
             return
 
-        meta = create_rig.load_module_metadata(module_id)
-        built = meta.get("built", False)
+        metadata = create_rig.load_module_metadata(module_id) or {}
+        was_built = metadata.get("built", False)
 
-        status_lbl = info["status_lbl"]
-        parent_btn = info["parent_btn"]
-        spaces_container = info["spaces_container"]
-        built_view = info["built_view"]
-        edit_view = info["edit_view"]
+        main_control = self._get_first_existing_ctrl(module_id, metadata)
+        module_exists = self._module_exists(module_id, was_built, main_control)
 
-        # Find the first existing control in scene for this module
-        main_ctrl = self._get_first_existing_ctrl(module_id, meta)
+        self._set_module_view_state(module_widgets, module_exists)
 
-        # Sync Create / Remove button enabled state with scene presence
-        module_exists = main_ctrl is not None
-        
-        if module_id == "Other Face Joints" and built and not main_ctrl:
-            module_exists = True
+        if not module_exists:
+            self._refresh_module_edit_fields(module_id, module_widgets, metadata)
 
-        # Toggle Built View vs Edit View
-        if module_exists:
-            built_view.setVisible(True)
-            edit_view.setVisible(False)
-        else:
-            built_view.setVisible(False)
-            edit_view.setVisible(True)
+        self._refresh_create_remove_buttons(module_id, module_exists)
+        self._refresh_module_status_label(module_widgets["status_lbl"], was_built, main_control)
+        self._refresh_parent_button(module_widgets["parent_btn"], was_built, main_control)
+        self._refresh_jaw_buttons(module_id, module_widgets, metadata, main_control)
+        self._refresh_mapped_joints_label(module_id, module_widgets, metadata)
+        self._refresh_spaces_and_connections(module_id, module_widgets, main_control)
 
-            # Populate fields from metadata first so we recover parent and joints
-            self._populate_fields_from_metadata(module_id, meta)
+    def _module_exists(self, module_id, was_built, main_control):
+        if main_control:
+            return True
 
-            # Initialize / refresh editable fields
-            body_list_names = ["Root / Origin", "Pelvis & Hips", "Spine", "Left Clavicle", "Right Clavicle", "Neck", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg"]
-            if info.get("parent_edit") and not info["parent_edit"].text().strip():
-                default_parent = self.body_parent_field.text().strip() if module_id in body_list_names else self.module_parent_field.text().strip()
-                info["parent_edit"].setText(default_parent)
-            if info.get("jaw_ctrl_edit") and not info["jaw_ctrl_edit"].text().strip():
-                info["jaw_ctrl_edit"].setText(self.module_jaw_ctrl_field.text().strip())
-            if info.get("jaw_jnt_edit") and not info["jaw_jnt_edit"].text().strip():
-                info["jaw_jnt_edit"].setText(self.module_jaw_jnt_field.text().strip())
+        # Other Face Joints may not have one obvious main control.
+        if module_id == "Other Face Joints" and was_built:
+            return True
 
-            # Now update the slot QLineEdit text boxes with the values from self.fields
-            for slot_key, widget in self._slot_edit_widgets.items():
-                widget.setText(self.fields.get(slot_key, ""))
+        return False
 
-        create_btn = self.module_create_buttons.get(module_id)
-        if create_btn:
-            create_btn.setEnabled(not module_exists)
+    def _set_module_view_state(self, module_widgets, module_exists):
+        module_widgets["built_view"].setVisible(module_exists)
+        module_widgets["edit_view"].setVisible(not module_exists)
+
+    def _refresh_module_edit_fields(self, module_id, module_widgets, metadata):
+        self._populate_fields_from_metadata(module_id, metadata)
+
+        body_modules = {
+            "Root / Origin",
+            "Pelvis & Hips",
+            "Spine",
+            "Left Clavicle",
+            "Right Clavicle",
+            "Neck",
+            "Head",
+            "Left Arm",
+            "Right Arm",
+            "Left Leg",
+            "Right Leg",
+        }
+
+        parent_edit = module_widgets.get("parent_edit")
+        if parent_edit and not parent_edit.text().strip():
+            default_parent = (
+                self.body_parent_field.text().strip()
+                if module_id in body_modules
+                else self.module_parent_field.text().strip()
+            )
+            parent_edit.setText(default_parent)
+
+        jaw_ctrl_edit = module_widgets.get("jaw_ctrl_edit")
+        if jaw_ctrl_edit and not jaw_ctrl_edit.text().strip():
+            jaw_ctrl_edit.setText(self.module_jaw_ctrl_field.text().strip())
+
+        jaw_jnt_edit = module_widgets.get("jaw_jnt_edit")
+        if jaw_jnt_edit and not jaw_jnt_edit.text().strip():
+            jaw_jnt_edit.setText(self.module_jaw_jnt_field.text().strip())
+
+        for slot_key, slot_widget in self._slot_edit_widgets.items():
+            slot_widget.setText(self.fields.get(slot_key, ""))
+
+    def _refresh_create_remove_buttons(self, module_id, module_exists):
+        create_button = self.module_create_buttons.get(module_id)
+        remove_button = self.module_remove_buttons.get(module_id)
+
+        if create_button:
+            create_button.setEnabled(not module_exists)
+
             if module_exists:
-                create_btn.setStyleSheet(
+                create_button.setStyleSheet(
                     "background-color: #1e3a20; color: #557755; font-weight: bold; "
-                    "border: 1px solid #335533;")
-                create_btn.setToolTip(f"Module already exists in scene. Remove it first to rebuild.")
+                    "border: 1px solid #335533;"
+                )
+                create_button.setToolTip("Module already exists in scene. Remove it first to rebuild.")
             else:
-                create_btn.setStyleSheet("background-color: #2e6930; color: white; font-weight: bold;")
-                create_btn.setToolTip(f"Build this module setup.")
-        remove_btn = self.module_remove_buttons.get(module_id)
-        if remove_btn:
-            remove_btn.setEnabled(module_exists)
-            if not module_exists:
-                remove_btn.setStyleSheet(
+                create_button.setStyleSheet(
+                    "background-color: #2e6930; color: white; font-weight: bold;"
+                )
+                create_button.setToolTip("Build this module setup.")
+
+        if remove_button:
+            remove_button.setEnabled(module_exists)
+
+            if module_exists:
+                remove_button.setStyleSheet(
+                    "background-color: #7d2a2a; color: white; font-weight: bold;"
+                )
+                remove_button.setToolTip("Remove this module setup.")
+            else:
+                remove_button.setStyleSheet(
                     "background-color: #3a1e1e; color: #775555; font-weight: bold; "
-                    "border: 1px solid #553333;")
-                remove_btn.setToolTip("Module does not exist in scene — nothing to remove.")
-            else:
-                remove_btn.setStyleSheet("background-color: #7d2a2a; color: white; font-weight: bold;")
-                remove_btn.setToolTip(f"Remove this module setup.")
-
-        # ---- Status indicator ----
-        if main_ctrl:
-            status_lbl.setText("\u25cf")
-            status_lbl.setStyleSheet("color: #55cc66; font-size: 10pt;")  # green = built & in scene
-        elif built:
-            status_lbl.setText("\u26a0")
-            status_lbl.setStyleSheet("color: #cc9933; font-size: 10pt;")  # amber = built but missing
-        else:
-            status_lbl.setText("\u25cb")
-            status_lbl.setStyleSheet("color: #555555; font-size: 10pt;")  # grey = not built
-
-        # ---- Parent button ----
-        if main_ctrl:
-            parent_node = self._get_ctrl_scene_parent(main_ctrl)
-            if parent_node:
-                parent_btn.setText(parent_node)
-                parent_btn.setEnabled(True)
-                color = "#6699cc" if cmds.objExists(parent_node) else "#cc6666"
-                parent_btn.setStyleSheet(
-                    f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
-                    f"text-decoration: underline; text-align: left;"
+                    "border: 1px solid #553333;"
                 )
-                try:
-                    parent_btn.clicked.disconnect()
-                except RuntimeError:
-                    pass
-                parent_btn.clicked.connect(
-                    lambda checked=False, n=parent_node: self._select_node(n)
-                )
-            else:
-                parent_btn.setText("\u2014")
-                parent_btn.setEnabled(False)
-                parent_btn.setStyleSheet("color: #777777; font-size: 8pt; border: none; padding: 0 2px;")
+                remove_button.setToolTip("Module does not exist in scene — nothing to remove.")
+
+    def _refresh_module_status_label(self, status_label, was_built, main_control):
+        if main_control:
+            status_label.setText("●")
+            status_label.setStyleSheet("color: #55cc66; font-size: 10pt;")
+        elif was_built:
+            status_label.setText("⚠")
+            status_label.setStyleSheet("color: #cc9933; font-size: 10pt;")
         else:
-            parent_btn.setText("not in scene" if built else "\u2014")
-            parent_btn.setEnabled(False)
-            parent_btn.setStyleSheet("color: #666666; font-size: 8pt; font-style: italic; border: none; padding: 0 2px;")
+            status_label.setText("○")
+            status_label.setStyleSheet("color: #555555; font-size: 10pt;")
 
-        # ---- Jaw Info if applicable ----
-        if main_ctrl and module_id in ["Mouth & Lips", "Teeth", "Tongue", "Other Face Joints"]:
-            jaw_ctrl_val = meta.get("jaw_ctrl")
-            jaw_jnt_val = meta.get("jaw_jnt")
-            
-            if info["jaw_ctrl_btn"]:
-                if jaw_ctrl_val:
-                    info["jaw_ctrl_btn"].setText(jaw_ctrl_val)
-                    info["jaw_ctrl_btn"].setEnabled(True)
-                    color = "#6699cc" if cmds.objExists(jaw_ctrl_val) else "#cc6666"
-                    info["jaw_ctrl_btn"].setStyleSheet(f"color: {color}; font-size: 8pt; border: none; text-decoration: underline; text-align: left;")
-                    try:
-                        info["jaw_ctrl_btn"].clicked.disconnect()
-                    except:
-                        pass
-                    info["jaw_ctrl_btn"].clicked.connect(lambda checked=False, n=jaw_ctrl_val: self._select_node(n))
-                else:
-                    info["jaw_ctrl_btn"].setText("\u2014")
-                    info["jaw_ctrl_btn"].setEnabled(False)
-                    info["jaw_ctrl_btn"].setStyleSheet("color: #777777; font-size: 8pt; border: none;")
+    def _refresh_parent_button(self, parent_button, was_built, main_control):
+        if not main_control:
+            parent_button.setText("not in scene" if was_built else "—")
+            parent_button.setEnabled(False)
+            parent_button.setStyleSheet(
+                "color: #666666; font-size: 8pt; font-style: italic; "
+                "border: none; padding: 0 2px;"
+            )
+            return
 
-            if info["jaw_jnt_btn"]:
-                if jaw_jnt_val:
-                    info["jaw_jnt_btn"].setText(jaw_jnt_val)
-                    info["jaw_jnt_btn"].setEnabled(True)
-                    color = "#6699cc" if cmds.objExists(jaw_jnt_val) else "#cc6666"
-                    info["jaw_jnt_btn"].setStyleSheet(f"color: {color}; font-size: 8pt; border: none; text-decoration: underline; text-align: left;")
-                    try:
-                        info["jaw_jnt_btn"].clicked.disconnect()
-                    except:
-                        pass
-                    info["jaw_jnt_btn"].clicked.connect(lambda checked=False, n=jaw_jnt_val: self._select_node(n))
-                else:
-                    info["jaw_jnt_btn"].setText("\u2014")
-                    info["jaw_jnt_btn"].setEnabled(False)
-                    info["jaw_jnt_btn"].setStyleSheet("color: #777777; font-size: 8pt; border: none;")
+        parent_node = self._get_ctrl_scene_parent(main_control)
+        if not parent_node:
+            parent_button.setText("—")
+            parent_button.setEnabled(False)
+            parent_button.setStyleSheet(
+                "color: #777777; font-size: 8pt; border: none; padding: 0 2px;"
+            )
+            return
 
-        # ---- Mapped Joints / Twist bones read-only display ----
-        jnts = meta.get("joints", [])
-        twists_u = []
-        twists_l = []
+        exists = cmds.objExists(parent_node)
+        color = "#6699cc" if exists else "#cc6666"
+
+        parent_button.setText(parent_node)
+        parent_button.setEnabled(True)
+        parent_button.setStyleSheet(
+            f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
+            f"text-decoration: underline; text-align: left;"
+        )
+
+        self._safe_reconnect_button(parent_button, lambda: self._select_node(parent_node))
+
+    def _refresh_jaw_buttons(self, module_id, module_widgets, metadata, main_control):
+        face_modules = {"Mouth & Lips", "Teeth", "Tongue", "Other Face Joints"}
+
+        if not main_control or module_id not in face_modules:
+            return
+
+        self._set_scene_node_button(
+            module_widgets.get("jaw_ctrl_btn"),
+            metadata.get("jaw_ctrl"),
+            missing_text="—",
+            valid_color="#6699cc",
+        )
+
+        self._set_scene_node_button(
+            module_widgets.get("jaw_jnt_btn"),
+            metadata.get("jaw_jnt"),
+            missing_text="—",
+            valid_color="#6699cc",
+        )
+
+    def _refresh_mapped_joints_label(self, module_id, module_widgets, metadata):
+        joint_names = metadata.get("joints", [])
+        upper_twist_joints = []
+        lower_twist_joints = []
+
         if "Arm" in module_id:
-            twists_u = meta.get("twist_upper", [])
-            twists_l = meta.get("twist_lower", [])
+            upper_twist_joints = metadata.get("twist_upper", [])
+            lower_twist_joints = metadata.get("twist_lower", [])
         elif "Leg" in module_id:
-            twists_u = meta.get("twist_thigh", [])
-            twists_l = meta.get("twist_knee", [])
-        
-        mapped_texts = []
-        if jnts:
-            mapped_texts.append("Joints: " + ", ".join([j.split("|")[-1] for j in jnts if j]))
-        if twists_u:
-            mapped_texts.append("Upper Twist: " + ", ".join([j.split("|")[-1] for j in twists_u if j]))
-        if twists_l:
-            mapped_texts.append("Lower Twist: " + ", ".join([j.split("|")[-1] for j in twists_l if j]))
-            
-        if mapped_texts:
-            info["mapped_joints_lbl"].setText("\n".join(mapped_texts))
-        else:
-            info["mapped_joints_lbl"].setText("\u2014")
+            upper_twist_joints = metadata.get("twist_thigh", [])
+            lower_twist_joints = metadata.get("twist_knee", [])
 
-        # ---- Spaces / connections section — rebuild ----
-        self._clear_widget_layout(spaces_container.layout())
+        mapped_lines = []
 
-        # Collect all controls associated with this module
-        controls_to_check = []
-        if "Arm" in module_id:
-            side = "l" if "Left" in module_id else "r"
-            controls_to_check = [
-                (f"{side}_upperarm_fk_ctrl", "FK"),
-                (f"{side}_hand_ik_ctrl", "IK"),
-                (f"{side}_lowerarm_pv_ctrl", "PV")
-            ]
-        elif "Leg" in module_id:
-            side = "l" if "Left" in module_id else "r"
-            controls_to_check = [
-                (f"{side}_thigh_fk_ctrl", "FK"),
-                (f"{side}_ankle_ik_ctrl", "IK"),
-                (f"{side}_knee_pv_ctrl", "PV")
-            ]
-        else:
-            if main_ctrl:
-                controls_to_check = [(main_ctrl, "")]
+        if joint_names:
+            mapped_lines.append(f"Joints: {self._short_node_list(joint_names)}")
 
-        # Query all spaces first
-        has_spaces = False
-        first_section = True
-        
-        for ctrl, label in controls_to_check:
-            if not cmds.objExists(ctrl):
+        if upper_twist_joints:
+            mapped_lines.append(f"Upper Twist: {self._short_node_list(upper_twist_joints)}")
+
+        if lower_twist_joints:
+            mapped_lines.append(f"Lower Twist: {self._short_node_list(lower_twist_joints)}")
+
+        module_widgets["mapped_joints_lbl"].setText("\n".join(mapped_lines) if mapped_lines else "—")
+
+    def _refresh_spaces_and_connections(self, module_id, module_widgets, main_control):
+        spaces_container = module_widgets["spaces_container"]
+        spaces_layout = spaces_container.layout()
+
+        self._clear_widget_layout(spaces_layout)
+
+        controls_to_check = self._get_module_space_controls(module_id, main_control)
+
+        has_added_section = False
+
+        for control_name, control_label in controls_to_check:
+            if not cmds.objExists(control_name):
                 continue
-            space_targets = self._get_space_targets(ctrl)
-            if space_targets:
-                has_spaces = True
-                if first_section:
-                    sep_lbl = QtWidgets.QLabel("|")
-                    sep_lbl.setStyleSheet("color: #444444; font-size: 8pt;")
-                    spaces_container.layout().addWidget(sep_lbl)
-                    first_section = False
-                else:
-                    section_sep = QtWidgets.QLabel("  ")
-                    spaces_container.layout().addWidget(section_sep)
 
-                hdr_text = f"{label} Spaces →" if label else "Spaces →"
-                sw_hdr = QtWidgets.QLabel(hdr_text)
-                sw_hdr.setStyleSheet("color: #999999; font-weight: bold; font-size: 8pt;")
-                spaces_container.layout().addWidget(sw_hdr)
+            space_targets = self._get_space_targets(control_name)
+            if not space_targets:
+                continue
 
-                for opt, target in space_targets:
-                    t_btn = QtWidgets.QPushButton(opt)
-                    t_btn.setFlat(True)
-                    exists = target and cmds.objExists(target)
-                    color = "#aa88cc" if exists else "#cc6666"
-                    t_btn.setStyleSheet(
-                        f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
-                        f"text-decoration: underline;"
-                    )
-                    t_btn.setCursor(QtCore.Qt.PointingHandCursor)
-                    if exists:
-                        t_btn.setToolTip(f"Click to select the space switch target '{target}' in the Maya scene.")
-                        t_btn.clicked.connect(lambda checked=False, n=target: self._select_node(n))
-                    else:
-                        t_btn.setToolTip(f"Target node '{target}' does not exist in the scene.")
-                        t_btn.setEnabled(False)
-                    spaces_container.layout().addWidget(t_btn)
+            self._add_spaces_section(
+                spaces_layout,
+                control_label,
+                space_targets,
+                add_separator=has_added_section,
+            )
+            has_added_section = True
 
-        # Query incoming driven connections on main_ctrl
-        if main_ctrl:
-            driven_by = self._get_incoming_connections(main_ctrl)
-            if driven_by:
-                if has_spaces or not first_section:
-                    conn_sep = QtWidgets.QLabel("|")
-                    conn_sep.setStyleSheet("color: #444444; font-size: 8pt;")
-                    spaces_container.layout().addWidget(conn_sep)
-                
-                conn_hdr = QtWidgets.QLabel("Driven by \u2192")
-                conn_hdr.setStyleSheet("color: #999999; font-weight: bold; font-size: 8pt;")
-                spaces_container.layout().addWidget(conn_hdr)
+        if main_control:
+            driven_by_nodes = self._get_incoming_connections(main_control)
+            if driven_by_nodes:
+                self._add_driven_by_section(
+                    spaces_layout,
+                    driven_by_nodes,
+                    add_separator=has_added_section,
+                )
 
-                for n in driven_by[:3]:  # cap at 3 to avoid overflow
-                    n_btn = QtWidgets.QPushButton(n)
-                    n_btn.setFlat(True)
-                    exists = cmds.objExists(n)
-                    color = "#cc8844" if exists else "#cc6666"
-                    n_btn.setStyleSheet(
-                        f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
-                        f"text-decoration: underline;"
-                    )
-                    n_btn.setCursor(QtCore.Qt.PointingHandCursor)
-                    n_btn.setToolTip(f"Click to select the driving node '{n}' in the Maya scene.")
-                    n_btn.clicked.connect(lambda checked=False, n_=n: self._select_node(n_))
-                    spaces_container.layout().addWidget(n_btn)
+    def _get_module_space_controls(self, module_id, main_control):
+        metadata = create_rig.load_module_metadata(module_id) or {}
+        stored_controls = [
+            ctrl for ctrl in metadata.get("controls", [])
+            if ctrl and cmds.objExists(ctrl) and cmds.attributeQuery("space", node=ctrl, exists=True)
+        ]
+        if stored_controls:
+            return [(ctrl, self._space_control_label(ctrl)) for ctrl in stored_controls]
+
+        if "Arm" in module_id:
+            side_prefix = "l" if "Left" in module_id else "r"
+            return [
+                (f"{side_prefix}_upperarm_fk_ctrl", "FK"),
+                (f"{side_prefix}_hand_ik_ctrl", "IK"),
+                (f"{side_prefix}_lowerarm_pv_ctrl", "PV"),
+            ]
+
+        if "Leg" in module_id:
+            side_prefix = "l" if "Left" in module_id else "r"
+            return [
+                (f"{side_prefix}_thigh_fk_ctrl", "FK"),
+                (f"{side_prefix}_ankle_ik_ctrl", "IK"),
+                (f"{side_prefix}_knee_pv_ctrl", "PV"),
+            ]
+
+        return [(main_control, "")] if main_control else []
+
+    def _space_control_label(self, ctrl_name):
+        lower_name = ctrl_name.lower()
+        if "_fk_ctrl" in lower_name:
+            return "FK"
+        if "_ik_ctrl" in lower_name:
+            return "IK"
+        if "_pv_ctrl" in lower_name:
+            return "PV"
+        return ctrl_name
+
+    def _add_spaces_section(self, layout, control_label, space_targets, add_separator=False):
+        if add_separator:
+            separator = QtWidgets.QLabel("  ")
+        else:
+            separator = QtWidgets.QLabel("|")
+            separator.setStyleSheet("color: #444444; font-size: 8pt;")
+
+        layout.addWidget(separator)
+
+        header_text = f"{control_label} Spaces →" if control_label else "Spaces →"
+        header_label = QtWidgets.QLabel(header_text)
+        header_label.setStyleSheet("color: #999999; font-weight: bold; font-size: 8pt;")
+        layout.addWidget(header_label)
+
+        for option_name, target_node in space_targets:
+            target_button = QtWidgets.QPushButton(option_name)
+            target_button.setFlat(True)
+
+            target_exists = target_node and cmds.objExists(target_node)
+            color = "#aa88cc" if target_exists else "#cc6666"
+
+            target_button.setStyleSheet(
+                f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
+                f"text-decoration: underline;"
+            )
+            target_button.setCursor(QtCore.Qt.PointingHandCursor)
+
+            if target_exists:
+                target_button.setToolTip(
+                    f"Click to select the space switch target '{target_node}' in the Maya scene."
+                )
+                target_button.clicked.connect(
+                    lambda checked=False, node=target_node: self._select_node(node)
+                )
+            else:
+                target_button.setToolTip(f"Target node '{target_node}' does not exist in the scene.")
+                target_button.setEnabled(False)
+
+            layout.addWidget(target_button)
+
+    def _add_driven_by_section(self, layout, driven_by_nodes, add_separator=False):
+        if add_separator:
+            separator = QtWidgets.QLabel("|")
+            separator.setStyleSheet("color: #444444; font-size: 8pt;")
+            layout.addWidget(separator)
+
+        header_label = QtWidgets.QLabel("Driven by →")
+        header_label.setStyleSheet("color: #999999; font-weight: bold; font-size: 8pt;")
+        layout.addWidget(header_label)
+
+        for node_name in driven_by_nodes[:3]:
+            node_button = QtWidgets.QPushButton(node_name)
+            node_button.setFlat(True)
+
+            node_exists = cmds.objExists(node_name)
+            color = "#cc8844" if node_exists else "#cc6666"
+
+            node_button.setStyleSheet(
+                f"color: {color}; font-size: 8pt; border: none; padding: 0 2px; "
+                f"text-decoration: underline;"
+            )
+            node_button.setCursor(QtCore.Qt.PointingHandCursor)
+            node_button.setToolTip(f"Click to select the driving node '{node_name}' in the Maya scene.")
+
+            if node_exists:
+                node_button.clicked.connect(
+                    lambda checked=False, node=node_name: self._select_node(node)
+                )
+            else:
+                node_button.setEnabled(False)
+
+            layout.addWidget(node_button)
+
+    def _set_scene_node_button(self, button, node_name, missing_text="—", valid_color="#6699cc"):
+        if not button:
+            return
+
+        if not node_name:
+            button.setText(missing_text)
+            button.setEnabled(False)
+            button.setStyleSheet("color: #777777; font-size: 8pt; border: none;")
+            return
+
+        node_exists = cmds.objExists(node_name)
+        color = valid_color if node_exists else "#cc6666"
+
+        button.setText(node_name)
+        button.setEnabled(node_exists)
+        button.setStyleSheet(
+            f"color: {color}; font-size: 8pt; border: none; "
+            f"text-decoration: underline; text-align: left;"
+        )
+
+        if node_exists:
+            self._safe_reconnect_button(button, lambda: self._select_node(node_name))
+
+    def _safe_reconnect_button(self, button, callback):
+        try:
+            button.clicked.disconnect()
+        except RuntimeError:
+            pass
+        except TypeError:
+            pass
+
+        button.clicked.connect(lambda checked=False: callback())
+
+    def _short_node_list(self, node_names):
+        return ", ".join(node.split("|")[-1] for node in node_names if node)
 
     def _refresh_all_module_details(self):
         """Refresh the detail widget for every registered module."""
@@ -2872,100 +3042,124 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             except Exception as e:
                 cmds.warning(f"[HIK UI] Could not refresh detail for '{module_id}': {e}")
 
-    def _populate_fields_from_metadata(self, module_id, meta):
-        if not meta:
+    def _get_registered_module_ids(self):
+        module_ids = []
+        module_ids.extend(self._module_detail_widgets.keys())
+        module_ids.extend(self.module_create_buttons.keys())
+        module_ids.extend(self.module_remove_buttons.keys())
+        return list(dict.fromkeys(module_ids))
+
+    def _populate_fields_from_metadata(self, module_id, metadata):
+        if not metadata:
             return
-        
-        # Helper to set if empty
-        def set_field_if_empty(slot, value):
-            if slot in self.fields and not self.fields[slot]:
-                self.fields[slot] = value
 
-        # 1. Parent control
-        p = meta.get("parent")
-        if p and cmds.objExists(p):
-            info = self._module_detail_widgets.get(module_id)
-            if info and info.get("parent_edit") and not info["parent_edit"].text().strip():
-                info["parent_edit"].setText(p)
+        module_widgets = self._module_detail_widgets.get(module_id)
 
-        # 2. Jaw controls/joints for face modules
-        if module_id in ["Mouth & Lips", "Teeth", "Tongue", "Other Face Joints"]:
-            info = self._module_detail_widgets.get(module_id)
-            if info:
-                jc = meta.get("jaw_ctrl")
-                if jc and info.get("jaw_ctrl_edit") and not info["jaw_ctrl_edit"].text().strip():
-                    info["jaw_ctrl_edit"].setText(jc)
-                jj = meta.get("jaw_jnt")
-                if jj and info.get("jaw_jnt_edit") and not info["jaw_jnt_edit"].text().strip():
-                    info["jaw_jnt_edit"].setText(jj)
+        def set_hik_field_if_empty(field_name, joint_name):
+            if field_name in self.fields and not self.fields[field_name]:
+                self.fields[field_name] = joint_name
 
-        # 3. Main and twist joint mapping
-        jnts = meta.get("joints", [])
-        
-        if module_id == "Root / Origin" and len(jnts) >= 1:
-            set_field_if_empty("Reference", jnts[0])
-        elif module_id == "Pelvis & Hips" and len(jnts) >= 1:
-            set_field_if_empty("Hips", jnts[0])
-            if len(jnts) >= 2:
-                set_field_if_empty("HipSwing", jnts[1])
+        def set_line_edit_if_empty(widget_key, value):
+            if not module_widgets:
+                return
+
+            line_edit = module_widgets.get(widget_key)
+            if line_edit and value and not line_edit.text().strip():
+                line_edit.setText(value)
+
+        def populate_chain_slots(slot_names, joint_names):
+            for slot_name, joint_name in zip(slot_names, joint_names):
+                set_hik_field_if_empty(slot_name, joint_name)
+
+        def populate_numbered_slots(base_slot_name, joint_names):
+            for index, joint_name in enumerate(joint_names):
+                slot_name = base_slot_name if index == 0 else f"{base_slot_name}{index}"
+                set_hik_field_if_empty(slot_name, joint_name)
+
+        def populate_roll_slots(first_roll_slot, leaf_roll_prefix, roll_joints):
+            if not roll_joints:
+                return
+
+            set_hik_field_if_empty(first_roll_slot, roll_joints[0])
+
+            for index, joint_name in enumerate(roll_joints[1:], start=1):
+                set_hik_field_if_empty(f"{leaf_roll_prefix}{index}", joint_name)
+
+        parent_control = metadata.get("parent")
+        if parent_control and cmds.objExists(parent_control):
+            set_line_edit_if_empty("parent_edit", parent_control)
+
+        if module_id in {"Mouth & Lips", "Teeth", "Tongue", "Other Face Joints"}:
+            set_line_edit_if_empty("jaw_ctrl_edit", metadata.get("jaw_ctrl"))
+            set_line_edit_if_empty("jaw_jnt_edit", metadata.get("jaw_jnt"))
+
+        joint_names = metadata.get("joints", [])
+
+        if module_id == "Root / Origin":
+            populate_chain_slots(["Reference"], joint_names)
+
+        elif module_id == "Pelvis & Hips":
+            populate_chain_slots(["Hips", "HipSwing"], joint_names)
+
         elif module_id == "Spine":
-            for i, j in enumerate(jnts):
-                slot = "Spine" if i == 0 else f"Spine{i}"
-                set_field_if_empty(slot, j)
-        elif "Clavicle" in module_id:
-            sp = "Left" if "Left" in module_id else "Right"
-            if len(jnts) >= 1:
-                set_field_if_empty(f"{sp}Shoulder", jnts[0])
+            populate_numbered_slots("Spine", joint_names)
+
         elif module_id == "Neck":
-            for i, j in enumerate(jnts):
-                slot = "Neck" if i == 0 else f"Neck{i}"
-                set_field_if_empty(slot, j)
-        elif module_id == "Head" and len(jnts) >= 1:
-            set_field_if_empty("Head", jnts[0])
-            
+            populate_numbered_slots("Neck", joint_names)
+
+        elif module_id == "Head":
+            populate_chain_slots(["Head"], joint_names)
+
+        elif "Clavicle" in module_id:
+            side_label = "Left" if "Left" in module_id else "Right"
+            populate_chain_slots([f"{side_label}Shoulder"], joint_names)
+
         elif "Arm" in module_id:
-            sp = "Left" if "Left" in module_id else "Right"
-            # Main chain (Clavicle is now in its own separate module)
-            slots = [f"{sp}Arm", f"{sp}ForeArm", f"{sp}Hand"]
-            for i, j in enumerate(jnts):
-                if i < len(slots):
-                    set_field_if_empty(slots[i], j)
-            # Twist upper
-            tw_u = meta.get("twist_upper", [])
-            if tw_u:
-                set_field_if_empty(f"{sp}ArmRoll", tw_u[0])
-                for i, j in enumerate(tw_u[1:]):
-                    set_field_if_empty(f"Leaf{sp}ArmRoll{i+1}", j)
-            # Twist lower
-            tw_l = meta.get("twist_lower", [])
-            if tw_l:
-                set_field_if_empty(f"{sp}ForeArmRoll", tw_l[0])
-                for i, j in enumerate(tw_l[1:]):
-                    set_field_if_empty(f"Leaf{sp}ForearmRoll{i+1}", j)
-                    
+            side_label = "Left" if "Left" in module_id else "Right"
+
+            populate_chain_slots(
+                [f"{side_label}Arm", f"{side_label}ForeArm", f"{side_label}Hand"],
+                joint_names
+            )
+
+            populate_roll_slots(
+                f"{side_label}ArmRoll",
+                f"Leaf{side_label}ArmRoll",
+                metadata.get("twist_upper", [])
+            )
+
+            populate_roll_slots(
+                f"{side_label}ForeArmRoll",
+                f"Leaf{side_label}ForearmRoll",
+                metadata.get("twist_lower", [])
+            )
+
         elif "Leg" in module_id:
-            sp = "Left" if "Left" in module_id else "Right"
-            # Main chain
-            slots = [f"{sp}UpLeg", f"{sp}Leg", f"{sp}Foot", f"{sp}ToeBase"]
-            for i, j in enumerate(jnts):
-                if i < len(slots):
-                    set_field_if_empty(slots[i], j)
-            # Twist thigh (upper)
-            tw_u = meta.get("twist_thigh", [])
-            if tw_u:
-                set_field_if_empty(f"{sp}UpLegRoll", tw_u[0])
-                for i, j in enumerate(tw_u[1:]):
-                    set_field_if_empty(f"Leaf{sp}UpLegRoll{i+1}", j)
-            # Twist knee (lower)
-            tw_l = meta.get("twist_knee", [])
-            if tw_l:
-                set_field_if_empty(f"{sp}LegRoll", tw_l[0])
-                for i, j in enumerate(tw_l[1:]):
-                    set_field_if_empty(f"Leaf{sp}LegRoll{i+1}", j)
+            side_label = "Left" if "Left" in module_id else "Right"
+
+            populate_chain_slots(
+                [f"{side_label}UpLeg", f"{side_label}Leg", f"{side_label}Foot", f"{side_label}ToeBase"],
+                joint_names
+            )
+
+            populate_roll_slots(
+                f"{side_label}UpLegRoll",
+                f"Leaf{side_label}UpLegRoll",
+                metadata.get("twist_thigh", [])
+            )
+
+            populate_roll_slots(
+                f"{side_label}LegRoll",
+                f"Leaf{side_label}LegRoll",
+                metadata.get("twist_knee", [])
+            )
 
     def _get_first_existing_ctrl(self, module_id, meta=None):
         """Return the first scene-existing control for a module (candidates + metadata fallback)."""
-        candidates = list(self._MODULE_CTRL_CANDIDATES.get(module_id, []))
+        candidates = []
+        if meta:
+            candidates.extend(meta.get("controls", []))
+        candidates.extend(self._MODULE_CTRL_CANDIDATES.get(module_id, []))
         if meta:
             for jnt in meta.get("joints", []):
                 if jnt:
@@ -3147,8 +3341,6 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         """Refresh module details whenever the Rigging tab becomes active."""
         if self.tabs.tabText(index) == "Rigging":
             self._refresh_all_module_details()
-
-
 
     def _load_module_metadata_from_scene(self):
         """Read rig_module_store, check for discrepancies, then refresh all detail widgets."""

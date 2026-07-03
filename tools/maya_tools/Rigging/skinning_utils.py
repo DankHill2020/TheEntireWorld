@@ -1,4 +1,5 @@
 import maya.cmds as cmds
+import maya.mel as mel
 from collections import OrderedDict
 import json
 import os
@@ -17,14 +18,12 @@ def transfer_skin_weights_from_selection(remove_unused_influences=True):
     return transfer_skin_weights(
         source_meshes=selection[:-1],
         target_mesh=selection[-1],
-        remove_unused_influences=remove_unused_influences
     )
 
 
 def transfer_skin_weights(
     source_meshes,
     target_mesh,
-    remove_unused_influences=True
 ):
     """
     Transfer skin weights from source meshes to a target mesh.
@@ -32,7 +31,6 @@ def transfer_skin_weights(
     Args:
         source_meshes (list[str])
         target_mesh (str)
-        remove_unused_influences (bool)
 
     Returns:
         dict | bool
@@ -51,9 +49,6 @@ def transfer_skin_weights(
 
         target_skin = _create_target_skin(target_mesh, skin_data)
         _copy_weights(source_meshes, target_mesh)
-
-        if remove_unused_influences:
-            cmds.skinCluster(target_skin, e=True, removeUnusedInfluence=True)
 
         cmds.setAttr(
             f"{target_mesh}.inheritsTransform",
@@ -154,6 +149,25 @@ def _copy_weights(source_meshes, target_mesh):
         sa="closestPoint",
         normalize=True
     )
+
+
+def _run_weight_hammer(mesh):
+    previous_selection = cmds.ls(selection=True) or []
+    try:
+        vertex_count = cmds.polyEvaluate(mesh, vertex=True) or 0
+        if vertex_count < 1:
+            cmds.warning(f"Weight Hammer skipped for '{mesh}': no vertices found.")
+            return
+
+        cmds.select(f"{mesh}.vtx[0]", replace=True)
+        mel.eval("WeightHammer;")
+    except Exception as exc:
+        cmds.warning(f"Weight Hammer failed for '{mesh}': {exc}")
+    finally:
+        if previous_selection:
+            cmds.select(previous_selection, replace=True)
+        else:
+            cmds.select(clear=True)
 
 
 def export_skin_weights(meshes, export_dir="C:/temp/weights"):
@@ -271,6 +285,7 @@ def import_skin_weights(meshes, export_dir="C:/temp/weights"):
             print(f"[!] Failed to import weights for '{mesh}': {e}")
             continue
 
+        _run_weight_hammer(mesh)
         print(f"[?] Imported: {mesh}")
 
 

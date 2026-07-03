@@ -5,7 +5,7 @@ import inspect
 import threading
 
 
-def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, nodes=None, reference_paths=None, changelist=None):
+def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, nodes=None, reference_paths=None):
     """
     Subprocess command function which calls the actual export function, to make scene state unchanged
     :param export_path: full path for fbx animation to be exported
@@ -14,7 +14,6 @@ def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, node
     :param end_frame: end frame of exported data
     :param nodes: Joints or nodes to be exported
     :param reference_paths: Paths to import in the maya py instance from reference
-    :param changelist: Optional changelist id for P4 add/edit
 
     :return:
     """
@@ -50,10 +49,6 @@ def export_animation_to_fbx(export_path, namespace, start_frame, end_frame, node
 
     if reference_paths:
         cmd += ["--reference_paths", (str(reference_paths))]
-        
-    if changelist:
-        cmd += ["--changelist", str(changelist)]
-        
     # Set environment variables
     maya_env = os.environ.copy()
     maya_env["MAYA_SCRIPT_PATH"] = os.path.join("C:/Program Files", "Autodesk", f"Maya{maya_version}","scripts")

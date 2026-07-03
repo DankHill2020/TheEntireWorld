@@ -2,10 +2,66 @@ import os
 import json
 import maya.cmds as cmds
 
+SPACE_TARGET_MAP = {
+    "World": "origin_ctrl",
+    "Pelvis": "pelvis_ctrl",
+    "Hip": "pelvis_ctrl",
+    "Neck": "neck2_ctrl",
+    "Spine5": "spine5_Tip_ctrl",
+}
 
-# =========================================================
-# ENUM QUERY / STORAGE
-# =========================================================
+SIDE_SPACE_TARGET_MAP = {
+    "Clav": "{side}_clavicle_ctrl",
+    "Hand": "{side}_hand_ik_ctrl",
+    "Foot": "{side}_ankle_ik_ctrl",
+    "Hand and Clav": "{side}_arm_pv_handClav_space",
+    "Foot And Hip": "{side}_leg_pv_footHip_space",
+    "Foot and Hip": "{side}_leg_pv_footHip_space",
+    "Foot Hip": "{side}_leg_pv_footHip_space",
+}
+
+def get_side_from_node(node):
+    short = node.split("|")[-1].split(":")[-1]
+    if short.startswith("l_"):
+        return "l"
+    if short.startswith("r_"):
+        return "r"
+    return None
+
+
+def resolve_space_target(label, node=None, side=None):
+    if label in SPACE_TARGET_MAP:
+        return SPACE_TARGET_MAP[label]
+
+    if side is None and node:
+        side = get_side_from_node(node)
+
+    template = SIDE_SPACE_TARGET_MAP.get(label)
+    if template and side:
+        return template.format(side=side)
+
+    return None
+
+
+def resolve_space_targets_from_labels(labels, node=None, side=None, require_existing=True):
+    targets = []
+
+    for label in labels:
+        target = resolve_space_target(label, node=node, side=side)
+
+        if not target:
+            cmds.warning("No space target mapping found for label: {}".format(label))
+            targets.append(None)
+            continue
+
+        if require_existing and not cmds.objExists(target):
+            cmds.warning("Mapped space target does not exist: {} -> {}".format(label, target))
+            targets.append(None)
+            continue
+
+        targets.append(target)
+
+    return targets
 
 def get_enum_labels(node, attr):
     data = cmds.attributeQuery(attr, node=node, listEnum=True)
@@ -75,9 +131,14 @@ def collect_enum_data(nodes=None, attr_filter=None, strip_namespaces=True):
             except Exception:
                 current_value = None
 
+            current_label = None
+            if isinstance(current_value, int) and 0 <= current_value < len(labels):
+                current_label = labels[current_value]
+
             node_data[attr] = {
                 "labels": labels,
                 "value": current_value,
+                "label": current_label,
             }
 
         if node_data:
@@ -111,10 +172,6 @@ def load_enum_data_from_json(filepath):
     with open(filepath, "r") as f:
         return json.load(f)
 
-
-# =========================================================
-# CONNECTION HELPERS
-# =========================================================
 
 def get_attr_connections(plug):
     """
@@ -152,11 +209,7 @@ def reconnect_attr_connections(plug, incoming, outgoing):
             print("Failed reconnect outgoing {} -> {} : {}".format(plug, dst, exc))
 
 
-# =========================================================
-# ENUM REBUILD
-# =========================================================
-
-def rebuild_enum_attr_with_order(node, attr, new_labels, preserve_value_by_label=True, verbose=True):
+def rebuild_enum_attr_with_order(node, attr, new_labels, preserve_value_by_label=True, stored_label=None, stored_value=None, verbose=True):
     """
     Rebuild enum order on an existing attr while preserving connections.
 
@@ -164,6 +217,7 @@ def rebuild_enum_attr_with_order(node, attr, new_labels, preserve_value_by_label
     -----
     - This preserves raw connections by disconnecting and reconnecting them.
     - It remaps the attr's local current value by label when possible.
+    - If stored_label is supplied, it will restore the saved enum selection by label.
     - It does NOT remap animated/int-driven upstream values by semantic label.
       If you need that too, this can be expanded later.
     """
@@ -216,12 +270,42 @@ def rebuild_enum_attr_with_order(node, attr, new_labels, preserve_value_by_label
     try:
         cmds.addAttr(plug, edit=True, enumName=":".join(new_labels))
 
-        if preserve_value_by_label and old_label in new_labels:
+        restored = False
+
+        def apply_label(label):
+            if label not in new_labels:
+                return False
             try:
-                cmds.setAttr(plug, new_labels.index(old_label))
-            except Exception as exc:
-                if verbose:
-                    print("Could not restore value for {} : {}".format(plug, exc))
+                cmds.setAttr(plug, new_labels.index(label))
+                return True
+            except Exception:
+                try:
+                    cmds.setAttr(plug, label, type="enum")
+                    return True
+                except Exception:
+                    return False
+
+        if stored_label and apply_label(stored_label):
+            restored = True
+        elif preserve_value_by_label and old_label and apply_label(old_label):
+            restored = True
+        elif isinstance(stored_value, int) and 0 <= stored_value < len(new_labels):
+            try:
+                cmds.setAttr(plug, stored_value)
+                restored = True
+            except Exception:
+                pass
+        elif isinstance(old_value, int) and 0 <= old_value < len(new_labels):
+            try:
+                cmds.setAttr(plug, old_value)
+                restored = True
+            except Exception:
+                pass
+
+        if not restored and verbose:
+            print("Could not restore enum value for {} | stored_label={} stored_value={} old_label={} old_value={}".format(
+                plug, stored_label, stored_value, old_label, old_value
+            ))
     except Exception as exc:
         success = False
         if verbose:
@@ -240,10 +324,6 @@ def rebuild_enum_attr_with_order(node, attr, new_labels, preserve_value_by_label
 
     return success
 
-
-# =========================================================
-# APPLY TO TARGET SCENE
-# =========================================================
 
 def build_node_lookup(strip_namespaces=True):
     """
@@ -304,12 +384,35 @@ def apply_enum_data(data, prefer_first_match=True, strip_namespaces=True, verbos
             labels = attr_data.get("labels", [])
             if not labels:
                 continue
+            if attr == "space":
+                targets = resolve_space_targets_from_labels(
+                    labels,
+                    node=target_node,
+                    require_existing=True
+                )
+
+                attr_data["targets"] = targets
+
+                if verbose:
+                    print("Resolved space targets for {}.{} : {}".format(
+                        target_node,
+                        attr,
+                        list(zip(labels, targets))
+                    ))
+            stored_label = attr_data.get("label")
+            stored_value = attr_data.get("value")
+            if stored_label is None and isinstance(stored_value, int) and 0 <= stored_value < len(labels):
+                stored_label = labels[stored_value]
+            elif stored_label is None and isinstance(stored_value, str) and stored_value in labels:
+                stored_label = stored_value
 
             ok = rebuild_enum_attr_with_order(
                 target_node,
                 attr,
                 labels,
                 preserve_value_by_label=True,
+                stored_label=stored_label,
+                stored_value=stored_value,
                 verbose=verbose
             )
 
@@ -320,10 +423,6 @@ def apply_enum_data(data, prefer_first_match=True, strip_namespaces=True, verbos
 
     return results
 
-
-# =========================================================
-# CONVENIENCE WRAPPERS
-# =========================================================
 
 def export_selected_enum_orders(filepath, attr_filter=None):
     """
@@ -351,9 +450,7 @@ def import_enum_orders(filepath):
     )
 
 
-# =========================================================
-# EXAMPLE USAGE
-# =========================================================
+
 
 # 1. In the source file:
 # Select the controls you want to export, then run:
@@ -374,7 +471,7 @@ def import_enum_orders(filepath):
 # 2. Open the target file:
 # Then run:
 #
-import_enum_orders(r"C:/temp/enum_orders.json")
+#import_enum_orders(r"C:/temp/enum_orders.json")
 #
 # This will:
 # - find matching nodes by short name
