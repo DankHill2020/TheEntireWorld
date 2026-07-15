@@ -1,11 +1,6 @@
-try:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    from shiboken6 import wrapInstance
-    PYQT_VERSION = 6
-except:
-    from PySide2 import QtWidgets, QtCore, QtGui
-    from shiboken2 import wrapInstance
-    PYQT_VERSION = 2
+HOST = None
+PYQT_VERSION = None
+
 import threading
 import os
 from custom_qt import custom_widgets
@@ -24,21 +19,49 @@ def is_maya():
 def is_motionbuilder():
     try:
         import pyfbsdk
-
         return True
     except ImportError:
         return False
 
 if is_maya():
+    HOST = "maya"
+    import maya.cmds as cmds
+    maya_version = int(cmds.about(version=True).split(".")[0])
     from maya_tools.Animation.anim_export import anim_export_command as anim_ec
     from maya_tools.Animation.anim_export import anim_export_utils as anim_utils
     from maya_tools.Cinematics.SequenceUI import sequence_utils
-    print("Running in Maya")
+    if maya_version >= 2025:
+        from PySide6 import QtWidgets, QtCore, QtGui
+        from shiboken6 import wrapInstance
+        PYQT_VERSION = 6
+    else:
+        from PySide2 import QtWidgets, QtCore, QtGui
+        from shiboken2 import wrapInstance
+        PYQT_VERSION = 2
 
 elif is_motionbuilder():
+    HOST = "motionbuilder"
     from motionbuilder_tools.Animation.anim_export import anim_export as anim_ec
     from motionbuilder_tools.Cinematics.SequenceUI import sequence_utils
-    print("Running in MotionBuilder")
+    try:
+        from PySide2 import QtWidgets, QtCore, QtGui
+        from shiboken2 import wrapInstance
+        PYQT_VERSION = 2
+    except ImportError:
+        from PySide6 import QtWidgets, QtCore, QtGui
+        from shiboken6 import wrapInstance
+        PYQT_VERSION = 6
+
+else:
+    HOST = "standalone"
+    try:
+        from PySide6 import QtWidgets, QtCore, QtGui
+        from shiboken6 import wrapInstance
+        PYQT_VERSION = 6
+    except ImportError:
+        from PySide2 import QtWidgets, QtCore, QtGui
+        from shiboken2 import wrapInstance
+        PYQT_VERSION = 2
 
 script_dir = os.path.dirname(__file__).replace('\\', '/')
 
@@ -62,9 +85,9 @@ class AnimationEntryError(Exception):
 class AnimationManagerUI(QtWidgets.QDialog):
     file_opened = QtCore.Signal()
     def __init__(self, parent=None):
-        if is_maya():
+        if HOST == "maya":
             parent = wrapInstance(sequence_utils.get_main_window_pointer(), QtWidgets.QMainWindow)
-        elif is_motionbuilder():
+        elif HOST == "motionbuilder":
             parent = QtWidgets.QApplication.activeWindow()
         """
         Creates the UI with a table, context menu, and right-side controls.

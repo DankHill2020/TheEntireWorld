@@ -1,0 +1,23 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-3.31/Modules/BasicConfigVersion-SameMajorVersion.cmake.in
+C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/CMakePackageConfigHelpers.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/CheckCXXCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/ExternalProject/shared_internal_commands.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FetchContent.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/GNUInstallDirs.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CheckCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CheckFlagCommonConfig.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/WriteBasicConfigVersionFile.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/CMakeModulesExtra.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/install/Config.cmake.in
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/install/InstallLibrary.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/symbols/Defs.h.in
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/symbols/Symbols.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/utilities/SupportedCompileOptions.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/version/VersionHeader.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/CMakeModulesExtra/version/VersionHeader.h.in
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/CMakeLists.txt
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/cmake/DNACDependencies.cmake

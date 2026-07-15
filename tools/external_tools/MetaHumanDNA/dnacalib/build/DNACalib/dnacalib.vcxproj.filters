@@ -1,0 +1,669 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODConstraint.cpp">
+      <Filter>src\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODMapping.cpp">
+      <Filter>src\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\Reader.cpp">
+      <Filter>src\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\Writer.cpp">
+      <Filter>src\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\AnimatedMapFilter.cpp">
+      <Filter>src\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\BlendShapeFilter.cpp">
+      <Filter>src\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\JointFilter.cpp">
+      <Filter>src\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\MeshFilter.cpp">
+      <Filter>src\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamReaderImpl.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamWriterImpl.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\FilteredInputArchive.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamReaderImpl.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamWriterImpl.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\StreamReader.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\StreamWriter.cpp">
+      <Filter>src\dna\stream</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\Command.cpp">
+      <Filter>src\dnacalib</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommandImpl.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\ClearBlendShapesCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CommandSequence.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\PruneBlendShapeTargetsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveAnimatedMapCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveBlendShapeCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveJointAnimationCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveJointCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveMeshCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameAnimatedMapCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameBlendShapeCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameJointCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameMeshCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RotateCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\ScaleCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetBlendShapeTargetDeltasCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetLODsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetNeutralJointRotationsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetNeutralJointTranslationsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetSkinWeightsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetVertexPositionsCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\TranslateCommand.cpp">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNACalibDNAReaderImpl.cpp">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODConstraint.cpp">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODMapping.cpp">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\AnimatedMapFilter.cpp">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\BlendShapeFilter.cpp">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\JointFilter.cpp">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\MeshFilter.cpp">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\Triangle.cpp">
+      <Filter>src\dnacalib\types</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\UVBarycentricMapping.cpp">
+      <Filter>src\dnacalib\types</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\version\VersionInfo.cpp">
+      <Filter>src\dnacalib\version</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\MemoryResource.cpp">
+      <Filter>src\pma</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\AlignedMemoryResource.cpp">
+      <Filter>src\pma\resources</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\ArenaMemoryResource.cpp">
+      <Filter>src\pma\resources</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\DefaultMemoryResource.cpp">
+      <Filter>src\pma\resources</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Provider.cpp">
+      <Filter>src\status</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Registry.cpp">
+      <Filter>src\status</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Status.cpp">
+      <Filter>src\status</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Storage.cpp">
+      <Filter>src\status</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\Concepts.cpp">
+      <Filter>src\trio</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\Stream.cpp">
+      <Filter>src\trio</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\FileStreamImpl.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStream.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamFallback.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamUnix.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamWindows.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryStreamImpl.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\StreamStatus.cpp">
+      <Filter>src\trio\streams</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\BaseImpl.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DNA.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DataLayerBitmask.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DenormalizedData.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODConstraint.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODMapping.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\ReaderImpl.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\SurjectiveMapping.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\TypeDefs.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\WriterImpl.h">
+      <Filter>src\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\AnimatedMapFilter.h">
+      <Filter>src\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\BlendShapeFilter.h">
+      <Filter>src\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\JointFilter.h">
+      <Filter>src\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\MeshFilter.h">
+      <Filter>src\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\Remap.h">
+      <Filter>src\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamReaderImpl.h">
+      <Filter>src\dna\stream</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamWriterImpl.h">
+      <Filter>src\dna\stream</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\FilteredInputArchive.h">
+      <Filter>src\dna\stream</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamReaderImpl.h">
+      <Filter>src\dna\stream</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamWriterImpl.h">
+      <Filter>src\dna\stream</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\types\Limits.h">
+      <Filter>src\dna\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\utils\Extd.h">
+      <Filter>src\dna\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\utils\ScopedEnumEx.h">
+      <Filter>src\dna\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\CommandImplBase.h">
+      <Filter>src\dnacalib</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\TypeDefs.h">
+      <Filter>src\dnacalib</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommandImpl.h">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameResourceCommand.h">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SupportFactories.h">
+      <Filter>src\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\BaseImpl.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNA.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNACalibDNAReaderImpl.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DenormalizedData.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODConstraint.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODMapping.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\ReaderImpl.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\SurjectiveMapping.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\WriterImpl.h">
+      <Filter>src\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\AnimatedMapFilter.h">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\BlendShapeFilter.h">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\JointFilter.h">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\MeshFilter.h">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\Remap.h">
+      <Filter>src\dnacalib\dna\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\BoundingBox.h">
+      <Filter>src\dnacalib\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\Triangle.h">
+      <Filter>src\dnacalib\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\UVBarycentricMapping.h">
+      <Filter>src\dnacalib\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\Algorithm.h">
+      <Filter>src\dnacalib\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\Extd.h">
+      <Filter>src\dnacalib\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\FormatString.h">
+      <Filter>src\dnacalib\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\ScopedEnumEx.h">
+      <Filter>src\dnacalib\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\PredefinedCodes.h">
+      <Filter>src\status</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Registry.h">
+      <Filter>src\status</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Storage.h">
+      <Filter>src\status</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Computations.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Mat.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\TDM.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Transforms.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Types.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Vec.h">
+      <Filter>src\tdm</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\version\Version.h">
+      <Filter>src\tdm\version</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\Archive.h">
+      <Filter>src\terse</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\Common.h">
+      <Filter>src\terse\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\Traits.h">
+      <Filter>src\terse\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\binary\InputArchive.h">
+      <Filter>src\terse\archives\binary</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\binary\OutputArchive.h">
+      <Filter>src\terse\archives\binary</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\json\InputArchive.h">
+      <Filter>src\terse\archives\json</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\json\OutputArchive.h">
+      <Filter>src\terse\archives\json</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Anchor.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\ArchiveOffset.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\ArchiveSize.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Blob.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\CharInputStreamBuf.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\CharOutputStreamBuf.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\DynArray.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Transparent.h">
+      <Filter>src\terse\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\Base64.h">
+      <Filter>src\terse\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\ByteSwap.h">
+      <Filter>src\terse\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\Endianness.h">
+      <Filter>src\terse\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\VirtualSerializerProxy.h">
+      <Filter>src\terse\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\version\Version.h">
+      <Filter>src\terse\version</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\FileStreamImpl.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamFallback.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamUnix.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamWindows.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryStreamImpl.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\StreamStatus.h">
+      <Filter>src\trio\streams</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\NativeString.h">
+      <Filter>src\trio\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\PlatformWindows.h">
+      <Filter>src\trio\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\ScopedEnumEx.h">
+      <Filter>src\trio\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\DNACalib.h">
+      <Filter>include\dnacalib</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Command.h">
+      <Filter>include\dnacalib</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Defs.h">
+      <Filter>include\dnacalib</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CalculateMeshLowerLODsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ClearBlendShapesCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CommandSequence.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ConditionalCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\PruneBlendShapeTargetsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveAnimatedMapCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveBlendShapeCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointAnimationCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveMeshCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameAnimatedMapCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameBlendShapeCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameJointCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameMeshCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RotateCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ScaleCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetBlendShapeTargetDeltasCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetLODsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointRotationsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointTranslationsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetSkinWeightsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetVertexPositionsCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\TranslateCommand.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\VectorOperations.h">
+      <Filter>include\dnacalib\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\dna\DNACalibDNAReader.h">
+      <Filter>include\dnacalib\dna</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\types\Aliases.h">
+      <Filter>include\dnacalib\types</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\Version.h">
+      <Filter>include\dnacalib\version</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\VersionInfo.h">
+      <Filter>include\dnacalib\version</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{548580E4-875B-3424-B980-8F42B2163128}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\dnacalib">
+      <UniqueIdentifier>{2F9D2800-4B58-3D2D-A9B3-9A3E7175AF05}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\dnacalib\commands">
+      <UniqueIdentifier>{261010B3-0ABA-3225-B4BF-046CEB906682}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\dnacalib\dna">
+      <UniqueIdentifier>{9D1D72A3-E834-3E5E-8750-B3F5243A7701}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\dnacalib\types">
+      <UniqueIdentifier>{D46094FA-3A28-3925-AD1D-D56E13945926}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\dnacalib\version">
+      <UniqueIdentifier>{A474DC60-9638-38F9-B32A-099C52376E04}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{30C33F91-C855-32AD-8631-E0383AAA457D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dna">
+      <UniqueIdentifier>{5A380C8A-93B7-339C-BBFE-26FDA7CF370D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dna\filters">
+      <UniqueIdentifier>{323411B0-C0A8-31EE-82EF-E222DDFEB724}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dna\stream">
+      <UniqueIdentifier>{69E14C25-EF50-3D9A-9E50-CAF21DCBFE09}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dna\types">
+      <UniqueIdentifier>{C9FCED35-CCD0-325D-BF72-CBCB8E428171}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dna\utils">
+      <UniqueIdentifier>{07674D4E-9EAF-3D1B-B278-8240970DAFC7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib">
+      <UniqueIdentifier>{0951EB82-2955-3FA3-B3D1-D883D6F92860}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\commands">
+      <UniqueIdentifier>{5632C6D1-40FB-3C45-88EF-056D1FD7A46B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\dna">
+      <UniqueIdentifier>{00CB1470-3098-3CD1-9D41-880CF87D29D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\dna\filters">
+      <UniqueIdentifier>{B77F53CE-59CF-36F7-9CFF-AA24291C31D4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\types">
+      <UniqueIdentifier>{C35DE663-285D-3302-90CF-188BB66A8B2A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\utils">
+      <UniqueIdentifier>{298614BF-C8D6-3054-9A8E-EC406F8B1621}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\dnacalib\version">
+      <UniqueIdentifier>{13916AEF-1396-3A21-B8C3-6B994EA60FE9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\pma">
+      <UniqueIdentifier>{6688E5A9-5621-3600-90DE-78BA6A314139}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\pma\resources">
+      <UniqueIdentifier>{0A609E82-CBA3-3C73-836C-76C91BC8DB70}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\status">
+      <UniqueIdentifier>{1D96E437-9C20-3344-927A-8AB14FBE7C9F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\tdm">
+      <UniqueIdentifier>{18A5BF29-49B8-31DA-BD23-869F0AA19EE1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\tdm\version">
+      <UniqueIdentifier>{1DB83999-92B4-3E31-8483-29FA2D3EDCC4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse">
+      <UniqueIdentifier>{E60F40F1-F49B-3B72-AFC7-94CE3E2A8CE7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\archives">
+      <UniqueIdentifier>{4AB3CA79-79AE-33B2-9A4B-4726A8ABB3F8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\archives\binary">
+      <UniqueIdentifier>{1910AA55-4585-3FA8-8219-6379694CC799}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\archives\json">
+      <UniqueIdentifier>{8B0CF970-93E1-34BF-AD8A-FF4091AB99BF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\types">
+      <UniqueIdentifier>{416C331E-98CD-3335-9552-40DCC26C437A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\utils">
+      <UniqueIdentifier>{61ED6BFD-BD83-30A9-B591-76AF712C6D0B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\terse\version">
+      <UniqueIdentifier>{1E6D0D0E-9214-3AE3-8E73-91D38E509821}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\trio">
+      <UniqueIdentifier>{AFEF8228-62FB-30CD-A1E7-AE8B8CD606AD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\trio\streams">
+      <UniqueIdentifier>{C8F5A35F-1242-3DC6-80F5-3042935DF109}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\trio\utils">
+      <UniqueIdentifier>{691663D6-13F4-33F6-AD4B-43A58259F3CF}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

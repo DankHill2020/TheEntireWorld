@@ -1,0 +1,8 @@
+*.pyc
+*.pyc
+tools/unreal_tools/__pycache__/get_skeletons.cpython-311.pyc
+*.pyc
+/tools/mcp_servers/the_entire_world_ai_studio/.ai_studio
+/tools/.ai_studio
+tools/.vscode/settings.json
+tools/.project_ai/asset_index.json

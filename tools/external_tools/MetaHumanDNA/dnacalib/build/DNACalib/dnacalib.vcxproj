@@ -1,0 +1,513 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C3D001E0-D7C2-3CC0-A896-677C6381F22D}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>dnacalib</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">dnacalib.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">dnacalib</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">dnacalib.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">dnacalib</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">dnacalib.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">dnacalib</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">dnacalib.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">dnacalib</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.lib</TargetExt>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /w14061 /w14062 /w14121 /w14242 /w14245 /w14254 /w14263 /w14265 /w14266 /w14287 /w14289 /w14296 /w14302 /w14311 /w14365 /w14388 /w14545 /w14546 /w14547 /w14549 /w14555 /w14619 /w14640 /w14826 /w14905 /w14906 /w14928 /w14987 /w14946</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <ConformanceMode>true</ConformanceMode>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /w14061 /w14062 /w14121 /w14242 /w14245 /w14254 /w14263 /w14265 /w14266 /w14287 /w14289 /w14296 /w14302 /w14311 /w14365 /w14388 /w14545 /w14546 /w14547 /w14549 /w14555 /w14619 /w14640 /w14826 /w14905 /w14906 /w14928 /w14987 /w14946</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ConformanceMode>true</ConformanceMode>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /w14061 /w14062 /w14121 /w14242 /w14245 /w14254 /w14263 /w14265 /w14266 /w14287 /w14289 /w14296 /w14302 /w14311 /w14365 /w14388 /w14545 /w14546 /w14547 /w14549 /w14555 /w14619 /w14640 /w14826 /w14905 /w14906 /w14928 /w14987 /w14946</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ConformanceMode>true</ConformanceMode>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /w14061 /w14062 /w14121 /w14242 /w14245 /w14254 /w14263 /w14265 /w14266 /w14287 /w14289 /w14296 /w14302 /w14311 /w14365 /w14388 /w14545 /w14546 /w14547 /w14549 /w14555 /w14619 /w14640 /w14826 /w14905 /w14906 /w14928 /w14987 /w14946</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ConformanceMode>true</ConformanceMode>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/DNACalib/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\BasicConfigVersion-SameMajorVersion.cmake.in;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\ExternalProject\shared_internal_commands.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FetchContent.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckFlagCommonConfig.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\WriteBasicConfigVersionFile.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\CMakeModulesExtra.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\Config.cmake.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\InstallLibrary.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Defs.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Symbols.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\utilities\SupportedCompileOptions.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\cmake\DNACDependencies.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/DNACalib/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\BasicConfigVersion-SameMajorVersion.cmake.in;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\ExternalProject\shared_internal_commands.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FetchContent.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckFlagCommonConfig.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\WriteBasicConfigVersionFile.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\CMakeModulesExtra.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\Config.cmake.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\InstallLibrary.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Defs.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Symbols.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\utilities\SupportedCompileOptions.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\cmake\DNACDependencies.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/DNACalib/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\BasicConfigVersion-SameMajorVersion.cmake.in;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\ExternalProject\shared_internal_commands.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FetchContent.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckFlagCommonConfig.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\WriteBasicConfigVersionFile.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\CMakeModulesExtra.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\Config.cmake.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\InstallLibrary.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Defs.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Symbols.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\utilities\SupportedCompileOptions.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\cmake\DNACDependencies.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/DNACalib/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\BasicConfigVersion-SameMajorVersion.cmake.in;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\CheckCXXSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\ExternalProject\shared_internal_commands.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FetchContent.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckCompilerFlag.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckFlagCommonConfig.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\WriteBasicConfigVersionFile.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\CMakeModulesExtra.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\Config.cmake.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\install\InstallLibrary.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Defs.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\symbols\Symbols.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\utilities\SupportedCompileOptions.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.cmake;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\CMakeModulesExtra\version\VersionHeader.h.in;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\cmake\DNACDependencies.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\BaseImpl.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DNA.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DataLayerBitmask.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\DenormalizedData.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODConstraint.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/LODConstraint.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODConstraint.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODMapping.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/LODMapping.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\LODMapping.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\Reader.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\ReaderImpl.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\SurjectiveMapping.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\TypeDefs.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\Writer.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\WriterImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\AnimatedMapFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/filters/AnimatedMapFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\AnimatedMapFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\BlendShapeFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/filters/BlendShapeFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\BlendShapeFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\JointFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/filters/JointFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\JointFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\MeshFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dna/filters/MeshFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\MeshFilter.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\filters\Remap.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamReaderImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamReaderImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamWriterImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\BinaryStreamWriterImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\FilteredInputArchive.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\FilteredInputArchive.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamReaderImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamReaderImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamWriterImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\JSONStreamWriterImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\StreamReader.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\stream\StreamWriter.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\types\Limits.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\utils\Extd.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dna\utils\ScopedEnumEx.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\Command.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\CommandImplBase.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\TypeDefs.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommandImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CalculateMeshLowerLODsCommandImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\ClearBlendShapesCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\CommandSequence.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\PruneBlendShapeTargetsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveAnimatedMapCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveBlendShapeCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveJointAnimationCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveJointCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RemoveMeshCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameAnimatedMapCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameBlendShapeCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameJointCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameMeshCommand.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RenameResourceCommand.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\RotateCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\ScaleCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetBlendShapeTargetDeltasCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetLODsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetNeutralJointRotationsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetNeutralJointTranslationsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetSkinWeightsCommand.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SetVertexPositionsCommand.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\SupportFactories.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\commands\TranslateCommand.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\BaseImpl.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNA.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNACalibDNAReaderImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DNACalibDNAReaderImpl.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\DenormalizedData.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODConstraint.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/LODConstraint.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODConstraint.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODMapping.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/LODMapping.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\LODMapping.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\ReaderImpl.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\SurjectiveMapping.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\WriterImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\AnimatedMapFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/filters/AnimatedMapFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\AnimatedMapFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\BlendShapeFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/filters/BlendShapeFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\BlendShapeFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\JointFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/filters/JointFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\JointFilter.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\MeshFilter.cpp">
+      <ObjectFileName>$(IntDir)/src/dnacalib/dna/filters/MeshFilter.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\MeshFilter.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\dna\filters\Remap.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\BoundingBox.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\Triangle.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\Triangle.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\UVBarycentricMapping.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\types\UVBarycentricMapping.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\Algorithm.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\Extd.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\FormatString.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\utils\ScopedEnumEx.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\dnacalib\version\VersionInfo.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\MemoryResource.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\AlignedMemoryResource.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\ArenaMemoryResource.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\pma\resources\DefaultMemoryResource.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\PredefinedCodes.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Provider.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Registry.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Registry.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Status.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Storage.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\status\Storage.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Computations.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Mat.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\TDM.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Transforms.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Types.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\Vec.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\tdm\version\Version.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\Archive.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\Common.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\Traits.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\binary\InputArchive.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\binary\OutputArchive.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\json\InputArchive.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\archives\json\OutputArchive.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Anchor.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\ArchiveOffset.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\ArchiveSize.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Blob.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\CharInputStreamBuf.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\CharOutputStreamBuf.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\DynArray.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\types\Transparent.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\Base64.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\ByteSwap.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\Endianness.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\utils\VirtualSerializerProxy.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\terse\version\Version.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\Concepts.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\Stream.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\FileStreamImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\FileStreamImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStream.cpp" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamFallback.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamFallback.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamUnix.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamUnix.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamWindows.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryMappedFileStreamWindows.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryStreamImpl.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\MemoryStreamImpl.h" />
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\StreamStatus.cpp" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\streams\StreamStatus.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\NativeString.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\PlatformWindows.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\src\trio\utils\ScopedEnumEx.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\DNACalib.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Command.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Defs.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CalculateMeshLowerLODsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ClearBlendShapesCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CommandSequence.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ConditionalCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\PruneBlendShapeTargetsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveAnimatedMapCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveBlendShapeCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointAnimationCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveMeshCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameAnimatedMapCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameBlendShapeCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameJointCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameMeshCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RotateCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ScaleCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetBlendShapeTargetDeltasCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetLODsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointRotationsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointTranslationsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetSkinWeightsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetVertexPositionsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\TranslateCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\VectorOperations.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\dna\DNACalibDNAReader.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\types\Aliases.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\Version.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\VersionInfo.h" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\ZERO_CHECK.vcxproj">
+      <Project>{0E16D95E-CE61-35C0-B7A2-7C5397C4BF93}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

@@ -3,6 +3,9 @@ import os
 import maya.cmds as cmds
 import maya.api.OpenMaya as om
 import math
+import re
+import copy
+from maya_tools.Utilities import joints as joints_util
 
 DEFAULT_FACE_JOINT_MAP = {
 
@@ -445,3 +448,310 @@ joint_map = {
     "RightHand": "r_hand"
 }
 
+
+def populate_default_face_map_from_scene(base_face_map=None):
+    """Fill face map with default scene joints under HIK head reference."""
+    if base_face_map is None:
+        dm = copy.deepcopy(DEFAULT_FACE_JOINT_MAP)
+    else:
+        dm = base_face_map
+
+    side = "l"
+    dm["LeftBrow"]["joints"] = [f"{side}_brow{i}" for i in range(1, 6)]
+    dm["LeftEyelid"]["inner"]["joint"] = f"{side}_inner_eyelidTip"
+    dm["LeftEyelid"]["outer"]["joint"] = f"{side}_outer_eyelidTip"
+    dm["LeftEyelid"]["joints"] = [
+        f"{side}_inner_eyelidTip",
+        f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
+        f"{side}_upper_eyelidTip8", f"{side}_upper_eyelidTip7", f"{side}_upper_eyelidTip6",
+        f"{side}_upper_eyelidTip5", f"{side}_upper_eyelidTip4", f"{side}_upper_eyelidTip3",
+        f"{side}_upper_eyelidTip2", f"{side}_upper_eyelidTip1",
+        f"{side}_outer_eyelidTip",
+        f"{side}_lower_eyelidTip1", f"{side}_lower_eyelidTip2", f"{side}_lower_eyelidTip3",
+        f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
+        f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
+    ]
+    
+    side = "r"
+    dm["RightBrow"]["joints"] = [f"{side}_brow{i}" for i in range(1, 6)]
+    dm["RightEyelid"]["inner"]["joint"] = f"{side}_inner_eyelidTip"
+    dm["RightEyelid"]["outer"]["joint"] = f"{side}_outer_eyelidTip"
+    dm["RightEyelid"]["joints"] = [
+        f"{side}_inner_eyelidTip",
+        f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
+        f"{side}_upper_eyelidTip8", f"{side}_upper_eyelidTip7", f"{side}_upper_eyelidTip6",
+        f"{side}_upper_eyelidTip5", f"{side}_upper_eyelidTip4", f"{side}_upper_eyelidTip3",
+        f"{side}_upper_eyelidTip2", f"{side}_upper_eyelidTip1",
+        f"{side}_outer_eyelidTip",
+        f"{side}_lower_eyelidTip1", f"{side}_lower_eyelidTip2", f"{side}_lower_eyelidTip3",
+        f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
+        f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
+    ]
+
+    # ---------- Lips ----------
+    dm["LipChain"]["joints"] = [
+        'c_upper_lip', 'r_upper_lip4', 'r_upper_lip3', 'r_upper_lip2', 'r_upper_lip1',
+        'r_lip_corner1', 'r_lower_lip1', 'r_lower_lip2', 'r_lower_lip3', 'r_lower_lip4',
+        'c_lower_lip', 'l_lower_lip4', 'l_lower_lip3', 'l_lower_lip2', 'l_lower_lip1',
+        'l_lip_corner1', 'l_upper_lip1', 'l_upper_lip2', 'l_upper_lip3', 'l_upper_lip4'
+    ]
+    dm["UpperLipCenter"]["joint"] = "c_upper_lip"
+    dm["LowerLipCenter"]["joint"] = "c_lower_lip"
+    dm["LeftLipCorner"]["joint"] = "l_lip_corner1"
+    dm["RightLipCorner"]["joint"] = "r_lip_corner1"
+
+    # ---------- Jaw ----------
+    dm["Jaw"]["joint"] = "jaw"
+
+    # ---------- Tongue ----------
+    dm["TongueChain"]["joints"] = ["tongue1", "tongue2", "tongue3", "tongue4"]
+
+    # ---------- Teeth ----------
+    dm["UpperTeeth"]["joint"] = "upper_teeth"
+    dm["LowerTeeth"]["joint"] = "lower_teeth"
+
+    # ---------- Eyes ----------
+    dm["LeftEye"]["joint"] = "l_eye"
+    dm["RightEye"]["joint"] = "r_eye"
+
+    # ---------- Nose ----------
+    dm["NoseRoot"]["joint"] = "nose_root"
+
+    # ---------- Other Face Joints ----------
+    dm["OtherFaceJoints"]["joints"] = [
+        'r_undereye_3', 'r_undereye_4', 'r_undereye_5', 'r_undereye_1',
+        'r_ear_base1', 'r_ear_base', 'l_upper_cheek', 'r_undereye_2',
+        'l_lower_cheek', 'l_inner_cheek', 'r_upper_nose',
+        'l_inner_cheek_smile', 'r_inner_cheek_smile', 'r_inner_cheek',
+        'r_upper_cheek', 'r_lower_cheek',
+        'r_undereye_8', 'r_undereye_7', 'r_undereye_6',
+        'l_undereye_8', 'l_undereye_7', 'l_undereye_6',
+        'l_undereye_5', 'l_undereye_4', 'l_undereye_3',
+        'l_undereye_2', 'l_undereye_1',
+        'l_ear_base1', 'l_upper_nose', 'l_ear_base'
+    ]
+    return dm
+
+
+def guess_joint_map_from_root(root_joint, base_joint_map=None):
+    """
+    Guesses HIK joint slots from a root joint based on name matching.
+    
+    :param root_joint: The root joint of the skeleton.
+    :param base_joint_map: Optional dict to write results into (e.g. self.default_map).
+                           If None, a deep copy of setup_hik.DEFAULT_JOINT_MAP is used.
+    :return: A dict with HIK slots and their mapped joint names.
+    """
+    if not cmds.objExists(root_joint):
+        return {}
+
+    if base_joint_map is None:
+        joint_map = copy.deepcopy(DEFAULT_JOINT_MAP)
+    else:
+        joint_map = base_joint_map
+
+    # Reset any existing joint mappings to avoid stale cache from previous runs
+    for key in joint_map:
+        joint_map[key]["joint"] = ""
+
+    def is_twist_bone(name):
+        return "twist" in name or "roll" in name
+
+    all_joints = cmds.listRelatives(root_joint, ad=True, type="joint") or []
+    all_joints = list(reversed(all_joints))
+    all_joints.insert(0, root_joint)
+
+    spines = []
+    necks = []
+
+    fingers = {
+        "Left": {"Thumb": [], "Index": [], "Middle": [], "Ring": [], "Pinky": []},
+        "Right": {"Thumb": [], "Index": [], "Middle": [], "Ring": [], "Pinky": []}
+    }
+
+    # Check if upperarm joint exists to distinguish shoulder vs upperarm
+    has_l_upperarm = any("l_upper" in j.lower() or "upper_l" in j.lower() or "l_arm" in j.lower() or "arm_l" in j.lower() or "l_upperarm" in j.lower() or "upperarm_l" in j.lower() for j in all_joints)
+    has_r_upperarm = any("r_upper" in j.lower() or "upper_r" in j.lower() or "r_arm" in j.lower() or "arm_r" in j.lower() or "r_upperarm" in j.lower() or "upperarm_r" in j.lower() for j in all_joints)
+
+    twist_map = {
+        # arms
+        "upperarm": ("ArmRoll", 3),
+        "lowerarm": ("ForeArmRoll", 3),
+        # legs
+        "thigh": ("UpLegRoll", 3),
+        "knee": ("LegRoll", 2),
+    }
+    side_prefix = {"l": "Left", "r": "Right"}
+
+    for jnt in all_joints:
+        name = jnt.lower()
+
+        def set_slot(slot):
+            if slot in joint_map and not joint_map[slot].get("joint"):
+                joint_map[slot]["joint"] = jnt
+
+        # 1. Twist joints mapping
+        is_twist = is_twist_bone(name)
+        if is_twist:
+            for side in ("l", "r"):
+                for limb, (slot_base, count) in twist_map.items():
+                    if limb in name:
+                        # Match side prefix or suffix
+                        is_side = False
+                        if side == "l":
+                            is_side = name.startswith("l_") or "l_upper" in name or "l_lower" in name or name.endswith("_l") or "_l_" in name or "left" in name
+                        else:
+                            is_side = name.startswith("r_") or "r_upper" in name or "r_lower" in name or name.endswith("_r") or "_r_" in name or "right" in name
+                        
+                        if is_side:
+                            match = re.search(r'(\d+)', name)
+                            num = int(match.group(1)) if match else 1
+                            
+                            slot_base_fixed = slot_base.replace('ForeArm', "Forearm")
+                            if num == 1:
+                                joint_map_key = f"{side_prefix[side]}{slot_base}"
+                                if joint_map_key in joint_map and not joint_map[joint_map_key].get("joint"):
+                                    joint_map[joint_map_key]["joint"] = jnt
+                            else:
+                                leaf_idx = num - 1
+                                joint_map_key = f"Leaf{side_prefix[side]}{slot_base_fixed}{leaf_idx}"
+                                if joint_map_key in joint_map and not joint_map[joint_map_key].get("joint"):
+                                    joint_map[joint_map_key]["joint"] = jnt
+            continue
+
+        # 2. Main skeleton joints mapping
+        if "spine" in name or "spn" in name:
+            spines.append(jnt)
+
+        elif "origin" in name or "root" in name:
+            set_slot("Reference")
+
+        elif "pelvis" in name:
+            set_slot("Hips")
+
+        elif "hipswing" in name or "hip_swing" in name:
+            set_slot("HipSwing")
+
+        elif "l_clavicle" in name or "clavicle_l" in name or ("l_shoulder" in name and has_l_upperarm):
+            set_slot("LeftShoulder")
+        elif ("l_upper" in name or "upper_l" in name or "l_upperarm" in name or "upperarm_l" in name or "l_upper_arm" in name or "upper_arm_l" in name or ("l_shoulder" in name and not has_l_upperarm) or "l_arm" in name or "arm_l" in name):
+            set_slot("LeftArm")
+        elif ("l_lower" in name or "lower_l" in name or "l_lowerarm" in name or "lowerarm_l" in name or "l_lower_arm" in name or "lower_arm_l" in name or "l_forearm" in name or "forearm_l" in name or "l_elbow" in name):
+            set_slot("LeftForeArm")
+
+        elif "l_hand" in name or "hand_l" in name and "ik" not in name:
+            set_slot("LeftHand")
+
+        elif "r_clavicle" in name or "clavicle_r" in name or ("r_shoulder" in name and has_r_upperarm):
+            set_slot("RightShoulder")
+        elif ("r_upper" in name or "upper_r" in name or "r_upperarm" in name or "upperarm_r" in name or "r_upper_arm" in name or "upper_arm_r" in name or ("r_shoulder" in name and not has_r_upperarm) or "r_arm" in name or "arm_r" in name):
+            set_slot("RightArm")
+        elif ("r_lower" in name or "lower_r" in name or "r_lowerarm" in name or "lowerarm_r" in name or "r_lower_arm" in name or "lower_arm_r" in name or "r_forearm" in name or "forearm_r" in name or "r_elbow" in name):
+            set_slot("RightForeArm")
+
+        elif "r_hand" in name or "hand_r" in name and "ik" not in name:
+            set_slot("RightHand")
+
+        elif ("l_thigh" in name or "thigh_l" in name or "l_upperleg" in name):
+            set_slot("LeftUpLeg")
+
+        elif ("l_knee" in name or "knee_l" in name or "calf_l" in name or "l_lowerleg" in name):
+            set_slot("LeftLeg")
+
+        elif "l_ankle" in name or "ankle_l" in name or "foot_l" in name and "ik" not in name:
+            set_slot("LeftFoot")
+
+        elif "l_toe" in name and "tip" not in name or "ball_l" in name:
+            set_slot("LeftToeBase")
+
+        elif ("r_thigh" in name or "thigh_r" in name or "r_upperleg" in name):
+            set_slot("RightUpLeg")
+
+        elif ("r_knee" in name or "knee_r" in name or "calf_r" in name or "r_lowerleg" in name):
+            set_slot("RightLeg")
+
+        elif "r_ankle" in name or "ankle_r" in name or "foot_r" in name and "ik" not in name:
+            set_slot("RightFoot")
+        elif "r_toe" in name and "tip" not in name or "ball_r" in name:
+            set_slot("RightToeBase")
+
+        if "neck" in name:
+            necks.append(jnt)
+        elif "head" in name:
+            set_slot("Head")
+
+        for side_prefix_str, side in [("l_", "Left"), ("r_", "Right")]:
+            if name.startswith(side_prefix_str):
+                for finger in fingers[side].keys():
+                    if finger.lower() in name:
+                        fingers[side][finger].append(jnt)
+            elif name.endswith("_" + side[0].lower()):
+                for finger in fingers[side].keys():
+                    if not len(fingers[side][finger]):
+                        if cmds.objExists(f"{finger.lower()}_metacarpal_{side[0].lower()}"):
+                            fingers[side][finger].append(f"{finger.lower()}_metacarpal_{side[0].lower()}")
+                        if cmds.objExists(f"{finger.lower()}_01_{side[0].lower()}"):
+                            fingers[side][finger].append(f"{finger.lower()}_01_{side[0].lower()}")
+                            fingers[side][finger].append(f"{finger.lower()}_02_{side[0].lower()}")
+                            fingers[side][finger].append(f"{finger.lower()}_03_{side[0].lower()}")
+
+    for i, spine in enumerate(spines):
+        key = "Spine" if i == 0 else f"Spine{i}"
+        if key in joint_map and not joint_map[key].get("joint"):
+            joint_map[key]["joint"] = spine
+
+    for i, neck in enumerate(necks):
+        key = "Neck" if i == 0 else f"Neck{i}"
+        if key in joint_map and not joint_map[key].get("joint"):
+            joint_map[key]["joint"] = neck
+
+    for side in ["Left", "Right"]:
+        for finger in ["Thumb", "Index", "Middle", "Ring", "Pinky"]:
+            joints_list = fingers[side][finger]
+            if not joints_list:
+                continue
+            if "_metacarpal_" not in joints_list[0]:
+                joints_sorted = sorted(joints_list, key=lambda x: x.lower())
+            else:
+                joints_sorted = joints_list
+            if "Thumb" not in finger:
+                in_hand_key = f"{side}InHand{finger}"
+                if in_hand_key in joint_map and not joint_map[in_hand_key].get("joint"):
+                    joint_map[in_hand_key]["joint"] = joints_sorted[0]
+            else:
+                if len(joints_list) > 4:
+                    thumb4_key = f"{side}Hand{finger}4"
+                else:
+                    thumb4_key = f"{side}Hand{finger}3"
+                joint_map[thumb4_key]["joint"] = joints_sorted[-1]
+            for i in range(1, min(5, len(joints_sorted))):
+                num = i
+                if "Thumb" in finger:
+                    num = i - 1
+                key = f"{side}Hand{finger}{i}"
+                if key in joint_map and not joint_map[key].get("joint"):
+                    joint_map[key]["joint"] = joints_sorted[num]
+                    
+    return joint_map
+
+
+def create_rig_mapping(root_joint=None):
+    """
+    Standalone HIK mapping function. Auto-detects the skeleton root if none is provided,
+    then runs guess_joint_map_from_root and populate_default_face_map_from_scene.
+    Returns a tuple of (body_joint_map, face_joint_map) suitable for passing to
+    create_rig.hik_map_to_rig_args.
+
+    :param root_joint: Optional root joint name. If None, auto-detected from scene.
+    :return: (body_joint_map dict, face_joint_map dict)
+    """
+    if root_joint is None:
+        top_joints = joints_util.find_skinned_or_top_joints(namespace='')
+        if not top_joints:
+            print("[create_rig_mapping] No root joint found in scene.")
+            return None, None
+        root_joint = top_joints[0]
+
+    body_joint_map = guess_joint_map_from_root(root_joint)
+    face_joint_map = populate_default_face_map_from_scene()
+    return body_joint_map, face_joint_map

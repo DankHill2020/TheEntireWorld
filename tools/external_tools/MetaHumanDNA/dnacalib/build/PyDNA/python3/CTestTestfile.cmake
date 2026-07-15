@@ -1,0 +1,36 @@
+# CMake generated Testfile for 
+# Source directory: C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3
+# Build directory: C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3
+# 
+# This file includes the relevant testing commands required for 
+# testing this directory and lists subdirectories to be tested as well.
+if(CTEST_CONFIGURATION_TYPE MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
+  add_test(dna_binary_to_json_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_binary_to_json_demo.py")
+  set_tests_properties(dna_binary_to_json_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
+  add_test(dna_binary_to_json_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_binary_to_json_demo.py")
+  set_tests_properties(dna_binary_to_json_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
+  add_test(dna_binary_to_json_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_binary_to_json_demo.py")
+  set_tests_properties(dna_binary_to_json_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+  add_test(dna_binary_to_json_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_binary_to_json_demo.py")
+  set_tests_properties(dna_binary_to_json_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+else()
+  add_test(dna_binary_to_json_demo NOT_AVAILABLE)
+endif()
+if(CTEST_CONFIGURATION_TYPE MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
+  add_test(dna_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_demo.py")
+  set_tests_properties(dna_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
+  add_test(dna_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_demo.py")
+  set_tests_properties(dna_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
+  add_test(dna_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_demo.py")
+  set_tests_properties(dna_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+  add_test(dna_demo "C:/Program Files/CMake/bin/cmake.exe" "-E" "env" "PATH=C:/Program Files (x86)/dnacalib/lib" "LD_LIBRARY_PATH=C:/Program Files (x86)/dnacalib/lib" "PYTHONPATH=." "C:/Program Files/Autodesk/Maya2023/bin/mayapy.exe" "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/../../../examples/dna_demo.py")
+  set_tests_properties(dna_demo PROPERTIES  PASS_REGULAR_EXPRESSION "Done." WORKING_DIRECTORY "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9" _BACKTRACE_TRIPLES "C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;66;add_test;C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt;0;")
+else()
+  add_test(dna_demo NOT_AVAILABLE)
+endif()

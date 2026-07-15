@@ -1,0 +1,6 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindSWIG.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/UseSWIG.cmake
+C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNACalib/CMakeLists.txt

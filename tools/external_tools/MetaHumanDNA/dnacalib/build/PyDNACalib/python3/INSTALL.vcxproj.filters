@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\CMakeFiles\71818d6d2f6576299d44f8df7e653424\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{F6296631-3A29-3209-9A3A-4508122C189D}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectOutputs>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\x64\Release\ZERO_CHECK</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\examples\Release\commandsequence.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\Release\_py3dna.pyd</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNACalib\python3\Release\_py3dnacalib.pyd</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\examples\Release\singlecommand.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\x64\Release\ALL_BUILD</FullPath>
+    </ProjectOutput>
+  </ProjectOutputs>
+  <ContentFiles />
+  <SatelliteDlls />
+  <NonRecipeFileRefs />
+</Project>

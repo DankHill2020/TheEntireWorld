@@ -1,0 +1,61 @@
+[
+  {
+    "pack": {
+      "_id": "DHISample",
+      "name": "DHI Sample"
+    },
+    "tags": [
+      "DHI",
+      "character",
+      "human"
+    ],
+    "previews": {
+      "images": [
+        {
+          "contentLength": 269580,
+          "resolution": "360x360",
+          "uri": "scpgdgca_Grid_360.png",
+          "tags": [
+            "thumb"
+          ]
+        }
+      ],
+      "scaleReferences": [],
+      "relativeSize": "1x1"
+    },
+    "environment": {
+      "biome": "undefined",
+      "region": "undefined"
+    },
+    "json": {
+      "contentLength": 29575,
+      "uri": "sample.json"
+    },
+    "categories": [
+      "dhi",
+      "human",
+      "character"
+    ],
+    "version": 1,
+    "references": [],
+    "properties": [],
+    "averageColor": "#62594C",
+    "name": "Generic DH name",
+    "isDHIAsset": "True",
+    "character": {
+      "characterAssets": {
+        "bodyPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Emory\\SourceAssets\\m_srt_unw_body_rig.ma",
+        "bodyMeshName": "m_srt_unw_body_rig",
+        "mapsDirPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Emory\\SourceAssets\\maps",
+        "dnaPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Emory\\SourceAssets\\Emory.dna"
+      },
+      "common": {
+        "masksDirPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Common\\SourceAssets\\masks",
+        "shadersDirPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Common\\SourceAssets\\shaders",
+        "headMapsPath": "D:\\data\\bridge-dev\\Downloaded\\DHI\\7lo8hhIr_asset\\8k\\asset_ue_source\\MetaHumans\\Common\\SourceAssets\\maps"
+      }
+    },
+    "id": "scpgdgca",
+    "physicalSize": null
+  }
+]

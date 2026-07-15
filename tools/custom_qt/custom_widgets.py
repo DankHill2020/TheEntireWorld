@@ -1,12 +1,64 @@
 try:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    PYQT_VERSION = 6
-except ImportError:
     from PySide2 import QtWidgets, QtCore, QtGui
     PYQT_VERSION = 2
+except ImportError:
+    from PySide6 import QtWidgets, QtCore, QtGui
+    PYQT_VERSION = 6
 
 from functools import partial
 
+
+class ModelessContinueDialog(QtWidgets.QDialog):
+    def __init__(self, title: str, message: str, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle(title)
+        self.setModal(False)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
+
+        self._result = QtWidgets.QDialog.Rejected
+
+        self.resize(500, 220)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        message_label = QtWidgets.QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setTextInteractionFlags(
+            QtCore.Qt.TextSelectableByMouse
+        )
+        layout.addWidget(message_label)
+
+        layout.addStretch()
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+
+        continue_button = QtWidgets.QPushButton("Continue")
+        continue_button.setDefault(True)
+        continue_button.clicked.connect(self._continue)
+
+        button_layout.addWidget(continue_button)
+        layout.addLayout(button_layout)
+
+    def _continue(self):
+        self._result = QtWidgets.QDialog.Accepted
+        self.accept()
+
+    def exec_non_modal(self):
+        """
+        Show the dialog without blocking Maya.
+
+        Returns the current dialog result immediately.
+        Use the accepted/rejected signals for work that must happen
+        after the user clicks Continue.
+        """
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        return self._result
 
 class NonScrollingSpinBox(QtWidgets.QSpinBox):
 

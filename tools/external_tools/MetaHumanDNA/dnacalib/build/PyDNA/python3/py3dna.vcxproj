@@ -1,0 +1,455 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C8C7F14C-41B4-3FC5-8DB2-5581C0CC3861}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>py3dna</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">py3dna.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_py3dna</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.pyd</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">py3dna.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_py3dna</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.pyd</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">py3dna.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">_py3dna</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.pyd</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">py3dna.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">_py3dna</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.pyd</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/Python39/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR="Debug";py3dna_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR=\"Debug\";py3dna_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\..\DNACalib\Debug\dnacalib.lib;C:\Program Files\Python39\libs\python39_d.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/Debug/py3dna.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/Debug/_py3dna.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/Python39/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR="Release";py3dna_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR=\"Release\";py3dna_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\..\DNACalib\Release\dnacalib.lib;C:\Program Files\Python39\libs\python39.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/Release/py3dna.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/Release/_py3dna.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/Python39/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR="MinSizeRel";py3dna_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR=\"MinSizeRel\";py3dna_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\..\DNACalib\MinSizeRel\dnacalib.lib;C:\Program Files\Python39\libs\python39.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/MinSizeRel/py3dna.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/MinSizeRel/_py3dna.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/Python39/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <UseFullPaths>false</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR="RelWithDebInfo";py3dna_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;DNA_BUILD_WITH_JSON_SUPPORT=ON;CMAKE_INTDIR=\"RelWithDebInfo\";py3dna_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\SPyUS\include;C:\Program Files\Python39\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\..\DNACalib\RelWithDebInfo\dnacalib.lib;C:\Program Files\Python39\libs\python39.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/RelWithDebInfo/py3dna.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/RelWithDebInfo/_py3dna.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3\DNA.i">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Swig compile DNA.i for python</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/py3dna.dir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env SWIG_LIB=C:/Tools/swigwin-4.3.0/Lib C:/Tools/swigwin-4.3.0/swig.exe -python -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3 -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/include -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/SPyUS/include "-IC:/Program Files/Python39/include" -DDNA_BUILD_WITH_JSON_SUPPORT=ON -doxygen -outdir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 -c++ -module dna -interface _py3dna -o C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3/DNAPYTHON_wrap.cxx C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/DNA.i
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\python3\DNAPYTHON_wrap.cxx;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\py3.9\dna.py</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Swig compile DNA.i for python</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/py3dna.dir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env SWIG_LIB=C:/Tools/swigwin-4.3.0/Lib C:/Tools/swigwin-4.3.0/swig.exe -python -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3 -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/include -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/SPyUS/include "-IC:/Program Files/Python39/include" -DDNA_BUILD_WITH_JSON_SUPPORT=ON -doxygen -outdir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 -c++ -module dna -interface _py3dna -o C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3/DNAPYTHON_wrap.cxx C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/DNA.i
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\python3\DNAPYTHON_wrap.cxx;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\py3.9\dna.py</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Swig compile DNA.i for python</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/py3dna.dir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env SWIG_LIB=C:/Tools/swigwin-4.3.0/Lib C:/Tools/swigwin-4.3.0/swig.exe -python -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3 -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/include -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/SPyUS/include "-IC:/Program Files/Python39/include" -DDNA_BUILD_WITH_JSON_SUPPORT=ON -doxygen -outdir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 -c++ -module dna -interface _py3dna -o C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3/DNAPYTHON_wrap.cxx C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/DNA.i
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\python3\DNAPYTHON_wrap.cxx;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\py3.9\dna.py</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Swig compile DNA.i for python</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/py3dna.dir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env SWIG_LIB=C:/Tools/swigwin-4.3.0/Lib C:/Tools/swigwin-4.3.0/swig.exe -python -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3 -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/DNACalib/include -IC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/SPyUS/include "-IC:/Program Files/Python39/include" -DDNA_BUILD_WITH_JSON_SUPPORT=ON -doxygen -outdir C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/py3.9 -c++ -module dna -interface _py3dna -o C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/python3/DNAPYTHON_wrap.cxx C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/DNA.i
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\python3\DNAPYTHON_wrap.cxx;C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\py3.9\dna.py</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\PyDNA\python3\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython\Support.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython3.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython\Support.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython3.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython\Support.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython3.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/PyDNA/python3/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/PyDNA/python3/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython\Support.cmake;C:\Program Files\CMake\share\cmake-3.31\Modules\FindPython3.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\PyDNA\python3\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\python3\DNAPYTHON_wrap.cxx" />
+    <None Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\py3.9\dna.py">
+    </None>
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\DNACalib.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Command.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\Defs.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CalculateMeshLowerLODsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ClearBlendShapesCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\CommandSequence.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ConditionalCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\PruneBlendShapeTargetsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveAnimatedMapCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveBlendShapeCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointAnimationCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveJointCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RemoveMeshCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameAnimatedMapCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameBlendShapeCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameJointCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RenameMeshCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\RotateCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\ScaleCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetBlendShapeTargetDeltasCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetLODsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointRotationsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetNeutralJointTranslationsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetSkinWeightsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\SetVertexPositionsCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\TranslateCommand.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\commands\VectorOperations.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\dna\DNACalibDNAReader.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\types\Aliases.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\Version.h" />
+    <ClInclude Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\DNACalib\include\dnacalib\version\VersionInfo.h" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\ZERO_CHECK.vcxproj">
+      <Project>{0E16D95E-CE61-35C0-B7A2-7C5397C4BF93}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="C:\depot\tools\external_tools\MetaHumanDNA\dnacalib\build\DNACalib\dnacalib.vcxproj">
+      <Project>{C3D001E0-D7C2-3CC0-A896-677C6381F22D}</Project>
+      <Name>dnacalib</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

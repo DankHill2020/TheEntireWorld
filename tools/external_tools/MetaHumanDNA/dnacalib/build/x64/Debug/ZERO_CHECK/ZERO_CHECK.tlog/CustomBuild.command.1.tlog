@@ -1,0 +1,10 @@
+^C:\DEPOT\TOOLS\EXTERNAL_TOOLS\METAHUMANDNA\DNACALIB\BUILD\CMAKEFILES\98AE45345550D89C9E111C551B709B5C\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/depot/tools/external_tools/MetaHumanDNA/dnacalib -BC:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/depot/tools/external_tools/MetaHumanDNA/dnacalib/build/dnacalib.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -5,10 +5,12 @@ import maya.cmds as cmds
 from maya import OpenMayaUI as omui
 import re
 
-try:
+maya_version = int(cmds.about(version=True))
+
+if maya_version >= 2025:
     from PySide6 import QtWidgets, QtCore, QtGui
     from shiboken6 import wrapInstance
-except ImportError:
+else:
     from PySide2 import QtWidgets, QtCore, QtGui
     from shiboken2 import wrapInstance
 
@@ -55,21 +57,22 @@ class ParentSelectionDialog(QtWidgets.QDialog):
         self.setWindowTitle("Select Parent Control")
         self.setModal(True)
         self.resize(400, 150)
-        
+
         layout = QtWidgets.QVBoxLayout(self)
-        
+
         lbl = QtWidgets.QLabel(msg)
         lbl.setWordWrap(True)
         layout.addWidget(lbl)
-        
+
         layout.addSpacing(10)
-        
-        self.checkbox = QtWidgets.QCheckBox("Use this parent control for all remaining systems with missing parent control")
+
+        self.checkbox = QtWidgets.QCheckBox(
+            "Use this parent control for all remaining systems with missing parent control")
         self.checkbox.setChecked(False)
         layout.addWidget(self.checkbox)
-        
+
         layout.addSpacing(15)
-        
+
         btn_hl = QtWidgets.QHBoxLayout()
         self.ok_btn = QtWidgets.QPushButton("Assign & Build")
         self.ok_btn.clicked.connect(self.accept)
@@ -146,14 +149,14 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         except Exception as e:
             print(f"[HIK UI] Failed to open commandPort 7002: {e}")
 
-
         self.char_name = QtWidgets.QLineEdit("Character1")
         self.char_name.setToolTip("The name of the HumanIK character definition in Maya.")
         self.export_path = QtWidgets.QLineEdit(get_default_export_path())
         self.export_path.setToolTip("The directory path where character mappings and definitions will be exported.")
         namespace = os.path.basename(self.export_path.text()).rsplit('.')[0] + "_retarget"
         self.namespace = QtWidgets.QLineEdit(namespace)
-        self.namespace.setToolTip("The namespace prefix applied to character joints and animation nodes during retargeting.")
+        self.namespace.setToolTip(
+            "The namespace prefix applied to character joints and animation nodes during retargeting.")
 
         self.fields = {key: "" for key in setup_hik.DEFAULT_JOINT_MAP.keys()}
         self.fields["HipSwing"] = ""
@@ -172,6 +175,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self._session_parent_override = None
         self._use_override_for_all = False
 
+        # During full-rig builds, collect missing saved-joint references and
+        # report them once at the end instead of interrupting every module.
+        self._defer_module_discrepancy_warnings = False
+        self._pending_module_discrepancies = set()
+
         # ---------- Tabs ----------
         self.tabs = QtWidgets.QTabWidget()
         self.layout().addWidget(self.tabs)
@@ -182,8 +190,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         # Refresh detail widgets when the Rigging tab becomes active
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        # Auto-populate module states from scene metadata
-        self._load_module_metadata_from_scene()
+        # Auto-populate module states from scene metadata without showing
+        # stale saved-joint warnings when the UI first opens.
+        self._load_module_metadata_from_scene(report_missing=False)
 
     def _build_hik_tab(self):
         hik_tab = QtWidgets.QWidget()
@@ -364,11 +373,13 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         save_btn.clicked.connect(self.save_definition)
 
         detect_btn = QtWidgets.QPushButton("Auto Detect")
-        detect_btn.setToolTip("Attempt to automatically discover and map joints in the scene based on naming conventions.")
+        detect_btn.setToolTip(
+            "Attempt to automatically discover and map joints in the scene based on naming conventions.")
         detect_btn.clicked.connect(self.auto_detect)
 
         self.unreal_checkbox = QtWidgets.QCheckBox("Create Unreal Rig")
-        self.unreal_checkbox.setToolTip("When checked, automatically generates the Unreal modular control rig for the built skeleton.")
+        self.unreal_checkbox.setToolTip(
+            "When checked, automatically generates the Unreal modular control rig for the built skeleton.")
 
         create_btn = QtWidgets.QPushButton("Create HIK Character")
         create_btn.setToolTip("Generate the HumanIK character definition in Maya using the current mappings.")
@@ -467,7 +478,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.surf_region_combo = QtWidgets.QComboBox()
         self.surf_region_combo.addItems(["eyelid", "mouth", "brow", "other"])
         self.surf_region_combo.setToolTip("Choose the facial anatomical region this surface rig is built for.")
-        
+
         self.surf_side_combo = QtWidgets.QComboBox()
         self.surf_side_combo.addItems(["r", "l"])
         self.surf_side_combo.setToolTip("Select the character side (l for Left, r for Right) the surface resides on.")
@@ -489,7 +500,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.surf_indices_field.setToolTip("Specific follicle index placement indices along the loft spline path.")
 
         auto_detect_indices_btn = QtWidgets.QPushButton("Auto Detect")
-        auto_detect_indices_btn.setToolTip("Automatically populate matching indices based on the selected region profile.")
+        auto_detect_indices_btn.setToolTip(
+            "Automatically populate matching indices based on the selected region profile.")
         auto_detect_indices_btn.clicked.connect(self.auto_detect_indices)
 
         offset_indices_row = QtWidgets.QHBoxLayout()
@@ -503,7 +515,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.surf_region_combo.currentTextChanged.connect(lambda text: self.auto_detect_indices())
 
         create_surf_btn = QtWidgets.QPushButton("Create Surface Rig With Drivers")
-        create_surf_btn.setToolTip("Generate a lofted surface and follicle-driven secondary control setup for facial regions.")
+        create_surf_btn.setToolTip(
+            "Generate a lofted surface and follicle-driven secondary control setup for facial regions.")
         create_surf_btn.clicked.connect(self.create_surface_rig_with_drivers)
 
         surf_layout.addWidget(create_surf_btn)
@@ -518,9 +531,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         space_layout = QtWidgets.QVBoxLayout(space_group)
 
         self.space_switch_orient_rb = QtWidgets.QRadioButton("Orient")
-        self.space_switch_orient_rb.setToolTip("Use an orientConstraint for space switching (changes rotation space only).")
+        self.space_switch_orient_rb.setToolTip(
+            "Use an orientConstraint for space switching (changes rotation space only).")
         self.space_switch_parent_rb = QtWidgets.QRadioButton("Parent")
-        self.space_switch_parent_rb.setToolTip("Use a parentConstraint for space switching (changes translation and rotation spaces).")
+        self.space_switch_parent_rb.setToolTip(
+            "Use a parentConstraint for space switching (changes translation and rotation spaces).")
         self.space_switch_orient_rb.setChecked(True)
 
         rb_row = QtWidgets.QHBoxLayout()
@@ -550,7 +565,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         import_skin_btn = QtWidgets.QPushButton("Import Skin Weights")
         import_skin_btn.setToolTip("Import skin weights from JSON files to matching meshes in the scene.")
         transfer_skin_btn = QtWidgets.QPushButton("Transfer Skin Weights")
-        transfer_skin_btn.setToolTip("Transfer skin weights from selected source mesh(es) to the last selected target mesh. The target must not already have a skinCluster.")
+        transfer_skin_btn.setToolTip(
+            "Transfer skin weights from selected source mesh(es) to the last selected target mesh. The target must not already have a skinCluster.")
 
         export_skin_btn.clicked.connect(skinning_utils.export_skin_weights)
         import_skin_btn.clicked.connect(skinning_utils.import_skin_weights)
@@ -568,29 +584,34 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.rig_layout.addSpacing(20)
         actions_group = QtWidgets.QGroupBox("Full Rig Actions")
         actions_layout = QtWidgets.QVBoxLayout(actions_group)
-        
+
         # 1. Create Rig Mapping & Build Full Rig Buttons
         mapping_btn = QtWidgets.QPushButton("Create Rig Mapping")
         mapping_btn.setToolTip("Synchronize and cache the active HumanIK body and face mapping settings.")
-        mapping_btn.setStyleSheet("background-color: #3b825c; color: white; font-weight: bold; font-size: 11pt; height: 28px;")
+        mapping_btn.setStyleSheet(
+            "background-color: #3b825c; color: white; font-weight: bold; font-size: 11pt; height: 28px;")
         mapping_btn.clicked.connect(self.create_rig_mapping)
         actions_layout.addWidget(mapping_btn)
 
         body_btn = QtWidgets.QPushButton("Build Full Rig")
         body_btn.setToolTip("Construct the complete animation control rig for all mapped body and face modules.")
-        body_btn.setStyleSheet("background-color: #1a4d1a; color: white; font-weight: bold; font-size: 12pt; height: 30px;")
+        body_btn.setStyleSheet(
+            "background-color: #1a4d1a; color: white; font-weight: bold; font-size: 12pt; height: 30px;")
         body_btn.clicked.connect(self.build_full_rig)
         actions_layout.addWidget(body_btn)
 
         remove_rig_btn = QtWidgets.QPushButton("Remove Full Rig")
-        remove_rig_btn.setToolTip("Teardown the control rig setup, delete constraints/pads, and restore default skeletons.")
-        remove_rig_btn.setStyleSheet("background-color: #8a1a1a; color: white; font-weight: bold; font-size: 12pt; height: 30px;")
+        remove_rig_btn.setToolTip(
+            "Teardown the control rig setup, delete constraints/pads, and restore default skeletons.")
+        remove_rig_btn.setStyleSheet(
+            "background-color: #8a1a1a; color: white; font-weight: bold; font-size: 12pt; height: 30px;")
         remove_rig_btn.clicked.connect(self.remove_full_rig)
         actions_layout.addWidget(remove_rig_btn)
-        
+
         store_load_row = QtWidgets.QHBoxLayout()
         global_store_btn = QtWidgets.QPushButton("Store Connections & Switches")
-        global_store_btn.setToolTip("Capture and cache all custom parent constraints and space switch states on the controls.")
+        global_store_btn.setToolTip(
+            "Capture and cache all custom parent constraints and space switch states on the controls.")
         global_store_btn.setStyleSheet("background-color: #3b5b82; color: white; font-weight: bold;")
         global_store_btn.clicked.connect(self.store_all_face_connections)
 
@@ -600,7 +621,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         load_selection_btn.clicked.connect(self.load_settings_from_selection)
 
         refresh_details_btn = QtWidgets.QPushButton("↻ Refresh Module Details")
-        refresh_details_btn.setToolTip("Query the scene to update the status and parent connection fields for all modules.")
+        refresh_details_btn.setToolTip(
+            "Query the scene to update the status and parent connection fields for all modules.")
         refresh_details_btn.setStyleSheet("background-color: #4a4a2a; color: #ddcc66; font-weight: bold;")
         refresh_details_btn.clicked.connect(self._refresh_all_module_details)
 
@@ -617,11 +639,12 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.rig_layout.addSpacing(20)
         body_modules_group = QtWidgets.QGroupBox("Body Modules Setup (Granular Controls)")
         body_modules_layout = QtWidgets.QVBoxLayout(body_modules_group)
-        
+
         body_form = QtWidgets.QFormLayout()
         self.body_parent_field = QtWidgets.QLineEdit()
         self.body_parent_field.setPlaceholderText("e.g. clavicle_ctrl / pelvis_ctrl (Optional)")
-        self.body_parent_field.setToolTip("Optional: Parent control for body modules. If left empty, resolves to optimal scene defaults.")
+        self.body_parent_field.setToolTip(
+            "Optional: Parent control for body modules. If left empty, resolves to optimal scene defaults.")
         body_parent_btn = QtWidgets.QPushButton("Select")
         body_parent_btn.setToolTip("Map selected viewport node as the parent control for body modules.")
         body_parent_btn.clicked.connect(lambda: self._pick_parent(self.body_parent_field))
@@ -631,7 +654,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         body_form.addRow("Parent Control:", body_parent_row)
         body_modules_layout.addLayout(body_form)
         body_modules_layout.addSpacing(5)
-        
+
         body_grid = QtWidgets.QGridLayout()
         body_grid.setHorizontalSpacing(10)
         body_grid.setVerticalSpacing(5)
@@ -656,18 +679,18 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         for idx, (label_text, m_id) in enumerate(body_list, start=1):
             lbl_layout = QtWidgets.QHBoxLayout()
             lbl_layout.setContentsMargins(0, 0, 0, 0)
-            
+
             toggle_btn = QtWidgets.QToolButton()
             toggle_btn.setText("▶")
             toggle_btn.setFixedSize(16, 16)
             toggle_btn.setStyleSheet("border: none; font-weight: bold; color: #aaaaaa;")
-            
+
             sel_btn = QtWidgets.QPushButton("⌖")
             sel_btn.setFixedSize(20, 20)
             sel_btn.setToolTip(f"Select root control for {label_text}")
             sel_btn.setStyleSheet("border: none; color: #aaaaaa; font-weight: bold;")
             sel_btn.clicked.connect(lambda checked=False, m=label_text: self._select_module_root(m))
-            
+
             status_lbl = QtWidgets.QLabel("●")
             status_lbl.setFixedWidth(14)
             status_lbl.setStyleSheet("color: #555555; font-size: 10pt;")
@@ -675,7 +698,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
             lbl = QtWidgets.QLabel(label_text)
             lbl.setStyleSheet("font-weight: bold;")
-            
+
             lbl_layout.addWidget(toggle_btn)
             lbl_layout.addWidget(sel_btn)
             lbl_layout.addWidget(status_lbl)
@@ -683,7 +706,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             lbl_layout.addStretch()
             lbl_container = QtWidgets.QWidget()
             lbl_container.setLayout(lbl_layout)
-            
+
             c_btn = QtWidgets.QPushButton("Create")
             c_btn.setToolTip(f"Build the {label_text} module setup.")
             c_btn.setStyleSheet("background-color: #2e6930; color: white; font-weight: bold;")
@@ -694,14 +717,14 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             r_btn.setStyleSheet("background-color: #7d2a2a; color: white; font-weight: bold;")
             r_btn.clicked.connect(lambda checked=False, m=label_text: self.remove_body_module_setup(m))
             self.module_remove_buttons[label_text] = r_btn
-            
+
             detail_widget = self._make_module_detail_widget(label_text, status_lbl)
-            
+
             toggle_btn.clicked.connect(
-                lambda checked=False, tw=detail_widget, tb=toggle_btn: 
+                lambda checked=False, tw=detail_widget, tb=toggle_btn:
                 (tw.setVisible(not tw.isVisible()), tb.setText("▼" if tw.isVisible() else "▶"))
             )
-            
+
             row = idx * 2
             body_grid.addWidget(lbl_container, row, 0)
             body_grid.addWidget(c_btn, row, 1)
@@ -717,10 +740,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.rig_layout.addSpacing(20)
         face_modules_group = QtWidgets.QGroupBox("Face Modules Setup (Granular Controls)")
         face_modules_layout = QtWidgets.QVBoxLayout(face_modules_group)
-        
+
         face_form = QtWidgets.QFormLayout()
         self.module_parent_field = QtWidgets.QLineEdit("head1_ctrl")
-        self.module_parent_field.setToolTip("Optional: Parent control for face modules (e.g. head1_ctrl). If left empty, resolves to optimal scene defaults.")
+        self.module_parent_field.setToolTip(
+            "Optional: Parent control for face modules (e.g. head1_ctrl). If left empty, resolves to optimal scene defaults.")
         face_parent_btn = QtWidgets.QPushButton("Select")
         face_parent_btn.setToolTip("Map selected viewport node as parent control for face modules.")
         face_parent_btn.clicked.connect(lambda: self._pick_parent(self.module_parent_field))
@@ -728,7 +752,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         face_parent_row.addWidget(self.module_parent_field)
         face_parent_row.addWidget(face_parent_btn)
         face_form.addRow("Parent Control:", face_parent_row)
-        
+
         self.module_jaw_ctrl_field = QtWidgets.QLineEdit("jaw_ctrl")
         self.module_jaw_ctrl_field.setToolTip("Name of the jaw control node (e.g. jaw_ctrl).")
         face_jaw_btn = QtWidgets.QPushButton("Select")
@@ -738,7 +762,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         face_jaw_row.addWidget(self.module_jaw_ctrl_field)
         face_jaw_row.addWidget(face_jaw_btn)
         face_form.addRow("Jaw Control:", face_jaw_row)
-        
+
         self.module_jaw_jnt_field = QtWidgets.QLineEdit("jaw")
         self.module_jaw_jnt_field.setToolTip("Name of the jaw joint node (e.g. jaw).")
         face_jaw_jnt_btn = QtWidgets.QPushButton("Select")
@@ -750,7 +774,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         face_form.addRow("Jaw Joint:", face_jaw_jnt_row)
         face_modules_layout.addLayout(face_form)
         face_modules_layout.addSpacing(5)
-        
+
         face_grid = QtWidgets.QGridLayout()
         face_grid.setHorizontalSpacing(10)
         face_grid.setVerticalSpacing(5)
@@ -773,23 +797,23 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         for idx, label_text in enumerate(modules, start=1):
             lbl_layout = QtWidgets.QHBoxLayout()
             lbl_layout.setContentsMargins(0, 0, 0, 0)
-            
+
             toggle_btn = QtWidgets.QToolButton()
             toggle_btn.setText("▶")
             toggle_btn.setFixedSize(16, 16)
             toggle_btn.setStyleSheet("border: none; font-weight: bold; color: #aaaaaa;")
-            
+
             sel_btn = QtWidgets.QPushButton("⌖")
             sel_btn.setFixedSize(20, 20)
             sel_btn.setToolTip(f"Select root control for {label_text}")
             sel_btn.setStyleSheet("border: none; color: #aaaaaa; font-weight: bold;")
             sel_btn.clicked.connect(lambda checked=False, m=label_text: self._select_module_root(m))
-            
+
             status_lbl = QtWidgets.QLabel("●")
             status_lbl.setFixedWidth(14)
             status_lbl.setStyleSheet("color: #555555; font-size: 10pt;")
             status_lbl.setToolTip("Module build status: green (built), gray (unbuilt/removed).")
-            
+
             lbl = QtWidgets.QLabel(label_text)
             lbl.setStyleSheet("font-weight: bold;")
             lbl_layout.addWidget(toggle_btn)
@@ -809,14 +833,14 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             r_btn.setStyleSheet("background-color: #7d2a2a; color: white; font-weight: bold;")
             r_btn.clicked.connect(lambda checked=False, m=label_text: self.remove_face_module_setup(m))
             self.module_remove_buttons[label_text] = r_btn
-            
+
             detail_widget = self._make_module_detail_widget(label_text, status_lbl)
-            
+
             toggle_btn.clicked.connect(
-                lambda checked=False, tw=detail_widget, tb=toggle_btn: 
+                lambda checked=False, tw=detail_widget, tb=toggle_btn:
                 (tw.setVisible(not tw.isVisible()), tb.setText("▼" if tw.isVisible() else "▶"))
             )
-            
+
             row = idx * 2
             face_grid.addWidget(lbl_container, row, 0)
             face_grid.addWidget(c_btn, row, 1)
@@ -841,11 +865,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             return ""
         if not cmds.objExists(jnt):
             return " (Not in scene)"
-        
+
         # Check constraints
         relatives = cmds.listRelatives(jnt, children=True, type="constraint") or []
         has_constraint = len(relatives) > 0
-        
+
         # Check connections
         has_connection = False
         connections = cmds.listConnections(jnt, source=True, destination=False) or []
@@ -853,16 +877,17 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             if not cmds.objExists(n):
                 continue
             ct = cmds.objectType(n)
-            if "Constraint" in ct or ct in ["blendColors", "multiplyDivide", "plusMinusAverage", "reverse", "condition", "choice", "animCurve"]:
+            if "Constraint" in ct or ct in ["blendColors", "multiplyDivide", "plusMinusAverage", "reverse", "condition",
+                                            "choice", "animCurve"]:
                 has_connection = True
                 break
-                
+
         if not has_connection:
             for attr in ["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz"]:
                 if cmds.connectionInfo(f"{jnt}.{attr}", isDestination=True):
                     has_connection = True
                     break
-                    
+
         if has_constraint:
             return " [Constrained]"
         if has_connection:
@@ -881,11 +906,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             if "Not in scene" in status:
                 item.setForeground(QtGui.QColor("#ff6666"))
             elif "Constrained" in status:
-                item.setForeground(QtGui.QColor("#d8b4fe")) # Sleek purple
+                item.setForeground(QtGui.QColor("#d8b4fe"))  # Sleek purple
             elif "Connected" in status:
-                item.setForeground(QtGui.QColor("#fdba74")) # Warm orange
+                item.setForeground(QtGui.QColor("#fdba74"))  # Warm orange
             else:
-                item.setForeground(QtGui.QColor("#86efac")) # Clean light green
+                item.setForeground(QtGui.QColor("#86efac"))  # Clean light green
             list_widget.addItem(item)
 
     def create_space_switch(self):
@@ -902,86 +927,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 constraint_type="parent"
             )
 
-
     def populate_default_face_map_from_scene(self):
         """Fill default_face_map with scene joints under HIK head reference."""
-        dm = self.default_face_map
-
-        side = "l"
-        dm["LeftBrow"]["joints"] = brow_joints = [f"{side}_brow{i}" for i in range(1, 6)]
-        dm["LeftEyelid"]["inner"]["joint"] = f"{side}_inner_eyelidTip"
-        dm["LeftEyelid"]["outer"]["joint"] = f"{side}_outer_eyelidTip"
-        dm["LeftEyelid"]["joints"] = [
-            f"{side}_inner_eyelidTip",
-            f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
-            f"{side}_upper_eyelidTip8", f"{side}_upper_eyelidTip7", f"{side}_upper_eyelidTip6",
-            f"{side}_upper_eyelidTip5", f"{side}_upper_eyelidTip4", f"{side}_upper_eyelidTip3",
-            f"{side}_upper_eyelidTip2", f"{side}_upper_eyelidTip1",
-            f"{side}_outer_eyelidTip",
-            f"{side}_lower_eyelidTip1", f"{side}_lower_eyelidTip2", f"{side}_lower_eyelidTip3",
-            f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
-            f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
-        ]
-        side = "r"
-        dm["RightBrow"]["joints"] = brow_joints = [f"{side}_brow{i}" for i in range(1, 6)]
-
-        dm["RightEyelid"]["inner"]["joint"] = f"{side}_inner_eyelidTip"
-        dm["RightEyelid"]["outer"]["joint"] = f"{side}_outer_eyelidTip"
-        dm["RightEyelid"]["joints"] = [
-            f"{side}_inner_eyelidTip",
-            f"{side}_upper_eyelidTip11", f"{side}_upper_eyelidTip10", f"{side}_upper_eyelidTip9",
-            f"{side}_upper_eyelidTip8", f"{side}_upper_eyelidTip7", f"{side}_upper_eyelidTip6",
-            f"{side}_upper_eyelidTip5", f"{side}_upper_eyelidTip4", f"{side}_upper_eyelidTip3",
-            f"{side}_upper_eyelidTip2", f"{side}_upper_eyelidTip1",
-            f"{side}_outer_eyelidTip",
-            f"{side}_lower_eyelidTip1", f"{side}_lower_eyelidTip2", f"{side}_lower_eyelidTip3",
-            f"{side}_lower_eyelidTip4", f"{side}_lower_eyelidTip5", f"{side}_lower_eyelidTip6",
-            f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
-        ]
-
-        # ---------- Lips ----------
-        dm["LipChain"]["joints"] = [
-            'c_upper_lip', 'r_upper_lip4', 'r_upper_lip3', 'r_upper_lip2', 'r_upper_lip1',
-            'r_lip_corner1', 'r_lower_lip1', 'r_lower_lip2', 'r_lower_lip3', 'r_lower_lip4',
-            'c_lower_lip', 'l_lower_lip4', 'l_lower_lip3', 'l_lower_lip2', 'l_lower_lip1',
-            'l_lip_corner1', 'l_upper_lip1', 'l_upper_lip2', 'l_upper_lip3', 'l_upper_lip4'
-        ]
-        dm["UpperLipCenter"]["joint"] = "c_upper_lip"
-        dm["LowerLipCenter"]["joint"] = "c_lower_lip"
-        dm["LeftLipCorner"]["joint"] = "l_lip_corner1"
-        dm["RightLipCorner"]["joint"] = "r_lip_corner1"
-
-        # ---------- Jaw ----------
-        dm["Jaw"]["joint"] = "jaw"
-
-        # ---------- Tongue ----------
-        dm["TongueChain"]["joints"] = ["tongue1", "tongue2", "tongue3", "tongue4"]
-
-        # ---------- Teeth ----------
-        dm["UpperTeeth"]["joint"] = "upper_teeth"
-        dm["LowerTeeth"]["joint"] = "lower_teeth"
-
-        # ---------- Eyes ----------
-        dm["LeftEye"]["joint"] = "l_eye"
-        dm["RightEye"]["joint"] = "r_eye"
-
-        # ---------- Nose ----------
-        dm["NoseRoot"]["joint"] = "nose_root"
-
-        # ---------- Other Face Joints ----------
-        dm["OtherFaceJoints"]["joints"] = [
-            'r_undereye_3', 'r_undereye_4', 'r_undereye_5', 'r_undereye_1',
-            'r_ear_base1', 'r_ear_base', 'l_upper_cheek', 'r_undereye_2',
-            'l_lower_cheek', 'l_inner_cheek', 'r_upper_nose',
-            'l_inner_cheek_smile', 'r_inner_cheek_smile', 'r_inner_cheek',
-            'r_upper_cheek', 'r_lower_cheek',
-            'r_undereye_8', 'r_undereye_7', 'r_undereye_6',
-            'l_undereye_8', 'l_undereye_7', 'l_undereye_6',
-            'l_undereye_5', 'l_undereye_4', 'l_undereye_3',
-            'l_undereye_2', 'l_undereye_1',
-            'l_ear_base1', 'l_upper_nose', 'l_ear_base'
-        ]
-        self.default_face_map = dm
+        self.default_face_map = setup_hik.populate_default_face_map_from_scene(self.default_face_map)
 
     def assign_face_from_selection(self, list_widget):
         # Get the current selection of joints in Maya
@@ -992,7 +940,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         # Populate the list widget with the selection
         self._update_list_widget(list_widget, selection)
-        
+
         # Sync the mapping dict immediately so detail panels can reflect changes
         self.create_rig_mapping()
         self._refresh_all_module_details()
@@ -1000,7 +948,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
     def create_rig_mapping(self):
         # Check if there are empty slots in HIK fields
         empty_slots = [slot for slot in self.default_map if not self.fields.get(slot)]
-        
+
         if empty_slots:
             try:
                 top_joints = joints.find_skinned_or_top_joints(namespace='')
@@ -1039,13 +987,24 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
     def build_full_rig(self):
         self.create_rig_mapping()
-        # Reset session overrides
+
+        # Reset session overrides.
         self._session_parent_override = None
         self._use_override_for_all = False
 
+        # Suppress repeated metadata discrepancy dialogs while individual
+        # modules build. Missing saved references are collected and reported
+        # once in the final summary.
+        self._defer_module_discrepancy_warnings = True
+        self._pending_module_discrepancies.clear()
+
         still_empty = [slot for slot in self.default_map if not self.fields.get(slot)]
         if still_empty:
-            msg = f"The following HumanIK slots are still unmapped:\n{', '.join(still_empty)}\n\nDo you want to proceed and build the rig anyway?"
+            msg = (
+                    "The following HumanIK slots are still unmapped:\n"
+                    + ", ".join(still_empty)
+                    + "\n\nDo you want to proceed and build the rig anyway?"
+            )
             res = cmds.confirmDialog(
                 title="Unmapped Slots Notice",
                 message=msg,
@@ -1054,6 +1013,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 cancelButton="Cancel"
             )
             if res == "Cancel":
+                self._defer_module_discrepancy_warnings = False
+                self._pending_module_discrepancies.clear()
                 return
 
         all_modules = [
@@ -1079,60 +1040,111 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             "Other Face Joints"
         ]
 
-        # Force eyelids to build last no matter where they are listed above.
+        # Force eyelids to build last.
         eyelid_modules = ["Eyelids (Left)", "Eyelids (Right)"]
         all_modules = [m for m in all_modules if m not in eyelid_modules]
         all_modules.extend(eyelid_modules)
 
+        face_modules = {
+            "Brows (Left)",
+            "Brows (Right)",
+            "Eyes Aim",
+            "Eyelids (Left)",
+            "Eyelids (Right)",
+            "Mouth & Lips",
+            "Tongue",
+            "Teeth",
+            "Other Face Joints",
+        }
+
         cmds.undoInfo(openChunk=True, chunkName="Build Full Rig")
         built_modules = []
         skipped_modules = []
+
         try:
             for module in all_modules:
-                # Check if joints exist in scene
-                if module in ["Brows (Left)", "Brows (Right)", "Eyes Aim", "Eyelids (Left)", "Eyelids (Right)", "Mouth & Lips", "Tongue", "Teeth", "Other Face Joints"]:
-                    jnts = self._get_face_module_joints(module)
+                if module in face_modules:
+                    mapped_joints = self._get_face_module_joints(module)
                 else:
-                    jnts = self._get_module_joints(module)
-                
-                # Check if any joints exist for modules that map explicitly to joints
-                if module not in ["Mouth & Lips", "Other Face Joints", "Teeth", "Tongue", "Eyes Aim"]:
-                    existing_jnts = [j for j in jnts if j and cmds.objExists(j)]
-                    if not existing_jnts:
-                        skipped_modules.append(module)
-                        continue
+                    mapped_joints = self._get_module_joints(module)
 
-                # Build module silently
-                if module in ["Brows (Left)", "Brows (Right)", "Eyes Aim", "Eyelids (Left)", "Eyelids (Right)", "Mouth & Lips", "Tongue", "Teeth", "Other Face Joints"]:
+                existing_joints = [
+                    joint for joint in mapped_joints
+                    if joint and cmds.objExists(joint)
+                ]
+
+                # Every module should be skipped when none of its mapped joints
+                # exist. This includes optional face modules.
+                if not existing_joints:
+                    skipped_modules.append(module)
+                    continue
+
+                if module in face_modules:
                     self.create_face_module_setup(module, silent=True)
                 else:
                     self.create_body_module_setup(module, silent=True)
+
                 built_modules.append(module)
 
-            # Recreate all spaces and composite spaces once at the end
-            for s in ("l", "r"):
-                create_rig.create_arm_space_switches(s)
-                create_rig.create_leg_space_switches(s)
+            # Recreate all spaces and composite spaces once at the end.
+            for side in ("l", "r"):
+                create_rig.create_arm_space_switches(side)
+                create_rig.create_leg_space_switches(side)
 
-            # Cleanup orphaned main/temp nodes
             create_rig.delete_unused_scaffold_nodes()
-
-            # Store connections once at the very end
             self.store_all_face_connections(silent=True)
+
             if cmds.objExists("Do_Not_Touch"):
                 cmds.setAttr("Do_Not_Touch.visibility", 0)
-            summary = f"Full Rig Build Completed!\n\nBuilt Modules ({len(built_modules)}):\n" + ", ".join(built_modules)
+
+            summary = (
+                    f"Full Rig Build Completed!\n\n"
+                    f"Built Modules ({len(built_modules)}):\n"
+                    + (", ".join(built_modules) if built_modules else "None")
+            )
+
             if skipped_modules:
-                summary += f"\n\nSkipped Modules (joints not in scene) ({len(skipped_modules)}):\n" + ", ".join(skipped_modules)
-            cmds.confirmDialog(title="Success", message=summary, button=["OK"])
+                summary += (
+                        f"\n\nSkipped Modules (no mapped joints in scene) "
+                        f"({len(skipped_modules)}):\n"
+                        + ", ".join(skipped_modules)
+                )
+
+            if self._pending_module_discrepancies:
+                summary += (
+                    f"\n\nIgnored Missing Saved Joint References "
+                    f"({len(self._pending_module_discrepancies)}):\n"
+                )
+                summary += "\n".join(
+                    f"• [{module_name}] {joint_name}"
+                    for module_name, joint_name
+                    in sorted(self._pending_module_discrepancies)
+                )
+
+            cmds.confirmDialog(
+                title="Success",
+                message=summary,
+                button=["OK"]
+            )
 
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to create full rig:\n{e}", button=["OK"])
+            cmds.confirmDialog(
+                title="Error",
+                message=f"Failed to create full rig:\n{e}",
+                button=["OK"]
+            )
             cmds.warning(f"Failed to create full rig: {e}")
+
         finally:
             cmds.undoInfo(closeChunk=True)
+
+            # Keep warning deferral enabled for the final metadata refresh so it
+            # cannot reopen the same discrepancy dialog after the summary.
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
+
+            self._defer_module_discrepancy_warnings = False
+            self._pending_module_discrepancies.clear()
 
     def remove_full_rig(self):
         dag.disable_evaluation()
@@ -1203,7 +1215,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         if detected:
             self._update_list_widget(list_widget, detected)
-            
+
             # Sync the mapping dict immediately so detail panels can reflect changes
             self.create_rig_mapping()
             self._refresh_all_module_details()
@@ -1213,7 +1225,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         if not sel:
             cmds.warning("Please select at least one joint to create controls for.")
             return
-        
+
         parent = self.ctrl_parent_field.text().strip() or None
         shape = self.ctrl_shape_combo.currentText().lower()
         if shape == "double arrow":
@@ -1302,29 +1314,29 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             return []
         if len(joints) <= 1:
             return joints
-            
+
         positions = []
         for j in joints:
             try:
                 positions.append(cmds.xform(j, q=True, ws=True, t=True))
             except:
                 positions.append([0.0, 0.0, 0.0])
-                
+
         xs = [p[0] for p in positions]
         ys = [p[1] for p in positions]
         zs = [p[2] for p in positions]
-        
+
         var_x = max(xs) - min(xs)
         var_y = max(ys) - min(ys)
         var_z = max(zs) - min(zs)
-        
+
         if var_x >= var_y and var_x >= var_z:
             axis_idx = 0
         elif var_y >= var_x and var_y >= var_z:
             axis_idx = 1
         else:
             axis_idx = 2
-            
+
         sorted_pairs = sorted(zip(joints, positions), key=lambda x: x[1][axis_idx])
         return [p[0] for p in sorted_pairs]
 
@@ -1344,7 +1356,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         sorted_joints = self.sort_joints_by_bounding_box(sel)
         N = len(sorted_joints)
-        
+
         if N <= 2:
             self.surf_indices_field.setText(", ".join(map(str, range(N))))
             return
@@ -1489,7 +1501,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             if slot in joint_map:
                 self.fields[slot] = joint_map[slot].get("joint")
             self.update_button_color(slot)
-        #self._build_face_rig_section(self.rig_layout)
+        # self._build_face_rig_section(self.rig_layout)
         self._refresh_all_module_details()
 
     def get_uproject(self, directory):
@@ -1500,194 +1512,10 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         return None
 
     def guess_joint_map_from_root(self, root_joint):
-        if not cmds.objExists(root_joint):
-            return {}
-
-        # Reset any existing joint mappings to avoid stale cache from previous runs
-        for key in self.default_map:
-            self.default_map[key]["joint"] = ""
-
-        def is_twist_bone(name):
-            return "twist" in name or "roll" in name
-
-        joint_map = self.default_map
-        all_joints = cmds.listRelatives(root_joint, ad=True, type="joint") or []
-        all_joints = list(reversed(all_joints))
-        all_joints.insert(0, root_joint)
-
-        spines = []
-        necks = []
-
-        fingers = {
-            "Left": {"Thumb": [], "Index": [], "Middle": [], "Ring": [], "Pinky": []},
-            "Right": {"Thumb": [], "Index": [], "Middle": [], "Ring": [], "Pinky": []}
-        }
-
-        # Check if upperarm joint exists to distinguish shoulder vs upperarm
-        has_l_upperarm = any("l_upper" in j.lower() or "upper_l" in j.lower() or "l_arm" in j.lower() or "arm_l" in j.lower() or "l_upperarm" in j.lower() or "upperarm_l" in j.lower() for j in all_joints)
-        has_r_upperarm = any("r_upper" in j.lower() or "upper_r" in j.lower() or "r_arm" in j.lower() or "arm_r" in j.lower() or "r_upperarm" in j.lower() or "upperarm_r" in j.lower() for j in all_joints)
-
-        twist_map = {
-            # arms
-            "upperarm": ("ArmRoll", 3),
-            "lowerarm": ("ForeArmRoll", 3),
-            # legs
-            "thigh": ("UpLegRoll", 3),
-            "knee": ("LegRoll", 2),
-        }
-        side_prefix = {"l": "Left", "r": "Right"}
-
-        for jnt in all_joints:
-            name = jnt.lower()
-
-            def set_slot(slot):
-                if slot in joint_map and not joint_map[slot].get("joint"):
-                    joint_map[slot]["joint"] = jnt
-
-            # 1. Twist joints mapping
-            is_twist = is_twist_bone(name)
-            if is_twist:
-                for side in ("l", "r"):
-                    for limb, (slot_base, count) in twist_map.items():
-                        if limb in name:
-                            # Match side prefix or suffix
-                            is_side = False
-                            if side == "l":
-                                is_side = name.startswith("l_") or "l_upper" in name or "l_lower" in name or name.endswith("_l") or "_l_" in name or "left" in name
-                            else:
-                                is_side = name.startswith("r_") or "r_upper" in name or "r_lower" in name or name.endswith("_r") or "_r_" in name or "right" in name
-                            
-                            if is_side:
-                                match = re.search(r'(\d+)', name)
-                                num = int(match.group(1)) if match else 1
-                                
-                                slot_base_fixed = slot_base.replace('ForeArm', "Forearm")
-                                if num == 1:
-                                    joint_map_key = f"{side_prefix[side]}{slot_base}"
-                                    if joint_map_key in joint_map and not joint_map[joint_map_key].get("joint"):
-                                        joint_map[joint_map_key]["joint"] = jnt
-                                else:
-                                    leaf_idx = num - 1
-                                    joint_map_key = f"Leaf{side_prefix[side]}{slot_base_fixed}{leaf_idx}"
-                                    if joint_map_key in joint_map and not joint_map[joint_map_key].get("joint"):
-                                        joint_map[joint_map_key]["joint"] = jnt
-                continue
-
-            # 2. Main skeleton joints mapping
-            if "spine" in name or "spn" in name:
-                spines.append(jnt)
-
-            elif "origin" in name or "root" in name:
-                set_slot("Reference")
-
-            elif "pelvis" in name:
-                set_slot("Hips")
-
-            elif "hipswing" in name or "hip_swing" in name:
-                set_slot("HipSwing")
-
-            elif "l_clavicle" in name or "clavicle_l" in name or ("l_shoulder" in name and has_l_upperarm):
-                set_slot("LeftShoulder")
-            elif ("l_upper" in name or "upper_l" in name or "l_upperarm" in name or "upperarm_l" in name or "l_upper_arm" in name or "upper_arm_l" in name or ("l_shoulder" in name and not has_l_upperarm) or "l_arm" in name or "arm_l" in name):
-                set_slot("LeftArm")
-            elif ("l_lower" in name or "lower_l" in name or "l_lowerarm" in name or "lowerarm_l" in name or "l_lower_arm" in name or "lower_arm_l" in name or "l_forearm" in name or "forearm_l" in name or "l_elbow" in name):
-                set_slot("LeftForeArm")
-
-            elif "l_hand" in name or "hand_l" in name and "ik" not in name:
-                set_slot("LeftHand")
-
-            elif "r_clavicle" in name or "clavicle_r" in name or ("r_shoulder" in name and has_r_upperarm):
-                set_slot("RightShoulder")
-            elif ("r_upper" in name or "upper_r" in name or "r_upperarm" in name or "upperarm_r" in name or "r_upper_arm" in name or "upper_arm_r" in name or ("r_shoulder" in name and not has_r_upperarm) or "r_arm" in name or "arm_r" in name):
-                set_slot("RightArm")
-            elif ("r_lower" in name or "lower_r" in name or "r_lowerarm" in name or "lowerarm_r" in name or "r_lower_arm" in name or "lower_arm_r" in name or "r_forearm" in name or "forearm_r" in name or "r_elbow" in name):
-                set_slot("RightForeArm")
-
-            elif "r_hand" in name or "hand_r" in name and "ik" not in name:
-                set_slot("RightHand")
-
-            elif ("l_thigh" in name or "thigh_l" in name or "l_upperleg" in name):
-                set_slot("LeftUpLeg")
-
-            elif ("l_knee" in name or "knee_l" in name or "calf_l" in name or "l_lowerleg" in name):
-                set_slot("LeftLeg")
-
-            elif "l_ankle" in name or "ankle_l" in name or "foot_l" in name and "ik" not in name:
-                set_slot("LeftFoot")
-
-            elif "l_toe" in name and "tip" not in name or "ball_l" in name:
-                set_slot("LeftToeBase")
-
-            elif ("r_thigh" in name or "thigh_r" in name or "r_upperleg" in name):
-                set_slot("RightUpLeg")
-
-            elif ("r_knee" in name or "knee_r" in name or "calf_r" in name or "r_lowerleg" in name):
-                set_slot("RightLeg")
-
-            elif "r_ankle" in name or "ankle_r" in name or "foot_r" in name and "ik" not in name:
-                set_slot("RightFoot")
-            elif "r_toe" in name and "tip" not in name or "ball_r" in name:
-                set_slot("RightToeBase")
-
-            if "neck" in name:
-                necks.append(jnt)
-            elif "head" in name:
-                set_slot("Head")
-
-            for side_prefix_str, side in [("l_", "Left"), ("r_", "Right")]:
-                if name.startswith(side_prefix_str):
-                    for finger in fingers[side].keys():
-                        if finger.lower() in name:
-                            fingers[side][finger].append(jnt)
-                elif name.endswith("_" + side[0].lower()):
-                    for finger in fingers[side].keys():
-                        if not len(fingers[side][finger]):
-                            if cmds.objExists(f"{finger.lower()}_metacarpal_{side[0].lower()}"):
-                                fingers[side][finger].append(f"{finger.lower()}_metacarpal_{side[0].lower()}")
-                            if cmds.objExists(f"{finger.lower()}_01_{side[0].lower()}"):
-                                fingers[side][finger].append(f"{finger.lower()}_01_{side[0].lower()}")
-                                fingers[side][finger].append(f"{finger.lower()}_02_{side[0].lower()}")
-                                fingers[side][finger].append(f"{finger.lower()}_03_{side[0].lower()}")
-
-        for i, spine in enumerate(spines):
-            key = "Spine" if i == 0 else f"Spine{i}"
-            if key in joint_map and not joint_map[key].get("joint"):
-                joint_map[key]["joint"] = spine
-
-        for i, neck in enumerate(necks):
-            key = "Neck" if i == 0 else f"Neck{i}"
-            if key in joint_map and not joint_map[key].get("joint"):
-                joint_map[key]["joint"] = neck
-
-        for side in ["Left", "Right"]:
-            for finger in ["Thumb", "Index", "Middle", "Ring", "Pinky"]:
-                joints_list = fingers[side][finger]
-                if not joints_list:
-                    continue
-                if "_metacarpal_" not in joints_list[0]:
-                    joints_sorted = sorted(joints_list, key=lambda x: x.lower())
-                else:
-                    joints_sorted = joints_list
-                if "Thumb" not in finger:
-                    in_hand_key = f"{side}InHand{finger}"
-                    if in_hand_key in joint_map and not joint_map[in_hand_key].get("joint"):
-                        joint_map[in_hand_key]["joint"] = joints_sorted[0]
-                else:
-                    if len(joints_list) > 4:
-                        thumb4_key = f"{side}Hand{finger}4"
-                    else:
-                        thumb4_key = f"{side}Hand{finger}3"
-                    joint_map[thumb4_key]["joint"] = joints_sorted[-1]
-                for i in range(1, min(5, len(joints_sorted))):
-                    num = i
-                    if "Thumb" in finger:
-                        num = i - 1
-                    key = f"{side}Hand{finger}{i}"
-                    if key in joint_map and not joint_map[key].get("joint"):
-                        joint_map[key]["joint"] = joints_sorted[num]
+        result = setup_hik.guess_joint_map_from_root(root_joint, self.default_map)
         # Refresh the face map after assignment
         self.populate_default_face_map_from_scene()
-        return joint_map
+        return result
 
     def create_hik_character(self):
         char_name = self.char_name.text()
@@ -1751,14 +1579,14 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             stored_data = create_rig.store_rig_connections(ctrls, name)
             if any(stored_data.values()):
                 stored_modules.append(name)
-                
+
         if not silent:
             message = "Rig connections and space switches stored successfully!"
             if stored_modules:
                 message += "\n\nStored data for:\n" + "\n".join([f"• {m}" for m in stored_modules])
             else:
                 message += "\n(No active space switches or custom external connections were found in the scene)."
-                
+
             cmds.confirmDialog(title="Global Store", message=message, button=["OK"])
 
     def _get_module_joints(self, module):
@@ -1771,9 +1599,11 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         elif module == "Right Clavicle":
             return [self.fields.get("RightShoulder")]
         elif module == "Left Leg":
-            return [self.fields.get("LeftUpLeg"), self.fields.get("LeftLeg"), self.fields.get("LeftFoot"), self.fields.get("LeftToeBase")]
+            return [self.fields.get("LeftUpLeg"), self.fields.get("LeftLeg"), self.fields.get("LeftFoot"),
+                    self.fields.get("LeftToeBase")]
         elif module == "Right Leg":
-            return [self.fields.get("RightUpLeg"), self.fields.get("RightLeg"), self.fields.get("RightFoot"), self.fields.get("RightToeBase")]
+            return [self.fields.get("RightUpLeg"), self.fields.get("RightLeg"), self.fields.get("RightFoot"),
+                    self.fields.get("RightToeBase")]
         elif module == "Root / Origin":
             return [self.fields.get("Reference")]
         elif module == "Pelvis & Hips":
@@ -1816,7 +1646,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         if not parent:
             parent = self.body_parent_field.text().strip() or None
         if module != "Root / Origin" and (not parent or not cmds.objExists(parent)):
-            if self._use_override_for_all and self._session_parent_override and cmds.objExists(self._session_parent_override):
+            if self._use_override_for_all and self._session_parent_override and cmds.objExists(
+                    self._session_parent_override):
                 parent = self._session_parent_override
                 if edit_info and edit_info.get("parent_edit"):
                     edit_info["parent_edit"].setText(parent)
@@ -1846,7 +1677,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                                 edit_info["parent_edit"].setText(parent)
                             break
                         else:
-                            cmds.confirmDialog(title="Error", message="Nothing selected. Please select a node in the scene.", button=["OK"])
+                            cmds.confirmDialog(title="Error",
+                                               message="Nothing selected. Please select a node in the scene.",
+                                               button=["OK"])
                     else:
                         return
 
@@ -1968,7 +1801,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             # Cleanup orphaned main/temp nodes
             create_rig.delete_unused_scaffold_nodes()
 
-            cmds.confirmDialog(title="Success", message=f"Body Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.", button=["OK"])
+            cmds.confirmDialog(title="Success",
+                               message=f"Body Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
+                               button=["OK"])
         except Exception as e:
             cmds.confirmDialog(title="Error", message=f"Failed to remove body module setup:\n{e}", button=["OK"])
         finally:
@@ -1985,7 +1820,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         if not parent:
             parent = self.module_parent_field.text().strip() or None
         if not parent or not cmds.objExists(parent):
-            if self._use_override_for_all and self._session_parent_override and cmds.objExists(self._session_parent_override):
+            if self._use_override_for_all and self._session_parent_override and cmds.objExists(
+                    self._session_parent_override):
                 parent = self._session_parent_override
                 if edit_info and edit_info.get("parent_edit"):
                     edit_info["parent_edit"].setText(parent)
@@ -2015,16 +1851,18 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                                 edit_info["parent_edit"].setText(parent)
                             break
                         else:
-                            cmds.confirmDialog(title="Error", message="Nothing selected. Please select a node in the scene.", button=["OK"])
+                            cmds.confirmDialog(title="Error",
+                                               message="Nothing selected. Please select a node in the scene.",
+                                               button=["OK"])
                     else:
                         return
-                    
+
         jaw_ctrl = None
         if edit_info and edit_info.get("jaw_ctrl_edit"):
             jaw_ctrl = edit_info["jaw_ctrl_edit"].text().strip() or None
         if not jaw_ctrl:
             jaw_ctrl = self.module_jaw_ctrl_field.text().strip() or None
-            
+
         jaw_jnt = None
         if edit_info and edit_info.get("jaw_jnt_edit"):
             jaw_jnt = edit_info["jaw_jnt_edit"].text().strip() or None
@@ -2032,6 +1870,25 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             jaw_jnt = self.module_jaw_jnt_field.text().strip() or None
 
         self.create_rig_mapping()
+
+        # Remove missing scene joints from this module's active mapping before
+        # the builder or metadata store sees them.
+        face_joints = [
+            joint for joint in self._get_face_module_joints(module)
+            if joint and cmds.objExists(joint)
+        ]
+
+        if not face_joints:
+            if not silent:
+                cmds.confirmDialog(
+                    title="Skipped",
+                    message=(
+                        f"Face Module '{module}' was not built because none of "
+                        "its mapped joints exist in the current scene."
+                    ),
+                    button=["OK"]
+                )
+            return
 
         cmds.undoInfo(openChunk=True, chunkName=f"Build Face Module: {module}")
         try:
@@ -2056,8 +1913,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
             restored = create_rig.restore_rig_connections(module)
 
-            # Save metadata for face module so it is kept in rig_module_store node!
-            face_joints = self._get_face_module_joints(module)
+            # Save only joints that actually exist in the current scene.
             create_rig.save_module_metadata(module, {
                 "parent": parent or "",
                 "jaw_ctrl": jaw_ctrl or "",
@@ -2114,7 +1970,9 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             # Cleanup orphaned main/temp nodes
             create_rig.delete_unused_scaffold_nodes()
 
-            cmds.confirmDialog(title="Success", message=f"Face Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.", button=["OK"])
+            cmds.confirmDialog(title="Success",
+                               message=f"Face Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
+                               button=["OK"])
         except Exception as e:
             cmds.confirmDialog(title="Error", message=f"Failed to remove face module setup:\n{e}", button=["OK"])
         finally:
@@ -2123,16 +1981,18 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             self._refresh_all_module_details()
             dag.enable_evaluation()
 
-
     def load_settings_from_selection(self):
         sel = cmds.ls(sl=True)
         if not sel:
-            cmds.confirmDialog(title="Info", message="Please select a control or joint in the scene first.", button=["OK"])
+            cmds.confirmDialog(title="Info", message="Please select a control or joint in the scene first.",
+                               button=["OK"])
             return
 
         node = sel[0]
         node_lower = node.lower()
-        is_body = any(t in node_lower for t in ["upperarm", "lowerarm", "hand", "clavicle", "thigh", "knee", "ankle", "toe", "foot", "leg", "arm"])
+        is_body = any(t in node_lower for t in
+                      ["upperarm", "lowerarm", "hand", "clavicle", "thigh", "knee", "ankle", "toe", "foot", "leg",
+                       "arm"])
 
         parent_ctrl = ""
         jaw_ctrl = ""
@@ -2211,25 +2071,25 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
     # Primary control candidates per module (tried in order; first existing wins)
     _MODULE_CTRL_CANDIDATES = {
-        "Root / Origin":    ["origin_ctrl"],
-        "Pelvis & Hips":    ["pelvis_ctrl", "hipswing_ctrl"],
-        "Spine":            ["spine1_ctrl", "spine3_ctrl", "spine5_ctrl"],
-        "Left Clavicle":    ["l_clavicle_ctrl"],
-        "Right Clavicle":   ["r_clavicle_ctrl"],
-        "Neck":             ["neck1_ctrl", "neck2_ctrl"],
-        "Head":             ["head1_ctrl"],
-        "Left Arm":         ["l_upperarm_fk_ctrl", "l_hand_switch_ctrl"],
-        "Right Arm":        ["r_upperarm_fk_ctrl", "r_hand_switch_ctrl"],
-        "Left Leg":         ["l_thigh_fk_ctrl", "l_ankle_switch_ctrl"],
-        "Right Leg":        ["r_thigh_fk_ctrl", "r_ankle_switch_ctrl"],
-        "Brows (Left)":     ["l_brow_main_ctrl", "l_brow1_ctrl"],
-        "Brows (Right)":    ["r_brow_main_ctrl", "r_brow1_ctrl"],
-        "Eyelids (Left)":   ["l_eyelid_main_ctrl", "l_upper_eyelid1_ctrl"],
-        "Eyelids (Right)":  ["r_eyelid_main_ctrl", "r_upper_eyelid1_ctrl"],
-        "Mouth & Lips":     ["c_upper_lip_main_ctrl", "l_lip_corner1_main_ctrl"],
-        "Eyes Aim":         ["eye_aim_ctrl", "l_eye_aim_ctrl"],
-        "Tongue":           ["tongue1_ctrl"],
-        "Teeth":            ["upper_teeth_ctrl"],
+        "Root / Origin": ["origin_ctrl"],
+        "Pelvis & Hips": ["pelvis_ctrl", "hipswing_ctrl"],
+        "Spine": ["spine1_ctrl", "spine3_ctrl", "spine5_ctrl"],
+        "Left Clavicle": ["l_clavicle_ctrl"],
+        "Right Clavicle": ["r_clavicle_ctrl"],
+        "Neck": ["neck1_ctrl", "neck2_ctrl"],
+        "Head": ["head1_ctrl"],
+        "Left Arm": ["l_upperarm_fk_ctrl", "l_hand_switch_ctrl"],
+        "Right Arm": ["r_upperarm_fk_ctrl", "r_hand_switch_ctrl"],
+        "Left Leg": ["l_thigh_fk_ctrl", "l_ankle_switch_ctrl"],
+        "Right Leg": ["r_thigh_fk_ctrl", "r_ankle_switch_ctrl"],
+        "Brows (Left)": ["l_brow_main_ctrl", "l_brow1_ctrl"],
+        "Brows (Right)": ["r_brow_main_ctrl", "r_brow1_ctrl"],
+        "Eyelids (Left)": ["l_eyelid_main_ctrl", "l_upper_eyelid1_ctrl"],
+        "Eyelids (Right)": ["r_eyelid_main_ctrl", "r_upper_eyelid1_ctrl"],
+        "Mouth & Lips": ["c_upper_lip_main_ctrl", "l_lip_corner1_main_ctrl"],
+        "Eyes Aim": ["eye_aim_ctrl", "l_eye_aim_ctrl"],
+        "Tongue": ["tongue1_ctrl"],
+        "Teeth": ["upper_teeth_ctrl"],
         "Other Face Joints": [],
     }
 
@@ -2243,10 +2103,10 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             edit = QtWidgets.QLineEdit()
             edit.setReadOnly(True)
             edit.setText(self.fields.get(slot_key, ""))
-            
+
             # Register in self._slot_edit_widgets
             self._slot_edit_widgets[slot_key] = edit
-            
+
             btn = QtWidgets.QPushButton("⌖")
             btn.setFixedSize(20, 20)
             btn.setToolTip(f"Map selected joint to {label}")
@@ -2263,7 +2123,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             line_edit.setText(joint_name)
             self.fields[slot_key] = joint_name
             self.update_button_color(slot_key)
-            
+
             opposite_slot = self.get_opposite_slot(slot_key)
             if opposite_slot and opposite_slot in self.fields:
                 mirrored = self.mirror_joint_name(joint_name)
@@ -2271,7 +2131,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                     self.fields[opposite_slot] = mirrored
                     self._update_edit_view_slot_ui(opposite_slot, mirrored)
                     self.update_button_color(opposite_slot)
-            
+
             self.create_rig_mapping()
         else:
             cmds.warning("Please select a joint in the scene first.")
@@ -2284,16 +2144,16 @@ class HIKDefinitionUI(QtWidgets.QDialog):
     def _create_space_switch_edit_row(self, ctrl_name, default_targets, module_id):
         row = QtWidgets.QHBoxLayout()
         edit = QtWidgets.QLineEdit()
-        
+
         meta = create_rig.load_module_metadata(module_id)
         custom_sw = meta.get("custom_space_switches", {})
         targets = custom_sw.get(ctrl_name, default_targets)
         edit.setText(", ".join(targets))
-        
+
         btn = QtWidgets.QPushButton("⌖")
         btn.setFixedSize(20, 20)
         btn.setToolTip("Set targets from selection")
-        
+
         def assign_targets():
             sel = cmds.ls(sl=True)
             if sel:
@@ -2301,10 +2161,12 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 self._save_custom_space_switches(module_id, ctrl_name, sel)
             else:
                 cmds.warning("Nothing selected in viewport.")
-                
+
         btn.clicked.connect(assign_targets)
-        edit.textChanged.connect(lambda text: self._save_custom_space_switches(module_id, ctrl_name, [t.strip() for t in text.split(",") if t.strip()]))
-        
+        edit.textChanged.connect(lambda text: self._save_custom_space_switches(module_id, ctrl_name,
+                                                                               [t.strip() for t in text.split(",") if
+                                                                                t.strip()]))
+
         row.addWidget(edit)
         row.addWidget(btn)
         return row
@@ -2411,7 +2273,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
             jaw_ctrl_btn = QtWidgets.QPushButton("\u2014")
             jaw_ctrl_btn.setFlat(True)
             jaw_ctrl_btn.setEnabled(False)
-            jaw_ctrl_btn.setStyleSheet("color: #777777; font-size: 8pt; border: none; padding: 0 2px; text-align: left;")
+            jaw_ctrl_btn.setStyleSheet(
+                "color: #777777; font-size: 8pt; border: none; padding: 0 2px; text-align: left;")
             jaw_ctrl_btn.setCursor(QtCore.Qt.PointingHandCursor)
             jaw_ctrl_row.addWidget(jaw_ctrl_btn)
             jaw_ctrl_row.addStretch()
@@ -2437,7 +2300,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         mapped_joints_hdr.setFixedWidth(50)
         mapped_joints_hdr.setStyleSheet("color: #999999; font-size: 8pt; border: none;")
         mapped_joints_row.addWidget(mapped_joints_hdr)
-        
+
         mapped_joints_lbl = QtWidgets.QLabel("\u2014")
         mapped_joints_lbl.setStyleSheet("color: #99cc99; font-size: 8pt; border: none;")
         mapped_joints_lbl.setWordWrap(True)
@@ -2450,7 +2313,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         spaces_hdr.setFixedWidth(50)
         spaces_hdr.setStyleSheet("color: #999999; font-size: 8pt; border: none;")
         spaces_row.addWidget(spaces_hdr)
-        
+
         spaces_container = QtWidgets.QWidget()
         spaces_layout = QtWidgets.QHBoxLayout(spaces_container)
         spaces_layout.setContentsMargins(0, 0, 0, 0)
@@ -2467,7 +2330,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         e_vl.setContentsMargins(0, 0, 0, 0)
         e_vl.setSpacing(8)
 
-        body_list_names = ["Root / Origin", "Pelvis & Hips", "Spine", "Left Clavicle", "Right Clavicle", "Neck", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg"]
+        body_list_names = ["Root / Origin", "Pelvis & Hips", "Spine", "Left Clavicle", "Right Clavicle", "Neck", "Head",
+                           "Left Arm", "Right Arm", "Left Leg", "Right Leg"]
         is_body = module_id in body_list_names
 
         # Common Parameters (Parent Control, and Jaw settings if applicable)
@@ -2520,9 +2384,12 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
             # Determine slots based on module
             if module_id == "Root / Origin":
-                slots_hl.addWidget(self._create_joint_slots_group("Main Joints", [("Reference", "Reference")], module_id))
+                slots_hl.addWidget(
+                    self._create_joint_slots_group("Main Joints", [("Reference", "Reference")], module_id))
             elif module_id == "Pelvis & Hips":
-                slots_hl.addWidget(self._create_joint_slots_group("Main Joints", [("Hips", "Hips"), ("Hip Swing", "HipSwing")], module_id))
+                slots_hl.addWidget(
+                    self._create_joint_slots_group("Main Joints", [("Hips", "Hips"), ("Hip Swing", "HipSwing")],
+                                                   module_id))
             elif module_id == "Spine":
                 slots_hl.addWidget(self._create_joint_slots_group("Spine Chain", [
                     ("Spine", "Spine"), ("Spine 1", "Spine1"), ("Spine 2", "Spine2"), ("Spine 3", "Spine3")
@@ -2535,11 +2402,12 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 slots_hl.addWidget(self._create_joint_slots_group("Main Joints", [("Head", "Head")], module_id))
             elif module_id in ["Left Clavicle", "Right Clavicle"]:
                 sp = "Left" if "Left" in module_id else "Right"
-                slots_hl.addWidget(self._create_joint_slots_group("Main Joints", [("Clavicle", f"{sp}Shoulder")], module_id))
+                slots_hl.addWidget(
+                    self._create_joint_slots_group("Main Joints", [("Clavicle", f"{sp}Shoulder")], module_id))
             elif module_id in ["Left Arm", "Right Arm"]:
                 side = "l" if "Left" in module_id else "r"
                 sp = "Left" if "Left" in module_id else "Right"
-                
+
                 main_slots = [
                     ("Arm (Upper)", f"{sp}Arm"),
                     ("Forearm (Lower)", f"{sp}ForeArm"),
@@ -2557,7 +2425,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                     ("Leaf 2", f"Leaf{sp}ForearmRoll2"),
                     ("Leaf 3", f"Leaf{sp}ForearmRoll3")
                 ]
-                
+
                 slots_hl.addWidget(self._create_joint_slots_group("Main Joints", main_slots, module_id))
                 slots_hl.addWidget(self._create_joint_slots_group("Twist Upper", upper_twist, module_id))
                 slots_hl.addWidget(self._create_joint_slots_group("Twist Lower", lower_twist, module_id))
@@ -2567,16 +2435,26 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 sw_lay = QtWidgets.QFormLayout(sw_group)
                 sw_lay.setContentsMargins(5, 5, 5, 5)
                 sw_lay.setSpacing(3)
-                
-                sw_lay.addRow("PV Space Targets:", self._create_space_switch_edit_row(f"{side}_lowerarm_pv_ctrl", ["pelvis_ctrl", "origin_ctrl", f"{side}_clavicle_ctrl", f"{side}_arm_pv_handClav_space"], module_id))
-                sw_lay.addRow("FK Space Targets:", self._create_space_switch_edit_row(f"{side}_upperarm_fk_ctrl", [f"{side}_clavicle_ctrl", "pelvis_ctrl", "origin_ctrl"], module_id))
-                sw_lay.addRow("IK Space Targets:", self._create_space_switch_edit_row(f"{side}_hand_ik_ctrl", [f"{side}_clavicle_ctrl", "spine5_Tip_ctrl", "pelvis_ctrl", "origin_ctrl"], module_id))
+
+                sw_lay.addRow("PV Space Targets:", self._create_space_switch_edit_row(f"{side}_lowerarm_pv_ctrl",
+                                                                                      ["pelvis_ctrl", "origin_ctrl",
+                                                                                       f"{side}_clavicle_ctrl",
+                                                                                       f"{side}_arm_pv_handClav_space"],
+                                                                                      module_id))
+                sw_lay.addRow("FK Space Targets:", self._create_space_switch_edit_row(f"{side}_upperarm_fk_ctrl",
+                                                                                      [f"{side}_clavicle_ctrl",
+                                                                                       "pelvis_ctrl", "origin_ctrl"],
+                                                                                      module_id))
+                sw_lay.addRow("IK Space Targets:", self._create_space_switch_edit_row(f"{side}_hand_ik_ctrl",
+                                                                                      [f"{side}_clavicle_ctrl",
+                                                                                       "spine5_Tip_ctrl", "pelvis_ctrl",
+                                                                                       "origin_ctrl"], module_id))
                 e_vl.addWidget(sw_group)
 
             elif module_id in ["Left Leg", "Right Leg"]:
                 side = "l" if "Left" in module_id else "r"
                 sp = "Left" if "Left" in module_id else "Right"
-                
+
                 main_slots = [
                     ("UpLeg", f"{sp}UpLeg"),
                     ("Leg", f"{sp}Leg"),
@@ -2594,7 +2472,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                     ("Leaf 1", f"Leaf{sp}LegRoll1"),
                     ("Leaf 2", f"Leaf{sp}LegRoll2")
                 ]
-                
+
                 slots_hl.addWidget(self._create_joint_slots_group("Main Joints", main_slots, module_id))
                 slots_hl.addWidget(self._create_joint_slots_group("Twist Upper", upper_twist, module_id))
                 slots_hl.addWidget(self._create_joint_slots_group("Twist Lower", lower_twist, module_id))
@@ -2604,10 +2482,19 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 sw_lay = QtWidgets.QFormLayout(sw_group)
                 sw_lay.setContentsMargins(5, 5, 5, 5)
                 sw_lay.setSpacing(3)
-                
-                sw_lay.addRow("PV Space Targets:", self._create_space_switch_edit_row(f"{side}_knee_pv_ctrl", ["pelvis_ctrl", f"{side}_ankle_ik_ctrl", "origin_ctrl", f"{side}_leg_pv_footHip_space"], module_id))
-                sw_lay.addRow("FK Space Targets:", self._create_space_switch_edit_row(f"{side}_thigh_fk_ctrl", ["pelvis_ctrl", "origin_ctrl"], module_id))
-                sw_lay.addRow("IK Space Targets:", self._create_space_switch_edit_row(f"{side}_ankle_ik_ctrl", ["pelvis_ctrl", "origin_ctrl"], module_id))
+
+                sw_lay.addRow("PV Space Targets:", self._create_space_switch_edit_row(f"{side}_knee_pv_ctrl",
+                                                                                      ["pelvis_ctrl",
+                                                                                       f"{side}_ankle_ik_ctrl",
+                                                                                       "origin_ctrl",
+                                                                                       f"{side}_leg_pv_footHip_space"],
+                                                                                      module_id))
+                sw_lay.addRow("FK Space Targets:", self._create_space_switch_edit_row(f"{side}_thigh_fk_ctrl",
+                                                                                      ["pelvis_ctrl", "origin_ctrl"],
+                                                                                      module_id))
+                sw_lay.addRow("IK Space Targets:", self._create_space_switch_edit_row(f"{side}_ankle_ik_ctrl",
+                                                                                      ["pelvis_ctrl", "origin_ctrl"],
+                                                                                      module_id))
                 e_vl.addWidget(sw_group)
         else:
             # Face module assignment lists
@@ -2623,8 +2510,10 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 lists_hl.addWidget(self._create_face_list_block("Left Outer Eyelid", ("LeftEyelid", "outer", "joint")))
                 lists_hl.addWidget(self._create_face_list_block("Left Eyelids (Ordered)", ("LeftEyelid", "joints")))
             elif module_id == "Eyelids (Right)":
-                lists_hl.addWidget(self._create_face_list_block("Right Inner Eyelid", ("RightEyelid", "inner", "joint")))
-                lists_hl.addWidget(self._create_face_list_block("Right Outer Eyelid", ("RightEyelid", "outer", "joint")))
+                lists_hl.addWidget(
+                    self._create_face_list_block("Right Inner Eyelid", ("RightEyelid", "inner", "joint")))
+                lists_hl.addWidget(
+                    self._create_face_list_block("Right Outer Eyelid", ("RightEyelid", "outer", "joint")))
                 lists_hl.addWidget(self._create_face_list_block("Right Eyelids (Ordered)", ("RightEyelid", "joints")))
             elif module_id == "Mouth & Lips":
                 lists_hl.addWidget(self._create_face_list_block("Lip Joints (Ordered)", ("LipChain", "joints")))
@@ -3203,7 +3092,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         """Return the list of (display_name, actual_node_name) space switch option names for *ctrl*, if any."""
         if not cmds.objExists(ctrl):
             return []
-        
+
         # 1. Collect orientConstraint, parentConstraint, pointConstraint on ctrl, parent, grandparent
         nodes_to_check = [ctrl]
         curr = ctrl
@@ -3218,12 +3107,14 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         con_nodes = []
         for node in nodes_to_check:
-            con_nodes.extend(cmds.listRelatives(node, type=["orientConstraint", "parentConstraint", "pointConstraint"]) or [])
+            con_nodes.extend(
+                cmds.listRelatives(node, type=["orientConstraint", "parentConstraint", "pointConstraint"]) or [])
             # Also check for duplicate target constraints (e.g. _spaceTarget parent group)
             parents = cmds.listRelatives(node, parent=True) or []
             for p in parents:
                 if p.endswith("_spaceTarget"):
-                    con_nodes.extend(cmds.listRelatives(p, type=["orientConstraint", "parentConstraint", "pointConstraint"]) or [])
+                    con_nodes.extend(
+                        cmds.listRelatives(p, type=["orientConstraint", "parentConstraint", "pointConstraint"]) or [])
 
         con_nodes = list(dict.fromkeys(con_nodes))
         actual_targets = []
@@ -3272,7 +3163,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         """Return external nodes driving *ctrl* via connections or constraints (excluding its own pad/sdk chain)."""
         if not cmds.objExists(ctrl):
             return []
-        
+
         # Collect ctrl, parent, and grandparent
         nodes_to_check = [ctrl]
         curr = ctrl
@@ -3287,7 +3178,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         internal_nodes = set(nodes_to_check)
         driven_by = set()
-        
+
         for node in nodes_to_check:
             if not cmds.objExists(node):
                 continue
@@ -3319,7 +3210,7 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 else:
                     if c not in internal_nodes:
                         driven_by.add(c)
-                        
+
         return sorted(list(driven_by))
 
     def _clear_widget_layout(self, layout):
@@ -3342,8 +3233,13 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         if self.tabs.tabText(index) == "Rigging":
             self._refresh_all_module_details()
 
-    def _load_module_metadata_from_scene(self):
-        """Read rig_module_store, check for discrepancies, then refresh all detail widgets."""
+    def _load_module_metadata_from_scene(self, report_missing=True):
+        """
+        Read rig_module_store and refresh all detail widgets.
+
+        When report_missing is False, stale saved-joint references are ignored
+        silently. This is used during initial UI startup.
+        """
         try:
             all_meta = create_rig.get_all_module_metadata()
         except Exception as e:
@@ -3352,25 +3248,25 @@ class HIKDefinitionUI(QtWidgets.QDialog):
 
         # Key normalisation map — attr key → display name
         key_to_display = {
-            "root___origin":    "Root / Origin",
-            "pelvis___hips":    "Pelvis & Hips",
-            "spine":            "Spine",
-            "left_clavicle":    "Left Clavicle",
-            "right_clavicle":   "Right Clavicle",
-            "neck":             "Neck",
-            "head":             "Head",
-            "left_arm":         "Left Arm",
-            "right_arm":        "Right Arm",
-            "left_leg":         "Left Leg",
-            "right_leg":        "Right Leg",
-            "brows__left_":     "Brows (Left)",
-            "brows__right_":    "Brows (Right)",
-            "eyelids__left_":   "Eyelids (Left)",
-            "eyelids__right_":  "Eyelids (Right)",
-            "mouth___lips":     "Mouth & Lips",
-            "eyes_aim":         "Eyes Aim",
-            "tongue":           "Tongue",
-            "teeth":            "Teeth",
+            "root___origin": "Root / Origin",
+            "pelvis___hips": "Pelvis & Hips",
+            "spine": "Spine",
+            "left_clavicle": "Left Clavicle",
+            "right_clavicle": "Right Clavicle",
+            "neck": "Neck",
+            "head": "Head",
+            "left_arm": "Left Arm",
+            "right_arm": "Right Arm",
+            "left_leg": "Left Leg",
+            "right_leg": "Right Leg",
+            "brows__left_": "Brows (Left)",
+            "brows__right_": "Brows (Right)",
+            "eyelids__left_": "Eyelids (Left)",
+            "eyelids__right_": "Eyelids (Right)",
+            "mouth___lips": "Mouth & Lips",
+            "eyes_aim": "Eyes Aim",
+            "tongue": "Tongue",
+            "teeth": "Teeth",
             "other_face_joints": "Other Face Joints",
         }
 
@@ -3389,30 +3285,39 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                     if jnt and not cmds.objExists(jnt):
                         missing_joints.append((display_name, jnt))
 
-        if missing_joints:
-            lines = [f"  \u2022 [{mod}] {jnt}" for mod, jnt in missing_joints]
-            msg = ("The following joints referenced by saved rig modules were "
-                   "not found in the current scene:\n\n" + "\n".join(lines) +
-                   "\n\nYou may need to re-map or rebuild those modules.")
-            cmds.warning("[HIK UI] Module discrepancy detected.")
-            cmds.confirmDialog(
-                title="Module Discrepancy Warning",
-                message=msg,
-                button=["OK"],
-                icon="warning"
-            )
+        if missing_joints and report_missing:
+            unique_missing = {
+                (module_name, joint_name)
+                for module_name, joint_name in missing_joints
+                if joint_name
+            }
+
+            self._pending_module_discrepancies.update(unique_missing)
+
+            if not self._defer_module_discrepancy_warnings:
+                lines = [
+                    f"  • [{module_name}] {joint_name}"
+                    for module_name, joint_name in sorted(unique_missing)
+                ]
+                msg = (
+                        "The following joints referenced by saved rig modules were "
+                        "not found in the current scene:\n\n"
+                        + "\n".join(lines)
+                        + "\n\nThese missing references will be ignored."
+                )
+                cmds.warning("[HIK UI] Module discrepancy detected.")
+                cmds.confirmDialog(
+                    title="Module Discrepancy Warning",
+                    message=msg,
+                    button=["OK"],
+                    icon="warning"
+                )
 
         # Refresh all live detail widgets from the scene
         self._refresh_all_module_details()
 
 
 def launch_hik_ui():
-    global hik_ui_instance
-    try:
-        hik_ui_instance.close()
-        hik_ui_instance.deleteLater()
-    except:
-        pass
     hik_ui_instance = HIKDefinitionUI()
     hik_ui_instance.show()
 

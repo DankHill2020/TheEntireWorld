@@ -1,0 +1,4059 @@
+"""Extracted MainWindow methods. Generated from the uploaded monolithic file."""
+
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+import json
+import re
+import time
+from types import SimpleNamespace
+from urllib.parse import parse_qs, unquote, urlparse
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QDesktopServices,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QPixmap,
+    QTextCursor,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QProgressDialog,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QToolButton,
+    QTreeWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from models.constants import (
+    ANSI_RE,
+    HISTORY_DIR,
+)
+from models.files import is_supported_code_file
+
+from services.model_provider_service import (
+    is_credit_or_quota_failure,
+    provider_for_model,
+    resolve_model_for_policy,
+)
+from services.ollama_service import (
+    AI_MODELS,
+    as_mcphost_model
+)
+
+from services.unreal.graph_patch_service import execute_patch
+
+
+class MainWindowChatRuntimeMixin:
+    def _start_prompt_progress_observer(self, role: str = "main", *, label: str = "request") -> None:
+        """Watch background prompt work and publish liveness without blocking UI."""
+        role = role or "main"
+        now = time.time()
+        if not hasattr(self, "_prompt_progress_observers"):
+            self._prompt_progress_observers = {}
+        state = self._prompt_progress_observers.get(role, {})
+        state.update(
+            {
+                "label": label or state.get("label") or "request",
+                "started_at": state.get("started_at") or now,
+                "last_event_at": now,
+                "last_chat_update_at": state.get("last_chat_update_at") or 0.0,
+                "last_message": state.get("last_message") or "Accepted request",
+                "active": True,
+            }
+        )
+        self._prompt_progress_observers[role] = state
+        timer = getattr(self, "_prompt_progress_observer_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(5000)
+            timer.timeout.connect(self._tick_prompt_progress_observers)
+            self._prompt_progress_observer_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _note_prompt_progress_event(self, message: str, role: str = "main") -> None:
+        observers = getattr(self, "_prompt_progress_observers", None)
+        if not observers:
+            return
+        role = role or "main"
+        state = observers.get(role) or observers.get("main")
+        if not state:
+            return
+        state["last_event_at"] = time.time()
+        state["last_message"] = (message or "").strip() or state.get("last_message") or "Working"
+
+    def _stop_prompt_progress_observer(self, role: str = "main") -> None:
+        observers = getattr(self, "_prompt_progress_observers", None)
+        if observers:
+            observers.pop(role or "main", None)
+        timer = getattr(self, "_prompt_progress_observer_timer", None)
+        if timer is not None and (not observers):
+            timer.stop()
+
+    def _tick_prompt_progress_observers(self) -> None:
+        observers = getattr(self, "_prompt_progress_observers", {}) or {}
+        if not observers:
+            timer = getattr(self, "_prompt_progress_observer_timer", None)
+            if timer is not None:
+                timer.stop()
+            return
+        now = time.time()
+        for role, state in list(observers.items()):
+            if not state.get("active"):
+                continue
+            elapsed = int(now - float(state.get("started_at") or now))
+            quiet = int(now - float(state.get("last_event_at") or now))
+            if quiet < 12:
+                continue
+            last_message = str(state.get("last_message") or "Working")
+            label = str(state.get("label") or "request")
+            status = f"Still working on {label}: {last_message} ({elapsed}s elapsed)"
+            if hasattr(self, "live_process_label"):
+                self.live_process_label.setText(f"Working: {status}")
+            if now - float(state.get("last_chat_update_at") or 0.0) >= 30:
+                state["last_chat_update_at"] = now
+                self.append(
+                    "\n[Progress Observer] "
+                    f"{status}. Watching background worker/model activity; UI should remain responsive.\n"
+                )
+
+    def append_status_once(self, msg):
+        if not hasattr(self, "_seen_log_status_msgs"):
+            self._seen_log_status_msgs = set()
+        if msg not in self._seen_log_status_msgs:
+            self._seen_log_status_msgs.add(msg)
+            self.append(f"\n[Status] {msg}\n")
+
+    def _mark_response_started(self, role="main"):
+        role = role or "main"
+        self._response_started_at_by_role[role] = time.time()
+        self._start_prompt_progress_observer(role, label=f"{role} model response")
+        self._note_prompt_progress_event("Waiting for model response", role)
+        QTimer.singleShot(30000, lambda r=role: self.pending_response_notice(r))
+
+    def _consume_response_elapsed_label(self, role="main"):
+        started = self._response_started_at_by_role.pop(role or "main", None)
+        if not started:
+            return ""
+        elapsed = max(0, int(time.time() - started))
+        minutes, seconds = divmod(elapsed, 60)
+        if minutes:
+            return f"Worked for {minutes}m {seconds}s"
+        return f"Worked for {seconds}s"
+
+    def append(self, text):
+        if not text:
+            return
+        self.extract_code_blocks(text)
+        self.chat_history_raw += text
+
+        if hasattr(self, "log"):
+            scroll = self.log.verticalScrollBar()
+            self._chat_render_pending_bottom = scroll.value() >= scroll.maximum() - 20
+            self._chat_render_previous_scroll = scroll.value()
+        if hasattr(self, "chat_render_timer"):
+            self.chat_render_timer.start(60)
+        else:
+            self.render_chat_history()
+
+    def _ui_diagnostic_enabled(self) -> bool:
+        try:
+            return bool(self.settings.get("ui_diagnostic_mode", False))
+        except Exception:
+            return False
+
+    def _log_ui_diagnostic(self, event: str, **details) -> None:
+        try:
+            from services.ui_diagnostic_service import log_ui_event
+
+            log_ui_event(event, enabled=self._ui_diagnostic_enabled(), **details)
+        except Exception:
+            pass
+
+    def _visible_prompt_text(self, text: str, *, limit=None) -> str:
+        """Return a chat-display-safe prompt preview while preserving full session data."""
+        text = text or ""
+        try:
+            limit = int(limit or self.settings.get("chat_visible_prompt_char_limit", 6000) or 6000)
+        except Exception:
+            limit = 6000
+        if limit <= 0 or len(text) <= limit:
+            return text
+        omitted = len(text) - limit
+        return (
+            text[:limit].rstrip()
+            + f"\n\n[Prompt preview truncated in chat: {omitted:,} characters kept in the request/session.]"
+        )
+
+    def clear_visible_chat_state(self):
+        """Reset rendered chat and pending stream buffers without touching saved history."""
+        self.chat_history_raw = ""
+        self.chat_copy_blocks = []
+        self._stream_buffer_by_role = {}
+        self._stream_header_written = set()
+        self._stream_flush_pending = set()
+        self._stream_preview_content_by_role = {}
+        self._stream_preview_render_pending = set()
+        self._stream_plain_started_roles = set()
+        self._stream_preview_base_html = ""
+        self._stream_finalize_pending = set()
+        self._raw_terminal_buffer_by_role = {}
+        self._raw_terminal_flush_pending = set()
+        self._response_started_at_by_role = {}
+        for role in list(getattr(self, "_prompt_progress_observers", {}) or {}):
+            self._stop_prompt_progress_observer(role)
+        self._pending_response_metadata_by_role = {}
+        self._active_response_addendum_counts = {}
+        self._active_response_addendum_keys = set()
+        self._chat_current_response_index = None
+        if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+            self._autocomplete_menu.hide()
+        if hasattr(self, "chat_render_timer"):
+            self.chat_render_timer.stop()
+        if hasattr(self, "log"):
+            self.log.clear()
+
+    def _queue_stream_output(self, role: str, text: str):
+        role = role or "main"
+        if not text:
+            return
+        self._stream_buffer_by_role[role] = (
+                self._stream_buffer_by_role.get(role, "") + text
+        )
+        if role not in self._stream_flush_pending:
+            self._stream_flush_pending.add(role)
+            QTimer.singleShot(120, lambda r=role: self._flush_stream_output(r))
+        self._schedule_stream_finalize(role)
+
+    def _flush_stream_output(self, role: str):
+        role = role or "main"
+        self._stream_flush_pending.discard(role)
+        chunk = self._stream_buffer_by_role.get(role, "")
+        if not chunk:
+            return
+        self._stream_buffer_by_role[role] = ""
+
+        if role not in self._stream_header_written:
+            elapsed_label = self._consume_response_elapsed_label(role)
+            header = (
+                f"ASSISTANT [{elapsed_label}]"
+                if elapsed_label
+                else ("ASSISTANT" if role == "main" else f"ASSISTANT [{role}]")
+            )
+            metadata = self.consume_request_metadata(role)
+            route_summary = self.render_model_route_summary(metadata)
+            self._stream_header_written.add(role)
+            self._queue_stream_preview(role, header, route_summary + chunk)
+            return
+
+        header = "ASSISTANT" if role == "main" else f"ASSISTANT [{role}]"
+        self._queue_stream_preview(role, header, chunk)
+
+    def _finish_stream_output(self, role: str, cleaned: str = ""):
+        role = role or "main"
+        if cleaned:
+            self._queue_stream_output(role, cleaned)
+        self._flush_stream_output(role)
+        preview_payload = self._stream_preview_content_by_role.get(role) or {}
+        preview_header = preview_payload.get("header")
+        preview_content = preview_payload.get("content") or ""
+        if preview_content:
+            header = preview_header or (
+                "ASSISTANT" if role == "main" else f"ASSISTANT [{role}]"
+            )
+            final_text = f"\n{header}:\n{preview_content}\n"
+            self.extract_code_blocks(final_text)
+            self.chat_history_raw += final_text
+
+            if ("<modify_file" in preview_content or "<create_file" in preview_content) and hasattr(self, "editor_diff_widget"):
+                self._handle_chat_stream_file_edits(preview_content)
+
+        self._clear_stream_preview(role, render_base=False)
+        self._stream_header_written.discard(role)
+        self._stop_prompt_progress_observer(role)
+        self._stream_buffer_by_role.pop(role, None)
+        self._stream_flush_pending.discard(role)
+        self._stream_finalize_pending.discard(role)
+        self._clear_active_response_addendum_state(role)
+        self.render_chat_history()
+
+    def _handle_chat_stream_file_edits(self, content: str):
+        try:
+            from services.project_edit_agent_service import preview_project_edit_agent_response
+            
+            project_root = self.active_project_root_path()
+            preview = preview_project_edit_agent_response(content, project_root=project_root)
+            
+            if preview.changes:
+                changes_list = []
+                for change in preview.changes:
+                    changes_list.append({
+                        "path": change["path"],
+                        "action": change["action"],
+                        "original_content": change.get("before", ""),
+                        "new_content": change.get("after", ""),
+                    })
+
+                if changes_list:
+                    self.workspace_tabs.setCurrentIndex(1)
+                    if hasattr(self, "normal_editor_widget"):
+                        self.normal_editor_widget.setVisible(False)
+                    self.editor_diff_widget.set_changes(changes_list)
+                    self.editor_diff_widget.setVisible(True)
+                    self.append(
+                        "\n[Project Edit Agent] Proposed code changes loaded into the Editor Diff comparison view. Review and approve to apply.\n"
+                    )
+            elif preview.errors:
+                self.append(
+                    "\n[Project Edit Agent] Could not prepare a safe diff preview:\n"
+                    + "\n".join(f"- {error}" for error in preview.errors)
+                    + "\n"
+                )
+        except Exception as e:
+            print(f"Error handling chat stream file edits: {e}")
+
+    def render_chat_history(self):
+        if not hasattr(self, "log"):
+            return
+        started = time.perf_counter()
+        html = self.raw_text_to_html(self.chat_history_raw)
+        self._stream_preview_base_html = html
+
+        previous_scroll = int(getattr(self, "_chat_render_previous_scroll", 0) or 0)
+        self.log.setHtml(html)
+        if self._chat_render_pending_bottom:
+            self.log.moveCursor(QTextCursor.End)
+        else:
+            try:
+                scroll = self.log.verticalScrollBar()
+                scroll.setValue(min(previous_scroll, scroll.maximum()))
+            except Exception:
+                pass
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if duration_ms >= 250 or self._ui_diagnostic_enabled():
+            self._log_ui_diagnostic(
+                "chat_render",
+                duration_ms=duration_ms,
+                raw_chars=len(self.chat_history_raw or ""),
+                html_chars=len(html or ""),
+            )
+
+    def _render_stream_preview(self, role: str):
+        role = role or "main"
+        self._stream_preview_render_pending.discard(role)
+        if not hasattr(self, "log"):
+            return
+        if not self._stream_preview_content_by_role:
+            return
+        for preview_role, payload in self._stream_preview_content_by_role.items():
+            content = payload.get("content") or ""
+            rendered = int(payload.get("rendered", 0) or 0)
+            delta = content[rendered:]
+            if not delta:
+                continue
+            header = payload.get("header") or (
+                "ASSISTANT" if preview_role == "main" else f"ASSISTANT [{preview_role}]"
+            )
+            self._append_stream_plain_text(preview_role, header, delta)
+            payload["rendered"] = len(content)
+            self._stream_preview_content_by_role[preview_role] = payload
+
+    def _append_stream_plain_text(self, role: str, header: str, text: str):
+        """Append streaming text without reparsing the full rich-text transcript."""
+        if not hasattr(self, "log") or not text:
+            return
+        previous_scroll = 0
+        try:
+            scroll = self.log.verticalScrollBar()
+            previous_scroll = scroll.value()
+        except Exception:
+            scroll = None
+        try:
+            try:
+                cursor = QTextCursor(self.log.document())
+            except Exception:
+                cursor = self.log.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            if role not in self._stream_plain_started_roles:
+                if self.log.document().characterCount() > 1:
+                    cursor.insertBlock()
+                cursor.insertText(f"{header}:\n")
+                self._stream_plain_started_roles.add(role)
+            cursor.insertText(text)
+            if self._chat_render_pending_bottom:
+                self.log.setTextCursor(cursor)
+                self.log.moveCursor(QTextCursor.End)
+            elif scroll is not None:
+                scroll.setValue(previous_scroll)
+        except Exception:
+            # If QTextBrowser insertion fails, the final rich render still happens.
+            pass
+
+    def _queue_stream_preview(self, role: str, header: str, text: str):
+        role = role or "main"
+        if not text:
+            return
+        payload = self._stream_preview_content_by_role.get(role) or {
+            "header": header,
+            "content": "",
+        }
+        payload["header"] = header
+        payload["content"] = (payload.get("content") or "") + text
+        payload.setdefault("rendered", 0)
+        self._stream_preview_content_by_role[role] = payload
+        if role in self._stream_preview_render_pending:
+            return
+        self._stream_preview_render_pending.add(role)
+        QTimer.singleShot(75, lambda r=role: self._render_stream_preview(r))
+
+    def _schedule_stream_finalize(self, role: str):
+        role = role or "main"
+        if role in self._stream_finalize_pending:
+            return
+        self._stream_finalize_pending.add(role)
+
+        def _finalize_if_quiet(r=role):
+            self._stream_finalize_pending.discard(r)
+            if self._stream_buffer_by_role.get(r):
+                self._schedule_stream_finalize(r)
+                return
+            if self._stream_preview_content_by_role.get(r):
+                self._finish_stream_output(r)
+
+        QTimer.singleShot(1500, _finalize_if_quiet)
+
+    def _clear_stream_preview(self, role: str, *, render_base: bool = True):
+        role = role or "main"
+        self._stream_preview_content_by_role.pop(role, None)
+        self._stream_preview_render_pending.discard(role)
+        self._stream_plain_started_roles.discard(role)
+        if render_base and hasattr(self, "log"):
+            self.log.setHtml(
+                self._stream_preview_base_html
+                or self.raw_text_to_html(self.chat_history_raw)
+            )
+            if self._chat_render_pending_bottom:
+                self.log.moveCursor(QTextCursor.End)
+
+    def _active_response_roles(self) -> list[str]:
+        roles = set(getattr(self, "_response_started_at_by_role", {}).keys())
+        roles.update(getattr(self, "_stream_preview_content_by_role", {}).keys())
+        roles.update(role for role, text in getattr(self, "_stream_buffer_by_role", {}).items() if text)
+        return sorted(role for role in roles if role)
+
+    def _role_for_active_response_addendum(self) -> str:
+        roles = self._active_response_roles()
+        if not roles:
+            return ""
+        try:
+            metadata = getattr(self, "_pending_response_metadata_by_role", {}) or {}
+            for role in roles:
+                if role in metadata:
+                    return role
+        except Exception:
+            pass
+        return "main" if "main" in roles else roles[0]
+
+    def _clear_active_response_addendum_state(self, role: str) -> None:
+        role = role or "main"
+        try:
+            keys = getattr(self, "_active_response_addendum_keys", set())
+            self._active_response_addendum_keys = {key for key in keys if not str(key).startswith(f"{role}:")}
+            counts = getattr(self, "_active_response_addendum_counts", {})
+            counts.pop(role, None)
+        except Exception:
+            pass
+
+    def _format_active_response_addendum(self, text: str, role: str) -> str:
+        count = int(getattr(self, "_active_response_addendum_counts", {}).get(role, 1))
+        return (
+            f"Additional context update #{count} for the answer currently in progress.\n"
+            "Incorporate this into your current answer if possible. If you already committed to a direction, revise before finalizing.\n\n"
+            f"{text}"
+        )
+
+    def _send_active_response_addendum(self, text: str) -> bool:
+        role = self._role_for_active_response_addendum()
+        if not role or not text.strip():
+            return False
+        key = f"{role}:{hash(text.strip())}"
+        keys = getattr(self, "_active_response_addendum_keys", set())
+        if key in keys:
+            self.set_live_process("Already added that context")
+            return True
+        keys.add(key)
+        self._active_response_addendum_keys = keys
+        counts = getattr(self, "_active_response_addendum_counts", {})
+        counts[role] = int(counts.get(role, 0)) + 1
+        self._active_response_addendum_counts = counts
+        payload = self._format_active_response_addendum(text.strip(), role)
+        self.append(f"\nYOU [Addendum -> {role}]:\n{self._visible_prompt_text(text.strip())}\n")
+        self.current_session.append(
+            {
+                "role": "user_addendum",
+                "content": text.strip(),
+                "session": role,
+                "metadata": {"kind": "active_response_addendum", "role": role, "addendum_index": counts[role]},
+            }
+        )
+        self.set_live_process(f"Sending context update to {role}")
+        self._log_ui_diagnostic(
+            "active_response_addendum_queued",
+            role=role,
+            prompt_chars=len(text.strip()),
+            payload_chars=len(payload),
+        )
+
+        def send_addendum():
+            started = time.perf_counter()
+            try:
+                if role == "main":
+                    ok = bool(getattr(self.bridge, "running", False) and self.bridge.write(payload))
+                    msg = "Added context to active main response." if ok else "Could not add context; main session is not accepting input."
+                else:
+                    ok, msg = self.mcphost_manager.send(role, payload)
+                elapsed = time.perf_counter() - started
+                self.live_process_update.emit(msg)
+                self.thread_log_message.emit(f"[{msg} Context update send took {elapsed:.1f}s.]\n")
+                self._log_ui_diagnostic(
+                    "active_response_addendum_sent",
+                    role=role,
+                    ok=ok,
+                    duration_ms=int(elapsed * 1000),
+                    payload_chars=len(payload),
+                )
+            except Exception as exc:
+                self.thread_log_message.emit(f"\n[Addendum Send Error] {exc}\n")
+                self.live_process_update.emit("Context update failed")
+
+        import threading
+
+        threading.Thread(target=send_addendum, daemon=True).start()
+        return True
+
+    def raw_text_to_html(self, raw_text: str) -> str:
+        """Render saved plain-text chat into polished QTextBrowser HTML.
+
+        The renderer lives in ui.chat_renderer so the chat visual quality is not
+        tangled with runtime/model-routing logic. It preserves fenced code blocks
+        as whole cards, supports copy actions, and formats messages closer to
+        ChatGPT-style conversation output.
+        """
+        try:
+            from ui.chat_renderer import render_thread
+            return render_thread(self, raw_text or "")
+        except Exception as exc:
+            import html as html_module
+            safe = html_module.escape(raw_text or "").replace("\n", "<br/>")
+            return (
+                "<html><body style='font-family: Segoe UI; color:#d7dde5; "
+                "background:#0b0f14; padding:18px;'>"
+                f"<div style='color:#ff7b72;'>Chat render failed: {html_module.escape(str(exc))}</div>"
+                f"<div>{safe}</div></body></html>"
+            )
+
+    def handle_log_anchor_clicked(self, url: QUrl):
+        href = url.toString()
+        if href.startswith("action://copy_snippet_"):
+            try:
+                idx = int(href.split("_")[-1])
+                code = ""
+                # Attempt to extract current edited snippet from QTextDocument
+                cursor = self.log.document().find(f"action://copy_snippet_{idx}")
+                if not cursor.isNull():
+                    cursor.movePosition(QTextCursor.NextBlock)
+                    lines = []
+                    while True:
+                        block = cursor.block()
+                        if not block.isValid():
+                            break
+                        block_fmt = block.blockFormat()
+                        block_bg = block_fmt.background().color().name().lower()
+                        char_font = block.charFormat().font()
+                        family = char_font.family().lower()
+
+                        is_code_block = (
+                                any(
+                                    f in family
+                                    for f in ("consolas", "monaco", "courier", "monospace")
+                                )
+                                or char_font.fixedPitch()
+                                or block_bg in ("#161b22", "#0d1117", "#0f141c")
+                                or block.charFormat().background().color().name().lower()
+                                in ("#161b22", "#0d1117", "#0f141c")
+                        )
+
+                        if is_code_block:
+                            lines.append(block.text())
+                            if not cursor.movePosition(QTextCursor.NextBlock):
+                                break
+                        else:
+                            break
+                    if lines:
+                        code = "\n".join(lines)
+
+                # Fallback to initial code cache
+                if not code and 0 <= idx < len(self.code_snippets):
+                    code = self.code_snippets[idx][1]
+
+                if code:
+                    QGuiApplication.clipboard().setText(code)
+                    self.append(
+                        f"\n[Status] Copied code snippet {idx + 1} to clipboard.\n"
+                    )
+            except Exception as e:
+                print(f"Error copying snippet: {e}")
+        elif href == "action://copy_thread":
+            self.copy_full_log()
+        elif href.startswith("action://copy_block_"):
+            try:
+                idx = int(href.split("_")[-1])
+                if 0 <= idx < len(self.chat_copy_blocks):
+                    QGuiApplication.clipboard().setText(self.chat_copy_blocks[idx])
+                    self._set_current_chat_response_from_copy_index(idx)
+                    self.append(
+                        f"\n[Status] Copied message block {idx + 1} to clipboard.\n"
+                    )
+            except Exception as e:
+                print(f"Error copying message block: {e}")
+        elif href == "action://undo_last_applied":
+            self.undo_last_applied_changes()
+        elif href.startswith("action://open_file"):
+            try:
+                parsed = urlparse(href)
+                params = parse_qs(parsed.query)
+                path = unquote((params.get("path") or [""])[0])
+                line = int((params.get("line") or ["1"])[0] or 1)
+                if path:
+                    self.open_file_at_line(path, line)
+            except Exception as exc:
+                self.append(f"\n[Open File] Could not open linked file: {exc}\n")
+
+    def export_log_to_pdf(self):
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Conversation to PDF", str(HISTORY_DIR), "PDF Files (*.pdf)"
+        )
+        if file_path:
+            try:
+                self.log.document().printToPdf(file_path)
+                self.append(f"\n[Status] Conversation exported to PDF: {file_path}\n")
+                QMessageBox.information(
+                    self,
+                    "Export Complete",
+                    f"PDF successfully created at:\n{file_path}",
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Export Failed", f"Could not create PDF:\n{e}"
+                )
+
+    def undo_last_applied_changes(self):
+        if not hasattr(self, "last_applied_backup") or not self.last_applied_backup:
+            self.append("\n[Status] No changes available to undo.\n")
+            QMessageBox.information(self, "Undo", "No changes available to undo.")
+            return
+
+        restored = []
+        deleted = []
+        failed = []
+
+        from pathlib import Path
+
+        for path, data in list(self.last_applied_backup.items()):
+            action = data["action"]
+            if action == "create":
+                try:
+                    if Path(path).exists():
+                        Path(path).unlink()
+                        deleted.append(path)
+                except Exception as e:
+                    failed.append(f"Could not delete {path}: {e}")
+            elif action == "modify":
+                try:
+                    Path(path).write_text(data["content"], encoding="utf-8")
+                    restored.append(path)
+                except Exception as e:
+                    failed.append(f"Could not restore {path}: {e}")
+
+        self.last_applied_backup = {}
+        self.refresh_project_tree_fast()
+        self.build_index()
+
+        summary = ""
+        if restored:
+            summary += f"[Undo] Restored modified files: {', '.join(restored)}\n"
+        if deleted:
+            summary += f"[Undo] Deleted created files: {', '.join(deleted)}\n"
+        if failed:
+            summary += f"[Undo Error] Failures:\n" + "\n".join(failed) + "\n"
+
+        self.append(f"\n[Status] Undid last applied changes.\n{summary}\n")
+        QMessageBox.information(
+            self,
+            "Undo Complete",
+            "Last applied changes have been rolled back successfully.",
+        )
+
+    def handle_diff_accepted(self, pending_changes):
+        self.last_applied_backup = {}
+        changed_paths = []
+        report_changes = []
+        saved_change_session_path = None
+
+        from pathlib import Path
+
+        try:
+            from services.change_history_service import create_change_session, save_change_session
+            session = create_change_session(pending_changes, summary="Accepted AI code changes")
+            saved_change_session_path = save_change_session(session)
+        except Exception as exc:
+            self.append(f"\n[Change History] Could not persist undo session: {exc}\n")
+
+        for path, data in pending_changes.items():
+            action = data["action"]
+            if action == "create":
+                self.last_applied_backup[path] = {"action": "create"}
+                try:
+                    Path(path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(path).write_text(data["current"], encoding="utf-8")
+                    changed_paths.append(path)
+                    report_changes.append(
+                        {
+                            "path": path,
+                            "action": "create",
+                            "before": "",
+                            "after": data.get("current") or "",
+                            "summary": "Created a new file from the accepted AI diff.",
+                        }
+                    )
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Create Failed", f"Could not create file {path}:\n{e}"
+                    )
+            elif action == "modify":
+                ok, content = self.service.read_file(path)
+                before_content = content if ok else data.get("original") or data.get("previous") or ""
+                if ok:
+                    self.last_applied_backup[path] = {
+                        "action": "modify",
+                        "content": content,
+                    }
+                try:
+                    Path(path).write_text(data["current"], encoding="utf-8")
+                    changed_paths.append(path)
+                    report_changes.append(
+                        {
+                            "path": path,
+                            "action": "modify",
+                            "before": before_content,
+                            "after": data.get("current") or "",
+                            "summary": "Accepted and wrote the reviewed diff.",
+                        }
+                    )
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Modify Failed", f"Could not modify file {path}:\n{e}"
+                    )
+
+        self.refresh_project_tree_fast()
+        self.build_index()
+        self.refresh_open_editors_after_diff(changed_paths)
+
+        self.editor_diff_widget.setVisible(False)
+        self.normal_editor_widget.setVisible(True)
+        try:
+            from services.chat_report_service import format_code_change_report
+            from services.project_edit_agent_service import validate_project_edit_paths
+
+            validation = ["Project tree refreshed.", "Knowledge index refresh queued."]
+            for item in validate_project_edit_paths(changed_paths):
+                label = "passed" if item.get("ok") else "failed"
+                validation.append(
+                    f"{label}: `{item.get('command')}` - {item.get('message')}"
+                )
+            if saved_change_session_path:
+                validation.append(f"Undo session saved: `{saved_change_session_path}`")
+            report = format_code_change_report(
+                report_changes,
+                title="Code Changes Applied",
+                validation=validation,
+            )
+            self.append(f"\nASSISTANT [Code Change Report]:\n{report}\n")
+        except Exception:
+            self.append(
+                "\n[Status] Code changes applied successfully. Click 'Undo Last Change' at the top of the Chat if you need to rollback.\n"
+            )
+
+    def open_file_at_line(self, path: str, line: int = 1):
+        self.workspace_tabs.setCurrentIndex(1)
+        self.open_code_file(path)
+        try:
+            self.code_editor.goto_line(max(1, int(line or 1)))
+            self.update_cursor_status()
+        except Exception:
+            pass
+
+    def handle_diff_cancelled(self):
+        self.editor_diff_widget.setVisible(False)
+        self.normal_editor_widget.setVisible(True)
+        self.append("\n[Status] Code changes discarded.\n")
+
+    def refresh_open_editors_after_diff(self, paths):
+        focused_path = ""
+        for path in paths:
+            resolved = str(Path(path).resolve())
+            ok, content = self.service.read_file(resolved)
+            if not ok:
+                continue
+
+            editor = self.open_editors.get(resolved)
+            if editor:
+                editor.blockSignals(True)
+                editor.setPlainText(content)
+                editor.blockSignals(False)
+                editor.document().setModified(False)
+                focused_path = focused_path or resolved
+                continue
+
+            if Path(resolved).exists() and is_supported_code_file(Path(resolved)):
+                focused_path = focused_path or resolved
+
+        if focused_path:
+            self.open_code_file(focused_path)
+        self.update_cursor_status()
+
+    def _format_chat_block(self, header, content):
+        """Format a single live/streaming chat block using the shared renderer."""
+        try:
+            from ui.chat_renderer import format_message
+            return format_message(self, header or "ASSISTANT", content or "")
+        except Exception:
+            import html as html_module
+            return (
+                "<div class='assistant-card'>"
+                f"<pre>{html_module.escape(content or '')}</pre>"
+                "</div>"
+            )
+
+    def _format_system_block(self, text):
+        try:
+            from ui.chat_renderer import format_status
+            return format_status(text or "")
+        except Exception:
+            import html as html_module
+            return f"<div class='status-chip'>{html_module.escape(text or '')}</div>"
+
+    def _format_status_block(self, text):
+        try:
+            from ui.chat_renderer import format_status
+            return format_status(text or "")
+        except Exception:
+            import html as html_module
+            return f"<div class='status-chip'>{html_module.escape(text or '')}</div>"
+
+    def extract_code_blocks(self, text):
+        for m in re.finditer(r"```([A-Za-z0-9_+.-]*)\n(.*?)```", text, re.DOTALL):
+            lang = m.group(1) or "text"
+            code = m.group(2).strip()
+            if not code:
+                continue
+            key = (lang, code)
+            if key in self.code_snippets:
+                continue
+            self.code_snippets.append(key)
+            preview = code.splitlines()[0] if code.splitlines() else code[:70]
+            self.code_list.addItem(
+                f"{len(self.code_snippets)}. {lang} - {preview[:70]}"
+            )
+
+    def copy_selected_code(self):
+        item = self.code_list.currentItem()
+        if not item:
+            return
+        idx = self.code_list.row(item)
+        if 0 <= idx < len(self.code_snippets):
+            QGuiApplication.clipboard().setText(self.code_snippets[idx][1])
+            self.append(f"\n[Copied code snippet {idx + 1}.]\n")
+
+    def copy_last_prompt(self):
+        QGuiApplication.clipboard().setText(self.last_user_prompt or "")
+        self.append("\n[Copied last prompt.]\n")
+
+    def copy_last_response(self):
+        QGuiApplication.clipboard().setText(
+            self.last_assistant_output or self.last_tool_output or ""
+        )
+        self.append("\n[Copied last response/output.]\n")
+
+    def _set_current_chat_response_from_copy_index(self, copy_index: int) -> bool:
+        try:
+            for idx, item in enumerate(getattr(self, "chat_response_anchors", []) or []):
+                if int(item.get("copy_index", -1)) == int(copy_index):
+                    self._chat_current_response_index = idx
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def navigate_chat_response(self, direction: int):
+        anchors = list(getattr(self, "chat_response_anchors", []) or [])
+        if not anchors or not hasattr(self, "log"):
+            return
+        current = getattr(self, "_chat_current_response_index", None)
+        if current is None:
+            current = 0 if direction >= 0 else len(anchors) - 1
+        else:
+            current = max(0, min(len(anchors) - 1, int(current) + (1 if direction >= 0 else -1)))
+        self._chat_current_response_index = current
+        anchor = str(anchors[current].get("anchor") or "")
+        if anchor:
+            self.log.scrollToAnchor(anchor)
+        self._chat_render_pending_bottom = False
+
+    def copy_current_chat_response(self):
+        anchors = list(getattr(self, "chat_response_anchors", []) or [])
+        if not anchors:
+            self.copy_last_response()
+            return
+        current = getattr(self, "_chat_current_response_index", None)
+        if current is None:
+            current = len(anchors) - 1
+        current = max(0, min(len(anchors) - 1, int(current)))
+        self._chat_current_response_index = current
+        copy_index = int(anchors[current].get("copy_index", -1))
+        if 0 <= copy_index < len(getattr(self, "chat_copy_blocks", []) or []):
+            QGuiApplication.clipboard().setText(self.chat_copy_blocks[copy_index])
+            self.append(f"\n[Status] Copied response {current + 1} to clipboard.\n")
+
+    def copy_full_log(self):
+        QGuiApplication.clipboard().setText(self.log.toPlainText())
+        self.append("\n[Copied full log.]\n")
+
+    def health_check(self):
+        msg = self.service.get_health_check()
+        self.append("\n" + msg + "\n")
+
+    def check_mcphost_startup_visibility(self):
+        if not self.bridge.running:
+            return
+        if not self.mcphost_ready:
+            self.set_card("mcphost", "warn", "Running, readiness unknown")
+            if self.mcphost_use_pty:
+                self.append(
+                    "\n[Status] MCPHost is running in PTY mode, but the ready marker was not detected yet. "
+                    "Wait a little longer, or check the visible terminal output above.\n"
+                )
+            else:
+                self.append(
+                    "\n[Status] MCPHost process is running, but no ready prompt/tool-load output was detected yet. "
+                    "Pipe mode can be quiet with MCPHost's terminal UI. Turn on 'Use PTY' before starting MCPHost "
+                    "for visible terminal output.\n"
+                )
+
+    def send_with_timeout_notice(self, text, label):
+        self.send_raw(text, label)
+
+    def pending_response_notice(self, label):
+        running = bool(getattr(self.bridge, "running", False))
+        if hasattr(self, "mcphost_manager") and label != "main":
+            try:
+                running = self.mcphost_manager.get_session(label).bridge.running
+            except Exception:
+                pass
+        if running and label in self._response_started_at_by_role:
+            self.append(
+                f"\n[Still waiting after 30s for {label}. "
+                "Longer planning answers can take a bit; direct host buttons are still fastest for simple inventory queries.]\n"
+            )
+
+    def _queue_terminal_output(self, role: str, raw: str):
+        role = role or "main"
+        if not raw:
+            return
+        buffers = getattr(self, "_raw_terminal_buffer_by_role", {})
+        buffers[role] = buffers.get(role, "") + raw
+        self._raw_terminal_buffer_by_role = buffers
+        pending = getattr(self, "_raw_terminal_flush_pending", set())
+        if role not in pending:
+            pending.add(role)
+            self._raw_terminal_flush_pending = pending
+            QTimer.singleShot(90, lambda r=role: self._flush_terminal_output(r))
+
+    def _flush_terminal_output(self, role: str):
+        role = role or "main"
+        pending = getattr(self, "_raw_terminal_flush_pending", set())
+        pending.discard(role)
+        self._raw_terminal_flush_pending = pending
+        raw = (getattr(self, "_raw_terminal_buffer_by_role", {}) or {}).get(role, "")
+        if not raw:
+            return
+        max_chars = int(getattr(self, "settings", {}).get("terminal_output_process_chunk_chars", 24000) or 24000)
+        chunk = raw[:max_chars]
+        remainder = raw[max_chars:]
+        self._raw_terminal_buffer_by_role[role] = remainder
+        started = time.perf_counter()
+        if role == "main":
+            self._process_main_terminal_output(chunk)
+        else:
+            self._process_role_terminal_output(role, chunk)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if duration_ms >= 200 or self._ui_diagnostic_enabled():
+            self._log_ui_diagnostic(
+                "terminal_output_processed",
+                role=role,
+                duration_ms=duration_ms,
+                chunk_chars=len(chunk),
+                remaining_chars=len(remainder),
+            )
+        if remainder:
+            pending.add(role)
+            self._raw_terminal_flush_pending = pending
+            QTimer.singleShot(30, lambda r=role: self._flush_terminal_output(r))
+
+    def handle_output(self, data):
+        self._queue_terminal_output("main", data or "")
+
+    def _process_main_terminal_output(self, raw):
+        if raw.strip():
+            self.set_card("service", "busy", "Streaming output")
+
+        # Scan raw for status
+        for line in raw.splitlines():
+            line_str = ANSI_RE.sub("", line).strip()
+            line_str = re.sub(r"[\x00-\x1f]", "", line_str)
+            if "Loading Ollama model" in line_str:
+                self.set_live_process("Loading model")
+                self.append_status_once("Loading Ollama model...")
+            elif "Thinking" in line_str:
+                self.set_live_process("Thinking")
+                self.append_status_once("Thinking...")
+            elif "Executing " in line_str:
+                m = re.search(r"Executing\s+([\w_]+)", line_str, re.IGNORECASE)
+                if m:
+                    self.set_live_process(f"Calling tool {m.group(1)}")
+                    self.append_status_once(f"Executing tool {m.group(1)}...")
+                else:
+                    self.set_live_process("Calling tool")
+                    self.append_status_once(line_str)
+
+        cleaned = self.output_cleaner.clean(raw)
+
+        if (
+                is_credit_or_quota_failure(raw)
+                and self.settings.get("model_source_mode") == "auto_with_local_fallback"
+        ):
+            self.settings["cloud_model_unavailable"] = True
+            self.service.save_settings(self.settings)
+            self.mcphost_manager.settings = self.settings
+            metadata = self._pending_response_metadata_by_role.get("main")
+            if metadata:
+                metadata["fallback_used"] = True
+                metadata["fallback_error"] = "Cloud provider quota/credit issue"
+                self.update_active_response_model_label(
+                    metadata.get("active_raw_model"),
+                    metadata.get("routing_mode"),
+                    True,
+                    metadata.get("active_raw_model"),
+                )
+            self.append(
+                "\n[Model Provider] Cloud provider quota/credit issue detected. Fallback will use local models for new sessions.\n"
+            )
+
+        if "subprocess pipe active" in raw:
+            self.set_card("mcphost", "busy", "Process active")
+        if "PTY active" in raw:
+            self.set_card("mcphost", "busy", "PTY active")
+        if "Loading Ollama model" in raw:
+            self.set_card("ollama", "busy", "Loading")
+        if "[Ollama Status] Active model:" in raw:
+            m = re.search(r"\[Ollama Status\] Active model:\s*(.*)", raw)
+            if m:
+                self.set_card("ollama", "ok", m.group(1).strip())
+        if "Model loaded:" in raw:
+            self.set_ollama_card_for_model("ok", self.selected_mcphost_model())
+        if "Model loaded successfully on GPU" in raw:
+            self.set_card("ollama", "ok", "GPU loaded")
+        m_tools = re.search(r"Loaded\s+(\d+)\s+tools", raw, re.IGNORECASE)
+        if m_tools:
+            self.mcphost_ready = True
+            self.set_card("mcphost", "ok", f"Ready ({m_tools.group(1)} tools)")
+            self.set_ollama_card_for_model("ok", self.selected_mcphost_model())
+        if "tools from MCP servers" in raw:
+            self.mcphost_ready = True
+            m = re.search(r"Loaded\s+(\d+)\s+tools", raw)
+            self.set_card(
+                "mcphost", "ok", f"Ready ({m.group(1)} tools)" if m else "Ready"
+            )
+        if (
+                "Enter your prompt" in raw
+                or "Type your message" in raw
+                or "Model loaded" in raw
+        ):
+            self.mcphost_ready = True
+            self.set_ollama_card_for_model("ok", self.selected_mcphost_model())
+            if "ok" not in self.status_cards["mcphost"].styleSheet():
+                self.set_card("mcphost", "ok", "Ready")
+        if "maya__" in raw or "Maya" in raw:
+            if "Failed to load MCP server 'maya'" in raw:
+                self.set_card("maya", "bad", "MCP failed")
+            elif "maya__" in raw:
+                self.set_card("maya", "busy", "Tool activity")
+        if "Goodbye!" in raw:
+            self.set_card("mcphost", "bad", "Exited after input")
+            self.append(
+                "\n[Status] MCPHost printed Goodbye after input. This usually means the terminal UI interpreted "
+                "the programmatic input as a quit/EOF event. v5.2 sends prompts using bracketed paste to avoid this. "
+                "If it still happens, the next step is direct model/tool orchestration instead of driving MCPHost's TUI.\n"
+            )
+        if "motionbuilder" in raw.lower():
+            if "failed" in raw.lower():
+                self.set_card("motionbuilder", "warn", "Optional / unavailable")
+            else:
+                self.set_card("motionbuilder", "busy", "Tool activity")
+
+        if cleaned:
+            self.set_live_process("Streaming response")
+            self.mcphost_ready = True
+            if "ok" not in self.status_cards["mcphost"].styleSheet():
+                self.set_card("mcphost", "ok", "Ready")
+            self.last_assistant_output = cleaned
+            self.service.last_assistant_output = cleaned
+            self._queue_stream_output("main", cleaned)
+            self.current_session.append(
+                {
+                    "role": "assistant_or_tool_output",
+                    "content": cleaned,
+                    "metadata": self._pending_response_metadata_by_role.get("main"),
+                }
+            )
+
+    def on_finished(self, msg="MCPHost exited."):
+        self._stop_prompt_progress_observer("main")
+        self._clear_active_response_addendum_state("main")
+        self.set_card("mcphost", "off", "Exited")
+        self.status.setText("Exited")
+        self.status.setStyleSheet("font-weight: bold; color: #ff5555;")
+        self.append(f"\n=== {msg} ===\n")
+
+    def start_mcphost(self):
+        if self.bridge.running:
+            return
+        model = self.selected_mcphost_model()
+        config = self.config_box.currentText().strip()
+        use_pty = self.use_pty_checkbox.isChecked()
+        self.output_cleaner.reset()
+        self.mcphost_started_at = time.time()
+        self.mcphost_ready = False
+        self.mcphost_use_pty = use_pty
+        self.set_card("mcphost", "busy", "Starting")
+        if provider_for_model(model) == "ollama":
+            self.set_card("ollama", "busy", "Loading model")
+        else:
+            self.set_card("ollama", "off", "Cloud selected")
+
+        ok, cmd_display, error = self.service.start_mcphost(model, config, use_pty)
+        if not ok:
+            if error == "Already running":
+                return
+            QMessageBox.critical(self, "Start failed", error)
+            self.set_card("mcphost", "bad", "Start failed")
+            return
+
+        self.status.setText("Running")
+        self.status.setStyleSheet("font-weight: bold; color: #5bd000;")
+
+        if not use_pty:
+            self.mcphost_ready = True
+            self.set_card("mcphost", "ok", "Ready")
+            self.set_ollama_card_for_model("ok", model)
+
+        QTimer.singleShot(15000, self.check_mcphost_startup_visibility)
+
+    def stop_mcphost(self):
+        self.bridge.stop()
+        if hasattr(self, 'mcphost_manager'):
+            self.mcphost_manager.stop_all()
+        self.set_card('mcphost', 'off', 'Stopped')
+        self.status.setText('Stopped')
+        self.status.setStyleSheet('font-weight: bold; color: #ff5555;')
+
+    def cancel_active_query(self):
+        for role in list(getattr(self, "_prompt_progress_observers", {}) or {}):
+            self._stop_prompt_progress_observer(role)
+        if self.bridge.running:
+            self.service.interrupt_mcphost()
+        if hasattr(self, "mcphost_manager"):
+            for role in ["plan", "code", "dcc"]:
+                session = self.mcphost_manager.get_session(role)
+                if session.running:
+                    session.bridge.interrupt()
+
+        # Terminate active Editor Assist background threads immediately
+        if (
+                hasattr(self, "editor_assist_worker")
+                and self.editor_assist_worker
+                and self.editor_assist_worker.isRunning()
+        ):
+            try:
+                self.editor_assist_worker.terminate()
+                self.editor_assist_worker.wait(1000)
+                self.editor_assist_worker = None
+                self.append("\n[Status] Cancelled active Editor Assist generation.\n")
+            except Exception as e:
+                print(f"Error cancelling editor worker: {e}")
+
+        self.append(
+            "\n[Status] Sent cancel/interrupt signal to active query processes.\n"
+        )
+
+    def prestart_core_mcphost_sessions(self):
+        config = self.config_box.currentText().strip()
+        use_pty = self.use_pty_checkbox.isChecked()
+
+        for role in ["plan", "code"]:
+            session = self.mcphost_manager.get_session(role)
+
+            if not getattr(session, "_ui_signals_connected", False):
+                session.bridge.output.connect(
+                    lambda data, r=role: self.handle_session_output(r, data)
+                )
+                session.bridge.exited.connect(
+                    lambda msg, r=role: self.handle_session_finished(r, msg)
+                )
+                session._ui_signals_connected = True
+
+            if session.bridge.running:
+                continue
+
+            ok, cmd_display, error = self.mcphost_manager.start_session(
+                role, config, use_pty
+            )
+
+            if ok:
+                self.append(
+                    f"\n=== Prestarted {role} MCPHost session ===\n{cmd_display}\n\n"
+                )
+            else:
+                self.append(f"\n[Prestart failed: {role}] {error}\n")
+
+    def set_live_process(self, text):
+        message = (text or "").strip()
+        if not message:
+            return
+        self._note_prompt_progress_event(message)
+
+        # This method may be called while prompt preparation is happening in a
+        # background thread. Route the actual UI update back to the Qt thread so
+        # the user sees progress immediately and we avoid unsafe cross-thread
+        # widget writes.
+        try:
+            app = QApplication.instance()
+            if app is not None and QThread.currentThread() != app.thread():
+                if hasattr(self, "live_process_update"):
+                    self.live_process_update.emit(message)
+                    return
+        except Exception:
+            pass
+
+        now = time.time()
+        is_context_change = message.startswith("Context changed:")
+        if not is_context_change and not getattr(self, "_live_work_started_at", None):
+            self._live_work_started_at = now
+        self.set_card("service", "busy", message[:60])
+        if hasattr(self, "live_process_label"):
+            self.live_process_label.setText(f"Working: {message}")
+        if (
+                message == self._last_live_process
+                and (now - self._last_live_process_at) < 1.5
+        ):
+            return
+        self._last_live_process = message
+        self._last_live_process_at = now
+        elapsed = 0 if is_context_change else max(0, int(now - float(getattr(self, "_live_work_started_at", now) or now)))
+        self.append(f"\n[Process +{elapsed}s] {message}\n")
+
+
+    def show_activity_details_enabled(self) -> bool:
+        """Whether observable engine activity should be shown in the chat thread."""
+        try:
+            widget = getattr(self, "show_activity_details_checkbox", None)
+            if widget is not None:
+                return bool(widget.isChecked())
+        except Exception:
+            pass
+        try:
+            return bool(self.settings.get("show_activity_details", False))
+        except Exception:
+            return False
+
+    def set_ui_diagnostic_mode(self, enabled: bool):
+        enabled = bool(enabled)
+        self.settings["ui_diagnostic_mode"] = enabled
+        try:
+            self.service.settings["ui_diagnostic_mode"] = enabled
+            self.service.save_settings()
+        except Exception:
+            pass
+        self.append(f"\n[Diagnostics] UI diagnostic mode {'enabled' if enabled else 'disabled'}.\n")
+        self._log_ui_diagnostic("diagnostic_mode_changed", diagnostic_enabled=enabled)
+
+    def show_ui_diagnostic_report(self):
+        try:
+            from services.ui_diagnostic_service import diagnostic_path, read_ui_diagnostics
+
+            report = read_ui_diagnostics(limit=300)
+            path = diagnostic_path()
+        except Exception as exc:
+            report = f"Could not read UI diagnostics: {exc}"
+            path = ""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("UI Diagnostic Report")
+        dialog.resize(980, 720)
+        layout = QVBoxLayout(dialog)
+        title = QLabel("UI Diagnostic Report")
+        title.setStyleSheet("font-weight:bold; color:#b9dcff;")
+        layout.addWidget(title)
+        if path:
+            path_label = QLabel(str(path))
+            path_label.setStyleSheet("color:#8fb9c9;")
+            layout.addWidget(path_label)
+        box = QPlainTextEdit()
+        box.setReadOnly(True)
+        box.setPlainText(report)
+        box.setLineWrapMode(QPlainTextEdit.NoWrap)
+        layout.addWidget(box, 1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        dialog.exec()
+
+    def clear_ui_diagnostic_report(self):
+        try:
+            from services.ui_diagnostic_service import clear_ui_diagnostics
+
+            clear_ui_diagnostics()
+            self.append("\n[Diagnostics] UI diagnostic report cleared.\n")
+        except Exception as exc:
+            self.append(f"\n[Diagnostics] Could not clear UI diagnostic report: {exc}\n")
+
+    def handle_engine_activity(self, event):
+        """Render safe activity feed events from the Intelligence Engine.
+
+        This intentionally shows observable activity only: tools checked, files
+        considered, functions/classes ranked, DCC context inspected, planned
+        patch targets, and clarification needs. It does not expose hidden
+        chain-of-thought.
+        """
+        try:
+            compact = event.compact_text() if hasattr(event, "compact_text") else str(event)
+        except Exception:
+            compact = str(event)
+        if hasattr(self, "set_live_process"):
+            self.set_live_process(compact[:140])
+        if not self.show_activity_details_enabled():
+            return
+        try:
+            body = event.markdown() if hasattr(event, "markdown") else compact
+        except Exception:
+            body = compact
+        self.append(f"\n[Activity]\n{body}\n")
+
+    def set_show_activity_details(self, enabled: bool):
+        self.settings["show_activity_details"] = bool(enabled)
+        try:
+            self.service.settings["show_activity_details"] = bool(enabled)
+            self.service.save_settings()
+        except Exception:
+            pass
+        widget = getattr(self, "show_activity_details_checkbox", None)
+        if widget is not None and widget.isChecked() != bool(enabled):
+            widget.blockSignals(True)
+            widget.setChecked(bool(enabled))
+            widget.blockSignals(False)
+        self.append(f"\n[Status] Activity details {'enabled' if enabled else 'disabled'}.\n")
+
+    def send_raw(self, text, label="Prompt"):
+        self.last_user_prompt = text
+        self.service.last_user_prompt = text
+        self.set_live_process(f"Preparing raw prompt: {label}")
+        self.append(f"\nYOU [{label}]:\n{self._visible_prompt_text(text)}\n")
+        active_model = resolve_model_for_policy(
+            self.selected_mcphost_model(),
+            as_mcphost_model(AI_MODELS["plan"]),
+            self.settings,
+        )
+        route = SimpleNamespace(task_role="general", reason=f"Manual prompt: {label}")
+        request_metadata = self.build_request_metadata(
+            text,
+            text,
+            route,
+            "main",
+            active_model,
+            fallback_used=active_model != self.selected_mcphost_model(),
+        )
+        self.current_session.append(
+            {"role": "user", "content": text, "metadata": request_metadata}
+        )
+        self.store_request_metadata("main", request_metadata)
+        self._mark_response_started("main")
+        if self.bridge.write(text):
+            if self.mcphost_use_pty:
+                self.append(
+                    "[Sent to LLM via PTY. Waiting for assistant/tool output...]\n"
+                )
+            else:
+                self.append("[Sent to LLM. Waiting for assistant/tool output...]\n")
+        else:
+            self.append(
+                "\n[Send failed: MCPHost is not running or input stream is unavailable.]\n"
+            )
+
+
+    def _emit_unreal_milestone(self, message: str):
+        """Append honest Unreal planning status without exposing hidden reasoning."""
+        try:
+            self.set_live_process(message)
+        except Exception:
+            pass
+        try:
+            self.append(f"[Unreal Planning] {message}\n")
+        except Exception:
+            pass
+
+    def _resolve_unreal_project_root(self):
+        try:
+            roots = self.project_roots() if hasattr(self, "project_roots") else []
+            if roots:
+                return roots[0]
+        except Exception:
+            pass
+        try:
+            value = (getattr(self, "settings", {}) or {}).get("unreal_project_root")
+            if value:
+                return value
+        except Exception:
+            pass
+        return None
+
+    def _get_project_intelligence_service(self, project_root=None):
+        """Return the shared ProjectIntelligenceService used by the UI and Unreal planner."""
+        root = project_root or self._resolve_unreal_project_root()
+        existing = getattr(self, "intel_service", None)
+        if existing is not None:
+            try:
+                if root and not getattr(existing, "project_root", None):
+                    existing.project_root = root
+                return existing
+            except Exception:
+                return existing
+        try:
+            from services.project_service import ProjectIntelligenceService
+            service = ProjectIntelligenceService(project_root=root, auto_start=True)
+            self.intel_service = service
+            return service
+        except Exception as exc:
+            self.append(f"[UnrealContext] Project Intelligence unavailable: {exc}\n")
+            return None
+
+    def _request_unreal_project_intelligence_context(self, request_text: str, *, mode: str = "quick", max_tokens: int = 4000):
+        """Fetch warm daemon context. Returns None so the caller can direct-scan fallback."""
+        root = self._resolve_unreal_project_root()
+        service = self._get_project_intelligence_service(root)
+        if service is None:
+            return None
+        timeout_seconds = float((getattr(self, "settings", {}) or {}).get("project_intelligence_context_timeout_seconds", 5.0) or 5.0)
+
+        def call_with_timeout(label, func, fallback=None):
+            import concurrent.futures
+
+            started = time.perf_counter()
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"tc-{label}")
+            future = executor.submit(func)
+            try:
+                result = future.result(timeout=timeout_seconds)
+                self._log_ui_diagnostic(
+                    "project_intelligence_call_finished",
+                    label=label,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+                return result
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                self._log_ui_diagnostic(
+                    "project_intelligence_call_timed_out",
+                    label=label,
+                    timeout_seconds=timeout_seconds,
+                )
+                self._emit_unreal_milestone(f"Project Intelligence {label} timed out; using cached/quick context")
+                return fallback
+            finally:
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    executor.shutdown(wait=False)
+
+        try:
+            self._emit_unreal_milestone("Checking Project Intelligence daemon")
+            ok, message = call_with_timeout(
+                "ensure_running",
+                lambda: service.ensure_running(root) if hasattr(service, "ensure_running") else (service.is_daemon_running(), ""),
+                fallback=(False, "Project Intelligence daemon check timed out"),
+            )
+            if not ok:
+                self.append(f"[UnrealContext] Project Intelligence daemon unavailable: {message}\n")
+                return None
+            self._emit_unreal_milestone("Gathering warm Unreal context")
+            return call_with_timeout(
+                "get_context",
+                lambda: service.get_context(
+                    prompt=request_text or "unreal request",
+                    mode=mode,
+                    max_tokens=max_tokens,
+                    project_root=root,
+                ),
+                fallback=None,
+            )
+        except TypeError:
+            try:
+                return call_with_timeout(
+                    "get_context_legacy",
+                    lambda: service.get_context(
+                        prompt=request_text or "unreal request",
+                        mode=mode,
+                        max_tokens=max_tokens,
+                    ),
+                    fallback=None,
+                )
+            except Exception as exc:
+                self.append(f"[UnrealContext] daemon context unavailable; using direct scanner: {exc}\n")
+                return None
+        except Exception as exc:
+            self.append(f"[UnrealContext] daemon context unavailable; using direct scanner: {exc}\n")
+    def prepare_prompt_for_llm(self, text, task_role=""):
+        self.set_live_process("Preparing prompt for LLM")
+        original_text = text or ""
+        try:
+            from services.prompt_task_splitter_service import staged_prompt_for_llm
+
+            staged_text, staged_contract = staged_prompt_for_llm(
+                original_text,
+                threshold=int(self.settings.get("long_prompt_stage_threshold", 2600) or 2600),
+            )
+            if staged_contract is not None:
+                text = staged_text
+                self._last_staged_prompt_contract = staged_contract
+                self.set_live_process(f"Staged long prompt: {staged_contract.active_stage.title}")
+                self._log_ui_diagnostic(
+                    "long_prompt_staged",
+                    original_chars=staged_contract.original_chars,
+                    staged_chars=len(staged_text),
+                    source_hash=staged_contract.source_hash,
+                    active_stage=staged_contract.active_stage.key,
+                    deferred_stages=[stage.key for stage in staged_contract.deferred_stages],
+                )
+                if hasattr(self, "thread_log_message"):
+                    self.thread_log_message.emit(
+                        "[Prompt Staging] Long request split into staged work. "
+                        f"Sending {staged_contract.active_stage.title}; "
+                        f"{len(staged_contract.deferred_stages)} later stage(s) held as deferred contract.\n"
+                    )
+            else:
+                self._last_staged_prompt_contract = None
+        except Exception as exc:
+            self._log_ui_diagnostic("long_prompt_staging_failed", error=str(exc), prompt_chars=len(original_text))
+        if hasattr(self.service, "prepare_prompt"):
+            self.set_live_process("Applying source policy and project context")
+            prepared = self.service.prepare_prompt(text)
+        else:
+            from services.source_policy import apply_source_policy
+
+            self.set_live_process("Applying source policy")
+            prepared = apply_source_policy(text, self.settings)
+
+        self.set_live_process("Checking connected-application context")
+        dcc_context = self.command_router.build_dcc_tool_context(
+            text, route_task_role=task_role
+        )
+        if dcc_context:
+            prepared = f"{prepared}\n\n{dcc_context}"
+
+        try:
+            self.set_live_process("Applying studio decision profile")
+            from services.studio_profile_service import studio_decision_profile_context
+
+            studio_profile_context = studio_decision_profile_context(
+                text or "",
+                host=task_role or "",
+            )
+            if studio_profile_context:
+                prepared = f"{prepared}\n\n{studio_profile_context}"
+        except Exception:
+            pass
+
+        try:
+            self.set_live_process("Planning capability gaps")
+            from services.goal_gap_planning_service import goal_gap_planning_context
+
+            gap_context = goal_gap_planning_context(
+                text or "",
+                {
+                    "host": task_role or "",
+                    "route": task_role or "",
+                    "provider": "dcc" if task_role else "",
+                    "context_resolvers": ["thread_context", "project_context", "tool_context"],
+                },
+                max_chars=int(
+                    self.settings.get(
+                        "goal_gap_context_max_chars",
+                        self.settings.get("goal_bridge_context_max_chars", 3000),
+                    )
+                    or 3000
+                ),
+            )
+            if gap_context:
+                prepared = f"{prepared}\n\n{gap_context}"
+        except Exception:
+            pass
+
+        try:
+            self.set_live_process("Building expert memory packet")
+            from services.expert_memory_service import build_expert_memory_packet
+            from services.task_playbook_service import thread_context_text
+
+            try:
+                roots = self.project_roots() if hasattr(self, "project_roots") else []
+            except Exception:
+                roots = []
+            project_context = "\n".join(str(root) for root in roots[:4])
+            packet = build_expert_memory_packet(
+                text or "",
+                {"host": task_role or "", "route": task_role or ""},
+                settings=self.settings,
+                host=task_role or "",
+                thread_context=thread_context_text(getattr(self, "current_session", []) or []),
+                project_context=project_context,
+                tool_context=dcc_context,
+                operation_memory=getattr(self, "_active_operation_memory", None),
+                max_chars=int(self.settings.get("expert_memory_packet_max_chars", 3500) or 3500),
+            )
+            if packet:
+                prepared = f"{prepared}\n\n{packet}"
+        except Exception:
+            pass
+
+        try:
+            self.set_live_process("Checking local task playbooks")
+            from services.source_policy import live_sources_enabled
+            from services.task_playbook_service import best_practices_context, thread_context_text
+
+            try:
+                roots = self.project_roots() if hasattr(self, "project_roots") else []
+            except Exception:
+                roots = []
+            project_context = "\n".join(str(root) for root in roots[:4])
+            allow_best_practice_research = (
+                live_sources_enabled(self.settings)
+                and bool(self.settings.get("research_best_practices", False))
+            )
+            playbook_context = best_practices_context(
+                text or "",
+                host=task_role or "",
+                thread_context=thread_context_text(getattr(self, "current_session", []) or []),
+                project_context=project_context,
+                tool_context=dcc_context,
+                allow_research=allow_best_practice_research,
+            )
+            if playbook_context and "KNOWN PRACTICES AND TECHNIQUES" not in dcc_context:
+                prepared = f"{prepared}\n\n{playbook_context}"
+        except Exception:
+            pass
+
+        active_dcc = self.command_router.get_active_dcc_context_cached()
+        if active_dcc:
+            prepared = f"{prepared}\n\n{active_dcc}"
+
+        try:
+            self.set_live_process("Checking AI memory and locked knowledge")
+            from services.ai_work_memory_service import relevant_ai_work_context
+
+            work_context = relevant_ai_work_context(
+                self.settings,
+                text or "",
+                host=task_role or "",
+                max_chars=int(
+                    self.settings.get("ai_work_memory_max_context_chars", 6000)
+                ),
+            )
+            if work_context:
+                prepared = f"{prepared}\n\n{work_context}"
+        except Exception:
+            pass
+
+        try:
+            thread_context = self._extract_thread_assets()
+            if thread_context:
+                prepared = f"{prepared}\n\n{thread_context}"
+        except Exception:
+            pass
+
+        try:
+            from services.asset_mention_service import mention_context_block
+
+            mention_context = mention_context_block(
+                text or "",
+                self._asset_mention_candidates("", include_index=False, limit=80),
+            )
+            if mention_context:
+                prepared = f"{prepared}\n\n{mention_context}"
+        except Exception:
+            pass
+
+        # Unreal TD system prompt (prepended as LLM system context)
+        # Fires on any Unreal-context query. Assembles three layers:
+        #   1. Senior Principal TD persona + engineering priorities
+        #   2. Live or cached project assets (parsed from snapshot JSON)
+        #   3. Execution philosophy (capability-first, compose-before-create)
+        _is_unreal = (
+                task_role == "unreal"
+                or "unreal" in (text or "").lower()
+        )
+        _is_maya = (
+                task_role == "maya"
+                or "maya" in (text or "").lower()
+        )
+
+        if _is_unreal:
+            try:
+                from bridges.unreal.unreal_scanner import UnrealScanner
+
+                project_root = self._resolve_unreal_project_root()
+                scanner = UnrealScanner(project_root=project_root)
+                self.set_live_process("Building Unreal context")
+                status = None
+                scan = None
+                daemon_prompt_context = ""
+                daemon_context = self._request_unreal_project_intelligence_context(
+                    text or "unreal request",
+                    mode="standard",
+                    max_tokens=4000,
+                )
+                if isinstance(daemon_context, dict):
+                    status = daemon_context.get("status") or {}
+                    scan = daemon_context.get("scan") or None
+                    daemon_prompt_context = str(daemon_context.get("context") or "")
+                if not scan:
+                    if getattr(
+                            scanner, "should_use_fast_path", None
+                    ) and scanner.should_use_fast_path(text or ""):
+                        scan = scanner.load_cached() or {
+                            "data": {},
+                            "connected": False,
+                            "cache_used": True,
+                            "mode": "cached_fast",
+                        }
+                    else:
+                        self._emit_unreal_milestone("Running standard live Unreal asset scan")
+                        scan = scanner.scan_all(mode="standard")
+                if not status:
+                    try:
+                        status = scanner.context_status(text or "", mode="standard")
+                    except Exception:
+                        status = {}
+                self.unreal_project_snapshot = json.dumps(scan, indent=2, default=str)
+                if scan.get("connected"):
+                    health = (scan.get("data") or {}).get("health", {})
+                    level = (
+                            (scan.get("data") or {}).get("loaded_level")
+                            or health.get("loaded_level")
+                            or "unknown level"
+                    )
+                    engine = health.get("engine_version") or "UE"
+                    self.set_card(
+                        "unreal", "ok", f"Connected - {engine} - Level: {level}"
+                    )
+                elif scan.get("cache_used"):
+                    self.set_card("unreal", "warn", "Not connected - using cache")
+                else:
+                    self.set_card("unreal", "bad", "Bridge unavailable")
+                self.append(
+                    "\n[UnrealContext] "
+                    f"live={str(status.get('unreal_live_context')).lower()} "
+                    f"cache_used={str(status.get('cache_used')).lower()} "
+                    f"memory_cache={str(status.get('used_memory_cache')).lower()} "
+                    f"mode={status.get('scan_mode')} "
+                    f"intelligence_db={status.get('intelligence_db')} "
+                    f"selected_assets={status.get('selected_assets')} "
+                    f"selected_actors={status.get('selected_actors')} "
+                    f"blueprint_index={status.get('blueprint_index')}\n"
+                    f"[UnrealContext] {status.get('stage_summary') or 'No staged checks reported.'}\n"
+                )
+                if not getattr(
+                        scanner, "should_use_fast_path", None
+                ) or not scanner.should_use_fast_path(text or ""):
+
+                    def _refresh_unreal_context_background():
+                        try:
+                            fresh_scan = scanner.scan_all(mode="standard", force=True)
+                            self.unreal_project_snapshot = json.dumps(
+                                fresh_scan, indent=2, default=str
+                            )
+                            self.thread_log_message.emit(
+                                "[UnrealContext] Background refresh completed.\n"
+                            )
+                        except Exception as refresh_exc:
+                            self.thread_log_message.emit(
+                                f"[UnrealContext] Background refresh skipped: {refresh_exc}\n"
+                            )
+
+                    import threading
+
+                    threading.Thread(
+                        target=_refresh_unreal_context_background, daemon=True
+                    ).start()
+            except Exception as scan_exc:
+                self.set_card("unreal", "warn", "Context scan skipped")
+                self.append(f"\n[UnrealContext] quick scan skipped: {scan_exc}\n")
+            try:
+                from bridges.unreal.unreal_td_prompt import build_for_prompt
+
+                _raw_snap = getattr(self, "unreal_project_snapshot", "")
+                _td_system = build_for_prompt(text=text or "", raw_snapshot=_raw_snap)
+                if daemon_prompt_context:
+                    _td_system = (
+                        _td_system
+                        + "\n\n============================================================\n"
+                        + "WARM PROJECT INTELLIGENCE CONTEXT\n"
+                        + "============================================================\n"
+                        + daemon_prompt_context[:6000]
+                    )
+                sep = "=" * 60
+                prepared = f"{_td_system}\n\n{sep}\nUSER REQUEST\n{sep}\n\n{prepared}"
+            except Exception:
+                pass  # never break chat on prompt assembly failure
+        elif _is_maya:
+            try:
+                from bridges.maya.maya_td_prompt import build_for_prompt
+
+                _raw_snap = getattr(self, "maya_project_snapshot", "")
+                _td_system = build_for_prompt(text=text or "", raw_snapshot=_raw_snap)
+                sep = "=" * 60
+                prepared = f"{_td_system}\n\n{sep}\nUSER REQUEST\n{sep}\n\n{prepared}"
+            except Exception:
+                pass
+
+        resolved_role = task_role
+        if not resolved_role:
+            try:
+                from router.ai_router import AIRouter
+                editor_active = (
+                    hasattr(self, "workspace_tabs")
+                    and self.workspace_tabs.tabText(self.workspace_tabs.currentIndex())
+                    == "Editor"
+                )
+                resolved_role = AIRouter.choose_role(text, editor_active=editor_active)
+            except Exception:
+                resolved_role = "plan"
+
+        if resolved_role not in ("plan", "docs"):
+            file_edit_caps = (
+                "You have autonomous file-editing capabilities. "
+                "To propose changes to a file, you MUST output special XML tags:\n"
+                "- To MODIFY an existing file, output:\n"
+                "  <modify_file path=\"relative/or/absolute/path.py\">\n"
+                "  <<<< ORIGINAL\n"
+                "  ... exact original lines to replace ...\n"
+                "  ====\n"
+                "  ... replacement lines ...\n"
+                "  >>>>\n"
+                "  </modify_file>\n\n"
+                "- To CREATE a new file, output:\n"
+                "  <create_file path=\"relative/or/absolute/path.py\">\n"
+                "  ... file content ...\n"
+                "  </create_file>\n"
+                "If you only need to modify a small part of a file, use the <modify_file> tags. Do not use standard markdown code blocks for multi-file changes; use the XML tags specified above."
+            )
+        else:
+            file_edit_caps = ""
+
+        if file_edit_caps:
+            sep = "=" * 60
+            prepared = f"{file_edit_caps}\n\n{sep}\n\n{prepared}"
+        
+        self.set_live_process("Prompt context ready")
+        return prepared
+
+
+    def _engine_should_prepare_request(self, text: str) -> bool:
+        """Return True for requests that should use the Intelligence Engine before LLM routing.
+
+        This is intentionally broader than the first pass: project-wide search,
+        project-health/dead-code questions, and target-discovery edits all go
+        through the same background preparation path so the UI does not freeze.
+        """
+        try:
+            from services.prompt_route_service import ENGINE_PROVIDERS
+            decision = self._classify_prompt_route_decision(text)
+            if decision.provider in ENGINE_PROVIDERS:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _classify_prompt_route_decision(self, text: str):
+        from services.prompt_route_service import classify_prompt_route
+        from engine.request_context import should_prioritize_open_file_context
+
+        roots = self.project_roots() if hasattr(self, "project_roots") else []
+        active_path = str(getattr(self, "current_file_path", "") or "")
+        if active_path and not should_prioritize_open_file_context(self, text):
+            active_path = ""
+        decision = classify_prompt_route(text, project_roots=roots, active_path=active_path)
+        self._last_prompt_route_decision = decision.to_dict()
+        return decision
+
+    def on_prioritize_open_file_context_changed(self, state):
+        enabled = state == 2
+        self.settings["prioritize_open_file_context"] = enabled
+        try:
+            self.service.settings["prioritize_open_file_context"] = enabled
+            self.service.save_settings()
+        except Exception:
+            pass
+        try:
+            self.set_live_process(
+                "Open file priority enabled" if enabled else "Open file priority disabled"
+            )
+            self.update_unified_prompt_context_label()
+        except Exception:
+            pass
+
+    def _append_prompt_understanding(self, decision) -> None:
+        if not self.show_activity_details_enabled():
+            self._append_visible_prompt_progress(decision)
+            return
+        try:
+            from services.engineering_reasoning_service import render_senior_prompt_analysis
+
+            data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+            analysis = data.get("senior_prompt_analysis") or {}
+            summary = render_senior_prompt_analysis(analysis)
+            if summary:
+                self.append(f"\n[Prompt Analysis]\n{summary}\n")
+        except Exception:
+            pass
+        self._append_visible_prompt_progress(decision)
+
+    def _append_visible_prompt_progress(self, decision=None, text: str = "") -> None:
+        """Show the observable expert-stage plan for any prompt path."""
+        try:
+            from services.prompt_progress_service import (
+                build_prompt_progress_plan,
+                first_progress_status,
+                render_prompt_progress_plan,
+            )
+
+            data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+            plan = data.get("visible_progress") or build_prompt_progress_plan(text, data)
+            compact = render_prompt_progress_plan(plan, max_stages=4)
+            if hasattr(self, "set_live_process"):
+                self.set_live_process(first_progress_status(plan))
+            if compact and self.show_activity_details_enabled():
+                self.append(f"\n[Visible Work]\n{compact}\n")
+        except Exception:
+            pass
+
+    def start_intelligence_engine_request(self, text: str, decision=None) -> None:
+        """Start deterministic engine-provider work in a background worker."""
+        try:
+            from dataclasses import replace
+            from engine import snapshot_from_window, RequestPreparationWorker
+
+            prompt_route_decision = decision or getattr(self, "_last_prompt_route_decision", None)
+            base_context = snapshot_from_window(self, text)
+            extras = dict(base_context.extras or {})
+            if prompt_route_decision is not None:
+                extras["prompt_route_decision"] = (
+                    prompt_route_decision.to_dict()
+                    if hasattr(prompt_route_decision, "to_dict")
+                    else dict(prompt_route_decision or {})
+                )
+            extras["window"] = self
+            if getattr(self, "_active_operation_memory", None):
+                extras["operation_memory"] = self._active_operation_memory
+            context = replace(base_context, extras=extras)
+            self._append_prompt_understanding(prompt_route_decision or {})
+            self.set_live_process("Running deterministic engine request")
+            self._log_ui_diagnostic(
+                "intelligence_engine_worker_starting",
+                prompt_chars=len(text or ""),
+                route=(extras.get("prompt_route_decision") or {}).get("route", ""),
+                provider=(extras.get("prompt_route_decision") or {}).get("provider", ""),
+            )
+            self.request_preparation_worker = RequestPreparationWorker(context, self)
+            self.request_preparation_worker.progress.connect(self.set_live_process)
+            if hasattr(self.request_preparation_worker, "activity"):
+                self.request_preparation_worker.activity.connect(self.handle_engine_activity)
+            self.request_preparation_worker.finished_result.connect(self.on_intelligence_engine_result)
+            self.request_preparation_worker.start()
+        except Exception as exc:
+            self.append(f"\n[Intelligence Engine Error] {exc}\n")
+            try:
+                self.set_live_process("Intelligence Engine failed to start")
+                self._log_ui_diagnostic(
+                    "intelligence_engine_worker_start_failed",
+                    prompt_chars=len(text or ""),
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+
+    def _dispatch_prompt_route_from_chat(self, text: str, decision) -> bool:
+        """Dispatch foreground routes without chat owning host-specific execution."""
+        if not decision:
+            return False
+        execution_route = getattr(decision, "execution_route", "") or ""
+        if execution_route not in {"dcc.execution_pipeline", "dcc.prototype_pipeline", "unreal.capability_pipeline"}:
+            return False
+
+        # Engineering Reasoning Phase
+        # For complex engineering prompts, emit a structured reasoning card
+        # before dispatching. This runs synchronously (no DCC needed) and
+        # gives the user staff-level technical thinking before any code runs.
+        try:
+            from services.interaction_quality_service import is_senior_engineering_prompt
+
+            if is_senior_engineering_prompt(text):
+                self.set_live_process("Queued expert prompt analysis")
+                self._log_ui_diagnostic(
+                    "senior_reasoning_deferred",
+                    route=execution_route,
+                    prompt_chars=len(text or ""),
+                )
+        except Exception:
+            pass
+        # ------------------------------------------------------------
+
+        try:
+            from dataclasses import replace
+            from engine import snapshot_from_window, RequestPreparationWorker
+
+            base_context = snapshot_from_window(self, text)
+            extras = dict(base_context.extras or {})
+            extras["prompt_route_decision"] = decision.to_dict()
+            extras["window"] = self
+            if getattr(self, "_active_operation_memory", None):
+                extras["operation_memory"] = self._active_operation_memory
+            context = replace(base_context, extras=extras)
+            self.input.clear()
+            self.append(f"\nYOU [Dispatch]:\n{self._visible_prompt_text(text)}\n")
+            self._append_prompt_understanding(decision)
+            self.set_live_process("Preparing dispatch in background")
+            self.request_preparation_worker = RequestPreparationWorker(context, self)
+            self.request_preparation_worker.progress.connect(self.set_live_process)
+            if hasattr(self.request_preparation_worker, "activity"):
+                self.request_preparation_worker.activity.connect(self.handle_engine_activity)
+            self.request_preparation_worker.finished_result.connect(self.on_intelligence_engine_result)
+            self.request_preparation_worker.start()
+            return True
+        except Exception as exc:
+            self.input.clear()
+            self.append(f"\n[Prompt Dispatch Error] {exc}\n")
+            return True
+
+        try:
+            from engine import snapshot_from_window, RequestPreparationWorker
+            context = snapshot_from_window(self, text)
+            self.set_live_process("Understanding request")
+            self.append(f"\nYOU [Intelligence Engine]:\n{self._visible_prompt_text(text)}\n")
+            try:
+                decision = self._last_prompt_route_decision or {}
+                self._append_prompt_understanding(decision)
+            except Exception:
+                pass
+            self.request_preparation_worker = RequestPreparationWorker(context, self)
+            self.request_preparation_worker.progress.connect(self.set_live_process)
+            if hasattr(self.request_preparation_worker, "activity"):
+                self.request_preparation_worker.activity.connect(self.handle_engine_activity)
+            self.request_preparation_worker.finished_result.connect(self.on_intelligence_engine_result)
+            self.request_preparation_worker.start()
+        except Exception as exc:
+            self.append(f"\n[Intelligence Engine Error] {exc}\n")
+
+    def on_intelligence_engine_result(self, result) -> None:
+        """Handle RequestPreparationWorker results safely on the UI thread."""
+        self._stop_prompt_progress_observer("main")
+        action = getattr(result, "action", "error")
+        label = getattr(result, "label", "Intelligence Engine")
+        text = getattr(result, "text", "") or ""
+        prompt = getattr(result, "prompt", "") or ""
+        self._update_active_operation_memory_from_result(result)
+
+        if action == "answer":
+            self.set_live_process(f"{label} ready")
+            self.last_assistant_output = text
+            self.service.last_assistant_output = text
+            self.append(f"\nASSISTANT [{label}]:\n{text}\n")
+            self._append_structured_interaction_cards(result)
+            self._store_pending_chat_continuation(result, text)
+            return
+
+        if action == "clarify":
+            self.set_live_process(f"{label} needs input")
+            self.last_assistant_output = text
+            self.service.last_assistant_output = text
+            self.append(f"\nASSISTANT [{label}]:\n{text}\n")
+            self._append_structured_interaction_cards(result)
+            self._store_pending_chat_continuation(result, text)
+            return
+
+        if action == "send_raw" and prompt:
+            self.set_live_process("Sending prepared prompt to model")
+            if text:
+                self.append(f"\n[Intent] {text}\n")
+            self.send_raw(prompt, label)
+            return
+
+        if action == "action_plan":
+            self.set_live_process("Executing action graph")
+            metadata = getattr(result, "metadata", None) or {}
+            plan = metadata.get("plan") or {}
+            try:
+                from services.action_execution_engine import (
+                    ActionExecutionEngine,
+                    ExecutionContext,
+                    InMemoryWorkflowRuntime,
+                )
+                from services.chat_report_service import (
+                    format_action_plan_chat_report,
+                    simple_chat_enabled,
+                )
+
+                roots = self.project_roots() if hasattr(self, "project_roots") else []
+                workflow = InMemoryWorkflowRuntime(goal=plan.get("goal") or "")
+                report = ActionExecutionEngine().execute_plan(
+                    plan,
+                    ExecutionContext(
+                        project_root=roots[0] if roots else "",
+                        project_roots=roots,
+                        active_file=str(getattr(self, "current_file_path", "") or ""),
+                        app_service=getattr(self, "service", None),
+                        window=self,
+                        workflow=workflow,
+                        approved=False,
+                        policy={"goal": plan.get("goal") or ""},
+                    ),
+                )
+                self._last_action_graph = plan
+                self._last_action_execution_report = report
+                chat_report = format_action_plan_chat_report(
+                    plan,
+                    report,
+                    simple=simple_chat_enabled(getattr(self, "settings", {})),
+                )
+                self.append(f"\nASSISTANT [Action Graph]:\n{chat_report}\n")
+                return
+            except Exception as exc:
+                self.append(f"\n[Action Graph Error]\n{exc}\n")
+                return
+
+        if action == "passthrough":
+            # Should rarely happen because callers guard with _engine_should_prepare_request.
+            self.set_live_process("Routing request normally")
+            return
+
+        self.set_live_process(f"{label} failed")
+        self.append(f"\n[{label} Error]\n{text or 'Unknown request preparation error.'}\n")
+        self._append_structured_interaction_cards(result)
+
+    def _append_structured_interaction_cards(self, result) -> None:
+        metadata = getattr(result, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            return
+        try:
+            from services.interaction_quality_service import render_structured_interaction_summary
+
+            summary = render_structured_interaction_summary(metadata)
+            if not summary:
+                return
+            self._last_execution_plan = metadata.get("execution_plan")
+            self._last_result_card = metadata.get("result_card")
+            self._last_recovery_options = metadata.get("recovery_options") or []
+            self.append(f"\n[Execution Summary]\n{summary}\n")
+        except Exception:
+            pass
+
+    def _store_pending_chat_continuation(self, result, message: str = "") -> None:
+        metadata = getattr(result, "metadata", None) or {}
+        if not metadata.get("pending_clarification"):
+            return
+        try:
+            from engine import snapshot_from_window
+            from services.chat_continuation_service import (
+                continuation_view_model,
+                create_pending_continuation,
+            )
+            from services.interaction_lifecycle_service import InteractionLifecycleManager
+
+            context = snapshot_from_window(self, "")
+            pending = create_pending_continuation(metadata, context, message=message)
+            if pending is None:
+                return
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            if lifecycle is None:
+                lifecycle = InteractionLifecycleManager()
+                self._interaction_lifecycle = lifecycle
+            operation = lifecycle.start_operation(continuation_id=pending.continuation_id, origin_message_id=pending.origin_message_id)
+            pending_dict = pending.to_dict()
+            pending_dict["operation_id"] = operation.operation_id
+            pending_dict["operation_revision"] = operation.revision
+            self._pending_chat_continuation = pending_dict
+            view_model = continuation_view_model(pending, message=message).to_dict()
+            if str(view_model.get("clarification_type") or "") == "confirmation":
+                self._render_chat_clarification_controls(view_model)
+            else:
+                self._clear_chat_clarification_controls()
+            self.set_live_process("Waiting for clarification")
+        except Exception as exc:
+            try:
+                self.append(f"\n[Clarification UI] Could not render native controls: {exc}\n")
+            except Exception:
+                pass
+
+    def _clear_pending_chat_continuation(self, reason: str = "") -> None:
+        try:
+            pending = getattr(self, "_pending_chat_continuation", None) or {}
+            operation_id = str(pending.get("operation_id") or "")
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            if operation_id and lifecycle is not None:
+                lifecycle.cancel_operation(operation_id, reason=reason or "cleared")
+        except Exception:
+            pass
+        self._pending_chat_continuation = None
+        self._clear_chat_clarification_controls()
+        if reason and hasattr(self, "set_live_process"):
+            self.set_live_process(reason)
+
+    def _update_active_operation_memory_from_result(self, result) -> None:
+        try:
+            metadata = getattr(result, "metadata", None) or {}
+            memory = metadata.get("operation_memory")
+            if isinstance(memory, dict) and memory.get("status") != "cleared":
+                self._active_operation_memory = memory
+        except Exception:
+            pass
+
+    def _clear_chat_clarification_controls(self) -> None:
+        widget = getattr(self, "clarification_controls_widget", None)
+        layout = getattr(self, "clarification_controls_layout", None)
+        self._chat_clarification_widgets = {}
+        self._chat_clarification_multi_control = False
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                child = item.widget()
+                if child is not None:
+                    child.deleteLater()
+        if widget is not None:
+            widget.setVisible(False)
+
+    def _render_chat_clarification_controls(self, view_model: dict) -> None:
+        layout = getattr(self, "clarification_controls_layout", None)
+        widget = getattr(self, "clarification_controls_widget", None)
+        if layout is None or widget is None:
+            return
+        self._clear_chat_clarification_controls()
+        layout = getattr(self, "clarification_controls_layout", None)
+        controls = list((view_model or {}).get("controls") or [])
+        if not controls:
+            return
+        clarification_type = str((view_model or {}).get("clarification_type") or "")
+        is_confirmation = clarification_type == "confirmation"
+        self._chat_clarification_multi_control = bool(not is_confirmation and len(controls) > 1)
+        waiting_for_choices = any(
+            control.get("choice_provider_id")
+            and not control.get("choices")
+            and str(control.get("state") or "") in {"", "idle", "loading", "refreshing"}
+            and control.get("inferred_value") in (None, "", [])
+            and control.get("default_value") in (None, "", [])
+            for control in controls
+        )
+        title = QLabel("Approval Required" if is_confirmation else "Confirm Context")
+        title.setStyleSheet("color:#b9dcff; font-weight:bold; border:0px; background:transparent;")
+        layout.addWidget(title)
+        for control in controls[:6]:
+            self._add_chat_clarification_control(layout, control)
+        if not is_confirmation and not waiting_for_choices:
+            approve_btn = QPushButton("Approve")
+            approve_btn.setToolTip("Use the selected context and continue the pending operation")
+            approve_btn.clicked.connect(self._submit_chat_clarification_form)
+            layout.addWidget(approve_btn)
+        cancel_btn = QPushButton("Deny" if not is_confirmation else "Cancel")
+        cancel_btn.setToolTip("Cancel this pending operation")
+        cancel_btn.clicked.connect(lambda checked=False: self._submit_chat_clarification_value("cancel"))
+        layout.addWidget(cancel_btn)
+        layout.addStretch(1)
+        widget.setVisible(True)
+        for control in controls[:6]:
+            if control.get("choice_provider_id") and str(control.get("state") or "") in {"", "idle"} and not control.get("choices"):
+                QTimer.singleShot(0, lambda c=dict(control): self._refresh_chat_clarification_choices(c))
+
+    def _add_chat_clarification_control(self, layout, control: dict) -> None:
+        control_type = str(control.get("type") or "text")
+        slot = str(control.get("slot") or "")
+        label = str(control.get("label") or slot or "value")
+        choices = list(control.get("choices") or [])
+        provider_id = str(control.get("choice_provider_id") or "")
+        state = str(control.get("state") or "")
+        inferred_value = control.get("inferred_value")
+        default_value = control.get("default_value")
+        multi_control = bool(getattr(self, "_chat_clarification_multi_control", False))
+        widgets = getattr(self, "_chat_clarification_widgets", None)
+        if not isinstance(widgets, dict):
+            widgets = {}
+            self._chat_clarification_widgets = widgets
+        if control_type == "button":
+            value = control.get("value", label)
+            btn = QPushButton(label)
+            btn.setToolTip(str(control.get("tooltip") or label))
+            btn.clicked.connect(lambda checked=False, v=value, lbl=label: self._submit_chat_clarification_value(v, display_value=lbl))
+            layout.addWidget(btn)
+            return
+        if provider_id:
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.setToolTip(f"Refresh {label} choices")
+            refresh_btn.clicked.connect(lambda checked=False, c=dict(control): self._refresh_chat_clarification_choices(c))
+            layout.addWidget(refresh_btn)
+        if slot:
+            slot_label = QLabel(label)
+            slot_label.setStyleSheet("color:#b9dcff; border:0px; background:transparent;")
+            layout.addWidget(slot_label)
+        if state in {"loading", "refreshing"}:
+            loading = QLabel("Loading choices...")
+            loading.setStyleSheet("color:#b9dcff; border:0px; background:transparent;")
+            layout.addWidget(loading)
+            return
+        if provider_id and not choices and state in {"", "idle", "manual"}:
+            inferred = inferred_value if inferred_value not in (None, "", []) else default_value
+            if inferred not in (None, "", []):
+                widgets[slot] = ("value", inferred)
+                detecting = QLabel(f"Using {self._chat_clarification_choice_label(inferred)}")
+                detecting.setToolTip("Inferred from the chat prompt. Use Ask Anything to correct it, or wait for refreshed choices.")
+            else:
+                detecting = QLabel("Detecting from prompt...")
+            detecting.setStyleSheet("color:#b9dcff; border:0px; background:transparent;")
+            layout.addWidget(detecting)
+            return
+        if state in {"failed", "disconnected", "empty", "stale"} and not choices:
+            status = QLabel(str(control.get("error") or f"{label} choices are {state}."))
+            status.setStyleSheet("color:#f1d38a; border:0px; background:transparent;")
+            layout.addWidget(status)
+            for option in list(control.get("recovery_options") or [])[:3]:
+                recovery_btn = QPushButton(str(option.get("label") or option.get("action_id") or option.get("action") or "Recover"))
+                recovery_btn.setToolTip(str(option.get("description") or "Run this recovery action"))
+                recovery_btn.clicked.connect(lambda checked=False, opt=dict(option), c=dict(control): self._execute_chat_recovery_option(opt, c))
+                layout.addWidget(recovery_btn)
+            return
+        if control_type in {"choice", "dropdown", "searchable_select"} and choices and len(choices) <= 5 and not multi_control:
+            for choice in choices:
+                display = self._chat_clarification_choice_label(choice)
+                btn = QPushButton(display)
+                btn.setToolTip(f"Use {display} for {label}")
+                btn.setProperty("clarification_slot", slot)
+                btn.setProperty("clarification_value", choice)
+                btn.clicked.connect(lambda checked=False, value=choice: self._submit_chat_clarification_value(value))
+                layout.addWidget(btn)
+            return
+        if control_type in {"choice", "dropdown", "searchable_select", "asset_picker", "file_picker"} and choices:
+            combo = QComboBox()
+            combo.setToolTip(label)
+            for choice in choices:
+                combo.addItem(self._chat_clarification_choice_label(choice), choice)
+            recommended = control.get("recommended_choice") or control.get("default_value") or control.get("inferred_value")
+            if recommended:
+                idx = combo.findData(recommended)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                else:
+                    idx = combo.findText(self._chat_clarification_choice_label(recommended))
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+            layout.addWidget(combo, 1)
+            if slot:
+                widgets[slot] = ("combo", combo)
+            if multi_control:
+                return
+            use_btn = QPushButton("Use")
+            use_btn.clicked.connect(lambda checked=False, c=combo: self._submit_chat_clarification_value(c.currentData() or c.currentText()))
+            layout.addWidget(use_btn)
+            return
+        if control_type == "toggle":
+            toggle = QCheckBox(label)
+            layout.addWidget(toggle)
+            if slot:
+                widgets[slot] = ("toggle", toggle)
+            if multi_control:
+                return
+            use_btn = QPushButton("Apply")
+            use_btn.clicked.connect(lambda checked=False, t=toggle: self._submit_chat_clarification_value("true" if t.isChecked() else "false"))
+            layout.addWidget(use_btn)
+            return
+        field = QLineEdit()
+        field.setPlaceholderText(label)
+        val = control.get("inferred_value") or control.get("default_value") or ""
+        if val:
+            field.setText(str(val))
+        if multi_control:
+            field.returnPressed.connect(self._submit_chat_clarification_form)
+        else:
+            field.returnPressed.connect(lambda f=field: self._submit_chat_clarification_value(f.text()))
+        layout.addWidget(field, 1)
+        if slot:
+            widgets[slot] = ("text", field)
+        if multi_control:
+            return
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(lambda checked=False, f=field: self._submit_chat_clarification_value(f.text()))
+        layout.addWidget(apply_btn)
+
+    def _chat_clarification_choice_label(self, value) -> str:
+        if isinstance(value, dict) and value.get("label"):
+            return str(value.get("label"))
+        try:
+            from services.clarification_service import choice_label
+
+            return choice_label(value)
+        except Exception:
+            return str(value)
+
+    def _submit_chat_clarification_value(self, value, display_value: str = "") -> None:
+        self._handle_pending_chat_continuation(
+            str(value),
+            from_control=True,
+            display_value=display_value or self._chat_clarification_choice_label(value),
+        )
+
+    def _submit_chat_clarification_form(self) -> None:
+        widgets = dict(getattr(self, "_chat_clarification_widgets", {}) or {})
+        if not widgets:
+            self._handle_pending_chat_continuation("approve", from_control=True, display_value="Approve")
+            return
+        values: dict[str, object] = {}
+        missing: list[str] = []
+        for slot, item in widgets.items():
+            kind, widget = item
+            if kind == "combo":
+                value = widget.currentData()
+                if value is None:
+                    value = widget.currentText()
+            elif kind == "toggle":
+                value = "true" if widget.isChecked() else "false"
+            elif kind == "value":
+                value = widget
+            else:
+                value = widget.text().strip()
+            if value in (None, ""):
+                missing.append(slot)
+            else:
+                values[slot] = value
+        if missing:
+            self.append(f"\nASSISTANT [Clarification]:\nChoose values for: {', '.join(missing)}.\n")
+            self.set_live_process("Waiting for clarification values")
+            return
+        payload = json.dumps({"slots": values}, default=str)
+        display = ", ".join(f"{slot}: {self._chat_clarification_choice_label(value)}" for slot, value in values.items())
+        self._handle_pending_chat_continuation(payload, from_control=True, display_value=display or "Approve")
+
+    def _execute_chat_recovery_option(self, option: dict, control: dict) -> None:
+        try:
+            from services.recovery_action_service import execute_recovery_option
+
+            pending = getattr(self, "_pending_chat_continuation", None) or {}
+            operation_id = str(control.get("operation_id") or pending.get("operation_id") or "")
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            action_id = str(option.get("action_id") or option.get("action") or "recover")
+            if lifecycle is not None and operation_id:
+                claimed = lifecycle.claim_action(
+                    operation_id=operation_id,
+                    action_id=action_id,
+                    idempotency_key=f"recovery:{action_id}:{control.get('slot') or ''}",
+                )
+                if not claimed:
+                    self.set_live_process("Recovery action already running")
+                    return
+            result = execute_recovery_option(option, {"window": self, "control": control, "operation_id": operation_id})
+            self.append(f"\n[Recovery]\n{result.message}\n")
+            self.set_live_process(result.message)
+            if result.refresh_required and control.get("choice_provider_id"):
+                self._refresh_chat_clarification_choices(control)
+        except Exception as exc:
+            self.append(f"\n[Recovery Error] {exc}\n")
+
+    def _refresh_chat_clarification_choices(self, control: dict) -> None:
+        pending = getattr(self, "_pending_chat_continuation", None)
+        provider_id = str(control.get("choice_provider_id") or "")
+        slot = str(control.get("slot") or "")
+        if not pending or not provider_id or not slot:
+            return
+        try:
+            from engine import snapshot_from_window
+            from services.choice_provider_service import CHOICE_PROVIDER_JOBS, ChoiceProviderRequest
+            from services.interaction_lifecycle_service import InteractionLifecycleManager
+
+            base_context = snapshot_from_window(self, "")
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            if lifecycle is None:
+                lifecycle = InteractionLifecycleManager()
+                self._interaction_lifecycle = lifecycle
+            operation_id = str(pending.get("operation_id") or "")
+            if not operation_id:
+                operation = lifecycle.start_operation(continuation_id=str(pending.get("continuation_id") or ""))
+                operation_id = operation.operation_id
+                pending["operation_id"] = operation_id
+                self._pending_chat_continuation = pending
+            provider_generation = lifecycle.start_provider_request(
+                operation_id=operation_id,
+                continuation_id=str(pending.get("continuation_id") or ""),
+                slot_name=slot,
+            )
+            context_snapshot = {
+                "project_roots": list(base_context.project_roots or []),
+                "active_file": base_context.current_file_path,
+                "index_state": base_context.index_state,
+                "operation_memory": getattr(self, "_active_operation_memory", None),
+                "window": self,
+            }
+            request = ChoiceProviderRequest(
+                provider_id=provider_id,
+                slot_name=slot,
+                query=str(control.get("query") or ""),
+                filters=dict(control.get("provider_filters") or {}),
+                context_snapshot=context_snapshot,
+                continuation_id=str(pending.get("continuation_id") or ""),
+            )
+            updated_control = dict(control)
+            updated_control["state"] = "loading"
+            updated_control["operation_id"] = operation_id
+            updated_control["continuation_id"] = str(pending.get("continuation_id") or "")
+            updated_control["provider_request_id"] = provider_generation.request_id
+            updated_control["provider_generation"] = provider_generation.generation
+            self._replace_pending_chat_clarification_control(slot, updated_control)
+            self._render_chat_clarification_controls({"controls": (getattr(self, "_pending_chat_continuation", None) or {}).get("ui_controls") or []})
+            job = CHOICE_PROVIDER_JOBS.start(request)
+            self._poll_chat_clarification_choice_job(job.job_id, slot, updated_control)
+            self.set_live_process(f"Loading {slot} choices")
+        except Exception as exc:
+            self.append(f"\n[Choice Refresh Error] {exc}\n")
+
+    def _poll_chat_clarification_choice_job(self, job_id: str, slot: str, control: dict) -> None:
+        try:
+            from services.choice_provider_service import CHOICE_PROVIDER_JOBS
+
+            snapshot = CHOICE_PROVIDER_JOBS.status(job_id)
+            if snapshot.status in {"queued", "running"}:
+                QTimer.singleShot(120, lambda jid=job_id, s=slot, c=dict(control): self._poll_chat_clarification_choice_job(jid, s, c))
+                return
+            result = snapshot.result
+            updated_control = dict(control)
+            pending = getattr(self, "_pending_chat_continuation", None) or {}
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            operation_id = str(control.get("operation_id") or "")
+            continuation_id = str(control.get("continuation_id") or "")
+            request_id = str(control.get("provider_request_id") or "")
+            generation = int(control.get("provider_generation") or 0)
+            if lifecycle is not None and not lifecycle.can_apply_provider_result(
+                operation_id=operation_id,
+                continuation_id=continuation_id,
+                request_id=request_id,
+                slot_name=slot,
+                generation=generation,
+            ):
+                if request_id:
+                    lifecycle.finish_provider_request(request_id, status="stale_ignored")
+                self.set_live_process(f"Ignored stale {slot} choices")
+                return
+            if str(pending.get("continuation_id") or "") != continuation_id:
+                self.set_live_process(f"Ignored stale {slot} choices")
+                return
+            if result is None:
+                updated_control.update({"state": snapshot.status, "error": snapshot.error or "Choice lookup did not return a result."})
+            else:
+                choices = [choice.to_dict() for choice in result.choices]
+                updated_control.update(
+                    {
+                        "choices": choices,
+                        "state": result.status,
+                        "error": result.error or "",
+                        "recovery_options": [option.to_dict() for option in result.recovery_options],
+                        "next_page_token": result.next_page_token or "",
+                        "is_stale": result.is_stale,
+                        "refresh_policy": result.refresh_policy,
+                    }
+                )
+                self._update_pending_chat_clarification_schema(slot, choices, updated_control)
+            if lifecycle is not None and request_id:
+                lifecycle.finish_provider_request(request_id, status=str(updated_control.get("state") or snapshot.status or "completed"))
+            self._replace_pending_chat_clarification_control(slot, updated_control)
+            self._render_chat_clarification_controls({"controls": (getattr(self, "_pending_chat_continuation", None) or {}).get("ui_controls") or []})
+            self.set_live_process(f"{slot} choices {updated_control.get('state') or snapshot.status}")
+        except Exception as exc:
+            self.append(f"\n[Choice Refresh Error] {exc}\n")
+
+    def _replace_pending_chat_clarification_control(self, slot: str, updated_control: dict) -> None:
+        pending = getattr(self, "_pending_chat_continuation", None)
+        if not pending:
+            return
+        controls = []
+        replaced = False
+        for item in list(pending.get("ui_controls") or []):
+            if item.get("slot") == slot:
+                controls.append(updated_control)
+                replaced = True
+            else:
+                controls.append(item)
+        if not replaced:
+            controls.append(updated_control)
+        pending["ui_controls"] = controls
+        self._pending_chat_continuation = pending
+
+    def _update_pending_chat_clarification_schema(self, slot: str, choices: list, updated_control: dict) -> None:
+        pending = getattr(self, "_pending_chat_continuation", None)
+        if not pending:
+            return
+        pending_state = dict(pending.get("pending_clarification") or {})
+        schemas = dict(pending_state.get("accepted_value_schemas") or {})
+        schema = dict(schemas.get(slot) or {})
+        schema["choices"] = choices
+        schema["free_text_allowed"] = bool(updated_control.get("free_text_allowed", True))
+        schemas[slot] = schema
+        pending_state["accepted_value_schemas"] = schemas
+        unresolved = []
+        for unresolved_slot in list(pending_state.get("unresolved_slots") or []):
+            if unresolved_slot.get("name") == slot:
+                item = dict(unresolved_slot)
+                item["choices"] = choices
+                unresolved.append(item)
+            else:
+                unresolved.append(unresolved_slot)
+        pending_state["unresolved_slots"] = unresolved
+        pending["pending_clarification"] = pending_state
+        self._pending_chat_continuation = pending
+
+    def _handle_pending_chat_continuation(self, text: str, *, from_control: bool = False, display_value: str = "") -> bool:
+        pending = getattr(self, "_pending_chat_continuation", None)
+        if not pending:
+            return False
+        try:
+            from dataclasses import replace
+            from engine import snapshot_from_window
+            from services.chat_continuation_service import (
+                apply_continuation_modifier,
+                classify_continuation_reply,
+                validate_continuation_context,
+            )
+            from services.clarification_service import bind_clarification_response
+            from services.prompt_dispatch_service import PromptDispatchService
+
+            reply = str(display_value or text or "").strip()
+            binding_text = str(text or "").strip() if from_control else reply
+            pending_state = dict(pending.get("pending_clarification") or {})
+            if pending_state.get("kind") == "confirmation" and not from_control:
+                self.append("\nASSISTANT [Approval]:\nUse the Approve or Deny button for this operation. If you want to change the request, cancel it and send a new follow-up.\n")
+                self.set_live_process("Waiting for approval button")
+                return True
+            kind = classify_continuation_reply(reply)
+            if (
+                pending_state.get("kind") != "confirmation"
+                and kind.get("kind") == "replace"
+                and pending_state.get("unresolved_slots")
+                and not from_control
+            ):
+                kind = {"kind": "answer"}
+            if kind.get("kind") == "replace":
+                self._clear_pending_chat_continuation("Clarification replaced")
+                return False
+            if kind.get("kind") == "modify":
+                pending_state = apply_continuation_modifier(dict(pending.get("pending_clarification") or {}), kind)
+            else:
+                pending_state = dict(pending.get("pending_clarification") or {})
+
+            binding = bind_clarification_response(pending_state, binding_text)
+            if not binding.get("accepted"):
+                if binding.get("reroute"):
+                    self._clear_pending_chat_continuation("Clarification expired")
+                    return False
+                self.append(f"\nASSISTANT [Clarification]:\n{binding.get('message') or 'That value does not match the pending clarification.'}\n")
+                self.set_live_process("Clarification value rejected")
+                return True
+
+            operation_id = str(pending.get("operation_id") or "")
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            if lifecycle is not None and operation_id:
+                action_id = "cancel" if binding.get("action") == "cancel" else "submit"
+                if not lifecycle.claim_action(
+                    operation_id=operation_id,
+                    action_id=action_id,
+                    idempotency_key=f"clarification:{pending.get('continuation_id') or ''}:{action_id}",
+                ):
+                    self.set_live_process("Clarification action already handled")
+                    return True
+
+            self.input.clear()
+            if binding.get("action") == "cancel":
+                self.append(f"\nYOU [Clarification]:\n{reply or 'Cancel'}\n")
+                self.append("\nASSISTANT [Clarification]:\nCancelled the pending operation.\n")
+                self._clear_pending_chat_continuation("Clarification cancelled")
+                try:
+                    from services.operation_memory_service import clear_operation_memory
+
+                    self._active_operation_memory = clear_operation_memory(getattr(self, "_active_operation_memory", None), reason="user_cancelled")
+                except Exception:
+                    pass
+                return True
+
+            route_decision = dict(binding.get("route_decision") or pending_state.get("route_decision") or pending.get("route_decision") or {})
+            if binding.get("action") == "confirm":
+                route_decision["approved"] = True
+                route_decision["requires_confirmation"] = False
+
+            base_context = snapshot_from_window(self, str((pending_state.get("execution_request") or {}).get("original_prompt") or ""))
+            stale = validate_continuation_context(
+                SimpleNamespace(**pending),
+                base_context,
+            )
+            if stale.get("status") not in {"safe_to_continue", ""}:
+                self.append(f"\nASSISTANT [Clarification]:\n{stale.get('reason') or 'The pending clarification is stale.'}\n")
+                if stale.get("status") == "must_cancel_and_reroute":
+                    self._clear_pending_chat_continuation("Clarification stale")
+                return True
+
+            self.append(f"\nYOU [Clarification]:\n{reply}\n")
+            self._clear_pending_chat_continuation("Resuming clarified request")
+            extras = dict(base_context.extras or {})
+            extras["prompt_route_decision"] = route_decision
+            extras["window"] = self
+            extras["clarification_binding"] = binding
+            if getattr(self, "_active_operation_memory", None):
+                extras["operation_memory"] = self._active_operation_memory
+            context = replace(base_context, extras=extras)
+            self.set_live_process("Resuming clarified request in background")
+            from engine import RequestPreparationWorker
+
+            self.request_preparation_worker = RequestPreparationWorker(context, self)
+            self.request_preparation_worker.progress.connect(self.set_live_process)
+            if hasattr(self.request_preparation_worker, "activity"):
+                self.request_preparation_worker.activity.connect(self.handle_engine_activity)
+            self.request_preparation_worker.finished_result.connect(self.on_intelligence_engine_result)
+            self.request_preparation_worker.start()
+            return True
+        except Exception as exc:
+            self.append(f"\n[Clarification Resume Error] {exc}\n")
+            return True
+
+
+    def _attachment_context_for_prompt(self) -> str:
+        """Return compact text context for attached files.
+
+        This lets the user attach files to a chat request and ask for issue
+        scanning/review without forcing the UI to display raw attachment paths.
+        """
+        paths = list(getattr(self, "attached_files", []) or [])
+        if not paths:
+            return ""
+        parts = ["Attached files:"]
+        for raw in paths[:8]:
+            try:
+                p = Path(raw)
+                parts.append(f"\n---\nFile: {p}")
+                if p.exists() and p.is_file() and p.suffix.lower() in {
+                    ".py", ".txt", ".md", ".json", ".yaml", ".yml", ".ini", ".cfg", ".bat", ".ps1", ".mel", ".cpp", ".h", ".hpp", ".cs"
+                }:
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                    if len(content) > 12000:
+                        content = content[:12000] + "\n... [truncated attachment] ..."
+                    parts.append("```text\n" + content + "\n```")
+                else:
+                    parts.append("(binary or unsupported text preview)")
+            except Exception as exc:
+                parts.append(f"\n---\nFile: {raw}\nCould not read: {exc}")
+        return "\n".join(parts).strip()
+
+    def update_attachment_strip(self):
+        """Refresh the compact image/file attachment strip under the chat view."""
+        strip = getattr(self, "attachment_strip", None)
+        layout = getattr(self, "attachment_strip_layout", None)
+        if not strip or not layout:
+            if hasattr(self, "image_label"):
+                count = len(getattr(self, "attached_images", []) or [])
+                self.image_label.setText(f"Images: {count}" if count else "")
+                self.image_label.setVisible(bool(count))
+            return
+
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        has_any = False
+
+        for img_path in list(getattr(self, "attached_images", []) or [])[:12]:
+            try:
+                label = QLabel()
+                pix = QPixmap(str(img_path))
+                if not pix.isNull():
+                    label.setPixmap(pix.scaled(74, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                else:
+                    label.setText(Path(img_path).name)
+                label.setToolTip(str(img_path))
+                label.setStyleSheet("border:1px solid #1e9bff; border-radius:6px; padding:3px; background:#000711;")
+                layout.addWidget(label)
+                has_any = True
+            except Exception:
+                pass
+
+        for file_path in list(getattr(self, "attached_files", []) or [])[:12]:
+            try:
+                chip = QLabel("File: " + Path(file_path).name)
+                chip.setToolTip(str(file_path))
+                chip.setStyleSheet("border:1px solid #12324a; border-radius:8px; padding:5px 8px; color:#b9dcff; background:#000711;")
+                layout.addWidget(chip)
+                has_any = True
+            except Exception:
+                pass
+
+        layout.addStretch(1)
+        strip.setVisible(has_any)
+
+    def attach_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Attach files to chat",
+            "",
+            "Code/Text Files (*.py *.txt *.md *.json *.yaml *.yml *.ini *.cfg *.bat *.ps1 *.mel *.cpp *.h *.hpp *.cs);;All Files (*.*)",
+        )
+        if not paths:
+            return
+        if not hasattr(self, "attached_files"):
+            self.attached_files = []
+        for path in paths:
+            if path not in self.attached_files:
+                self.attached_files.append(path)
+        self.update_attachment_strip()
+        if hasattr(self, "set_live_process"):
+            self.set_live_process(f"Attached {len(paths)} file(s)")
+
+    def attach_images(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Attach images to chat",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All Files (*.*)",
+        )
+        if not paths:
+            return
+        if not hasattr(self, "attached_images"):
+            self.attached_images = []
+        for path in paths:
+            if path not in self.attached_images:
+                self.attached_images.append(path)
+        self.update_attachment_strip()
+        if hasattr(self, "set_live_process"):
+            self.set_live_process(f"Attached {len(paths)} image(s)")
+
+    def paste_image_from_clipboard(self):
+        clipboard = QGuiApplication.clipboard()
+        pix = clipboard.pixmap()
+        if pix.isNull():
+            QMessageBox.information(self, "No image", "The clipboard does not contain an image.")
+            return
+        try:
+            from models.constants import IMAGE_DIR
+            IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+            path = IMAGE_DIR / f"clipboard_{int(time.time())}.png"
+        except Exception:
+            path = Path.cwd() / f"clipboard_{int(time.time())}.png"
+        pix.save(str(path), "PNG")
+        if not hasattr(self, "attached_images"):
+            self.attached_images = []
+        self.attached_images.append(str(path))
+        self.update_attachment_strip()
+        if hasattr(self, "set_live_process"):
+            self.set_live_process("Pasted clipboard image")
+
+    # ------------------------------------------------------------------
+    # Capability Acquisition & Gap Analysis
+    # ------------------------------------------------------------------
+
+    @property
+    def _capability_registry(self):
+        """Lazy-loaded per-project capability registry."""
+        if not hasattr(self, "_capability_registry_cache"):
+            try:
+                from services.capability_registry import CapabilityRegistry
+                from models.constants import TOOLS_ROOT
+                registry_path = Path(str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))())).parent / "data" / "capability_registry.json"
+                self._capability_registry_cache = CapabilityRegistry(registry_path)
+            except Exception:
+                self._capability_registry_cache = None
+        return self._capability_registry_cache
+
+    def _check_capability_gaps(self, text: str) -> bool:
+        """Run the capability gap analysis pre-dispatch gate.
+
+        Returns True if the prompt should be held (gaps detected, waiting for approval).
+        Returns False if the prompt can proceed normally.
+        This method must stay non-blocking. The full capability planner can scan
+        project internals or call a local model, so synchronous use is opt-in.
+        """
+        prompt_chars = len(text or "")
+        if not bool(getattr(self, "settings", {}).get("capability_gate_sync_enabled", False)):
+            self._log_ui_diagnostic(
+                "capability_gate_skipped_disabled",
+                prompt_chars=prompt_chars,
+                reason="sync_capability_gate_disabled_to_protect_ui_thread",
+            )
+            return False
+        if prompt_chars > int(getattr(self, "settings", {}).get("capability_gate_max_sync_chars", 240) or 240):
+            self._log_ui_diagnostic(
+                "capability_gate_skipped_long_prompt",
+                prompt_chars=prompt_chars,
+                reason="avoid_ui_thread_ollama_or_embedding_lookup",
+            )
+            return False
+        try:
+            gate_started = time.perf_counter()
+            self._log_ui_diagnostic(
+                "capability_gate_started",
+                prompt_chars=prompt_chars,
+            )
+            registry = self._capability_registry
+            if registry is None:
+                self._log_ui_diagnostic(
+                    "capability_gate_finished",
+                    prompt_chars=prompt_chars,
+                    duration_ms=int((time.perf_counter() - gate_started) * 1000),
+                    result="no_registry",
+                )
+                return False
+
+            from services.capability_planner_service import analyze_prompt
+
+            project_roots = []
+            try:
+                root = str(getattr(self, "active_project_root_path", lambda: "")())
+                if root:
+                    project_roots = [root]
+            except Exception:
+                pass
+
+            plan = analyze_prompt(text, registry, project_roots)
+            self._log_ui_diagnostic(
+                "capability_gate_finished",
+                prompt_chars=prompt_chars,
+                duration_ms=int((time.perf_counter() - gate_started) * 1000),
+                result="gaps" if plan.has_gaps else "no_gaps",
+                task_steps=len(plan.task_steps or []),
+                missing=len(plan.missing or []),
+            )
+
+            # No gaps - proceed normally
+            if not plan.has_gaps:
+                return False
+
+            # Gaps found - show inline acquisition card in chat
+            chat_msg = plan.format_for_chat()
+            if chat_msg:
+                self.append(f"\nYOU:\n{self._visible_prompt_text(text)}\n")
+                self.append(f"\n[Capability Planner]\n{chat_msg}\n")
+                self.input.clear()
+                # Store plan so we can re-dispatch after approval
+                self._pending_capability_plan = plan
+                self._pending_capability_text = text
+                self._render_capability_acquisition_controls()
+                return True
+
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+        return False
+
+    def _render_capability_acquisition_controls(self) -> None:
+        layout = getattr(self, "clarification_controls_layout", None)
+        widget = getattr(self, "clarification_controls_widget", None)
+        if layout is None or widget is None:
+            return
+        self._clear_chat_clarification_controls()
+        layout = getattr(self, "clarification_controls_layout", None)
+        title = QLabel("Approval Required")
+        title.setStyleSheet("color:#b9dcff; font-weight:bold; border:0px; background:transparent;")
+        layout.addWidget(title)
+        approve_btn = QPushButton("Approve")
+        approve_btn.setToolTip("Approve the capability acquisition plan")
+        approve_btn.clicked.connect(lambda checked=False: self._approve_capability_acquisition())
+        layout.addWidget(approve_btn)
+        deny_btn = QPushButton("Deny")
+        deny_btn.setToolTip("Skip capability acquisition and continue without it")
+        deny_btn.clicked.connect(lambda checked=False: self._deny_capability_acquisition())
+        layout.addWidget(deny_btn)
+        layout.addStretch(1)
+        widget.setVisible(True)
+
+    def _deny_capability_acquisition(self) -> None:
+        original = getattr(self, "_pending_capability_text", "")
+        self._pending_capability_plan = None
+        self._pending_capability_text = ""
+        self._clear_chat_clarification_controls()
+        self.append("\n[Capability Planner] Acquisition skipped. Proceeding without missing capabilities.\n")
+        if original:
+            self._capability_skip_once_text = original
+            self.input.setText(original)
+            self.send_message()
+
+    def _approve_capability_acquisition_legacy_unused(self) -> None:
+        """Legacy blocking capability acquisition path retained for reference."""
+        plan = getattr(self, "_pending_capability_plan", None)
+        if not plan:
+            return
+
+        registry = self._capability_registry
+        original_text = getattr(self, "_pending_capability_text", "")
+        self._pending_capability_plan = None
+        self._pending_capability_text = ""
+        self._clear_chat_clarification_controls()
+
+        if not plan.acquisition_strategies:
+            self.append("\n[Capability Planner] No automated strategies available. Please acquire manually.\n")
+            return
+
+        from services.capability_acquisition_service import AcquisitionEngine
+
+        # Expand system status panel if collapsed to ensure user sees the progress bar
+        if hasattr(self, "system_status_body") and not self.system_status_body.isVisible():
+            if hasattr(self, "toggle_system_status_panel"):
+                self.toggle_system_status_panel()
+
+        # Initialize progress bar visibility on the main window UI
+        if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+            self.download_status.setText("Acquisition starting...")
+            self.download_status.setVisible(True)
+            self.download_progress.setRange(0, 100)
+            self.download_progress.setValue(0)
+            self.download_progress.setVisible(True)
+
+        def _progress(msg: str, current: int = 0, total: int = 0) -> None:
+            self.append(f"[Acquiring] {msg}\n")
+            if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+                self.download_status.setText(msg)
+                if total > 0:
+                    self.download_progress.setRange(0, total)
+                    self.download_progress.setValue(max(0, min(current, total)))
+                else:
+                    self.download_progress.setRange(0, 0)
+
+        try:
+            from models.constants import TOOLS_ROOT
+            root_path = Path(str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))()))
+            engine = AcquisitionEngine(registry, root_path.parent)
+
+            phase1_strategies = [s for s in plan.acquisition_strategies if s.phase == 1]
+            for strategy in phase1_strategies[:3]:
+                self.append(f"\n[Acquiring] Executing: {strategy.name}...\n")
+                result = engine.execute_strategy(strategy, progress_cb=_progress)
+                if result.success:
+                    self.append(f"[Acquired] OK: {result.message}\n")
+                else:
+                    self.append(f"[Acquisition Failed] ERROR: {result.message}\n")
+
+            # Re-dispatch the original prompt now that capabilities are registered
+            if original_text:
+                self.append(f"\n[Capability Planner] Retrying original prompt with acquired capabilities...\n")
+                self.input.setText(original_text)
+                self.send_message()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.append("\n[Capability Planner] Acquisition error - see console for details.\n")
+        finally:
+            # Hide the progress bar elements when finished
+            if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+                self.download_status.setVisible(False)
+                self.download_progress.setVisible(False)
+
+    def _approve_capability_acquisition(self) -> None:
+        """Approve and run the pending capability acquisition plan without blocking Qt."""
+        plan = getattr(self, "_pending_capability_plan", None)
+        if not plan:
+            return
+
+        registry = self._capability_registry
+        original_text = getattr(self, "_pending_capability_text", "")
+        self._pending_capability_plan = None
+        self._pending_capability_text = ""
+        self._clear_chat_clarification_controls()
+
+        if not plan.acquisition_strategies:
+            self.append("\n[Capability Planner] No automated strategies available. Please acquire manually.\n")
+            return
+
+        if hasattr(self, "system_status_body") and not self.system_status_body.isVisible():
+            if hasattr(self, "toggle_system_status_panel"):
+                self.toggle_system_status_panel()
+
+        if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+            self.download_status.setText("Acquisition starting in background...")
+            self.download_status.setVisible(True)
+            self.download_progress.setRange(0, 0)
+            self.download_progress.setVisible(True)
+
+        def on_ui(callback):
+            QTimer.singleShot(0, callback)
+
+        def progress(msg: str, current: int = 0, total: int = 0) -> None:
+            def update():
+                self.append(f"[Acquiring] {msg}\n")
+                if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+                    self.download_status.setText(msg)
+                    if total > 0:
+                        self.download_progress.setRange(0, total)
+                        self.download_progress.setValue(max(0, min(current, total)))
+                    else:
+                        self.download_progress.setRange(0, 0)
+
+            on_ui(update)
+
+        def finish(lines: list[str], retry: bool) -> None:
+            for line in lines:
+                self.append(line)
+            if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+                self.download_status.setVisible(False)
+                self.download_progress.setVisible(False)
+            if retry and original_text:
+                self.append("\n[Capability Planner] Retrying original prompt with acquired capabilities...\n")
+                self.input.setText(original_text)
+                self.send_message()
+
+        def run_worker() -> None:
+            lines: list[str] = []
+            retry = False
+            try:
+                from models.constants import TOOLS_ROOT
+                from services.capability_acquisition_service import AcquisitionEngine
+
+                root_path = Path(str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))()))
+                engine = AcquisitionEngine(registry, root_path.parent)
+                phase1_strategies = [s for s in plan.acquisition_strategies if s.phase == 1]
+                for strategy in phase1_strategies[:3]:
+                    progress(f"Executing: {strategy.name}")
+                    result = engine.execute_strategy(strategy, progress_cb=progress)
+                    if result.success:
+                        self.append(f"[Acquired] OK: {result.message}\n")
+                    else:
+                        self.append(f"[Acquisition Failed] ERROR: {result.message}\n")
+                retry = bool(original_text)
+            except Exception as exc:
+                self.append("\n[Capability Planner] Acquisition error - see console for details.\n")
+            finally:
+                on_ui(lambda lines=lines, retry=retry: finish(lines, retry))
+
+        import threading
+
+        threading.Thread(target=run_worker, daemon=True).start()
+
+    def send_message(self):
+        send_started = time.perf_counter()
+        self._live_work_started_at = time.time()
+        self._last_live_process = ""
+        self._last_live_process_at = 0
+        self._seen_log_status_msgs = set()
+        text = self.input.text().strip()
+        self._log_ui_diagnostic(
+            "send_message_started",
+            prompt_chars=len(text or ""),
+            active_response_roles=self._active_response_roles(),
+        )
+        if not hasattr(self, "attached_files"):
+            self.attached_files = []
+        if not text and not self.attached_images and not self.attached_files:
+            return
+        # --- Capability plan approval interceptor ---
+        if getattr(self, "_pending_capability_plan", None):
+            self.input.clear()
+            self.append("\nASSISTANT [Approval]:\nUse the Approve or Deny button for the capability plan. If you want different context, deny it and send a follow-up.\n")
+            self.set_live_process("Waiting for approval button")
+            return
+
+        if text and getattr(self, "_pending_chat_continuation", None):
+            if self._handle_pending_chat_continuation(text):
+                return
+
+        attachment_context = self._attachment_context_for_prompt()
+        if attachment_context:
+            text = (text + "\n\n" if text else "") + attachment_context
+
+        from services.source_policy import check_moderation
+
+        flagged, reason = check_moderation(text)
+        if flagged:
+            self.append(
+                f"\n[Moderation Warning] Request Blocked: The input {reason}. Generating malware or exploit code is restricted for safety.\n"
+            )
+            self.input.clear()
+            return
+
+        if self._active_response_roles():
+            if self.attached_images:
+                text += "\n\nAttached image paths:\n" + "\n".join(self.attached_images)
+            self.input.clear()
+            self._send_active_response_addendum(text)
+            self.attached_images = []
+            self.attached_files = []
+            self.update_attachment_strip()
+            self._log_ui_diagnostic(
+                "send_message_completed",
+                path="active_response_addendum",
+                duration_ms=int((time.perf_counter() - send_started) * 1000),
+            )
+            return
+
+        try:
+            from services.docstring_service import looks_like_docstring_request
+
+            if looks_like_docstring_request(text) and hasattr(self, "add_docstrings_to_current_file"):
+                self.input.clear()
+                self.append(f"\nYOU [Docstrings]:\n{self._visible_prompt_text(text)}\n")
+                self._append_visible_prompt_progress(text=text)
+                self.add_docstrings_to_current_file(text)
+                return
+        except Exception as exc:
+            self.input.clear()
+            self.append(f"\n[Docstrings Error] {exc}\n")
+            return
+
+        # --- Capability Gap Analysis (pre-dispatch) ---
+        # Runs only when gaps are detected; zero overhead when all capabilities are satisfied.
+        skip_capability_gate = bool(text and text == getattr(self, "_capability_skip_once_text", ""))
+        if skip_capability_gate:
+            self._capability_skip_once_text = ""
+        if not skip_capability_gate and self._check_capability_gaps(text):
+            return
+
+        try:
+            preview = self._visible_prompt_text(text)
+            if len(preview) > 900:
+                preview = preview[:900].rstrip() + "\n..."
+            self.input.clear()
+            self.append(f"\nYOU [Queued]:\n{preview}\n")
+            self.append("[Request] Accepted. Routing and preparing context...\n")
+            self._start_prompt_progress_observer("main", label="prompt request")
+            self._note_prompt_progress_event("Accepted request - routing", "main")
+            self.set_live_process("Accepted request - routing")
+            self._log_ui_diagnostic(
+                "send_message_acknowledged",
+                prompt_chars=len(text or ""),
+            )
+        except Exception:
+            pass
+
+        try:
+            from services.prompt_route_service import ENGINE_PROVIDERS
+            route_classify_started = time.perf_counter()
+            self._log_ui_diagnostic(
+                "route_classification_started",
+                prompt_chars=len(text or ""),
+            )
+            prompt_route_decision = self._classify_prompt_route_decision(text)
+            self._log_ui_diagnostic(
+                "route_classification_finished",
+                prompt_chars=len(text or ""),
+                duration_ms=int((time.perf_counter() - route_classify_started) * 1000),
+                route=getattr(prompt_route_decision, "route", ""),
+                provider=getattr(prompt_route_decision, "provider", ""),
+            )
+        except Exception:
+            ENGINE_PROVIDERS = set()
+            prompt_route_decision = None
+            self._log_ui_diagnostic(
+                "route_classification_failed",
+                prompt_chars=len(text or ""),
+            )
+
+        # Intelligence Engine fast paths: project health/dead code and target-discovery edits.
+        # These can be expensive, so they run in a QThread before any normal LLM routing.
+        if prompt_route_decision and prompt_route_decision.provider in ENGINE_PROVIDERS:
+            self.input.clear()
+            self.start_intelligence_engine_request(text, prompt_route_decision)
+            return
+
+        # 1. Preset Shortcut Interceptor
+        lower_text = text.lower()
+        if (
+            prompt_route_decision
+            and prompt_route_decision.route == "github_ingest"
+        ) or self.should_open_github_import_for_prompt(text):
+            self.append(f"\nYOU [GitHub Workflow Composer]:\n{self._visible_prompt_text(text)}\n")
+            self.append(
+                "[Composer] Opening Web / GitHub Import so you can select a repo, ingest it, and compose a workflow from local plus ingested functions.\n"
+            )
+            self.input.clear()
+            self.trigger_web_import(initial_query=text, workflow_goal=text)
+            return
+
+        if self._dispatch_prompt_route_from_chat(text, prompt_route_decision):
+            return
+
+
+        if self.attached_images:
+            text += "\n\nAttached image paths:\n" + "\n".join(self.attached_images)
+
+        self.input.clear()
+
+        editor_active = (
+                hasattr(self, "workspace_tabs")
+                and self.workspace_tabs.tabText(self.workspace_tabs.currentIndex())
+                == "Editor"
+        )
+
+        # Read Model & Safety flags
+        _allow_local_only = self._ms_local_only()
+        _allow_better = self._ms_allow_better()
+
+        # Build tiers from currently-configured Ollama models
+        try:
+            from router.ai_router import ModelTiers
+
+            _active_model = self.selected_mcphost_model() or ""
+            _tiers = ModelTiers(active=_active_model)
+            # If user disabled "allow better model", cap to local_plan
+            if not _allow_better:
+                _tiers.local_deep = ""
+        except Exception:
+            _tiers = None
+
+        self.set_live_process("Routing request")
+        route_started = time.perf_counter()
+        route = self.ai_router.route_prompt(
+            text,
+            editor_active=editor_active,
+            tiers=_tiers,
+            allow_local_only=_allow_local_only,
+            deep_route_scope=self.settings.get("deep_route_scope", "engine_complex_only"),
+            deep_code_complexity_threshold=int(self.settings.get("deep_code_complexity_threshold", 7) or 7),
+            get_model_for_role=self.mcphost_manager.get_model_for_role,
+        )
+        try:
+            decision_data = prompt_route_decision.to_dict() if hasattr(prompt_route_decision, "to_dict") else dict(prompt_route_decision or {})
+            if decision_data.get("intent_category") == "staged_long_contract" and getattr(route, "session_role", "") == "dcc":
+                from dataclasses import replace
+
+                route = replace(
+                    route,
+                    session_role="plan",
+                    reason="Staged Unreal planning contract routed through planning session; DCC execution is deferred until an approved action stage.",
+                )
+                self._log_ui_diagnostic(
+                    "route_session_overridden",
+                    reason="staged_long_contract_uses_plan_session",
+                    task_role=getattr(route, "task_role", ""),
+                    session_role=getattr(route, "session_role", ""),
+                )
+        except Exception:
+            pass
+        self._update_route_label(route)
+        self.set_live_process(f"Route selected: {getattr(route, 'session_role', 'main')}")
+
+        # Auto-check "Allow better model" when a hard Unreal task is detected
+        try:
+            from router.ai_router import ComplexityScorer
+
+            if ComplexityScorer.needs_deep_model(text) and hasattr(
+                    self, "_chk_allow_better"
+            ):
+                self._chk_allow_better.setChecked(True)
+        except Exception:
+            pass
+
+        # 2. Main Active Session Reuse
+        if self.bridge.running and route.session_role == "plan":
+            route_label = f"main | {self.selected_mcphost_model()}"
+            self.append(f"\nYOU [{route_label}]:\n{self._visible_prompt_text(text)}\n")
+            self._append_prompt_understanding(prompt_route_decision)
+            self.append(
+                "[Source Mode] "
+                + (
+                    "Live web/GitHub enabled.\n"
+                    if self.service.live_sources_enabled()
+                    else "Local only.\n"
+                )
+            )
+            self.append(f"[Router] Reusing active main session.\n")
+            self.set_live_process("Preparing prompt in background")
+
+            def _send_main_prompt_background():
+                try:
+                    started = time.perf_counter()
+                    prepared_text = self.prepare_prompt_for_llm(text, task_role=route.task_role)
+                    prompt_seconds = time.perf_counter() - started
+                    self.live_process_update.emit(
+                        f"Serializing request ({len(prepared_text):,} chars, ~{max(1, len(prepared_text) // 4):,} tokens)"
+                    )
+                    active_model = resolve_model_for_policy(
+                        self.selected_mcphost_model(),
+                        as_mcphost_model(AI_MODELS["plan"]),
+                        self.settings,
+                    )
+                    request_metadata = self.build_request_metadata(
+                        text,
+                        prepared_text,
+                        route,
+                        "main",
+                        active_model,
+                        fallback_used=active_model != self.selected_mcphost_model(),
+                    )
+                    self.last_user_prompt = prepared_text
+                    self.service.last_user_prompt = prepared_text
+                    self.current_session.append(
+                        {
+                            "role": "user",
+                            "content": prepared_text,
+                            "task_role": "general",
+                            "session": "main",
+                            "model": active_model,
+                            "source_mode": "live"
+                            if self.service.live_sources_enabled()
+                            else "local",
+                            "metadata": request_metadata,
+                        }
+                    )
+                    self.store_request_metadata("main", request_metadata)
+                    if self.bridge.write(prepared_text):
+                        self.thread_log_message.emit(
+                            f"[Sent to LLM. Prompt prepared in {prompt_seconds:.1f}s. Waiting for assistant/tool output...]\n"
+                        )
+                        self.response_started.emit("main")
+                        self.live_process_update.emit("Waiting for model response")
+                    else:
+                        self.thread_log_message.emit(
+                            "\n[Send failed: MCPHost is not running or input stream is unavailable.]\n"
+                        )
+                except Exception as exc:
+                    self.thread_log_message.emit(
+                        f"\n[Prompt Preparation Error] {exc}\n"
+                    )
+
+            import threading
+
+            threading.Thread(target=_send_main_prompt_background, daemon=True).start()
+            self.attached_images = []
+            self.update_image_label()
+            return
+
+        role = route.session_role
+        config = self.config_box.currentText().strip()
+        use_pty = self.use_pty_checkbox.isChecked()
+        desired_model = ""
+        if route.model:
+            try:
+                from services.mcphost_service import as_configured_model
+
+                desired_model = as_configured_model(route.model)
+            except Exception:
+                desired_model = route.model
+
+        session = self.mcphost_manager.get_session(role)
+
+        if not getattr(session, "_ui_signals_connected", False):
+            session.bridge.output.connect(
+                lambda data, r=role: self.handle_session_output(r, data)
+            )
+            session.bridge.exited.connect(
+                lambda msg, r=role: self.handle_session_finished(r, msg)
+            )
+            session._ui_signals_connected = True
+
+        if session.bridge.running and desired_model and session.model != desired_model:
+            self.append(f"\n[Router] Restarting {role} session for {desired_model}.\n")
+            self.mcphost_manager.stop_session(role)
+
+        if not session.bridge.running:
+            ok, cmd_display, error = self.mcphost_manager.start_session(
+                role, config, use_pty, model_override=desired_model
+            )
+            if not ok:
+                QMessageBox.critical(self, f"Start {role} session failed", error)
+                return
+            self.append(f"\n=== Starting {role} MCPHost session ===\n{cmd_display}\n\n")
+
+        route_label = f"{route.task_role} -> {role}"
+        if route.model:
+            route_label += f" | {route.model}"
+        self.append(f"\nYOU [{route_label}]:\n{self._visible_prompt_text(text)}\n")
+        self._start_prompt_progress_observer(role, label=f"{role} routed request")
+        self._note_prompt_progress_event("Preparing routed prompt in background", role)
+        self._append_prompt_understanding(prompt_route_decision)
+        self.append(
+            "[Source Mode] "
+            + (
+                "Live web/GitHub enabled.\n"
+                if self.service.live_sources_enabled()
+                else "Local only.\n"
+            )
+        )
+        self._log_ui_diagnostic(
+            "route_prompt_completed",
+            duration_ms=int((time.perf_counter() - route_started) * 1000),
+            prompt_chars=len(text or ""),
+            route=getattr(route, "session_role", ""),
+            task_role=getattr(route, "task_role", ""),
+        )
+        self.append(f"[Router] {route.reason}.\n")
+        if route.task_role == "unreal":
+            self.set_live_process("Routing Unreal request to selected model")
+            self.append(
+                "[Unreal Planning] Using the Unreal TD context for this answer. "
+                "For feature-planning questions I will reason from project facts, existing assets/tools, and safe Unreal architecture before recommending steps.\n"
+            )
+        self.set_live_process("Preparing routed prompt in background")
+
+        def _prepare_and_send_routed_prompt_background():
+            try:
+                started = time.perf_counter()
+                prepared_text = self.prepare_prompt_for_llm(text, task_role=route.task_role)
+                prompt_seconds = time.perf_counter() - started
+                self.live_process_update.emit(
+                    f"Serializing {role} request ({len(prepared_text):,} chars, ~{max(1, len(prepared_text) // 4):,} tokens)"
+                )
+                request_metadata = self.build_request_metadata(
+                    text,
+                    prepared_text,
+                    route,
+                    role,
+                    session.model,
+                    fallback_used=session.model != self.selected_mcphost_model()
+                                  and bool(self.settings.get("cloud_model_unavailable", False)),
+                )
+
+                self.last_user_prompt = prepared_text
+                self.service.last_user_prompt = prepared_text
+                self.current_session.append(
+                    {
+                        "role": "user",
+                        "content": prepared_text,
+                        "task_role": route.task_role,
+                        "session": role,
+                        "model": session.model,
+                        "source_mode": "live"
+                        if self.service.live_sources_enabled()
+                        else "local",
+                        "metadata": request_metadata,
+                    }
+                )
+                self.store_request_metadata(role, request_metadata)
+                ok, msg = self.mcphost_manager.send(role, prepared_text)
+                if ok:
+                    self.response_started.emit(role)
+                    self.live_process_update.emit("Waiting for model response")
+                self.thread_log_message.emit(f"[{msg} Prompt prepared in {prompt_seconds:.1f}s.]\n")
+            except Exception as exc:
+                self.thread_log_message.emit(f"\n[Prompt Preparation Error] {exc}\n")
+                self.live_process_update.emit("Prompt preparation failed")
+
+        import threading
+
+        threading.Thread(target=_prepare_and_send_routed_prompt_background, daemon=True).start()
+
+        self.attached_images = []
+        self.update_image_label()
+
+    def prime(self):
+        self.send_raw(self.prime_editor.toPlainText().strip(), "Prime")
+
+    def handle_session_output(self, role, data):
+        self._queue_terminal_output(role, data or "")
+
+    def _process_role_terminal_output(self, role, raw):
+        session = self.mcphost_manager.get_session(role)
+        if raw:
+            self._note_prompt_progress_event("Receiving model/tool output", role)
+
+        # Scan raw for status
+        for line in raw.splitlines():
+            line_str = ANSI_RE.sub("", line).strip()
+            line_str = re.sub(r"[\x00-\x1f]", "", line_str)
+            if "Loading Ollama model" in line_str:
+                self.append_status_once(
+                    f"[{role.capitalize()}] Loading Ollama model..."
+                )
+            elif "Thinking" in line_str:
+                self.append_status_once(f"[{role.capitalize()}] Thinking...")
+            elif "Executing " in line_str:
+                m = re.search(r"Executing\s+([\w_]+)", line_str, re.IGNORECASE)
+                if m:
+                    self.append_status_once(
+                        f"[{role.capitalize()}] Executing tool {m.group(1)}..."
+                    )
+                else:
+                    self.append_status_once(f"[{role.capitalize()}] {line_str}")
+
+        cleaned = session.cleaner.clean(raw)
+
+        if (
+                is_credit_or_quota_failure(raw)
+                and self.settings.get("model_source_mode") == "auto_with_local_fallback"
+        ):
+            self.settings["cloud_model_unavailable"] = True
+            self.service.save_settings(self.settings)
+            self.mcphost_manager.settings = self.settings
+            metadata = self._pending_response_metadata_by_role.get(role)
+            if metadata:
+                metadata["fallback_used"] = True
+                metadata["fallback_error"] = "Cloud provider quota/credit issue"
+                self.update_active_response_model_label(
+                    metadata.get("active_raw_model"),
+                    metadata.get("routing_mode"),
+                    True,
+                    metadata.get("active_raw_model"),
+                )
+            self.append(
+                "\n[Model Provider] Cloud provider quota/credit issue detected. Fallback will use local models for new sessions.\n"
+            )
+
+        if (
+                "tools from MCP servers" in raw
+                or "Enter your prompt" in raw
+                or "Type your message" in raw
+        ):
+            session.ready = True
+            self.set_card("mcphost", "ok", f"{role} ready")
+
+        if "Loading Ollama model" in raw:
+            self.set_card("ollama", "busy", f"Loading {role}")
+
+        if "Model loaded:" in raw or "Model loaded successfully on GPU" in raw:
+            self.set_ollama_card_for_model("ok", session.model)
+
+        if cleaned:
+            self.last_assistant_output = cleaned
+            self.service.last_assistant_output = cleaned
+            self._queue_stream_output(role, cleaned)
+            self.current_session.append(
+                {
+                    "role": f"{role}_assistant_or_tool_output",
+                    "content": cleaned,
+                    "metadata": self._pending_response_metadata_by_role.get(role),
+                }
+            )
+
+    def handle_session_finished(self, role, msg="MCPHost exited."):
+        self._stop_prompt_progress_observer(role)
+        session = self.mcphost_manager.get_session(role)
+        session.running = False
+        session.ready = False
+        self._clear_active_response_addendum_state(role)
+        self._flush_stream_output(role)
+        self._stream_header_written.discard(role)
+        self._stream_buffer_by_role.pop(role, None)
+        self._stream_flush_pending.discard(role)
+        self.append(f"\n=== {role} session exited: {msg} ===\n")
+
+
+    # ------------------------------------------------------------------
+    # Interactive Terminal integration
+    # ------------------------------------------------------------------
+    def active_project_root_path(self) -> str:
+        for attr in ("project_root", "active_project_root", "current_project_root"):
+            value = getattr(self, attr, None)
+            if value:
+                return str(value)
+        try:
+            label = getattr(self, "project_root_label", None)
+            if label is not None:
+                text = label.text()
+                if text and "No active project" not in text:
+                    return text.strip()
+        except Exception:
+            pass
+        return str(Path.cwd())
+
+    def open_terminal_dialog(self, command: str = "", cwd: str = ""):
+        """Open a persistent interactive PowerShell-style terminal."""
+        try:
+            from ui.interactive_terminal_dialog import InteractiveTerminalDialog
+            dialog = getattr(self, "_interactive_terminal_dialog", None)
+            if dialog is None:
+                dialog = InteractiveTerminalDialog(
+                    self,
+                    cwd=cwd or self.active_project_root_path(),
+                    shell="powershell",
+                )
+                self._interactive_terminal_dialog = dialog
+            if command:
+                dialog.stage_command(command)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return dialog
+        except Exception as exc:
+            try:
+                QMessageBox.warning(self, "Terminal unavailable", str(exc))
+            except Exception:
+                self.append(f"\n[Terminal] unavailable: {exc}\n")
+            return None
+
+    def _current_editor_text_selection(self) -> tuple[str, str]:
+        file_path = str(getattr(self, "current_file_path", "") or "")
+        selected = ""
+        try:
+            editor = None
+            if hasattr(self, "current_editor"):
+                editor = self.current_editor()
+            if editor is None:
+                editor = getattr(self, "editor", None)
+            if editor is None and hasattr(self, "open_editors") and file_path:
+                editor = self.open_editors.get(file_path)
+            if editor is not None:
+                selected = editor.textCursor().selectedText().replace("\u2029", "\n")
+        except Exception:
+            selected = ""
+        return selected, file_path
+
+    def send_to_terminal(self, command: str = ""):
+        return self.open_terminal_dialog(command=command or "", cwd=self.active_project_root_path())
+
+        self._stream_header_written.discard(role)
+        self._stream_buffer_by_role.pop(role, None)
+        self._stream_flush_pending.discard(role)
+        self.append(f"\n=== {role} session exited: {msg} ===\n")
+
+
+    # ------------------------------------------------------------------
+    # Interactive Terminal integration
+    # ------------------------------------------------------------------
+    def active_project_root_path(self) -> str:
+        for attr in ("project_root", "active_project_root", "current_project_root"):
+            value = getattr(self, attr, None)
+            if value:
+                return str(value)
+        try:
+            label = getattr(self, "project_root_label", None)
+            if label is not None:
+                text = label.text()
+                if text and "No active project" not in text:
+                    return text.strip()
+        except Exception:
+            pass
+        return str(Path.cwd())
+
+    def open_terminal_dialog(self, command: str = "", cwd: str = ""):
+        """Open a persistent interactive PowerShell-style terminal."""
+        try:
+            from ui.interactive_terminal_dialog import InteractiveTerminalDialog
+            dialog = getattr(self, "_interactive_terminal_dialog", None)
+            if dialog is None:
+                dialog = InteractiveTerminalDialog(
+                    self,
+                    cwd=cwd or self.active_project_root_path(),
+                    shell="powershell",
+                )
+                self._interactive_terminal_dialog = dialog
+            if command:
+                dialog.stage_command(command)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return dialog
+        except Exception as exc:
+            try:
+                QMessageBox.warning(self, "Terminal unavailable", str(exc))
+            except Exception:
+                self.append(f"\n[Terminal] unavailable: {exc}\n")
+            return None
+
+    def _current_editor_text_selection(self) -> tuple[str, str]:
+        file_path = str(getattr(self, "current_file_path", "") or "")
+        selected = ""
+        try:
+            editor = None
+            if hasattr(self, "current_editor"):
+                editor = self.current_editor()
+            if editor is None:
+                editor = getattr(self, "editor", None)
+            if editor is None and hasattr(self, "open_editors") and file_path:
+                editor = self.open_editors.get(file_path)
+            if editor is not None:
+                selected = editor.textCursor().selectedText().replace("\u2029", "\n")
+        except Exception:
+            selected = ""
+        return selected, file_path
+
+    def send_to_terminal(self, command: str = ""):
+        return self.open_terminal_dialog(command=command or "", cwd=self.active_project_root_path())
+
+    def run_selection_in_terminal(self):
+        selected, _file_path = self._current_editor_text_selection()
+        if not selected.strip():
+            self.append("\n[Terminal] No editor selection found to stage.\n")
+            return None
+        return self.open_terminal_dialog(command=selected.strip(), cwd=self.active_project_root_path())
+
+    def run_current_file_in_terminal(self):
+        _selected, file_path = self._current_editor_text_selection()
+        path = file_path or getattr(self, "current_file_path", "")
+        if not path:
+            self.append("\n[Terminal] No active file found to stage.\n")
+            return None
+        suffix = Path(path).suffix.lower()
+        if suffix == ".py":
+            command = f'python "{path}"'
+        elif suffix == ".ps1":
+            command = f'powershell -NoProfile -ExecutionPolicy Bypass -File "{path}"'
+        else:
+            command = f'"{path}"'
+        return self.open_terminal_dialog(command=command, cwd=self.active_project_root_path())
+
+    def run_prompt_in_terminal(self):
+        try:
+            command = self.input.text().strip()
+        except Exception:
+            command = ""
+        if not command:
+            self.append("\n[Terminal] Prompt is empty.\n")
+            return None
+        return self.open_terminal_dialog(command=command, cwd=self.active_project_root_path())
+
+    def _extract_thread_assets(self) -> str:
+        try:
+            candidates = self._asset_mention_candidates("", include_index=False, limit=80)
+        except Exception:
+            candidates = []
+        if not candidates:
+            return ""
+        lines = ["Active Thread / Asset Context:"]
+        for candidate in candidates[:30]:
+            lines.append(
+                f"  - @{candidate.token}: {candidate.kind} from {candidate.source} -> `{candidate.value}`"
+            )
+        return "\n".join(lines)
+
+    def _asset_mention_candidates(self, query_str: str = "", *, include_index: bool = True, limit: int = 20, text_context: str = ""):
+        from services.asset_mention_service import (
+            candidates_from_index,
+            candidates_from_selected_assets,
+            candidates_from_thread,
+            candidates_from_unreal_snapshot,
+            candidates_from_dcc_scene,
+            merge_candidates,
+        )
+
+        session = getattr(self, "current_session", None)
+        snapshot = getattr(self, "unreal_project_snapshot", "")
+        selected_assets = []
+        try:
+            parsed_snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+            if isinstance(parsed_snapshot, dict):
+                data = parsed_snapshot.get("data") if isinstance(parsed_snapshot.get("data"), dict) else parsed_snapshot
+                selected_assets = list(data.get("selected_assets") or [])
+        except Exception:
+            parsed_snapshot = snapshot
+
+        if not text_context:
+            text_context = self.input.text() if hasattr(self, "input") and hasattr(self.input, "text") else ""
+        groups = [
+            candidates_from_selected_assets(selected_assets),
+            candidates_from_thread(session),
+            candidates_from_unreal_snapshot(snapshot),
+            candidates_from_dcc_scene(query_str, getattr(self, "command_router", None), text_context),
+        ]
+        if include_index:
+            groups.append(candidates_from_index(query_str, limit=12))
+        return merge_candidates(*groups, query=query_str, limit=limit)
+
+    def on_chat_input_text_changed(self, text: str):
+        cursor_pos = self.input.cursorPosition()
+        before_cursor = text[:cursor_pos]
+        if len(text or "") > 4000 and "@" not in before_cursor[-120:]:
+            if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+                self._autocomplete_menu.hide()
+            self._log_ui_diagnostic(
+                "autocomplete_skipped_large_prompt",
+                prompt_chars=len(text or ""),
+                cursor_pos=cursor_pos,
+            )
+            return
+        
+        at_idx = before_cursor.rfind('@')
+        if at_idx == -1:
+            if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+                self._autocomplete_menu.hide()
+            return
+            
+        if ' ' in before_cursor[at_idx:]:
+            if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+                self._autocomplete_menu.hide()
+            return
+            
+        query_str = before_cursor[at_idx + 1:]
+
+        seq = int(getattr(self, "_autocomplete_query_seq", 0) or 0) + 1
+        self._autocomplete_query_seq = seq
+        text_snapshot = text or ""
+        self._log_ui_diagnostic(
+            "autocomplete_query_scheduled",
+            seq=seq,
+            query=query_str,
+            prompt_chars=len(text_snapshot),
+            cursor_pos=cursor_pos,
+        )
+        QTimer.singleShot(
+            175,
+            lambda s=seq, q=query_str, snap=text_snapshot, at=at_idx, pos=cursor_pos: self._start_autocomplete_query(s, q, snap, at, pos),
+        )
+
+    def _start_autocomplete_query(self, seq: int, query_str: str, text_snapshot: str, at_idx: int, cursor_pos: int):
+        if seq != int(getattr(self, "_autocomplete_query_seq", 0) or 0):
+            return
+        include_index = len(query_str or "") >= 2
+        self._log_ui_diagnostic(
+            "autocomplete_query_started",
+            seq=seq,
+            query=query_str,
+            include_index=include_index,
+            prompt_chars=len(text_snapshot or ""),
+        )
+
+        def run_query():
+            started = time.perf_counter()
+            suggestions = []
+            try:
+                suggestions = self._query_autocomplete_suggestions(
+                    query_str,
+                    include_index=include_index,
+                    text_context=text_snapshot,
+                )
+            except Exception:
+                suggestions = []
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            self._log_ui_diagnostic(
+                "autocomplete_query_finished",
+                seq=seq,
+                query=query_str,
+                duration_ms=duration_ms,
+                count=len(suggestions or []),
+            )
+            try:
+                self.autocomplete_suggestions_ready.emit(seq, at_idx, cursor_pos, suggestions)
+            except Exception:
+                pass
+
+        import threading
+
+        threading.Thread(target=run_query, daemon=True).start()
+
+    def _apply_autocomplete_suggestions(self, seq: int, at_idx: int, cursor_pos: int, suggestions):
+        if seq != int(getattr(self, "_autocomplete_query_seq", 0) or 0):
+            return
+        try:
+            text = self.input.text()
+            before_cursor = text[: self.input.cursorPosition()]
+            if before_cursor.rfind("@") != at_idx or " " in before_cursor[at_idx:]:
+                return
+        except Exception:
+            return
+
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+
+        if not suggestions:
+            if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+                self._autocomplete_menu.hide()
+            return
+            
+        if not hasattr(self, "_autocomplete_menu") or not self._autocomplete_menu:
+            self._autocomplete_menu = QMenu(self.input)
+            self._autocomplete_menu.setStyleSheet("""
+                QMenu {
+                    background-color: #0b0f14;
+                    color: #d7dde5;
+                    border: 1px solid #1e9bff;
+                    border-radius: 4px;
+                }
+                QMenu::item:selected {
+                    background-color: #1e9bff;
+                    color: #ffffff;
+                }
+            """)
+        else:
+            self._autocomplete_menu.clear()
+            
+        for item in suggestions:
+            label = item.display() if hasattr(item, "display") else str(item)
+            token = item.token if hasattr(item, "token") else str(item)
+            action = QAction(label, self._autocomplete_menu)
+            action.triggered.connect(lambda checked=False, val=token: self._insert_autocomplete_suggestion(val, at_idx, cursor_pos))
+            self._autocomplete_menu.addAction(action)
+            
+        rect = self.input.geometry()
+        pos = self.input.mapToGlobal(rect.bottomLeft())
+        pos.setY(pos.y() - rect.height() + 5)
+        pos.setX(pos.x() + max(0, cursor_pos * 6))
+        
+        self._autocomplete_menu.popup(pos)
+        self.input.setFocus()
+
+    def _insert_autocomplete_suggestion(self, val: str, at_idx: int, cursor_pos: int):
+        text = self.input.text()
+        before_at = text[:at_idx]
+        after_cursor = text[cursor_pos:]
+        
+        token = str(val or "").strip()
+        if not token.startswith("@"):
+            token = "@" + token
+        spacer = "" if not after_cursor or after_cursor.startswith((" ", "\n", "\t", ".", ",", ";", ":")) else " "
+        new_text = before_at + token + spacer + after_cursor
+        self.input.setText(new_text)
+        
+        self.input.setCursorPosition(len(before_at) + len(token) + len(spacer))
+        if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
+            self._autocomplete_menu.hide()
+
+    def _query_autocomplete_suggestions(self, query_str: str, *, include_index: bool = True, text_context: str = ""):
+        try:
+            return self._asset_mention_candidates(
+                query_str,
+                include_index=include_index,
+                limit=10,
+                text_context=text_context,
+            )
+        except Exception:
+            return []
