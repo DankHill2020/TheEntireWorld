@@ -781,8 +781,55 @@ def dcc_operation_function(host: str, mode: str) -> str:
     return f"{domain}.ai_studio.{function_name}"
 
 
-def dcc_prompt_to_operation(host: str, text: str) -> str | None:
+def dcc_prompt_to_operation(
+    host: str,
+    text: str,
+    *,
+    decision: dict[str, Any] | None = None,
+    problem_formulation: dict[str, Any] | None = None,
+) -> str | None:
+    """Resolve an explicit DCC operation only after problem formulation.
+
+    Source-code questions such as "what file creates rig" must never become a
+    live rig-creation operation merely because they contain the words
+    "create rig".
+    """
     q = (text or "").lower()
+    decision = dict(decision or {})
+    formulation = dict(
+        problem_formulation
+        or decision.get("problem_formulation")
+        or {}
+    )
+    action_mode = str(formulation.get("action_mode") or "")
+    deliverables = set(str(item) for item in formulation.get("deliverables") or [])
+
+    if not formulation:
+        try:
+            from services.problem_formulation_service import build_problem_formulation
+            formulation = build_problem_formulation(
+                text,
+                decision,
+                context={
+                    "host": host,
+                    "active_file": decision.get("active_file") or "",
+                    "conversation_entities": decision.get("conversation_entities") or {},
+                    "context_momentum": decision.get("context_momentum") or {},
+                },
+            ).to_dict()
+            action_mode = str(formulation.get("action_mode") or "")
+            deliverables = set(str(item) for item in formulation.get("deliverables") or [])
+        except Exception:
+            formulation = {}
+
+    source_question = bool(
+        re.match(r"^\s*(what|which|where|find|show|list|identify|explain)\b", q)
+        and re.search(r"\b(file|files|function|functions|method|methods|class|classes|code|source|implementation)\b", q)
+    )
+    if action_mode in {"read_only", "design", "understand"} or source_question:
+        return None
+    if deliverables.intersection({"files", "functions", "methods", "classes", "explanation", "function_design"}):
+        return None
     if host == "maya":
         if re.search(r"\b(frame selected|frame selection|zoom selected|focus selected|frame\s+[A-Za-z0-9_:|.-]+)\b", q):
             return "navigation.frame_selection"
@@ -831,7 +878,11 @@ def dcc_prompt_to_operation(host: str, text: str) -> str | None:
             return "api.call"
         if re.search(r"\b(maya_tools\.|tool call|call tool|run tool)\b", q):
             return "tool.call"
-        if "create_rig" in q or "create rig" in q or "build rig" in q or "create control rig" in q:
+        if (
+            ("create_rig" in q or "create rig" in q or "build rig" in q or "create control rig" in q)
+            and re.search(r"\b(run|execute|call|create|build|make)\b", q)
+            and not re.search(r"^\s*(what|which|where|find|show|list|identify|explain)\b", q)
+        ):
             return "rigging.create_rig"
         if "auto_skinner" in q or "auto skin" in q or "skin weights" in q or "skinning" in q or "smooth skin" in q:
             return "rigging.auto_skinner"

@@ -971,3 +971,98 @@ def _context_source_for_slot(name: str, environment: str) -> str:
     if name in {"callable", "callable_disambiguation"}:
         return "project_symbol_index"
     return "route_context"
+
+
+def build_problem_formulation_clarification(
+    *,
+    prompt: str,
+    decision: dict[str, Any] | None = None,
+    context: RequestContext,
+) -> ClarificationRenderResult | None:
+    """Ask only for unknowns that block an adequate problem formulation."""
+    decision = dict(decision or {})
+    try:
+        from services.problem_formulation_service import build_problem_formulation
+        formulation = build_problem_formulation(
+            prompt,
+            decision,
+            context={
+                "active_file": context.current_file_path,
+                "host": decision.get("host") or "",
+                "conversation_entities": (context.extras or {}).get("conversation_entities") or {},
+                "context_momentum": (context.extras or {}).get("context_momentum") or {},
+            },
+        )
+    except Exception:
+        return None
+
+    if not formulation.requires_clarification:
+        return None
+
+    slots: list[ClarificationSlot] = []
+    for index, unknown in enumerate(formulation.blocking_unknowns):
+        name = f"problem_unknown_{index + 1}"
+        if "file reference" in unknown.lower():
+            name = "target_file"
+        elif "target" in unknown.lower():
+            name = "target_symbol"
+        slots.append(
+            ClarificationSlot(
+                name=name,
+                label=slot_label(name),
+                expected_type=expected_type_for_slot(name, formulation.scope),
+                required_reason=unknown,
+                control_type=control_type_for_slot(name, formulation.scope),
+                choice_provider_id=choice_provider_for_slot(
+                    name,
+                    formulation.scope,
+                    decision=decision,
+                    request={"original_prompt": prompt},
+                ),
+                provider_filters=provider_filters_for_slot(
+                    name,
+                    decision=decision,
+                    request={"original_prompt": prompt},
+                ),
+                free_text_allowed=True,
+                context_source="problem_formulation",
+            )
+        )
+
+    request = ClarificationRequest(
+        kind=SEMANTIC_CLARIFICATION,
+        intent="problem_formulation",
+        target=formulation.subject,
+        execution_environment=str(decision.get("host") or ""),
+        slots=slots,
+        route_decision={
+            **decision,
+            "problem_formulation": formulation.to_dict(),
+        },
+        reason=(
+            "The system formed the problem before acting, but one or more "
+            "unknowns would materially change the plan."
+        ),
+        model_tier_policy="larger_local",
+        rendering_mechanism="deterministic",
+    )
+    request.ui_controls = ui_controls_for_request(request)
+
+    lines = [
+        "I need one detail before I can form the problem correctly:",
+        "",
+        f"Current interpretation: {formulation.interpreted_problem}",
+    ]
+    for question in formulation.clarification_questions:
+        lines.append(f"- {question}")
+    lines.extend([
+        "",
+        "I have not routed, searched, edited, or executed anything yet.",
+    ])
+    return ClarificationRenderResult(
+        text="\\n".join(lines),
+        request=request,
+        model_tier_policy=request.model_tier_policy,
+        rendering_mechanism=request.rendering_mechanism,
+        pending_state=pending_state_for_request(request),
+    )

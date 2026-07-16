@@ -60,8 +60,22 @@ def rank_target_candidates(
     open_files: Iterable[str] = (),
     momentum: ContextMomentum | None = None,
     allowed_roots: Iterable[str] = (),
+    problem_formulation: dict[str, Any] | None = None,
 ) -> list[RankedTarget]:
     entities = extract_target_entities(prompt)
+    formulation = dict(problem_formulation or {})
+    if not formulation:
+        try:
+            from services.problem_formulation_service import build_problem_formulation
+            formulation = build_problem_formulation(prompt).to_dict()
+        except Exception:
+            formulation = {}
+    semantic_terms = _semantic_terms_from_formulation(formulation)
+    semantic_exclusions = [
+        str(item).casefold()
+        for item in formulation.get("exclusions") or []
+        if str(item or "").strip()
+    ]
     explicit_files = [item for item in entities if item.kind in {"filename", "path"}]
     explicit_symbols = [item for item in entities if item.kind == "symbol"]
     open_set = {_norm(item).casefold() for item in open_files if item}
@@ -128,7 +142,54 @@ def rank_target_candidates(
             score += contribution
             signals.append(EvidenceSignal("provider_score", contribution, f"Underlying provider score={raw_score:.3f}."))
 
-        text_blob = " ".join(str(data.get(key) or "") for key in ("name", "symbol", "summary", "text", "reason")).casefold()
+        text_blob = " ".join(
+            str(data.get(key) or "")
+            for key in (
+                "name", "symbol", "qualname", "signature", "summary",
+                "docstring", "source", "text", "reason", "callers", "callees",
+            )
+        ).casefold()
+
+        if semantic_terms:
+            matched_terms = [term for term in semantic_terms if term in text_blob]
+            if matched_terms:
+                contribution = min(320.0, 55.0 * len(matched_terms))
+                score += contribution
+                signals.append(
+                    EvidenceSignal(
+                        "problem_semantics",
+                        contribution,
+                        "Candidate supports formulated concepts: " + ", ".join(matched_terms[:6]),
+                    )
+                )
+            elif formulation.get("deliverables") == ["files"]:
+                score -= 80.0
+                signals.append(
+                    EvidenceSignal(
+                        "missing_behavior_evidence",
+                        -80.0,
+                        "Candidate lacks evidence for the formulated implementation behavior.",
+                    )
+                )
+
+        narrow_helper = any(
+            term in text_blob
+            for term in ("helper", "utility", "space switch", "mirror", "cleanup", "delete", "remove")
+        )
+        asks_complete = any(
+            term in " ".join(semantic_terms)
+            for term in ("complete", "full", "primary", "create rig", "build rig")
+        )
+        if narrow_helper and asks_complete:
+            score -= 140.0
+            signals.append(
+                EvidenceSignal(
+                    "narrow_helper_penalty",
+                    -140.0,
+                    "Narrow/helper behavior is weaker than the formulated complete implementation goal.",
+                )
+            )
+
         for entity in explicit_symbols:
             if entity.value.casefold() in text_blob:
                 score += 260.0
@@ -159,6 +220,44 @@ def target_resolution_summary(ranked: list[RankedTarget], *, max_items: int = 5)
             lines.append(f"   {signal.score:+.1f} {signal.reason}")
     return "\n".join(lines)
 
+
+
+def _semantic_terms_from_formulation(formulation: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("subject", "interpreted_problem", "desired_outcome"):
+        values.extend(_concept_terms(str(formulation.get(key) or "")))
+    for relationship in formulation.get("relationships") or []:
+        values.extend(_concept_terms(str(relationship)))
+    for item in formulation.get("evidence_required") or []:
+        values.extend(_concept_terms(str(item)))
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if not value or key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result[:24]
+
+
+def _concept_terms(text: str) -> list[str]:
+    stop = {
+        "the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "with",
+        "that", "which", "what", "user", "requested", "source", "file", "files",
+        "function", "functions", "method", "methods", "code", "project",
+    }
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9_]+", (text or "").casefold())
+        if len(token) >= 3 and token not in stop
+    ]
+    phrases: list[str] = []
+    for size in (3, 2):
+        for index in range(0, max(0, len(tokens) - size + 1)):
+            phrases.append(" ".join(tokens[index:index + size]))
+    phrases.extend(tokens)
+    return phrases
 
 def _assign_confidence(ranked: list[RankedTarget]) -> None:
     if not ranked:

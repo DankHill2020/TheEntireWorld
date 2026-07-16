@@ -118,3 +118,65 @@ def normalize_facts(values: Iterable[Any], *, limit: int = 40) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def problem_formulation_contribution(
+    prompt: str,
+    decision: dict[str, Any] | None = None,
+    *,
+    context: dict[str, Any] | None = None,
+) -> ContextContribution:
+    """Create a required high-priority contribution that gates later context."""
+    try:
+        from services.problem_formulation_service import (
+            build_problem_formulation,
+            problem_formulation_context,
+        )
+        formulation = build_problem_formulation(
+            prompt,
+            decision,
+            context=context,
+        )
+        fragment = problem_formulation_context(
+            prompt,
+            decision,
+            context=context,
+        )
+        return ContextContribution(
+            provider="problem_formulation",
+            kind="problem_formulation",
+            prompt_fragment=fragment,
+            data=formulation.to_dict(),
+            priority=120.0,
+            confidence_gain=max(0.0, formulation.confidence - 0.5),
+            required=True,
+            cacheable=False,
+            deduplication_key="problem_formulation:current_request",
+            reasons=[
+                "Meaning and prerequisites must be settled before routing or action.",
+                "Downstream context must satisfy the formulated problem rather than raw token overlap.",
+            ],
+            facts=[
+                formulation.interpreted_problem,
+                formulation.desired_outcome,
+                *formulation.success_conditions[:4],
+            ],
+            warnings=list(formulation.critique[:4]),
+            metadata={
+                "adequate": formulation.adequate,
+                "can_plan": formulation.can_plan,
+                "requires_clarification": formulation.requires_clarification,
+                "action_mode": formulation.action_mode,
+            },
+        ).finalize()
+    except Exception as exc:
+        return ContextContribution(
+            provider="problem_formulation",
+            kind="problem_formulation",
+            prompt_fragment="Problem formulation unavailable; do not take irreversible action.",
+            priority=120.0,
+            required=True,
+            cacheable=False,
+            warnings=[str(exc)],
+            metadata={"adequate": False, "can_plan": False},
+        ).finalize()

@@ -179,6 +179,86 @@ def _goal_from_prompt(prompt: str) -> str:
     return text or "Complete the requested objective"
 
 
+
+def _build_problem_formulation(
+    prompt: str,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Form the problem before capability matching or action graph creation."""
+    try:
+        from services.problem_formulation_service import build_problem_formulation
+
+        context = {
+            "active_file": decision.get("active_file") or decision.get("current_file_path") or "",
+            "open_files": list(decision.get("open_files") or []),
+            "host": decision.get("host") or decision.get("execution_environment") or "",
+            "conversation_entities": dict(decision.get("conversation_entities") or {}),
+            "context_momentum": dict(decision.get("context_momentum") or {}),
+        }
+        return build_problem_formulation(
+            prompt,
+            decision,
+            context=context,
+        ).to_dict()
+    except Exception as exc:
+        return {
+            "framework": "problem_formulation_v1",
+            "literal_request": prompt,
+            "interpreted_problem": _goal_from_prompt(prompt),
+            "desired_outcome": _goal_from_prompt(prompt),
+            "deliverables": ["answer"],
+            "action_mode": "understand",
+            "knowns": ["Current prompt"],
+            "unknowns": [],
+            "blocking_unknowns": [],
+            "prerequisites": [],
+            "candidate_plan": [],
+            "success_conditions": ["The requested objective is completed."],
+            "adequate": False,
+            "can_plan": True,
+            "requires_clarification": False,
+            "confidence": 0.35,
+            "critique": [f"Problem formulation fallback used: {exc}"],
+            "meaning_graph": {"framework": "meaning_graph_v1", "nodes": [], "edges": []},
+        }
+
+
+def _capability_nodes_from_problem_formulation(
+    formulation: dict[str, Any],
+) -> list[CapabilityNode]:
+    """Translate meaning prerequisites into planner nodes without losing semantics."""
+    nodes: list[CapabilityNode] = []
+    for index, step in enumerate(list(formulation.get("candidate_plan") or []), start=1):
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("step_id") or f"formulation_step_{index}")
+        objective = str(step.get("objective") or step_id)
+        action = str(step.get("action") or "")
+        status = "missing_or_unverified"
+        if action in {"report"}:
+            status = "blocked_by_prerequisites"
+        nodes.append(
+            CapabilityNode(
+                key=f"problem.{_slug(step_id)}",
+                label=objective,
+                status=status,
+                evidence=("problem formulation",),
+                requires=tuple(str(value) for value in step.get("depends_on") or []),
+                produces=tuple(str(value) for value in step.get("produces") or []),
+                verification=tuple(
+                    [str(step.get("success_condition") or "Step result satisfies the formulated problem.")]
+                ),
+            )
+        )
+    return nodes
+
+
+def _problem_formulation_requires_pause(formulation: dict[str, Any]) -> bool:
+    return bool(
+        formulation.get("requires_clarification")
+        or not formulation.get("can_plan", True)
+    )
+
 def _terms(text: str) -> set[str]:
     lower = (text or "").lower()
     return set(re.findall(r"[a-z0-9_]+", lower))
@@ -1547,24 +1627,43 @@ def _report_outline(needs_detailed_progress: bool) -> list[str]:
 
 
 def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Build a deterministic A-to-Z gap plan for the requested goal."""
+    """Build an A-to-Z plan only after the problem is adequately formulated."""
     decision = dict(decision or {})
+    problem_formulation = _build_problem_formulation(prompt, decision)
+    decision["problem_formulation"] = problem_formulation
+
+    # Capability matching may use the original wording, but the formulated
+    # problem is authoritative for goal, prerequisites, success, and whether
+    # execution is allowed to continue.
     patterns = _matched_patterns(prompt, decision)
     if not patterns:
-        patterns = [_quick_direct_pattern(prompt, decision)] if _is_quick_direct_action(decision) else [_generic_pattern(prompt, decision)]
+        # A request is only "quick direct" after formulation confirms that it
+        # is actually an execution/direct-action problem rather than a source
+        # question containing executable words.
+        quick_allowed = (
+            str(problem_formulation.get("action_mode") or "") in {"execute", "mutate"}
+            and bool(problem_formulation.get("adequate"))
+            and not _problem_formulation_requires_pause(problem_formulation)
+        )
+        patterns = [_quick_direct_pattern(prompt, decision)] if quick_allowed and _is_quick_direct_action(decision) else [_generic_pattern(prompt, decision)]
 
-    goal = _goal_from_prompt(prompt)
+    goal = str(
+        problem_formulation.get("interpreted_problem")
+        or problem_formulation.get("desired_outcome")
+        or _goal_from_prompt(prompt)
+    )
     known_evidence = _known_capability_evidence(decision)
     nodes: list[CapabilityNode] = [
         CapabilityNode(
             key="user_goal",
             label=goal,
             status="target",
-            evidence=("current prompt",),
-            produces=("desired outcome",),
-            verification=("user-visible outcome is testable",),
+            evidence=("current prompt", "problem formulation"),
+            produces=tuple(problem_formulation.get("deliverables") or ["desired outcome"]),
+            verification=tuple(problem_formulation.get("success_conditions") or ["user-visible outcome is testable"]),
         )
     ]
+    nodes.extend(_capability_nodes_from_problem_formulation(problem_formulation))
     options: list[GapResolutionOption] = []
     questions: list[str] = []
     learning: list[str] = []
@@ -1656,8 +1755,13 @@ def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> 
     test_plan = _test_plan_from_path(recommended_path, ranked_options) if needs_detailed_progress else []
 
     return {
-        "framework": "goal_gap_planning_v1",
+        "framework": "goal_gap_planning_v2",
         "goal": goal,
+        "problem_formulation": problem_formulation,
+        "meaning_graph": dict(problem_formulation.get("meaning_graph") or {}),
+        "problem_adequate": bool(problem_formulation.get("adequate")),
+        "problem_can_plan": bool(problem_formulation.get("can_plan")),
+        "problem_requires_clarification": bool(problem_formulation.get("requires_clarification")),
         "matched_patterns": _uniq(pattern.key for pattern in patterns),
         "capability_labels": _uniq(labels),
         "known_evidence": list(known_evidence),
@@ -1683,6 +1787,9 @@ def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> 
         "questions": _uniq(questions),
         "learning_recommendations": _uniq(learning),
         "planning_rules": [
+            "Do not route, retrieve, mutate, or execute until the problem formulation is adequate.",
+            "Generate the capability/task graph from the meaning graph and desired deliverables, not from raw token overlap.",
+            "A handler result is not completion unless it satisfies the problem formulation success conditions.",
             "Treat every missing prerequisite as a planning node, not a failure.",
             "Ask what produces each missing capability before asking the user.",
             "Rank multiple resolution options before choosing one.",
@@ -1702,19 +1809,39 @@ def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> 
             "Keep reporting visible progress during long context, model, tool, daemon, or validation work.",
             "After execution, recommend reusable capability relationships that should be persisted.",
         ],
-        "next_action": "resolve_missing_links" if missing_links else "execute_validated_path",
+        "next_action": (
+            "clarify_problem"
+            if _problem_formulation_requires_pause(problem_formulation)
+            else ("resolve_missing_links" if missing_links else "execute_validated_path")
+        ),
     }
 
 
 def goal_gap_planning_context(prompt: str, decision: dict[str, Any] | None = None, *, max_chars: int = 3000) -> str:
     plan = build_goal_gap_plan(prompt, decision)
+    formulation = dict(plan.get("problem_formulation") or {})
     lines = [
         "GOAL GAP PLANNING:",
         "Use this to connect the user's A-to-Z goal through required intermediate capabilities before execution.",
         f"Goal: {plan['goal']}",
+        f"Problem adequate: {str(bool(plan.get('problem_adequate'))).lower()}",
+        f"Can plan: {str(bool(plan.get('problem_can_plan'))).lower()}",
         f"Progress mode: {plan.get('progress_mode', 'detailed')}",
-        "Planning rules:",
     ]
+    if formulation:
+        lines.extend([
+            "Problem formulation:",
+            f"- Literal request: {formulation.get('literal_request', '')}",
+            f"- Interpreted problem: {formulation.get('interpreted_problem', '')}",
+            f"- Desired outcome: {formulation.get('desired_outcome', '')}",
+            f"- Deliverables: {', '.join(formulation.get('deliverables') or [])}",
+            f"- Action mode: {formulation.get('action_mode', '')}",
+        ])
+        if formulation.get("unknowns"):
+            lines.append("- Unknowns: " + " | ".join(list(formulation.get("unknowns") or [])[:5]))
+        if formulation.get("exclusions"):
+            lines.append("- Exclusions: " + " | ".join(list(formulation.get("exclusions") or [])[:4]))
+    lines.append("Planning rules:")
     lines.extend(f"- {rule}" for rule in plan.get("planning_rules") or [])
     if plan.get("known_evidence"):
         lines.append("Known evidence:")
@@ -1828,9 +1955,25 @@ def compact_goal_gap_plan(
 ) -> dict[str, Any]:
     """Return a route-metadata friendly gap plan."""
     plan = dict(plan or {})
+    formulation = dict(plan.get("problem_formulation") or {})
     return {
-        "framework": plan.get("framework", "goal_gap_planning_v1"),
+        "framework": plan.get("framework", "goal_gap_planning_v2"),
         "goal": plan.get("goal", ""),
+        "problem_formulation": {
+            "interpreted_problem": formulation.get("interpreted_problem", ""),
+            "desired_outcome": formulation.get("desired_outcome", ""),
+            "deliverables": list(formulation.get("deliverables") or []),
+            "action_mode": formulation.get("action_mode", ""),
+            "unknowns": list(formulation.get("unknowns") or [])[:max_links],
+            "blocking_unknowns": list(formulation.get("blocking_unknowns") or [])[:max_links],
+            "exclusions": list(formulation.get("exclusions") or [])[:max_links],
+            "success_conditions": list(formulation.get("success_conditions") or [])[:max_links],
+            "candidate_plan": list(formulation.get("candidate_plan") or [])[:max_links * 2],
+            "adequate": bool(formulation.get("adequate")),
+            "can_plan": bool(formulation.get("can_plan")),
+            "requires_clarification": bool(formulation.get("requires_clarification")),
+            "confidence": float(formulation.get("confidence") or 0.0),
+        },
         "matched_patterns": list(plan.get("matched_patterns") or [])[:6],
         "next_action": plan.get("next_action", ""),
         "progress_mode": plan.get("progress_mode", ""),
@@ -1989,11 +2132,19 @@ def compact_goal_gap_plan(
 def render_goal_gap_plan(plan: dict[str, Any] | None, *, max_links: int = 5) -> str:
     if not plan:
         return ""
+    formulation = dict(plan.get("problem_formulation") or {})
     lines = [
         "Goal gap plan:",
         f"Goal: {plan.get('goal', '')}",
         f"Next action: {plan.get('next_action', '')}",
     ]
+    if formulation:
+        lines.extend([
+            "Problem formulation:",
+            f"- {formulation.get('interpreted_problem', '')}",
+            f"- deliverables={', '.join(formulation.get('deliverables') or [])}",
+            f"- adequate={str(bool(formulation.get('adequate'))).lower()} confidence={float(formulation.get('confidence') or 0):.2f}",
+        ])
     links = list(plan.get("missing_links") or [])
     if links:
         lines.append("Missing or unverified links:")

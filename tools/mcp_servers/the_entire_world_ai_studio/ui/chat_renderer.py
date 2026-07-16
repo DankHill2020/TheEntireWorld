@@ -20,6 +20,9 @@ HEADER_RE = re.compile(
 STATUS_PREFIXES = (
     "[Status]",
     "[Process]",
+    "[Progress]",
+    "[Reasoning Approach]",
+    "[Developer Activity]",
     "[Activity]",
     "[Source Mode]",
     "[ModelRoute]",
@@ -38,10 +41,6 @@ STATUS_PREFIXES = (
     "[Knowledge]",
     "[Project]",
     "[Index",
-    "[Understanding]",
-    "[Resolved Reference]",
-    "[Current Goal]",
-    "[Route]",
 )
 
 
@@ -533,113 +532,21 @@ def render_content(owner: Any, content: str) -> str:
     return "\n".join(parts)
 
 
-
-def _render_understanding_card_html(text: str) -> str:
-    """Render compact, user-visible request interpretation metadata."""
-    lines = [
-        line.strip()
-        for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
-        if line.strip()
-    ]
-    if not lines:
-        return ""
-
-    fields: dict[str, list[str]] = {}
-    current = ""
-    for line in lines:
-        match = re.match(
-            r"^(Understood Request|Interpreted Request|Resolved Reference|Route|Current Goal|Next|Confidence|Scope|Reason):\s*(.*)$",
-            line,
-            re.IGNORECASE,
-        )
-        if match:
-            current = match.group(1).strip().lower()
-            fields.setdefault(current, [])
-            if match.group(2).strip():
-                fields[current].append(match.group(2).strip())
-            continue
-        if current:
-            fields.setdefault(current, []).append(line)
-
-    understood = " ".join(
-        fields.get("understood request")
-        or fields.get("interpreted request")
-        or []
-    ).strip()
-    route = " ".join(fields.get("route") or []).strip()
-    goal = " ".join(fields.get("current goal") or []).strip()
-    next_step = " ".join(fields.get("next") or []).strip()
-    reference = " ".join(fields.get("resolved reference") or []).strip()
-    confidence = " ".join(fields.get("confidence") or []).strip()
-    scope = " ".join(fields.get("scope") or []).strip()
-    reason = " ".join(fields.get("reason") or []).strip()
-
-    if not any((understood, route, goal, next_step, reference, confidence, scope, reason)):
-        return ""
-
-    rows = []
-    if understood:
-        rows.append(
-            "<div class='understanding-main'>"
-            "<div class='understanding-label'>I believe you are asking</div>"
-            f"<div class='understanding-request'>{html.escape(understood)}</div>"
-            "</div>"
-        )
-    if reference:
-        rows.append(
-            "<div class='understanding-row'>"
-            "<span class='understanding-key'>Resolved reference</span>"
-            f"<span class='understanding-value'>{html.escape(reference)}</span>"
-            "</div>"
-        )
-    if goal:
-        rows.append(
-            "<div class='understanding-row current-goal-row'>"
-            "<span class='understanding-key'>Current goal</span>"
-            f"<span class='understanding-value'>{html.escape(goal)}</span>"
-            "</div>"
-        )
-    if next_step:
-        rows.append(
-            "<div class='understanding-row'>"
-            "<span class='understanding-key'>Next</span>"
-            f"<span class='understanding-value'>{html.escape(next_step)}</span>"
-            "</div>"
-        )
-    if route:
-        rows.append(
-            "<div class='understanding-row'>"
-            "<span class='understanding-key'>Route</span>"
-            f"<span class='understanding-value'>{html.escape(route)}</span>"
-            "</div>"
-        )
-
-    meta = []
-    if confidence:
-        meta.append(f"<span class='understanding-chip'>Confidence {html.escape(confidence)}</span>")
-    if scope:
-        meta.append(f"<span class='understanding-chip'>Scope {html.escape(scope)}</span>")
-    if reason:
-        meta.append(f"<span class='understanding-reason'>{html.escape(reason)}</span>")
-
-    return f"""
-    <div class='understanding-card'>
-      <div class='understanding-head'>
-        <span class='understanding-check'>&#10003;</span>
-        <span class='understanding-title'>Understanding</span>
-      </div>
-      {''.join(rows)}
-      <div class='understanding-meta'>{''.join(meta)}</div>
-    </div>
-    """
-
 def format_status(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", text or "").strip()
     inner = cleaned.strip()
     lower = inner.lower()
     if not inner:
         return ""
-    if "subprocess pipe active" in lower or lower.startswith("[opened file:"):
+    if (
+        "subprocess pipe active" in lower
+        or lower.startswith("[opened file:")
+        or "activityevent(" in lower
+        or "projectsearchhandler" in lower
+        or lower.startswith("[developer activity]")
+        or "dispatch handler selected" in lower
+        or "routing through engine." in lower
+    ):
         return ""
     return f"<div class='status-chip'>{html.escape(inner)}</div>"
 
@@ -652,7 +559,7 @@ def _render_working_status_html(lines: list[str]) -> str:
         stripped = (raw or "").strip()
         if not stripped:
             continue
-        match = re.match(r"^\[(Process|Request|Prompt Staging)(?:\s+\+(\d+)s)?\]\s*(.*)$", stripped, re.I)
+        match = re.match(r"^\[(Process|Progress|Request|Prompt Staging)(?:\s+\+(\d+)s)?\]\s*(.*)$", stripped, re.I)
         if not match:
             continue
         kind = match.group(1).strip()
@@ -695,6 +602,78 @@ def _render_working_status_html(lines: list[str]) -> str:
     </div>
     """
 
+
+
+def _render_reasoning_approach_html(text: str) -> str:
+    lines = [line.strip() for line in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+
+    # Remove duplicate sentinel if the body begins with it.
+    if lines and lines[0].lower() == "reasoning approach":
+        lines = lines[1:]
+
+    sections: dict[str, list[str]] = {}
+    current = "Understanding"
+    for line in lines:
+        if line in {"Understanding", "Success looks like", "Approach", "Plan"}:
+            current = line
+            sections.setdefault(current, [])
+            continue
+        sections.setdefault(current, []).append(line)
+
+    understanding = " ".join(sections.get("Understanding") or [])
+    success = " ".join(sections.get("Success looks like") or [])
+    approach = " ".join(sections.get("Approach") or [])
+    plan_lines = sections.get("Plan") or []
+
+    plan_html = []
+    for row in plan_lines:
+        active = row.startswith("▶")
+        complete = row.startswith("✓")
+        clean = row.lstrip("▶✓□⬜ ").strip()
+        marker = "▶" if active else "✓" if complete else "□"
+        cls = "active" if active else "done" if complete else "pending"
+        plan_html.append(
+            f"<div class='reasoning-step {cls}'>"
+            f"<span class='reasoning-marker'>{html.escape(marker)}</span>"
+            f"<span>{html.escape(clean)}</span>"
+            "</div>"
+        )
+
+    success_html = (
+        "<div class='reasoning-section'>"
+        "<div class='reasoning-label'>Success looks like</div>"
+        f"<div class='reasoning-value'>{html.escape(success)}</div>"
+        "</div>"
+        if success else ""
+    )
+    approach_html = (
+        "<div class='reasoning-section'>"
+        "<div class='reasoning-label'>Approach</div>"
+        f"<div class='reasoning-value'>{html.escape(approach)}</div>"
+        "</div>"
+        if approach else ""
+    )
+    return f"""
+    <div class='reasoning-card'>
+      <div class='reasoning-head'>
+        <span class='reasoning-icon'>◆</span>
+        <span class='reasoning-title'>Reasoning Approach</span>
+      </div>
+      <div class='reasoning-section'>
+        <div class='reasoning-label'>Understanding</div>
+        <div class='reasoning-value primary'>{html.escape(understanding)}</div>
+      </div>
+      {success_html}
+      {approach_html}
+      <div class='reasoning-section'>
+        <div class='reasoning-label'>Plan</div>
+        <div class='reasoning-steps'>{''.join(plan_html)}</div>
+      </div>
+    </div>
+    """
 
 def format_message(owner: Any, header: str, content: str) -> str:
     header = (header or "").strip().rstrip(":")
@@ -756,7 +735,7 @@ def _split_thread(raw_text: str):
             header = stripped
             continue
         is_status_line = any(stripped.startswith(prefix) for prefix in STATUS_PREFIXES) or bool(
-            re.match(r"^\[(Process|Request|Prompt Staging)(?:\s+\+\d+s)?\]", stripped, re.I)
+            re.match(r"^\[(Process|Progress|Request|Prompt Staging)(?:\s+\+\d+s)?\]", stripped, re.I)
         )
         if is_status_line:
             flush_message()
@@ -783,49 +762,35 @@ def render_thread(owner: Any, raw_text: str) -> str:
     for header, content in messages:
         if header == "STATUS":
             lines = content.splitlines()
-            understanding_lines: list[str] = []
+            reasoning_lines: list[str] = []
             ordinary_lines: list[str] = []
-            collecting_understanding = False
-
+            collecting_reasoning = False
             for line in lines:
                 stripped = line.strip()
-                if stripped.startswith("[Understanding]"):
-                    collecting_understanding = True
-                    remainder = stripped[len("[Understanding]"):].strip()
+                if stripped.startswith("[Reasoning Approach]"):
+                    collecting_reasoning = True
+                    remainder = stripped[len("[Reasoning Approach]"):].strip()
                     if remainder:
-                        understanding_lines.append(remainder)
+                        reasoning_lines.append(remainder)
                     continue
-                if collecting_understanding and stripped.startswith("[") and not stripped.startswith(
-                    ("[Resolved Reference]", "[Current Goal]", "[Route]")
-                ):
-                    collecting_understanding = False
-                if collecting_understanding:
-                    if stripped.startswith("[Resolved Reference]"):
-                        understanding_lines.append(
-                            "Resolved Reference: " + stripped[len("[Resolved Reference]"):].strip()
-                        )
-                    elif stripped.startswith("[Current Goal]"):
-                        understanding_lines.append(
-                            "Current Goal: " + stripped[len("[Current Goal]"):].strip()
-                        )
-                    elif stripped.startswith("[Route]"):
-                        understanding_lines.append(
-                            "Route: " + stripped[len("[Route]"):].strip()
-                        )
-                    else:
-                        understanding_lines.append(stripped)
+                if collecting_reasoning and stripped.startswith("["):
+                    collecting_reasoning = False
+                if collecting_reasoning:
+                    reasoning_lines.append(line)
                 else:
                     ordinary_lines.append(line)
 
-            understanding_card = _render_understanding_card_html("\n".join(understanding_lines))
-            if understanding_card:
-                html_parts.append(understanding_card)
+            reasoning_card = _render_reasoning_approach_html(
+                "\n".join(reasoning_lines)
+            )
+            if reasoning_card:
+                html_parts.append(reasoning_card)
 
             work_card = _render_working_status_html(ordinary_lines)
             if work_card:
                 html_parts.append(work_card)
             for line in ordinary_lines:
-                if re.match(r"^\[(Process|Request|Prompt Staging)(?:\s+\+\d+s)?\]", line.strip(), re.I):
+                if re.match(r"^\[(Process|Progress|Request|Prompt Staging)(?:\s+\+\d+s)?\]", line.strip(), re.I):
                     continue
                 block = format_status(line)
                 if block:
@@ -842,7 +807,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
         font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
         font-size: 14px;
         line-height: 1.62;
-        color: #ecfff3;
+        color: #effff4;
         background-color: #080b10;
         margin: 0;
         padding: 24px 32px 42px 32px;
@@ -883,13 +848,13 @@ def render_thread(owner: Any, raw_text: str) -> str:
         margin: 20px 0 30px 0;
       }}
       .assistant-head {{
-        color: #b9e7c8;
+        color: #9ca3af;
         font-size: 11px;
         font-weight: 600;
         margin-bottom: 9px;
       }}
       .assistant-body {{
-        color: #ecfff3;
+        color: #e5e7eb;
       }}
       .copy-link {{
         float: right;
@@ -912,12 +877,12 @@ def render_thread(owner: Any, raw_text: str) -> str:
         border-bottom: 1px solid #26303b;
         border-top-left-radius: 10px;
         border-top-right-radius: 10px;
-        color: #b9e7c8;
+        color: #9ca3af;
         font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
         font-size: 11px;
         padding: 7px 11px;
       }}
-      .code-lang {{ font-weight: 700; color: #ecfff3; }}
+      .code-lang {{ font-weight: 700; color: #e5e7eb; }}
       .code-pre {{
         margin: 0;
         padding: 14px;
@@ -929,9 +894,9 @@ def render_thread(owner: Any, raw_text: str) -> str:
         background-color: #0d1117;
       }}
       .py-keyword {{ color: #ff7b72; font-weight: 700; }}
-      .py-comment {{ color: #9fd7b2; font-style: italic; }}
+      .py-comment {{ color: #a8dfb8; font-style: italic; }}
       .status-chip {{
-        color: #9fd7b2;
+        color: #a8dfb8;
         background-color: transparent;
         border-left: 2px solid #26303b;
         margin: 4px 0 8px 0;
@@ -939,99 +904,90 @@ def render_thread(owner: Any, raw_text: str) -> str:
         font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
         font-size: 11px;
       }}
-      .understanding-card {{
+      .reasoning-card {{
         max-width: 980px;
-        margin: 14px 0 18px 0;
-        padding: 14px 16px;
-        border: 1px solid #2f7c47;
-        border-left: 3px solid #5bd000;
+        margin: 14px 0 22px 0;
+        padding: 15px 17px;
+        border: 1px solid #2d7142;
+        border-left: 4px solid #5bd000;
         border-radius: 10px;
-        background-color: #061109;
-        color: #ecfff3;
+        background-color: #061009;
+        color: #effff4;
       }}
-      .understanding-head {{
+      .reasoning-head {{
         display: flex;
         align-items: center;
         gap: 8px;
+        padding-bottom: 9px;
         margin-bottom: 10px;
+        border-bottom: 1px solid #183721;
       }}
-      .understanding-check {{
+      .reasoning-icon {{
         color: #5bd000;
-        font-weight: 800;
-        font-size: 15px;
+        font-size: 12px;
       }}
-      .understanding-title {{
-        color: #c8f7d6;
+      .reasoning-title {{
+        color: #c9f8d7;
         font-size: 12px;
         font-weight: 750;
         text-transform: uppercase;
         letter-spacing: 0.8px;
       }}
-      .understanding-main {{
-        border-bottom: 1px solid #17341f;
-        padding-bottom: 10px;
-        margin-bottom: 8px;
+      .reasoning-section {{
+        margin: 8px 0 10px 0;
       }}
-      .understanding-label {{
-        color: #86c99d;
+      .reasoning-label {{
+        color: #8fd5a5;
         font-size: 10px;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.7px;
-        margin-bottom: 4px;
+        letter-spacing: 0.65px;
+        margin-bottom: 3px;
       }}
-      .understanding-request {{
-        color: #f0fff5;
-        font-size: 14px;
-        font-weight: 600;
+      .reasoning-value {{
+        color: #dff7e7;
+        font-size: 12px;
         line-height: 1.45;
       }}
-      .understanding-row {{
+      .reasoning-value.primary {{
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 600;
+      }}
+      .reasoning-steps {{
         display: flex;
-        gap: 12px;
-        padding: 4px 0;
+        flex-direction: column;
+        gap: 5px;
+      }}
+      .reasoning-step {{
+        display: flex;
+        gap: 9px;
+        color: #b9e8c7;
         font-size: 12px;
       }}
-      .understanding-key {{
-        min-width: 112px;
-        color: #86c99d;
-        font-weight: 650;
-      }}
-      .understanding-value {{
-        color: #dff7e7;
-      }}
-      .current-goal-row .understanding-value {{
+      .reasoning-step.active {{
         color: #ffffff;
         font-weight: 650;
       }}
-      .understanding-meta {{
-        margin-top: 9px;
-        display: flex;
-        gap: 7px;
-        flex-wrap: wrap;
+      .reasoning-step.done {{
+        color: #9fdeb3;
       }}
-      .understanding-chip {{
-        display: inline-block;
-        border: 1px solid #2f7c47;
-        border-radius: 10px;
-        background-color: #0a1b0e;
-        color: #bfeecb;
-        font-size: 10px;
-        padding: 2px 7px;
+      .reasoning-step.pending {{
+        color: #8eb89b;
       }}
-      .understanding-reason {{
-        display: inline-block;
-        color: #9fd7b2;
-        font-size: 10.5px;
-        padding: 2px 0;
+      .reasoning-marker {{
+        min-width: 14px;
+        color: #5bd000;
+        font-weight: 800;
       }}
       .work-card {{
         max-width: 980px;
         margin: 14px 0 22px 0;
         padding: 13px 15px;
         border: 1px solid #26303b;
-        border-left: 3px solid #1e9bff;
+        border-left: 3px solid #5bd000;
         border-radius: 10px;
-        background-color: #0b1118;
+        background-color: #07110a;
       }}
       .work-head {{
         display: flex;
@@ -1042,12 +998,12 @@ def render_thread(owner: Any, raw_text: str) -> str:
         margin-bottom: 8px;
       }}
       .work-title {{
-        color: #dff7e7;
+        color: #c9f8d7;
         font-size: 12px;
         font-weight: 650;
       }}
       .work-current {{
-        color: #9fd7b2;
+        color: #ffffff;
         font-size: 12px;
       }}
       .work-steps {{
@@ -1059,11 +1015,11 @@ def render_thread(owner: Any, raw_text: str) -> str:
         display: flex;
         align-items: baseline;
         gap: 8px;
-        color: #b9e7c8;
+        color: #9ca3af;
         font-size: 12px;
       }}
       .work-step.active {{
-        color: #ecfff3;
+        color: #e5e7eb;
       }}
       .work-dot {{
         min-width: 22px;
@@ -1124,7 +1080,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .plan-step-raw {{
         padding-left: 92px;
-        color: #9fd7b2;
+        color: #a8dfb8;
         font-size: 11px;
         font-family: 'Cascadia Mono', Consolas, monospace;
       }}
@@ -1156,7 +1112,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .badge-pending {{
         background-color: #21262d;
-        color: #9fd7b2;
+        color: #a8dfb8;
         border: 1px solid #30363d;
       }}
       .badge-info {{
@@ -1312,7 +1268,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .rz-success {{ color: #4ade80; }}
       .rz-constraint {{ color: #f59e0b; font-size: 8px; }}
-      .rz-unknown {{ color: #9fd7b2; }}
+      .rz-unknown {{ color: #a8dfb8; }}
       .rz-value {{ color: #e2e8f0; }}
       .rz-dim {{ color: #4a5568; font-style: italic; font-size: 12px; }}
       /* Investigation */

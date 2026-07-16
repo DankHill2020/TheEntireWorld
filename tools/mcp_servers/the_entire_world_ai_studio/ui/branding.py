@@ -6,7 +6,7 @@ def application_stylesheet() -> str:
             /* Main Application Background and Text */
             QWidget {
                 background-color: #000102;
-                color: #e9fff4;
+                color: #effff4;
                 font-family: "Segoe UI", "Inter", sans-serif;
                 font-size: 12px;
             }
@@ -14,10 +14,19 @@ def application_stylesheet() -> str:
             /* Text Editors, Lists, Dropdowns */
             QTextEdit, QTextBrowser, QPlainTextEdit, QLineEdit, QListWidget, QComboBox, QTableWidget, QTreeWidget {
                 background-color: #000203;
-                color: #e9fff4;
+                color: #effff4;
                 border: 1px solid #12324a;
                 border-radius: 6px;
                 padding: 4px;
+                selection-background-color: #5bd000;
+                selection-color: #041105;
+            }
+
+            /* Chat and progress readability */
+            QTextBrowser {
+                background-color: #060a08;
+                color: #effff4;
+                border: 1px solid #173d26;
                 selection-background-color: #5bd000;
                 selection-color: #041105;
             }
@@ -57,7 +66,7 @@ def application_stylesheet() -> str:
             }
             QComboBox QAbstractItemView {
                 background-color: #020304;
-                color: #e9fff4;
+                color: #effff4;
                 border: 1px solid #12324a;
                 selection-background-color: #5bd000;
                 selection-color: #041105;
@@ -66,7 +75,7 @@ def application_stylesheet() -> str:
             /* Buttons: dark logo-blue controls; green is reserved for status/health lights. */
             QPushButton, QToolButton {
                 background-color: #010304;
-                color: #e9fff4;
+                color: #effff4;
                 border: 1px solid #1e9bff;
                 border-radius: 6px;
                 padding: 6px 12px;
@@ -82,7 +91,7 @@ def application_stylesheet() -> str:
             QPushButton:pressed, QToolButton:pressed {
                 background-color: #05213a;
                 border: 1px solid #7bc8ff;
-                color: #e9fff4;
+                color: #effff4;
             }
 
             QPushButton:disabled, QToolButton:disabled {
@@ -213,9 +222,9 @@ def application_stylesheet() -> str:
                 background-color: #061321;
             }
             QTreeWidget::item:selected, QListWidget::item:selected {
-                background-color: #5bd000;
-                border-left: 2px solid #8cff2f;
-                color: #041105;
+                background-color: #062b40;
+                border-left: 2px solid #1e9bff;
+                color: #effff4;
                 font-weight: bold;
             }
             QTreeView::branch {
@@ -246,7 +255,7 @@ def application_stylesheet() -> str:
             /* Menu Bar & Menu Items */
             QMenuBar {
                 background-color: #000102;
-                color: #e9fff4;
+                color: #effff4;
                 border-bottom: 1px solid #12324a;
             }
             QMenuBar::item {
@@ -254,7 +263,7 @@ def application_stylesheet() -> str:
                 padding: 4px 10px;
                 margin: 2px 2px;
                 border-radius: 4px;
-                color: #e9fff4;
+                color: #effff4;
             }
             QMenuBar::item:selected {
                 background-color: #061321;
@@ -262,13 +271,13 @@ def application_stylesheet() -> str:
             }
             QMenuBar::item:pressed {
                 background-color: #05213a;
-                color: #e9fff4;
+                color: #effff4;
             }
 
             /* Clean Context Menus & Dropdowns */
             QMenu {
                 background-color: #000203;
-                color: #e9fff4;
+                color: #effff4;
                 border: 1px solid #1e9bff;
                 border-radius: 6px;
                 padding: 4px;
@@ -277,7 +286,7 @@ def application_stylesheet() -> str:
                 padding: 6px 24px 6px 20px;
                 border-radius: 4px;
                 background-color: transparent;
-                color: #e9fff4;
+                color: #effff4;
             }
             QMenu::item:selected {
                 background-color: #061321;
@@ -308,7 +317,7 @@ def application_stylesheet() -> str:
             /* Tooltips */
             QToolTip {
                 background-color: #020304;
-                color: #e9fff4;
+                color: #effff4;
                 border: 1px solid #1e9bff;
                 border-radius: 4px;
                 padding: 4px;

@@ -1268,15 +1268,27 @@ class MainWindowChatRuntimeMixin:
                 self.append(f"\n[Prestart failed: {role}] {error}\n")
 
     def set_live_process(self, text):
-        message = (text or "").strip()
-        if not message:
+        raw_message = (text or "").strip()
+        if not raw_message:
             return
+
+        try:
+            from services.reasoning_narration_service import narrate_progress_message
+            message = narrate_progress_message(
+                raw_message,
+                getattr(self, "_active_reasoning_narration", None),
+            )
+        except Exception:
+            message = raw_message
+
+        # Empty narration means internal plumbing. Keep it out of the normal
+        # thread while retaining it for diagnostics and developer activity.
+        if not message:
+            self._note_prompt_progress_event(raw_message)
+            return
+
         self._note_prompt_progress_event(message)
 
-        # This method may be called while prompt preparation is happening in a
-        # background thread. Route the actual UI update back to the Qt thread so
-        # the user sees progress immediately and we avoid unsafe cross-thread
-        # widget writes.
         try:
             app = QApplication.instance()
             if app is not None and QThread.currentThread() != app.thread():
@@ -1290,18 +1302,31 @@ class MainWindowChatRuntimeMixin:
         is_context_change = message.startswith("Context changed:")
         if not is_context_change and not getattr(self, "_live_work_started_at", None):
             self._live_work_started_at = now
-        self.set_card("service", "busy", message[:60])
+        self.set_card("service", "busy", message[:100])
         if hasattr(self, "live_process_label"):
             self.live_process_label.setText(f"Working: {message}")
         if (
-                message == self._last_live_process
-                and (now - self._last_live_process_at) < 1.5
+            message == self._last_live_process
+            and (now - self._last_live_process_at) < 1.5
         ):
             return
         self._last_live_process = message
         self._last_live_process_at = now
-        elapsed = 0 if is_context_change else max(0, int(now - float(getattr(self, "_live_work_started_at", now) or now)))
-        self.append(f"\n[Process +{elapsed}s] {message}\n")
+        elapsed = (
+            0
+            if is_context_change
+            else max(
+                0,
+                int(
+                    now
+                    - float(
+                        getattr(self, "_live_work_started_at", now)
+                        or now
+                    )
+                ),
+            )
+        )
+        self.append(f"\n[Progress +{elapsed}s] {message}\n")
 
 
     def show_activity_details_enabled(self) -> bool:
@@ -1368,26 +1393,45 @@ class MainWindowChatRuntimeMixin:
             self.append(f"\n[Diagnostics] Could not clear UI diagnostic report: {exc}\n")
 
     def handle_engine_activity(self, event):
-        """Render safe activity feed events from the Intelligence Engine.
+        """Narrate observable goals while keeping plumbing in developer mode."""
+        try:
+            from services.reasoning_narration_service import (
+                narrate_activity_event,
+                should_show_debug_event,
+            )
+            narrated = narrate_activity_event(
+                event,
+                getattr(self, "_active_reasoning_narration", None),
+            )
+        except Exception:
+            narrated = {
+                "message": "",
+                "internal": False,
+                "debug_text": str(event),
+            }
 
-        This intentionally shows observable activity only: tools checked, files
-        considered, functions/classes ranked, DCC context inspected, planned
-        patch targets, and clarification needs. It does not expose hidden
-        chain-of-thought.
-        """
+        message = str(narrated.get("message") or "").strip()
+        if message and hasattr(self, "set_live_process"):
+            self.set_live_process(message)
+
+        developer_mode = bool(
+            self.show_activity_details_enabled()
+            or getattr(self, "settings", {}).get("ui_diagnostic_mode", False)
+        )
         try:
-            compact = event.compact_text() if hasattr(event, "compact_text") else str(event)
+            show_debug = should_show_debug_event(
+                event,
+                developer_mode=developer_mode,
+            )
         except Exception:
-            compact = str(event)
-        if hasattr(self, "set_live_process"):
-            self.set_live_process(compact[:140])
-        if not self.show_activity_details_enabled():
+            show_debug = developer_mode
+
+        if not show_debug:
             return
-        try:
-            body = event.markdown() if hasattr(event, "markdown") else compact
-        except Exception:
-            body = compact
-        self.append(f"\n[Activity]\n{body}\n")
+
+        debug_text = str(narrated.get("debug_text") or "").strip()
+        if debug_text:
+            self.append(f"\n[Developer Activity]\n{debug_text}\n")
 
     def set_show_activity_details(self, enabled: bool):
         self.settings["show_activity_details"] = bool(enabled)
@@ -1958,169 +2002,34 @@ class MainWindowChatRuntimeMixin:
         except Exception:
             pass
 
-
-    def _visible_understanding_lines(self, decision) -> list[str]:
-        """Build a compact, user-facing interpretation summary."""
-        data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
-        understanding = dict(data.get("request_understanding") or {})
-        graph = dict(
-            data.get("goal_graph")
-            or data.get("task_graph")
-            or understanding.get("goal_graph")
-            or {}
-        )
-        goals = [
-            dict(goal)
-            for goal in (graph.get("goals") or graph.get("tasks") or understanding.get("tasks") or [])
-            if isinstance(goal, dict)
-        ]
-
-        primary_goal = str(
-            understanding.get("primary_goal")
-            or data.get("primary_goal")
-            or ""
-        ).strip()
-        if not primary_goal and goals:
-            primary_goal = str(
-                goals[-1].get("objective")
-                or goals[-1].get("title")
-                or ""
-            ).strip()
-        if not primary_goal:
-            primary_goal = str(
-                data.get("reason")
-                or data.get("intent_category")
-                or "Complete the requested task."
-            ).strip()
-
-        ready = [
-            goal for goal in goals
-            if str(goal.get("status") or "").lower() in {"ready", "pending", ""}
-            and not goal.get("depends_on")
-        ]
-        current_goal = ready[0] if ready else (goals[0] if goals else {})
-        current_text = str(
-            current_goal.get("objective")
-            or current_goal.get("title")
-            or ""
-        ).strip()
-
-        next_text = ""
-        if goals:
-            current_id = str(
-                current_goal.get("goal_id")
-                or current_goal.get("task_id")
-                or current_goal.get("id")
-                or ""
-            )
-            for goal in goals:
-                dependencies = list(goal.get("depends_on") or [])
-                if current_id and current_id in dependencies:
-                    next_text = str(
-                        goal.get("objective")
-                        or goal.get("title")
-                        or ""
-                    ).strip()
-                    break
-            if not next_text and len(goals) > 1:
-                next_text = str(
-                    goals[1].get("objective")
-                    or goals[1].get("title")
-                    or ""
-                ).strip()
-
-        reference_bits = []
-        container_path = str(
-            understanding.get("target_container_path")
-            or data.get("target_container_path")
-            or ""
-        ).strip()
-        container_query = str(
-            understanding.get("target_container_query")
-            or data.get("target_container_query")
-            or ""
-        ).strip()
-        reference_scope = str(
-            understanding.get("reference_scope")
-            or data.get("reference_scope")
-            or ""
-        ).strip()
-        if container_query and container_path:
-            reference_bits.append(f"“{container_query}” → {container_path}")
-        elif reference_scope == "conversation_reference" and container_query:
-            reference_bits.append(f"Conversation reference → {container_query}")
-
-        route = str(
-            data.get("route")
-            or understanding.get("primary_route")
-            or data.get("provider")
-            or ""
-        ).replace("_", " ").strip().title()
-        scope = str(
-            data.get("search_scope")
-            or understanding.get("context_source")
-            or understanding.get("reference_scope")
-            or data.get("execution_environment")
-            or ""
-        ).replace("_", " ").strip().title()
-        confidence_value = (
-            understanding.get("confidence")
-            if understanding.get("confidence") is not None
-            else data.get("confidence")
-        )
-        confidence = ""
-        try:
-            value = float(confidence_value)
-            if value <= 1.0:
-                value *= 100.0
-            confidence = f"{max(0.0, min(100.0, value)):.0f}%"
-        except Exception:
-            confidence = ""
-
-        reasons = list(understanding.get("reasons") or [])
-        reason = str(reasons[0] if reasons else data.get("reason") or "").strip()
-
-        lines = [f"Understood Request: {primary_goal}"]
-        if reference_bits:
-            lines.append(f"Resolved Reference: {reference_bits[0]}")
-        if current_text:
-            lines.append(f"Current Goal: {current_text}")
-        if next_text:
-            lines.append(f"Next: {next_text}")
-        if route:
-            lines.append(f"Route: {route}")
-        if confidence:
-            lines.append(f"Confidence: {confidence}")
-        if scope:
-            lines.append(f"Scope: {scope}")
-        if reason:
-            lines.append(f"Reason: {reason}")
-        return lines
-
     def _append_prompt_understanding(self, decision) -> None:
+        """Expose the interpreted problem and plan before work begins."""
+        self._append_visible_prompt_progress(decision)
+        if not self.show_activity_details_enabled():
+            return
         try:
-            lines = self._visible_understanding_lines(decision)
-            if lines:
-                self.append("\n[Understanding]\n" + "\n".join(lines) + "\n")
+            from services.engineering_reasoning_service import (
+                render_senior_prompt_analysis,
+            )
+
+            data = (
+                decision.to_dict()
+                if hasattr(decision, "to_dict")
+                else dict(decision or {})
+            )
+            analysis = data.get("senior_prompt_analysis") or {}
+            summary = render_senior_prompt_analysis(analysis)
+            if summary:
+                self.append(f"\n[Prompt Analysis]\n{summary}\n")
         except Exception:
             pass
 
-        if self.show_activity_details_enabled():
-            try:
-                from services.engineering_reasoning_service import render_senior_prompt_analysis
-
-                data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
-                analysis = data.get("senior_prompt_analysis") or {}
-                summary = render_senior_prompt_analysis(analysis)
-                if summary:
-                    self.append(f"\n[Prompt Analysis]\n{summary}\n")
-            except Exception:
-                pass
-
-        self._append_visible_prompt_progress(decision)
-
-    def _append_visible_prompt_progress(self, decision=None, text: str = "") -> None:
-        """Show the observable expert-stage plan for any prompt path."""
+    def _append_visible_prompt_progress(
+        self,
+        decision=None,
+        text: str = "",
+    ) -> None:
+        """Show the interpreted outcome and high-level reasoning approach."""
         try:
             from services.prompt_progress_service import (
                 build_prompt_progress_plan,
@@ -2128,33 +2037,31 @@ class MainWindowChatRuntimeMixin:
                 render_prompt_progress_plan,
             )
 
-            data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
-            plan = data.get("visible_progress") or build_prompt_progress_plan(text, data)
-            compact = render_prompt_progress_plan(plan, max_stages=4)
+            data = (
+                decision.to_dict()
+                if hasattr(decision, "to_dict")
+                else dict(decision or {})
+            )
+            prompt_text = (
+                text
+                or data.get("user_text")
+                or data.get("prompt_preview")
+                or getattr(self, "last_user_prompt", "")
+            )
+            plan = (
+                data.get("visible_progress")
+                or build_prompt_progress_plan(prompt_text, data)
+            )
+            narration = dict(plan.get("reasoning_narration") or {})
+            self._active_reasoning_narration = narration
+            compact = render_prompt_progress_plan(plan, max_stages=6)
             if hasattr(self, "set_live_process"):
-                status = first_progress_status(plan)
-                try:
-                    stages = list(plan.get("stages") or [])
-                    active_stage = next(
-                        (
-                            stage for stage in stages
-                            if str(stage.get("status") or "").lower()
-                            in {"ready", "active", "running"}
-                        ),
-                        stages[0] if stages else {},
-                    )
-                    contextual = str(
-                        active_stage.get("detail")
-                        or active_stage.get("title")
-                        or status
-                    ).strip()
-                    self.set_live_process(contextual[:140] or status)
-                except Exception:
-                    self.set_live_process(status)
-            if compact and self.show_activity_details_enabled():
-                self.append(f"\n[Visible Work]\n{compact}\n")
+                self.set_live_process(first_progress_status(plan))
+            if compact:
+                self.append(f"\n[Reasoning Approach]\n{compact}\n")
         except Exception:
             pass
+
 
     def start_intelligence_engine_request(self, text: str, decision=None) -> None:
         """Start deterministic engine-provider work in a background worker."""
@@ -2202,37 +2109,11 @@ class MainWindowChatRuntimeMixin:
                 pass
 
     def _dispatch_prompt_route_from_chat(self, text: str, decision) -> bool:
-        """Dispatch only routes that genuinely require live host preparation.
-
-        Host-related project searches and code explanations must continue through
-        the project/LLM paths instead of opening a DCC MCPHost session.
-        """
+        """Dispatch foreground routes without chat owning host-specific execution."""
         if not decision:
             return False
-
-        try:
-            from services.prompt_route_service import (
-                decision_is_project_only,
-                decision_requires_live_dcc,
-            )
-        except Exception:
-            decision_is_project_only = lambda _decision: False
-            decision_requires_live_dcc = lambda _decision: bool(
-                getattr(_decision, "requires_dcc_connection", False)
-            )
-
-        if decision_is_project_only(decision):
-            return False
-        if not decision_requires_live_dcc(decision):
-            return False
-
         execution_route = getattr(decision, "execution_route", "") or ""
-        if execution_route not in {
-            "dcc.execution_pipeline",
-            "dcc.prototype_pipeline",
-            "dcc.scene_query",
-            "unreal.capability_pipeline",
-        }:
+        if execution_route not in {"dcc.execution_pipeline", "dcc.prototype_pipeline", "unreal.capability_pipeline"}:
             return False
 
         # Engineering Reasoning Phase
@@ -3380,45 +3261,6 @@ class MainWindowChatRuntimeMixin:
 
         threading.Thread(target=run_worker, daemon=True).start()
 
-
-    def _apply_goal_aware_session_guard(self, route, prompt_route_decision):
-        """Prevent a host hint from selecting the DCC model/session by itself."""
-        if route is None or prompt_route_decision is None:
-            return route
-
-        try:
-            from dataclasses import replace
-            from services.prompt_route_service import (
-                decision_is_project_only,
-                decision_requires_live_dcc,
-            )
-
-            if (
-                getattr(route, "session_role", "") == "dcc"
-                and (
-                    decision_is_project_only(prompt_route_decision)
-                    or not decision_requires_live_dcc(prompt_route_decision)
-                )
-            ):
-                return replace(
-                    route,
-                    session_role="plan",
-                    task_role="plan",
-                    reason=(
-                        "Goal-aware routing kept this on the planning/project path; "
-                        "the DCC name is context only and no live host operation is required."
-                    ),
-                )
-        except Exception as exc:
-            try:
-                self._log_ui_diagnostic(
-                    "goal_aware_session_guard_failed",
-                    error=str(exc),
-                )
-            except Exception:
-                pass
-        return route
-
     def send_message(self):
         send_started = time.perf_counter()
         self._live_work_started_at = time.time()
@@ -3599,10 +3441,6 @@ class MainWindowChatRuntimeMixin:
             deep_route_scope=self.settings.get("deep_route_scope", "engine_complex_only"),
             deep_code_complexity_threshold=int(self.settings.get("deep_code_complexity_threshold", 7) or 7),
             get_model_for_role=self.mcphost_manager.get_model_for_role,
-        )
-        route = self._apply_goal_aware_session_guard(
-            route,
-            prompt_route_decision,
         )
         try:
             decision_data = prompt_route_decision.to_dict() if hasattr(prompt_route_decision, "to_dict") else dict(prompt_route_decision or {})

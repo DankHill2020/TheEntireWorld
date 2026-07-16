@@ -48,6 +48,60 @@ class ContextProvider(Protocol):
         ...
 
 
+class ProblemFormulationContextProvider:
+    """Form the user's problem before project or live-host context is retrieved."""
+
+    name = "problem_formulation"
+
+    def collect(
+        self,
+        request: str,
+        *,
+        project_root: str | None = None,
+        max_chars: int = 6000,
+    ) -> list[ContextItem]:
+        try:
+            from services.problem_formulation_service import (
+                build_problem_formulation,
+                problem_formulation_context,
+            )
+            formulation = build_problem_formulation(
+                request,
+                {"project_root": project_root or ""},
+                context={},
+            )
+            return [
+                ContextItem(
+                    source=self.name,
+                    title="Problem Formulation",
+                    body=problem_formulation_context(
+                        request,
+                        {"project_root": project_root or ""},
+                        max_chars=max_chars,
+                    ),
+                    kind="problem_formulation",
+                    priority=120,
+                    metadata={
+                        "adequate": formulation.adequate,
+                        "can_plan": formulation.can_plan,
+                        "requires_clarification": formulation.requires_clarification,
+                        "confidence": formulation.confidence,
+                        "action_mode": formulation.action_mode,
+                    },
+                )
+            ]
+        except Exception as exc:
+            return [
+                ContextItem(
+                    source=self.name,
+                    title="Problem Formulation Failed",
+                    body=str(exc),
+                    kind="warning",
+                    priority=115,
+                )
+            ]
+
+
 class UnrealLiveContextProvider:
     """Collect live/cached Unreal facts through UnrealScanner and local intelligence."""
 
@@ -205,6 +259,7 @@ class CppWrapperContextProvider:
 class ContextProviderRegistry:
     def __init__(self, providers: list[ContextProvider] | None = None):
         self.providers = providers or [
+            ProblemFormulationContextProvider(),
             UnrealLiveContextProvider(),
             CodeIndexContextProvider(),
             CppWrapperContextProvider(),
