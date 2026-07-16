@@ -70,6 +70,7 @@ class ProjectSearchMode:
     UNUSED_IMPORTS = "unused_imports"
     DEPENDENTS = "dependents"
     TARGET_EDIT = "target_edit"
+    RESEARCH = "research"
     UNKNOWN = "usage"
 
 
@@ -1134,11 +1135,730 @@ def _answer_file_symbol_question(question: str, active_path: str | None = None) 
     return "\n".join(lines)
 
 
+
+
+def _parse_scoped_member_request(question: str):
+    try:
+        from services.prompt_reference_resolution_service import (
+            parse_scoped_member_query,
+        )
+        return parse_scoped_member_query(question)
+    except Exception:
+        return None
+
+
+def _resolve_scoped_container_file(
+    container_query: str,
+    *,
+    active_path: str | None = None,
+) -> dict | None:
+    query = str(container_query or "").strip()
+    if not query:
+        return None
+
+    explicit_hint = _file_hint_from_question(query, active_path)
+    if explicit_hint:
+        row = _matching_file_row(active_path, explicit_hint)
+        if row:
+            return row
+        resolved = _resolve_file_hint_path(active_path, explicit_hint)
+        if resolved:
+            return {
+                "path": str(resolved),
+                "rel_path": str(resolved),
+                "match_score": 1000,
+            }
+
+    terms = _function_location_terms(
+        f"what file has a function to {query}",
+        active_path=active_path,
+    )
+    rows = _function_location_rows(
+        terms,
+        active_path=active_path,
+        question=f"what file has a function to {query}",
+        limit=16,
+    )
+    if rows:
+        best = dict(rows[0])
+        return {
+            "path": best.get("path") or "",
+            "rel_path": best.get("rel_path") or best.get("path") or "",
+            "match_score": best.get("match_score") or 0,
+            "evidence_symbol": best.get("signature") or best.get("name") or "",
+        }
+
+    compact = re.sub(r"[^A-Za-z0-9_]+", "_", query.lower()).strip("_")
+    wanted_terms = [
+        term for term in compact.split("_")
+        if term and term not in {"the", "a", "an", "file", "module", "service"}
+    ]
+    candidates = _project_file_rows(active_path, limit=2000)
+    scored = []
+    for row in candidates:
+        rel = str(row.get("rel_path") or row.get("path") or "").replace("\\", "/")
+        name = Path(rel).stem.lower()
+        score = sum(20 for term in wanted_terms if term in name)
+        score += sum(4 for term in wanted_terms if term in rel.lower())
+        if score:
+            item = dict(row)
+            item["match_score"] = score
+            scored.append(item)
+    scored.sort(
+        key=lambda row: (
+            -int(row.get("match_score") or 0),
+            str(row.get("rel_path") or row.get("path") or "").lower(),
+        )
+    )
+    return scored[0] if scored else None
+
+
+def _member_behavior_terms(behavior: str) -> list[str]:
+    noise = {
+        "a", "an", "the", "to", "that", "which", "and", "or", "in", "from",
+        "function", "functions", "method", "methods", "class", "classes",
+        "helper", "helpers",
+    }
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", behavior or ""):
+        low = token.lower()
+        if len(low) < 3 or low in noise:
+            continue
+        if low.endswith("ing") and len(low) > 5:
+            low = low[:-3]
+            if low == "creat":
+                low = "create"
+        elif low.endswith("s") and len(low) > 4:
+            low = low[:-1]
+        if low not in terms:
+            terms.append(low)
+    return terms[:10]
+
+
+def _score_member_behavior(
+    row: dict,
+    *,
+    behavior: str,
+    member_type: str,
+) -> tuple[float, list[str]]:
+    name = str(row.get("name") or row.get("qualname") or "").lower()
+    signature = str(row.get("signature") or "").lower()
+    doc = str(row.get("docstring") or "").lower()
+    source = str(row.get("source") or "").lower()
+    kind = str(row.get("kind") or "").lower()
+    terms = _member_behavior_terms(behavior)
+
+    score = 0.0
+    evidence: list[str] = []
+
+    expected_kinds = {
+        "function": {"function"},
+        "method": {"method"},
+        "class": {"class"},
+        "helper": {"function", "method"},
+        "symbol": {"function", "method", "class"},
+    }.get(member_type, {"function", "method", "class"})
+    if kind in expected_kinds:
+        score += 4.0
+        evidence.append(f"kind:{kind}")
+    else:
+        score -= 8.0
+
+    action_terms = {
+        "create": ("create", "build", "make", "generate", "setup"),
+        "build": ("build", "create", "make", "setup"),
+        "find": ("find", "get", "resolve", "collect", "filter", "list"),
+        "detect": ("detect", "identify", "find", "classify", "filter"),
+        "resolve": ("resolve", "find", "get", "map"),
+        "handle": ("handle", "process", "dispatch", "route"),
+        "validate": ("validate", "verify", "check", "compile", "test"),
+    }
+    verb = terms[0] if terms else ""
+    alternatives = action_terms.get(verb, (verb,) if verb else ())
+
+    if any(name.startswith(prefix + "_") or f"_{prefix}_" in name for prefix in alternatives):
+        score += 12.0
+        evidence.append("action in symbol name")
+    elif any(prefix in name for prefix in alternatives):
+        score += 7.0
+        evidence.append("related action in symbol name")
+    elif any(prefix in doc for prefix in alternatives):
+        score += 3.0
+        evidence.append("action in docstring")
+
+    object_terms = [
+        term for term in terms
+        if term not in set(alternatives)
+    ]
+    for term in object_terms:
+        if term in name:
+            score += 10.0
+            evidence.append(f"name:{term}")
+        elif term in signature:
+            score += 4.0
+            evidence.append(f"signature:{term}")
+        elif term in doc:
+            score += 3.0
+            evidence.append(f"docstring:{term}")
+        elif term in source:
+            score += 1.0
+            evidence.append(f"source:{term}")
+
+    if verb in {"create", "build", "make", "generate"}:
+        if any(token in name for token in ("full", "from_mapping", "entire")):
+            score += 8.0
+            evidence.append("full-operation naming")
+        narrow_tokens = (
+            "space_switch", "surface", "finger", "eye", "brow",
+            "control", "ctrl", "driver",
+        )
+        if any(token in name for token in narrow_tokens) and not any(
+            token in object_terms for token in narrow_tokens
+        ):
+            score -= 7.0
+            evidence.append("narrow subsystem")
+
+    return round(score, 2), list(dict.fromkeys(evidence))
+
+
+def answer_scoped_member_behavior_question(
+    question: str,
+    active_path: str | None = None,
+) -> str | None:
+    request = _parse_scoped_member_request(question)
+    if request is None:
+        return None
+
+    if request.reference_kind == "conversation_reference":
+        return None
+
+    container = _resolve_scoped_container_file(
+        request.container_query,
+        active_path=active_path,
+    )
+    if not container:
+        return (
+            f"I could not resolve the project {request.container_type} described "
+            f"as `{request.container_query}`.\n\n"
+            "Verification: include an exact file name or refresh the project index."
+        )
+
+    file_path = str(container.get("path") or "")
+    rel_path = str(container.get("rel_path") or file_path)
+    rows = _symbol_rows_for_file(
+        file_path,
+        kinds=("function", "method", "class"),
+        limit=300,
+    )
+    if not rows:
+        rows = _active_file_symbol_rows(file_path, limit=300)
+
+    ranked: list[dict] = []
+    for raw in rows:
+        row = dict(raw)
+        score, evidence = _score_member_behavior(
+            row,
+            behavior=request.behavior_description,
+            member_type=request.member_type,
+        )
+        if score <= 0:
+            continue
+        row["scoped_behavior_score"] = score
+        row["scoped_behavior_evidence"] = evidence
+        ranked.append(row)
+
+    ranked.sort(
+        key=lambda row: (
+            -float(row.get("scoped_behavior_score") or 0.0),
+            int(row.get("start_line") or 0),
+        )
+    )
+
+    lines = [
+        f"Resolved container: `{rel_path}`",
+        "",
+        f"Best {request.member_type}s in that file that `{request.behavior_description}`:",
+    ]
+
+    if not ranked:
+        lines.append("- No member in the resolved file matched the requested behavior.")
+    else:
+        for index, row in enumerate(ranked[:8], start=1):
+            signature = (
+                row.get("signature")
+                or row.get("qualname")
+                or row.get("name")
+                or ""
+            )
+            line = row.get("start_line")
+            evidence = ", ".join(
+                row.get("scoped_behavior_evidence") or []
+            )
+            lines.append(
+                f"{index}. `{signature}`"
+                + (f" on line `{line}`" if line else "")
+            )
+            if evidence:
+                lines.append(f"   Evidence: {evidence}")
+
+    lines.extend(
+        [
+            "",
+            (
+                "Ranking was restricted to members inside the resolved file; "
+                "narrow subsystem helpers were demoted when the request described "
+                "a broader operation."
+            ),
+            "Source: local project knowledge index.",
+        ]
+    )
+    return "\n".join(lines)
+
+_CONDITIONAL_FALLBACK_RE = re.compile(
+    r"\b("
+    r"if (?:i|we|you) (?:have|has|find|found) none|"
+    r"if (?:there is|there are) none|"
+    r"if (?:it|one|that) (?:does not|doesn't|is not|isn't) exist|"
+    r"if (?:we|i|you) (?:do not|don't|dont) have (?:one|any|it)|"
+    r"otherwise|or else|if not"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_RESEARCH_BEHAVIOR_RE = re.compile(
+    r"\b("
+    r"detect|identify|recognize|recognise|find|filter|collect|resolve|"
+    r"locate|classify|determine|check whether|see if|discover"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_RESEARCH_ARTIFACT_RE = re.compile(
+    r"\b(function|functions|method|methods|helper|helpers|implementation|implementations)\b",
+    re.IGNORECASE,
+)
+
+
+def is_project_research_request(question: str) -> bool:
+    """Return True for search-analyze-decide-fallback project questions."""
+    lower = (question or "").lower()
+    if not _RESEARCH_ARTIFACT_RE.search(lower):
+        return False
+    if not _RESEARCH_BEHAVIOR_RE.search(lower):
+        return False
+    return bool(
+        _CONDITIONAL_FALLBACK_RE.search(lower)
+        or re.search(
+            r"\b(do i have|do we have|what functions do i have|"
+            r"which functions|is there a helper|are there helpers|"
+            r"how would i make|how would we make|how should i make|"
+            r"how should we make)\b",
+            lower,
+        )
+    )
+
+
+def _research_focus_terms(question: str) -> list[str]:
+    """Extract behavioral/domain terms while dropping request framing."""
+    noise = {
+        "what", "which", "where", "when", "why", "how", "could", "would", "should",
+        "please", "tell", "show", "give", "have", "has", "there", "none", "one",
+        "some", "any", "function", "functions", "method", "methods", "helper",
+        "helpers", "implementation", "implementations", "detect", "identify",
+        "recognize", "recognise", "find", "filter", "collect", "resolve", "locate",
+        "classify", "determine", "check", "whether", "make", "create", "build",
+        "write", "project", "code", "file", "files", "inside", "within", "from",
+        "that", "this", "with", "without", "then", "otherwise", "else", "if",
+        "not", "does", "do", "dont", "doesnt", "isnt", "are", "the", "and",
+        "for", "into", "our", "my", "your", "all",
+    }
+    terms: list[str] = []
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", question or ""):
+        low = token.lower()
+        if len(low) < 3 or low in noise:
+            continue
+        if low.endswith("s") and len(low) > 4:
+            low = low[:-1]
+        if low not in terms:
+            terms.append(low)
+
+    # Keep useful semantic expansions deterministic.
+    expansions = {
+        "twist": ["twist", "segment", "roll"],
+        "joint": ["joint", "bone", "chain", "hierarchy"],
+        "rig": ["rig", "rigging", "skeleton"],
+        "control": ["control", "ctrl"],
+    }
+    expanded: list[str] = []
+    for term in terms:
+        for value in expansions.get(term, [term]):
+            if value not in expanded:
+                expanded.append(value)
+    return expanded[:12]
+
+
+def _research_candidate_rows(
+    question: str,
+    active_path: str | None = None,
+    *,
+    limit: int = 16,
+) -> list[dict]:
+    """Return ranked symbols for behavioral research, not only name matches."""
+    try:
+        from knowledge.search import search_index_symbols
+    except Exception:
+        return []
+
+    terms = _research_focus_terms(question)
+    if not terms:
+        return []
+
+    scope = detect_search_scope(question)
+    roots = _active_project_roots(active_path)
+    rows = search_index_symbols(
+        terms,
+        limit=max(limit * 4, 40),
+        active_path=active_path,
+        class_bias=False,
+        scope=scope,
+        project_roots=roots,
+    )
+
+    action_words = ("find", "filter", "get", "resolve", "collect", "list", "detect", "identify", "classify")
+    creation_words = ("create", "setup", "build", "make", "show", "driver")
+    domain_terms = [term for term in terms if term not in {"find", "filter", "get", "resolve"}]
+
+    ranked: list[dict] = []
+    for raw in rows or []:
+        row = dict(raw)
+        if not _is_user_source_row(row):
+            continue
+        name = str(row.get("name") or row.get("qualname") or "").lower()
+        signature = str(row.get("signature") or "").lower()
+        doc = str(row.get("docstring") or "").lower()
+        source = str(row.get("source") or "").lower()
+        haystack = " ".join((name, signature, doc, source))
+
+        score = 0.0
+        evidence: list[str] = []
+
+        for term in domain_terms:
+            if term in name:
+                score += 8.0
+                evidence.append(f"name:{term}")
+            elif term in signature:
+                score += 4.0
+                evidence.append(f"signature:{term}")
+            elif term in doc:
+                score += 3.0
+                evidence.append(f"docstring:{term}")
+            elif term in source:
+                score += 1.5
+                evidence.append(f"source:{term}")
+
+        if any(word in name for word in action_words):
+            score += 6.0
+            evidence.append("resolver/filter naming")
+        if any(word in name for word in creation_words):
+            score -= 2.0
+            evidence.append("creation/setup naming")
+
+        # Behavioral evidence: likely traversal/filtering rather than setup.
+        behavior_patterns = {
+            "hierarchy traversal": r"\b(listRelatives|descendants?|children|parent|hierarchy|walk|traverse)\b",
+            "joint type check": r"\b(nodeType|objectType|type\s*==\s*['\"]joint|is.*joint)\b",
+            "name filtering": r"\b(re\.search|re\.match|endswith|startswith|split|lower\(\)|casefold\(\))\b",
+            "list filtering": r"\b(filter\(|\[.*for .* in .*\]|append\(|extend\()\b",
+            "mapping lookup": r"\b(mapping|joint_map|body_joint_map|face_joint_map|get\()\b",
+        }
+        for label, pattern in behavior_patterns.items():
+            if re.search(pattern, haystack, re.IGNORECASE):
+                score += 2.5
+                evidence.append(label)
+
+        row["research_score"] = round(score, 2)
+        row["research_evidence"] = list(dict.fromkeys(evidence))
+        if score > 0:
+            ranked.append(row)
+
+    ranked.sort(
+        key=lambda row: (
+            -float(row.get("research_score") or 0.0),
+            str(row.get("rel_path") or row.get("path") or "").lower(),
+            int(row.get("start_line") or 0),
+        )
+    )
+    return ranked[:max(1, int(limit or 16))]
+
+
+def _dedicated_behavior_match(
+    rows: list[dict],
+    focus_terms: list[str],
+) -> dict | None:
+    """Return a high-confidence dedicated detector/helper, if one exists."""
+    domain_terms = [
+        term for term in focus_terms
+        if term not in {"segment", "roll", "bone", "chain", "hierarchy", "rigging", "skeleton"}
+    ]
+    for row in rows:
+        name = str(row.get("name") or row.get("qualname") or "").lower()
+        score = float(row.get("research_score") or 0.0)
+        action_match = bool(
+            re.search(r"(?:^|_)(find|filter|get|resolve|collect|list|detect|identify|classify)(?:_|$)", name)
+        )
+        domain_match = any(term in name for term in domain_terms)
+        if action_match and domain_match and score >= 12.0:
+            return row
+    return None
+
+
+def _suggest_research_helper(
+    question: str,
+    active_path: str | None,
+    rows: list[dict],
+) -> str:
+    """Return a grounded helper design when no dedicated equivalent exists."""
+    focus = _research_focus_terms(question)
+    target_file = ""
+    if active_path:
+        target_file = str(active_path)
+    elif rows:
+        target_file = str(rows[0].get("rel_path") or rows[0].get("path") or "")
+
+    subject = " ".join(term for term in focus if term not in {"joint", "bone"}) or "target joints"
+    helper_name = "find_twist_joints" if "twist" in focus else "find_matching_joints"
+
+    lines = [
+        "Suggested helper design:",
+        f"- Name: `{helper_name}`",
+        f"- Likely target: `{target_file or 'the existing rigging utility module'}`",
+        "- Keep it read-only: return existing joint names and do not modify the Maya scene.",
+        "- Accept either a root joint or an explicit joint list.",
+        "- Traverse descendants only when a root is supplied.",
+        "- Filter to Maya joint nodes before applying naming or metadata rules.",
+        f"- Match {subject} using configurable tokens rather than one hard-coded spelling.",
+        "- Preserve hierarchy order and remove duplicates.",
+        "- Optionally expose strict and permissive matching modes.",
+        "",
+        "Implementation shape:",
+        "```python",
+        f"def {helper_name}(root_joint=None, joints=None, tokens=(\"twist\",), include_root=False):",
+        "    \"\"\"Return existing twist joints without mutating the scene.\"\"\"",
+        "    candidates = list(joints or [])",
+        "    if root_joint:",
+        "        descendants = cmds.listRelatives(root_joint, ad=True, type=\"joint\") or []",
+        "        candidates.extend(descendants)",
+        "        if include_root and cmds.nodeType(root_joint) == \"joint\":",
+        "            candidates.append(root_joint)",
+        "",
+        "    lowered_tokens = tuple(str(token).casefold() for token in tokens if token)",
+        "    result = []",
+        "    seen = set()",
+        "    for joint in reversed(candidates):",
+        "        short_name = joint.rsplit(\"|\", 1)[-1].casefold()",
+        "        if joint in seen or not any(token in short_name for token in lowered_tokens):",
+        "            continue",
+        "        seen.add(joint)",
+        "        result.append(joint)",
+        "    return result",
+        "```",
+        "",
+        "Before adding it, inspect the closest candidates below for project-specific naming, mapping, and hierarchy conventions.",
+    ]
+    return "\n".join(lines)
+
+
+def answer_project_research_question(
+    question: str,
+    active_path: str | None = None,
+) -> str | None:
+    """Answer semantic project research with existence analysis and fallback."""
+    if not is_project_research_request(question):
+        return None
+
+    rows = _research_candidate_rows(question, active_path=active_path, limit=12)
+    focus = _research_focus_terms(question)
+    dedicated = _dedicated_behavior_match(rows, focus)
+
+    if dedicated:
+        signature = (
+            dedicated.get("signature")
+            or dedicated.get("qualname")
+            or dedicated.get("name")
+            or ""
+        )
+        location = dedicated.get("rel_path") or dedicated.get("path") or ""
+        line = dedicated.get("start_line")
+        lines = [
+            "Yes. I found a likely dedicated helper for that behavior.",
+            "",
+            f"- `{signature}`",
+            f"- Location: `{location}`" + (f", line `{line}`" if line else ""),
+            "- Evidence: " + ", ".join(dedicated.get("research_evidence") or ["semantic symbol match"]),
+            "",
+            "Closest supporting candidates:",
+        ]
+    else:
+        lines = [
+            "I did not find a high-confidence dedicated helper that performs that detection behavior.",
+            "",
+            _suggest_research_helper(question, active_path, rows),
+            "",
+            "Closest supporting candidates:",
+        ]
+
+    if not rows:
+        lines.append("- No relevant indexed symbols were found.")
+    else:
+        for row in rows[:6]:
+            signature = row.get("signature") or row.get("qualname") or row.get("name") or ""
+            location = row.get("rel_path") or row.get("path") or ""
+            line = row.get("start_line")
+            evidence = ", ".join(row.get("research_evidence") or [])
+            lines.append(
+                f"- `{signature}` in `{location}`"
+                + (f":{line}" if line else "")
+                + (f" — {evidence}" if evidence else "")
+            )
+
+    lines.extend(
+        [
+            "",
+            "Conclusion basis: indexed names, signatures, docstrings, and source excerpts were compared for actual detector/filter behavior rather than only matching the domain word.",
+            "Source: local project knowledge index.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _semantic_contract_for_question(question: str) -> dict:
+    try:
+        from services.semantic_execution_contract_service import (
+            build_semantic_execution_contract,
+        )
+        return build_semantic_execution_contract(question).to_dict()
+    except Exception:
+        return {}
+
+
+def _answer_contract_file_location_question(
+    question: str,
+    active_path: str | None = None,
+) -> str | None:
+    contract = _semantic_contract_for_question(question)
+    if not contract:
+        return None
+    if str(contract.get("goal_type") or "") != "locate":
+        return None
+    if str(contract.get("deliverable_type") or "") != "file":
+        return None
+    if str(contract.get("relationship") or "") != "contains":
+        return None
+
+    behavior = str(
+        contract.get("behavior")
+        or contract.get("subject_text")
+        or ""
+    ).strip()
+    if not behavior:
+        return None
+
+    terms = _function_location_terms(
+        f"what file has a function to {behavior}",
+        active_path=active_path,
+    )
+    rows = _function_location_rows(
+        terms,
+        active_path=active_path,
+        question=question,
+        limit=12,
+    )
+    if not rows:
+        return (
+            f"I understood this as: `{contract.get('goal')}`\n\n"
+            "I could not find a project function with enough evidence to resolve "
+            "the containing file.\n\n"
+            "Verification: refresh the project index and retry."
+        )
+
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        path = str(row.get("rel_path") or row.get("path") or "")
+        grouped.setdefault(path, []).append(row)
+
+    ranked_files = sorted(
+        grouped.items(),
+        key=lambda item: (
+            -max(int(row.get("match_score") or 0) for row in item[1]),
+            item[0].lower(),
+        ),
+    )
+
+    best_path, best_rows = ranked_files[0]
+    lines = [
+        f"Best match: `{best_path}`",
+        "",
+        f"Understanding: {contract.get('goal')}",
+        "",
+        "Supporting functions:",
+    ]
+    for row in best_rows[:6]:
+        signature = (
+            row.get("signature")
+            or row.get("qualname")
+            or row.get("name")
+            or ""
+        )
+        line = row.get("start_line")
+        score = row.get("match_score")
+        lines.append(
+            f"- `{signature}`"
+            + (f" on line `{line}`" if line else "")
+            + (f" — evidence score `{score}`" if score is not None else "")
+        )
+
+    if len(ranked_files) > 1:
+        lines.extend(["", "Other plausible files:"])
+        for path, file_rows in ranked_files[1:4]:
+            score = max(int(row.get("match_score") or 0) for row in file_rows)
+            lines.append(f"- `{path}` — best evidence score `{score}`")
+
+    lines.extend(
+        [
+            "",
+            "Answer contract:",
+            "- deliverable: file path",
+            "- supporting evidence: contained function names",
+            "- relationship: file contains behavior implementation",
+            "",
+            "Source: local project knowledge index.",
+        ]
+    )
+    return "\n".join(lines)
+
 def answer_simple_project_index_question(question: str, active_path: str | None = None) -> str | None:
     """Answer small factual project-index questions without LLM involvement."""
     lower = (question or "").lower()
     if not is_project_scope_request(question):
         return None
+
+    contract_file_answer = _answer_contract_file_location_question(
+        question,
+        active_path=active_path,
+    )
+    if contract_file_answer:
+        return contract_file_answer
+
+    scoped_answer = answer_scoped_member_behavior_question(
+        question,
+        active_path=active_path,
+    )
+    if scoped_answer:
+        return scoped_answer
+
+    research_answer = answer_project_research_question(question, active_path=active_path)
+    if research_answer:
+        return research_answer
 
     equivalence_answer = _answer_file_symbol_equivalence_question(question, active_path=active_path)
     if equivalence_answer:
@@ -1289,6 +2009,11 @@ def detect_project_search_mode(question: str) -> str:
     """Classify a project-wide request into a retrieval mode."""
     lower = (question or "").lower()
 
+    if _parse_scoped_member_request(question) is not None:
+        return ProjectSearchMode.RESEARCH
+    if is_project_research_request(question):
+        return ProjectSearchMode.RESEARCH
+
     if re.search(r"\b(add|create|write|generate|implement|insert|modify|improve|refactor|fix|update)\b", lower) and (
         re.search(r"\b(project|repo|codebase|tool|function|class|method|module|file|existing|current|ui|pipeline|workflow|editor|service|bridge|where should|best place|which file)\b", lower)
         or re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(", question or "")
@@ -1364,6 +2089,22 @@ def gather_project_search_context(
     ]
 
     try:
+        if mode == ProjectSearchMode.RESEARCH:
+            answer = (
+                answer_scoped_member_behavior_question(
+                    question,
+                    active_path=active_path,
+                )
+                or answer_project_research_question(
+                    question,
+                    active_path=active_path,
+                )
+            )
+            return "\n".join(header) + (
+                answer
+                or "No semantic research evidence was found in the project index."
+            )
+
         if mode == ProjectSearchMode.TARGET_EDIT:
             from services.project_service import discover_edit_targets, format_edit_target_context
             discovery = discover_edit_targets(question, active_path=active_path, limit=min(limit, 10), scope=scope)
@@ -1534,6 +2275,8 @@ def should_deepen_project_search(question: str, first_answer: str | None = None)
     if not lower:
         return False
     if re.search(r"\b(every|all|full|complete|exhaustive|more|also|append|keep looking)\b", lower):
+        return True
+    if is_project_research_request(question):
         return True
     if re.search(r"\b(callers|usages|references|uses|used by|classes that|files that|where is|where are)\b", lower):
         return True

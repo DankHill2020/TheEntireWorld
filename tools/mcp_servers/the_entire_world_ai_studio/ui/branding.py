@@ -12,14 +12,14 @@ def application_stylesheet() -> str:
             }
 
             /* Text Editors, Lists, Dropdowns */
-            QTextEdit, QPlainTextEdit, QLineEdit, QListWidget, QComboBox, QTableWidget, QTreeWidget {
+            QTextEdit, QTextBrowser, QPlainTextEdit, QLineEdit, QListWidget, QComboBox, QTableWidget, QTreeWidget {
                 background-color: #000203;
                 color: #e9fff4;
                 border: 1px solid #12324a;
                 border-radius: 6px;
                 padding: 4px;
-                selection-background-color: #062b40;
-                selection-color: #e9fff4;
+                selection-background-color: #5bd000;
+                selection-color: #041105;
             }
 
             /* Active glowing focus effect on inputs */
@@ -59,8 +59,8 @@ def application_stylesheet() -> str:
                 background-color: #020304;
                 color: #e9fff4;
                 border: 1px solid #12324a;
-                selection-background-color: #062b40;
-                selection-color: #e9fff4;
+                selection-background-color: #5bd000;
+                selection-color: #041105;
             }
 
             /* Buttons: dark logo-blue controls; green is reserved for status/health lights. */
@@ -213,9 +213,9 @@ def application_stylesheet() -> str:
                 background-color: #061321;
             }
             QTreeWidget::item:selected, QListWidget::item:selected {
-                background-color: #062b40;
-                border-left: 2px solid #1e9bff;
-                color: #e9fff4;
+                background-color: #5bd000;
+                border-left: 2px solid #8cff2f;
+                color: #041105;
                 font-weight: bold;
             }
             QTreeView::branch {

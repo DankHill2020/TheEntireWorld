@@ -28,39 +28,113 @@ def filter_tree_items(tree, text: str) -> None:
 
 
 def load_lazy_roots(tree, roots: list[str], style) -> None:
-    tree.clear()
-    folder_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
-    for root_path in roots:
-        root_p = Path(root_path)
-        root_item = QTreeWidgetItem([root_p.name or str(root_p), str(root_p)])
-        root_item.setIcon(0, folder_icon)
-        root_item.setData(0, Qt.UserRole, "folder")
-        tree.addTopLevelItem(root_item)
-        if root_p.exists():
+    """Create root rows without touching the filesystem on the UI thread."""
+    tree.setUpdatesEnabled(False)
+    try:
+        tree.clear()
+        folder_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
+        root_items = []
+        for root_path in roots:
+            root_p = Path(root_path)
+            root_item = QTreeWidgetItem(
+                [root_p.name or str(root_p), str(root_p)]
+            )
+            root_item.setIcon(0, folder_icon)
+            root_item.setData(0, Qt.UserRole, "folder")
+            root_item.setData(0, Qt.UserRole + 1, "unloaded")
+            # Existence and directory enumeration are checked by the async
+            # expansion worker, not while showing the project panel.
             root_item.addChild(QTreeWidgetItem(["Loading...", ""]))
-        else:
-            root_item.addChild(QTreeWidgetItem(["[missing]", str(root_p)]))
+            root_items.append(root_item)
+
+        if root_items:
+            tree.addTopLevelItems(root_items)
+    finally:
+        tree.setUpdatesEnabled(True)
+        tree.viewport().update()
 
 
-def populate_folder_item(parent_item, folder_path: Path, style, is_supported_fn, folder_has_children_fn, list_entries_fn) -> None:
-    parent_item.takeChildren()
+
+def append_folder_entries(parent_item, entries, style) -> int:
+    """Append a batch of pre-enumerated entries with one Qt insertion."""
+    if not entries:
+        return 0
+
     folder_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
     file_icon = style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+    items = []
 
-    for name, path, kind in list_entries_fn(folder_path):
-        if kind == "error":
-            parent_item.addChild(QTreeWidgetItem([name, path]))
-            continue
+    for name, path, kind in entries:
         item = QTreeWidgetItem([name, path])
+        if kind == "error":
+            items.append(item)
+            continue
         if kind == "folder":
             item.setIcon(0, folder_icon)
             item.setData(0, Qt.UserRole, "folder")
-            if folder_has_children_fn(Path(path)):
-                item.addChild(QTreeWidgetItem(["Loading...", ""]))
+            item.setData(0, Qt.UserRole + 1, "unloaded")
+            item.addChild(QTreeWidgetItem(["Loading...", ""]))
         else:
             item.setIcon(0, file_icon)
             item.setData(0, Qt.UserRole, "file")
-        parent_item.addChild(item)
+        items.append(item)
+
+    parent_item.addChildren(items)
+    return len(items)
+
+def populate_folder_item(
+    parent_item,
+    folder_path: Path,
+    style,
+    is_supported_fn,
+    folder_has_children_fn,
+    list_entries_fn,
+) -> None:
+    """Populate one lazy folder with minimal filesystem and Qt overhead.
+
+    ``folder_has_children_fn`` and ``is_supported_fn`` remain in the signature
+    for compatibility with existing callers, but directory child probing is
+    intentionally deferred until expansion.
+    """
+
+    tree = parent_item.treeWidget()
+    if tree is not None:
+        tree.setUpdatesEnabled(False)
+
+    try:
+        parent_item.takeChildren()
+        folder_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
+        file_icon = style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+
+        items = []
+        for name, path, kind in list_entries_fn(folder_path):
+            item = QTreeWidgetItem([name, path])
+
+            if kind == "error":
+                items.append(item)
+                continue
+
+            if kind == "folder":
+                item.setIcon(0, folder_icon)
+                item.setData(0, Qt.UserRole, "folder")
+
+                # Do not scan every child directory just to decide whether to
+                # display an expansion arrow. Add a placeholder optimistically;
+                # an empty directory will simply resolve to no children when
+                # the user expands it.
+                item.addChild(QTreeWidgetItem(["Loading...", ""]))
+            else:
+                item.setIcon(0, file_icon)
+                item.setData(0, Qt.UserRole, "file")
+
+            items.append(item)
+
+        if items:
+            parent_item.addChildren(items)
+    finally:
+        if tree is not None:
+            tree.setUpdatesEnabled(True)
+            tree.viewport().update()
 
 
 def load_full_project_tree(tree, roots: list[str], style) -> None:

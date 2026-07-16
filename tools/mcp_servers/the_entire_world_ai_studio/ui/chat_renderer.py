@@ -38,6 +38,10 @@ STATUS_PREFIXES = (
     "[Knowledge]",
     "[Project]",
     "[Index",
+    "[Understanding]",
+    "[Resolved Reference]",
+    "[Current Goal]",
+    "[Route]",
 )
 
 
@@ -529,6 +533,106 @@ def render_content(owner: Any, content: str) -> str:
     return "\n".join(parts)
 
 
+
+def _render_understanding_card_html(text: str) -> str:
+    """Render compact, user-visible request interpretation metadata."""
+    lines = [
+        line.strip()
+        for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+        if line.strip()
+    ]
+    if not lines:
+        return ""
+
+    fields: dict[str, list[str]] = {}
+    current = ""
+    for line in lines:
+        match = re.match(
+            r"^(Understood Request|Interpreted Request|Resolved Reference|Route|Current Goal|Next|Confidence|Scope|Reason):\s*(.*)$",
+            line,
+            re.IGNORECASE,
+        )
+        if match:
+            current = match.group(1).strip().lower()
+            fields.setdefault(current, [])
+            if match.group(2).strip():
+                fields[current].append(match.group(2).strip())
+            continue
+        if current:
+            fields.setdefault(current, []).append(line)
+
+    understood = " ".join(
+        fields.get("understood request")
+        or fields.get("interpreted request")
+        or []
+    ).strip()
+    route = " ".join(fields.get("route") or []).strip()
+    goal = " ".join(fields.get("current goal") or []).strip()
+    next_step = " ".join(fields.get("next") or []).strip()
+    reference = " ".join(fields.get("resolved reference") or []).strip()
+    confidence = " ".join(fields.get("confidence") or []).strip()
+    scope = " ".join(fields.get("scope") or []).strip()
+    reason = " ".join(fields.get("reason") or []).strip()
+
+    if not any((understood, route, goal, next_step, reference, confidence, scope, reason)):
+        return ""
+
+    rows = []
+    if understood:
+        rows.append(
+            "<div class='understanding-main'>"
+            "<div class='understanding-label'>I believe you are asking</div>"
+            f"<div class='understanding-request'>{html.escape(understood)}</div>"
+            "</div>"
+        )
+    if reference:
+        rows.append(
+            "<div class='understanding-row'>"
+            "<span class='understanding-key'>Resolved reference</span>"
+            f"<span class='understanding-value'>{html.escape(reference)}</span>"
+            "</div>"
+        )
+    if goal:
+        rows.append(
+            "<div class='understanding-row current-goal-row'>"
+            "<span class='understanding-key'>Current goal</span>"
+            f"<span class='understanding-value'>{html.escape(goal)}</span>"
+            "</div>"
+        )
+    if next_step:
+        rows.append(
+            "<div class='understanding-row'>"
+            "<span class='understanding-key'>Next</span>"
+            f"<span class='understanding-value'>{html.escape(next_step)}</span>"
+            "</div>"
+        )
+    if route:
+        rows.append(
+            "<div class='understanding-row'>"
+            "<span class='understanding-key'>Route</span>"
+            f"<span class='understanding-value'>{html.escape(route)}</span>"
+            "</div>"
+        )
+
+    meta = []
+    if confidence:
+        meta.append(f"<span class='understanding-chip'>Confidence {html.escape(confidence)}</span>")
+    if scope:
+        meta.append(f"<span class='understanding-chip'>Scope {html.escape(scope)}</span>")
+    if reason:
+        meta.append(f"<span class='understanding-reason'>{html.escape(reason)}</span>")
+
+    return f"""
+    <div class='understanding-card'>
+      <div class='understanding-head'>
+        <span class='understanding-check'>&#10003;</span>
+        <span class='understanding-title'>Understanding</span>
+      </div>
+      {''.join(rows)}
+      <div class='understanding-meta'>{''.join(meta)}</div>
+    </div>
+    """
+
 def format_status(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", text or "").strip()
     inner = cleaned.strip()
@@ -679,10 +783,48 @@ def render_thread(owner: Any, raw_text: str) -> str:
     for header, content in messages:
         if header == "STATUS":
             lines = content.splitlines()
-            work_card = _render_working_status_html(lines)
+            understanding_lines: list[str] = []
+            ordinary_lines: list[str] = []
+            collecting_understanding = False
+
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("[Understanding]"):
+                    collecting_understanding = True
+                    remainder = stripped[len("[Understanding]"):].strip()
+                    if remainder:
+                        understanding_lines.append(remainder)
+                    continue
+                if collecting_understanding and stripped.startswith("[") and not stripped.startswith(
+                    ("[Resolved Reference]", "[Current Goal]", "[Route]")
+                ):
+                    collecting_understanding = False
+                if collecting_understanding:
+                    if stripped.startswith("[Resolved Reference]"):
+                        understanding_lines.append(
+                            "Resolved Reference: " + stripped[len("[Resolved Reference]"):].strip()
+                        )
+                    elif stripped.startswith("[Current Goal]"):
+                        understanding_lines.append(
+                            "Current Goal: " + stripped[len("[Current Goal]"):].strip()
+                        )
+                    elif stripped.startswith("[Route]"):
+                        understanding_lines.append(
+                            "Route: " + stripped[len("[Route]"):].strip()
+                        )
+                    else:
+                        understanding_lines.append(stripped)
+                else:
+                    ordinary_lines.append(line)
+
+            understanding_card = _render_understanding_card_html("\n".join(understanding_lines))
+            if understanding_card:
+                html_parts.append(understanding_card)
+
+            work_card = _render_working_status_html(ordinary_lines)
             if work_card:
                 html_parts.append(work_card)
-            for line in lines:
+            for line in ordinary_lines:
                 if re.match(r"^\[(Process|Request|Prompt Staging)(?:\s+\+\d+s)?\]", line.strip(), re.I):
                     continue
                 block = format_status(line)
@@ -700,7 +842,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
         font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
         font-size: 14px;
         line-height: 1.62;
-        color: #e5e7eb;
+        color: #ecfff3;
         background-color: #080b10;
         margin: 0;
         padding: 24px 32px 42px 32px;
@@ -741,17 +883,17 @@ def render_thread(owner: Any, raw_text: str) -> str:
         margin: 20px 0 30px 0;
       }}
       .assistant-head {{
-        color: #9ca3af;
+        color: #b9e7c8;
         font-size: 11px;
         font-weight: 600;
         margin-bottom: 9px;
       }}
       .assistant-body {{
-        color: #e5e7eb;
+        color: #ecfff3;
       }}
       .copy-link {{
         float: right;
-        color: #cbd5e1;
+        color: #dff7e7;
         text-decoration: none;
         font-size: 11px;
         border: 1px solid #303844;
@@ -770,12 +912,12 @@ def render_thread(owner: Any, raw_text: str) -> str:
         border-bottom: 1px solid #26303b;
         border-top-left-radius: 10px;
         border-top-right-radius: 10px;
-        color: #9ca3af;
+        color: #b9e7c8;
         font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
         font-size: 11px;
         padding: 7px 11px;
       }}
-      .code-lang {{ font-weight: 700; color: #e5e7eb; }}
+      .code-lang {{ font-weight: 700; color: #ecfff3; }}
       .code-pre {{
         margin: 0;
         padding: 14px;
@@ -783,19 +925,104 @@ def render_thread(owner: Any, raw_text: str) -> str:
         font-size: 12px;
         line-height: 1.5;
         white-space: normal;
-        color: #cbd5e1;
+        color: #dff7e7;
         background-color: #0d1117;
       }}
       .py-keyword {{ color: #ff7b72; font-weight: 700; }}
-      .py-comment {{ color: #8b949e; font-style: italic; }}
+      .py-comment {{ color: #9fd7b2; font-style: italic; }}
       .status-chip {{
-        color: #8b949e;
+        color: #9fd7b2;
         background-color: transparent;
         border-left: 2px solid #26303b;
         margin: 4px 0 8px 0;
         padding: 2px 0 2px 9px;
         font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
         font-size: 11px;
+      }}
+      .understanding-card {{
+        max-width: 980px;
+        margin: 14px 0 18px 0;
+        padding: 14px 16px;
+        border: 1px solid #2f7c47;
+        border-left: 3px solid #5bd000;
+        border-radius: 10px;
+        background-color: #061109;
+        color: #ecfff3;
+      }}
+      .understanding-head {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }}
+      .understanding-check {{
+        color: #5bd000;
+        font-weight: 800;
+        font-size: 15px;
+      }}
+      .understanding-title {{
+        color: #c8f7d6;
+        font-size: 12px;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+      }}
+      .understanding-main {{
+        border-bottom: 1px solid #17341f;
+        padding-bottom: 10px;
+        margin-bottom: 8px;
+      }}
+      .understanding-label {{
+        color: #86c99d;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        margin-bottom: 4px;
+      }}
+      .understanding-request {{
+        color: #f0fff5;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.45;
+      }}
+      .understanding-row {{
+        display: flex;
+        gap: 12px;
+        padding: 4px 0;
+        font-size: 12px;
+      }}
+      .understanding-key {{
+        min-width: 112px;
+        color: #86c99d;
+        font-weight: 650;
+      }}
+      .understanding-value {{
+        color: #dff7e7;
+      }}
+      .current-goal-row .understanding-value {{
+        color: #ffffff;
+        font-weight: 650;
+      }}
+      .understanding-meta {{
+        margin-top: 9px;
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+      }}
+      .understanding-chip {{
+        display: inline-block;
+        border: 1px solid #2f7c47;
+        border-radius: 10px;
+        background-color: #0a1b0e;
+        color: #bfeecb;
+        font-size: 10px;
+        padding: 2px 7px;
+      }}
+      .understanding-reason {{
+        display: inline-block;
+        color: #9fd7b2;
+        font-size: 10.5px;
+        padding: 2px 0;
       }}
       .work-card {{
         max-width: 980px;
@@ -815,12 +1042,12 @@ def render_thread(owner: Any, raw_text: str) -> str:
         margin-bottom: 8px;
       }}
       .work-title {{
-        color: #cbd5e1;
+        color: #dff7e7;
         font-size: 12px;
         font-weight: 650;
       }}
       .work-current {{
-        color: #8b949e;
+        color: #9fd7b2;
         font-size: 12px;
       }}
       .work-steps {{
@@ -832,11 +1059,11 @@ def render_thread(owner: Any, raw_text: str) -> str:
         display: flex;
         align-items: baseline;
         gap: 8px;
-        color: #9ca3af;
+        color: #b9e7c8;
         font-size: 12px;
       }}
       .work-step.active {{
-        color: #e5e7eb;
+        color: #ecfff3;
       }}
       .work-dot {{
         min-width: 22px;
@@ -897,7 +1124,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .plan-step-raw {{
         padding-left: 92px;
-        color: #8b949e;
+        color: #9fd7b2;
         font-size: 11px;
         font-family: 'Cascadia Mono', Consolas, monospace;
       }}
@@ -929,7 +1156,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .badge-pending {{
         background-color: #21262d;
-        color: #8b949e;
+        color: #9fd7b2;
         border: 1px solid #30363d;
       }}
       .badge-info {{
@@ -991,7 +1218,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
         text-transform: uppercase;
       }}
       .field-content {{
-        color: #cbd5e1;
+        color: #dff7e7;
       }}
       .fact-chip {{
         display: inline-block;
@@ -1085,7 +1312,7 @@ def render_thread(owner: Any, raw_text: str) -> str:
       }}
       .rz-success {{ color: #4ade80; }}
       .rz-constraint {{ color: #f59e0b; font-size: 8px; }}
-      .rz-unknown {{ color: #8b949e; }}
+      .rz-unknown {{ color: #9fd7b2; }}
       .rz-value {{ color: #e2e8f0; }}
       .rz-dim {{ color: #4a5568; font-style: italic; font-size: 12px; }}
       /* Investigation */

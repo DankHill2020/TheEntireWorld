@@ -1958,20 +1958,165 @@ class MainWindowChatRuntimeMixin:
         except Exception:
             pass
 
-    def _append_prompt_understanding(self, decision) -> None:
-        if not self.show_activity_details_enabled():
-            self._append_visible_prompt_progress(decision)
-            return
-        try:
-            from services.engineering_reasoning_service import render_senior_prompt_analysis
 
-            data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
-            analysis = data.get("senior_prompt_analysis") or {}
-            summary = render_senior_prompt_analysis(analysis)
-            if summary:
-                self.append(f"\n[Prompt Analysis]\n{summary}\n")
+    def _visible_understanding_lines(self, decision) -> list[str]:
+        """Build a compact, user-facing interpretation summary."""
+        data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+        understanding = dict(data.get("request_understanding") or {})
+        graph = dict(
+            data.get("goal_graph")
+            or data.get("task_graph")
+            or understanding.get("goal_graph")
+            or {}
+        )
+        goals = [
+            dict(goal)
+            for goal in (graph.get("goals") or graph.get("tasks") or understanding.get("tasks") or [])
+            if isinstance(goal, dict)
+        ]
+
+        primary_goal = str(
+            understanding.get("primary_goal")
+            or data.get("primary_goal")
+            or ""
+        ).strip()
+        if not primary_goal and goals:
+            primary_goal = str(
+                goals[-1].get("objective")
+                or goals[-1].get("title")
+                or ""
+            ).strip()
+        if not primary_goal:
+            primary_goal = str(
+                data.get("reason")
+                or data.get("intent_category")
+                or "Complete the requested task."
+            ).strip()
+
+        ready = [
+            goal for goal in goals
+            if str(goal.get("status") or "").lower() in {"ready", "pending", ""}
+            and not goal.get("depends_on")
+        ]
+        current_goal = ready[0] if ready else (goals[0] if goals else {})
+        current_text = str(
+            current_goal.get("objective")
+            or current_goal.get("title")
+            or ""
+        ).strip()
+
+        next_text = ""
+        if goals:
+            current_id = str(
+                current_goal.get("goal_id")
+                or current_goal.get("task_id")
+                or current_goal.get("id")
+                or ""
+            )
+            for goal in goals:
+                dependencies = list(goal.get("depends_on") or [])
+                if current_id and current_id in dependencies:
+                    next_text = str(
+                        goal.get("objective")
+                        or goal.get("title")
+                        or ""
+                    ).strip()
+                    break
+            if not next_text and len(goals) > 1:
+                next_text = str(
+                    goals[1].get("objective")
+                    or goals[1].get("title")
+                    or ""
+                ).strip()
+
+        reference_bits = []
+        container_path = str(
+            understanding.get("target_container_path")
+            or data.get("target_container_path")
+            or ""
+        ).strip()
+        container_query = str(
+            understanding.get("target_container_query")
+            or data.get("target_container_query")
+            or ""
+        ).strip()
+        reference_scope = str(
+            understanding.get("reference_scope")
+            or data.get("reference_scope")
+            or ""
+        ).strip()
+        if container_query and container_path:
+            reference_bits.append(f"“{container_query}” → {container_path}")
+        elif reference_scope == "conversation_reference" and container_query:
+            reference_bits.append(f"Conversation reference → {container_query}")
+
+        route = str(
+            data.get("route")
+            or understanding.get("primary_route")
+            or data.get("provider")
+            or ""
+        ).replace("_", " ").strip().title()
+        scope = str(
+            data.get("search_scope")
+            or understanding.get("context_source")
+            or understanding.get("reference_scope")
+            or data.get("execution_environment")
+            or ""
+        ).replace("_", " ").strip().title()
+        confidence_value = (
+            understanding.get("confidence")
+            if understanding.get("confidence") is not None
+            else data.get("confidence")
+        )
+        confidence = ""
+        try:
+            value = float(confidence_value)
+            if value <= 1.0:
+                value *= 100.0
+            confidence = f"{max(0.0, min(100.0, value)):.0f}%"
+        except Exception:
+            confidence = ""
+
+        reasons = list(understanding.get("reasons") or [])
+        reason = str(reasons[0] if reasons else data.get("reason") or "").strip()
+
+        lines = [f"Understood Request: {primary_goal}"]
+        if reference_bits:
+            lines.append(f"Resolved Reference: {reference_bits[0]}")
+        if current_text:
+            lines.append(f"Current Goal: {current_text}")
+        if next_text:
+            lines.append(f"Next: {next_text}")
+        if route:
+            lines.append(f"Route: {route}")
+        if confidence:
+            lines.append(f"Confidence: {confidence}")
+        if scope:
+            lines.append(f"Scope: {scope}")
+        if reason:
+            lines.append(f"Reason: {reason}")
+        return lines
+
+    def _append_prompt_understanding(self, decision) -> None:
+        try:
+            lines = self._visible_understanding_lines(decision)
+            if lines:
+                self.append("\n[Understanding]\n" + "\n".join(lines) + "\n")
         except Exception:
             pass
+
+        if self.show_activity_details_enabled():
+            try:
+                from services.engineering_reasoning_service import render_senior_prompt_analysis
+
+                data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+                analysis = data.get("senior_prompt_analysis") or {}
+                summary = render_senior_prompt_analysis(analysis)
+                if summary:
+                    self.append(f"\n[Prompt Analysis]\n{summary}\n")
+            except Exception:
+                pass
+
         self._append_visible_prompt_progress(decision)
 
     def _append_visible_prompt_progress(self, decision=None, text: str = "") -> None:
@@ -1987,7 +2132,25 @@ class MainWindowChatRuntimeMixin:
             plan = data.get("visible_progress") or build_prompt_progress_plan(text, data)
             compact = render_prompt_progress_plan(plan, max_stages=4)
             if hasattr(self, "set_live_process"):
-                self.set_live_process(first_progress_status(plan))
+                status = first_progress_status(plan)
+                try:
+                    stages = list(plan.get("stages") or [])
+                    active_stage = next(
+                        (
+                            stage for stage in stages
+                            if str(stage.get("status") or "").lower()
+                            in {"ready", "active", "running"}
+                        ),
+                        stages[0] if stages else {},
+                    )
+                    contextual = str(
+                        active_stage.get("detail")
+                        or active_stage.get("title")
+                        or status
+                    ).strip()
+                    self.set_live_process(contextual[:140] or status)
+                except Exception:
+                    self.set_live_process(status)
             if compact and self.show_activity_details_enabled():
                 self.append(f"\n[Visible Work]\n{compact}\n")
         except Exception:
@@ -2039,11 +2202,37 @@ class MainWindowChatRuntimeMixin:
                 pass
 
     def _dispatch_prompt_route_from_chat(self, text: str, decision) -> bool:
-        """Dispatch foreground routes without chat owning host-specific execution."""
+        """Dispatch only routes that genuinely require live host preparation.
+
+        Host-related project searches and code explanations must continue through
+        the project/LLM paths instead of opening a DCC MCPHost session.
+        """
         if not decision:
             return False
+
+        try:
+            from services.prompt_route_service import (
+                decision_is_project_only,
+                decision_requires_live_dcc,
+            )
+        except Exception:
+            decision_is_project_only = lambda _decision: False
+            decision_requires_live_dcc = lambda _decision: bool(
+                getattr(_decision, "requires_dcc_connection", False)
+            )
+
+        if decision_is_project_only(decision):
+            return False
+        if not decision_requires_live_dcc(decision):
+            return False
+
         execution_route = getattr(decision, "execution_route", "") or ""
-        if execution_route not in {"dcc.execution_pipeline", "dcc.prototype_pipeline", "unreal.capability_pipeline"}:
+        if execution_route not in {
+            "dcc.execution_pipeline",
+            "dcc.prototype_pipeline",
+            "dcc.scene_query",
+            "unreal.capability_pipeline",
+        }:
             return False
 
         # Engineering Reasoning Phase
@@ -3191,6 +3380,45 @@ class MainWindowChatRuntimeMixin:
 
         threading.Thread(target=run_worker, daemon=True).start()
 
+
+    def _apply_goal_aware_session_guard(self, route, prompt_route_decision):
+        """Prevent a host hint from selecting the DCC model/session by itself."""
+        if route is None or prompt_route_decision is None:
+            return route
+
+        try:
+            from dataclasses import replace
+            from services.prompt_route_service import (
+                decision_is_project_only,
+                decision_requires_live_dcc,
+            )
+
+            if (
+                getattr(route, "session_role", "") == "dcc"
+                and (
+                    decision_is_project_only(prompt_route_decision)
+                    or not decision_requires_live_dcc(prompt_route_decision)
+                )
+            ):
+                return replace(
+                    route,
+                    session_role="plan",
+                    task_role="plan",
+                    reason=(
+                        "Goal-aware routing kept this on the planning/project path; "
+                        "the DCC name is context only and no live host operation is required."
+                    ),
+                )
+        except Exception as exc:
+            try:
+                self._log_ui_diagnostic(
+                    "goal_aware_session_guard_failed",
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+        return route
+
     def send_message(self):
         send_started = time.perf_counter()
         self._live_work_started_at = time.time()
@@ -3371,6 +3599,10 @@ class MainWindowChatRuntimeMixin:
             deep_route_scope=self.settings.get("deep_route_scope", "engine_complex_only"),
             deep_code_complexity_threshold=int(self.settings.get("deep_code_complexity_threshold", 7) or 7),
             get_model_for_role=self.mcphost_manager.get_model_for_role,
+        )
+        route = self._apply_goal_aware_session_guard(
+            route,
+            prompt_route_decision,
         )
         try:
             decision_data = prompt_route_decision.to_dict() if hasattr(prompt_route_decision, "to_dict") else dict(prompt_route_decision or {})

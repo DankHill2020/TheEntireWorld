@@ -245,53 +245,345 @@ def _dedupe(items: list[str]) -> list[str]:
 from typing import Any
 
 
-def build_request_task_graph(prompt: str, *, host: str = "", allow_model: bool = False) -> dict[str, Any]:
-    """Build the canonical ordered task graph used by routing and execution.
+def build_request_task_graph(prompt: str, *, host: str = "") -> dict[str, Any]:
+    """Build the canonical achievable-goal graph used by routing and execution.
 
-    This delegates interpretation to prompt_intent_service so task splitting and
-    route selection cannot independently reinterpret the prompt. Model use is
-    opt-in because this function is also called from foreground routing.
+    PromptIntentService owns semantic interpretation and goal decomposition.
+    This service validates the graph, derives execution metadata, and preserves
+    backward-compatible ``tasks`` output for existing consumers.
     """
     from services.prompt_intent_service import understand_prompt_request
+    try:
+        from services.prompt_clause_service import split_prompt_clauses
+        clause_plan = split_prompt_clauses(prompt).to_dict()
+    except Exception:
+        clause_plan = {}
 
-    understanding = understand_prompt_request(prompt, host=host, allow_model=allow_model)
-    tasks = [task.to_dict() for task in understanding.tasks]
-    task_ids = {str(task.get("task_id") or "") for task in tasks}
+    understanding = understand_prompt_request(prompt, host=host)
+    goals = [task.to_dict() for task in understanding.tasks]
+
+    goal_ids = {
+        str(goal.get("task_id") or goal.get("goal_id") or "")
+        for goal in goals
+        if str(goal.get("task_id") or goal.get("goal_id") or "")
+    }
+
     invalid_dependencies: list[dict[str, str]] = []
-    for task in tasks:
-        for dependency in task.get("depends_on") or []:
-            if dependency not in task_ids:
-                invalid_dependencies.append({
-                    "task_id": str(task.get("task_id") or ""),
-                    "missing_dependency": str(dependency),
-                })
+    duplicate_goal_ids: list[str] = []
+    seen_goal_ids: set[str] = set()
+
+    for goal in goals:
+        goal_id = str(goal.get("task_id") or goal.get("goal_id") or "")
+        if goal_id in seen_goal_ids:
+            duplicate_goal_ids.append(goal_id)
+        elif goal_id:
+            seen_goal_ids.add(goal_id)
+
+        for dependency in goal.get("depends_on") or []:
+            dependency_id = str(dependency)
+            if dependency_id not in goal_ids:
+                invalid_dependencies.append(
+                    {
+                        "task_id": goal_id,
+                        "goal_id": goal_id,
+                        "missing_dependency": dependency_id,
+                    }
+                )
+
+    dependency_cycles = _find_dependency_cycles(goals)
+    ordered_goals = _topological_goal_order(goals)
+
+    terminal_goal_ids = [
+        str(goal.get("task_id") or goal.get("goal_id") or "")
+        for goal in goals
+        if bool(goal.get("terminal"))
+    ]
+    if not terminal_goal_ids and goals:
+        depended_on = {
+            str(dependency)
+            for goal in goals
+            for dependency in (goal.get("depends_on") or [])
+        }
+        terminal_goal_ids = [
+            str(goal.get("task_id") or goal.get("goal_id") or "")
+            for goal in goals
+            if str(goal.get("task_id") or goal.get("goal_id") or "") not in depended_on
+        ]
+
+    required_capabilities = _ordered_unique(
+        str(goal.get("capability") or "")
+        for goal in goals
+        if goal.get("capability")
+    )
+    required_inputs = _ordered_unique(
+        str(value)
+        for goal in goals
+        for value in (goal.get("required_inputs") or [])
+        if value
+    )
+    produced_outputs = _ordered_unique(
+        str(value)
+        for goal in goals
+        for value in (goal.get("produces") or [])
+        if value
+    )
+    approval_goal_ids = [
+        str(goal.get("task_id") or goal.get("goal_id") or "")
+        for goal in goals
+        if bool(goal.get("requires_confirmation"))
+    ]
+    reasoning_goal_ids = [
+        str(goal.get("task_id") or goal.get("goal_id") or "")
+        for goal in goals
+        if bool(goal.get("requires_reasoning"))
+    ]
+    mutation_goal_ids = [
+        str(goal.get("task_id") or goal.get("goal_id") or "")
+        for goal in goals
+        if not bool(goal.get("read_only", True))
+    ]
+
+    graph_valid = not invalid_dependencies and not duplicate_goal_ids and not dependency_cycles
+
     return {
-        "framework": "canonical_request_task_graph_v1",
+        "framework": "canonical_request_goal_graph_v3",
+        "compatibility_framework": "canonical_request_task_graph_v1",
+        "clause_framework": clause_plan.get("framework", ""),
+        "clauses": list(clause_plan.get("clauses") or []),
+        "clause_confidence": float(clause_plan.get("confidence") or 0.0),
+        "has_conditions": bool(clause_plan.get("has_conditions")),
+        "has_approval_gate": bool(clause_plan.get("has_approval_gate")),
+        "target_container_type": understanding.target_container_type,
+        "target_container_query": understanding.target_container_query,
+        "target_container_path": understanding.target_container_path,
+        "requested_member_type": understanding.requested_member_type,
+        "member_behavior": understanding.member_behavior,
+        "reference_scope": understanding.reference_scope,
+        "semantic_execution_contract": dict(
+            understanding.semantic_execution_contract or {}
+        ),
+        "semantic_plan_steps": list(
+            (understanding.semantic_execution_contract or {}).get(
+                "plan_steps"
+            )
+            or []
+        ),
+        "planning_rationale": str(
+            (understanding.semantic_execution_contract or {}).get(
+                "planning_rationale"
+            )
+            or ""
+        ),
         "goal": understanding.normalized_goal,
+        "primary_goal": understanding.primary_goal or understanding.normalized_goal,
+        "goal_type": understanding.goal_type,
         "primary_intent": understanding.primary_intent,
         "primary_route": understanding.primary_route,
-        "tasks": tasks,
+        "goals": goals,
+        "tasks": goals,
+        "ordered_goals": ordered_goals,
+        "terminal_goal_ids": terminal_goal_ids,
+        "required_capabilities": required_capabilities,
+        "required_inputs": required_inputs,
+        "produced_outputs": produced_outputs,
+        "approval_goal_ids": approval_goal_ids,
+        "reasoning_goal_ids": reasoning_goal_ids,
+        "mutation_goal_ids": mutation_goal_ids,
+        "requires_project_search": bool(understanding.requires_project_search),
+        "requires_graph": bool(understanding.requires_graph),
+        "requires_generation": bool(understanding.requires_generation),
+        "requires_validation": bool(understanding.requires_validation),
+        "requires_execution": bool(understanding.requires_execution),
+        "requires_clarification": bool(understanding.requires_clarification),
+        "requires_examples": bool(understanding.requires_examples),
+        "requires_reuse_search": bool(understanding.requires_reuse_search),
+        "estimated_steps": int(understanding.estimated_steps or len(goals)),
+        "estimated_complexity": sum(
+            max(1, int(goal.get("estimated_complexity") or 1))
+            for goal in goals
+        ),
         "constraints": list(understanding.constraints),
         "expected_outputs": list(understanding.expected_outputs),
         "stop_conditions": list(understanding.stop_conditions),
-        "valid": not invalid_dependencies,
+        "valid": graph_valid,
         "invalid_dependencies": invalid_dependencies,
+        "duplicate_goal_ids": duplicate_goal_ids,
+        "dependency_cycles": dependency_cycles,
         "confidence": understanding.confidence,
         "source": understanding.source,
+        "model_name": understanding.model_name,
     }
 
 
 def task_graph_route(task_graph: dict[str, Any]) -> str:
-    """Derive the route from task semantics, not isolated prompt keywords."""
-    tasks = list(task_graph.get("tasks") or [])
-    actions = {str(task.get("action") or "") for task in tasks}
-    capabilities = {str(task.get("capability") or "") for task in tasks}
-    if "modify_code" in actions or "project_edit" in capabilities:
+    """Derive the route from terminal intent and achievable-goal semantics.
+
+    Guidance and example-generation requests intentionally remain on the chat
+    path even when they include project search as a supporting goal.
+    """
+    goals = list(task_graph.get("goals") or task_graph.get("tasks") or [])
+    primary_route = str(task_graph.get("primary_route") or "chat")
+    goal_type = str(task_graph.get("goal_type") or "").lower()
+
+    actions = {str(goal.get("action") or "") for goal in goals}
+    capabilities = {str(goal.get("capability") or "") for goal in goals}
+    has_mutation = any(not bool(goal.get("read_only", True)) for goal in goals)
+
+    if goal_type in {"learn", "explain", "compare", "respond"}:
+        return "chat"
+
+    if has_mutation and (
+        "modify_code" in actions
+        or "project_edit" in capabilities
+        or goal_type == "modify"
+    ):
         return "target_discovery"
-    if "execute" in actions or "dcc_execution" in capabilities:
+
+    if "execute" in actions or "dcc_execution" in capabilities or goal_type == "execute":
         return "dcc_execute"
-    if "compose" in actions or "action_graph" in capabilities:
+
+    if (
+        "compose" in actions
+        or "action_graph" in capabilities
+        or "workflow_graph" in capabilities
+        or goal_type == "plan" and bool(task_graph.get("requires_graph"))
+    ):
         return "pipeline_graph"
-    if actions.intersection({"search", "inspect"}):
+
+    if primary_route == "chat" and bool(task_graph.get("requires_generation")):
+        return "chat"
+
+    if actions.intersection({"search", "inspect"}) or bool(task_graph.get("requires_project_search")):
         return "project_search"
-    return str(task_graph.get("primary_route") or "chat")
+
+    return primary_route
+
+
+def next_achievable_goals(
+    task_graph: dict[str, Any],
+    completed_goal_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return goals whose dependencies are satisfied and which are not complete."""
+    completed = {str(value) for value in (completed_goal_ids or [])}
+    goals = list(task_graph.get("ordered_goals") or task_graph.get("goals") or task_graph.get("tasks") or [])
+    ready: list[dict[str, Any]] = []
+
+    for goal in goals:
+        goal_id = str(goal.get("task_id") or goal.get("goal_id") or "")
+        if not goal_id or goal_id in completed:
+            continue
+        dependencies = {str(value) for value in (goal.get("depends_on") or [])}
+        if dependencies.issubset(completed):
+            ready.append(goal)
+
+    return ready
+
+
+def goal_graph_summary(task_graph: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact execution-facing summary of the goal graph."""
+    goals = list(task_graph.get("goals") or task_graph.get("tasks") or [])
+    return {
+        "framework": task_graph.get("framework", "canonical_request_goal_graph_v2"),
+        "primary_goal": task_graph.get("primary_goal") or task_graph.get("goal") or "",
+        "goal_type": task_graph.get("goal_type") or "",
+        "primary_route": task_graph.get("primary_route") or "",
+        "goal_count": len(goals),
+        "estimated_steps": int(task_graph.get("estimated_steps") or len(goals)),
+        "estimated_complexity": int(task_graph.get("estimated_complexity") or 0),
+        "valid": bool(task_graph.get("valid", True)),
+        "terminal_goal_ids": list(task_graph.get("terminal_goal_ids") or []),
+        "approval_goal_ids": list(task_graph.get("approval_goal_ids") or []),
+        "mutation_goal_ids": list(task_graph.get("mutation_goal_ids") or []),
+        "required_capabilities": list(task_graph.get("required_capabilities") or []),
+        "requires_project_search": bool(task_graph.get("requires_project_search")),
+        "requires_generation": bool(task_graph.get("requires_generation")),
+        "requires_validation": bool(task_graph.get("requires_validation")),
+        "requires_execution": bool(task_graph.get("requires_execution")),
+    }
+
+
+def _ordered_unique(values) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        item = str(value or "")
+        if item and item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def _goal_id(goal: dict[str, Any]) -> str:
+    return str(goal.get("task_id") or goal.get("goal_id") or "")
+
+
+def _find_dependency_cycles(goals: list[dict[str, Any]]) -> list[list[str]]:
+    graph = {
+        _goal_id(goal): [str(value) for value in (goal.get("depends_on") or [])]
+        for goal in goals
+        if _goal_id(goal)
+    }
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    stack: list[str] = []
+    cycles: list[list[str]] = []
+
+    def visit(node: str) -> None:
+        if node in visited:
+            return
+        if node in visiting:
+            try:
+                start = stack.index(node)
+            except ValueError:
+                start = 0
+            cycle = stack[start:] + [node]
+            if cycle not in cycles:
+                cycles.append(cycle)
+            return
+
+        visiting.add(node)
+        stack.append(node)
+        for dependency in graph.get(node, []):
+            if dependency in graph:
+                visit(dependency)
+        stack.pop()
+        visiting.remove(node)
+        visited.add(node)
+
+    for node in graph:
+        visit(node)
+
+    return cycles
+
+
+def _topological_goal_order(goals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id = {_goal_id(goal): goal for goal in goals if _goal_id(goal)}
+    ordered: list[dict[str, Any]] = []
+    remaining = list(goals)
+    resolved: set[str] = set()
+
+    while remaining:
+        progressed = False
+        next_remaining: list[dict[str, Any]] = []
+
+        for goal in remaining:
+            goal_id = _goal_id(goal)
+            dependencies = {
+                str(value)
+                for value in (goal.get("depends_on") or [])
+                if str(value) in by_id
+            }
+            if dependencies.issubset(resolved):
+                ordered.append(goal)
+                if goal_id:
+                    resolved.add(goal_id)
+                progressed = True
+            else:
+                next_remaining.append(goal)
+
+        if not progressed:
+            ordered.extend(next_remaining)
+            break
+        remaining = next_remaining
+
+    return ordered

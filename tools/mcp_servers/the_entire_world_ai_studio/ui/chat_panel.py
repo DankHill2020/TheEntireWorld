@@ -63,6 +63,16 @@ class ChatPanel(QWidget):
         self.thread.setOpenExternalLinks(False)
         self.thread.anchorClicked.connect(self._open_anchor)
         self.thread.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.thread.setStyleSheet(
+            "QTextBrowser {"
+            " background-color:#080b10;"
+            " color:#ecfff3;"
+            " border:1px solid #12324a;"
+            " border-radius:6px;"
+            " selection-background-color:#5bd000;"
+            " selection-color:#041105;"
+            "}"
+        )
         root.addWidget(self.thread, 1)
 
         self.attachment_strip = QScrollArea()
@@ -210,11 +220,11 @@ class ChatPanel(QWidget):
         self._scroll_bottom()
 
     def append_assistant_message(self, text: str) -> None:
-        self.thread.append(f"<p><b style='color:#7ddc9d'>ASSISTANT</b></p>{self._render_markdownish(text)}")
+        self.thread.append(f"<p><b style='color:#dff7e7'>ASSISTANT</b></p>{self._render_markdownish(text)}")
         self._scroll_bottom()
 
     def append_status(self, text: str) -> None:
-        self.thread.append(f"<p style='color:#8fd6a5'><i>{html.escape(text)}</i></p>")
+        self.thread.append(f"<p style='color:#bfeecb'><i>{html.escape(text)}</i></p>")
         self._scroll_bottom()
 
     def _attachments_html(self, files: Iterable[str], images: Iterable[str]) -> str:
@@ -227,7 +237,7 @@ class ChatPanel(QWidget):
         for file in files:
             p = Path(file)
             mime = mimetypes.guess_type(str(p))[0] or "file"
-            parts.append(f"<br><span style='color:#8fd6a5'>📄 {html.escape(p.name)} ({html.escape(mime)})</span>")
+            parts.append(f"<br><span style='color:#bfeecb'>📄 {html.escape(p.name)} ({html.escape(mime)})</span>")
         return "".join(parts)
 
     def _render_markdownish(self, text: str) -> str:
@@ -244,7 +254,7 @@ class ChatPanel(QWidget):
             code = html.escape(match.group(2) or "")
             html_parts.append(
                 "<div style='border:1px solid #00b866; background:#07110b; margin:8px 0;'>"
-                f"<div style='padding:4px 8px; color:#8fd6a5;'>Code • {lang}</div>"
+                f"<div style='padding:4px 8px; color:#bfeecb;'>Code • {lang}</div>"
                 f"<pre style='white-space:pre-wrap; margin:0; padding:8px;'>{code}</pre>"
                 "</div>"
             )

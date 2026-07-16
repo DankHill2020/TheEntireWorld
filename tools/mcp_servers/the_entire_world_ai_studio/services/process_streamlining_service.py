@@ -155,10 +155,35 @@ def _looks_repeatable(lower: str) -> bool:
 
 
 def _infer_route(lower: str) -> str:
-    if re.search(r"\b(maya|unreal|blender|houdini|unity|motionbuilder|substance)\b", lower):
+    """Infer an advisory route without confusing host domain with live context."""
+    code_subject = bool(
+        re.search(
+            r"\b(code|function|method|class|helper|implementation|definition|"
+            r"file|module|script|source|caller|usage|symbol|repo|project)\b",
+            lower,
+        )
+    )
+    live_dcc_subject = bool(
+        re.search(
+            r"\b(selected|selection|current scene|open scene|scene object|"
+            r"viewport|active asset|current level|loaded level|transform|"
+            r"joint position|move|rotate|scale|set key|keyframe)\b",
+            lower,
+        )
+    )
+    host_domain = bool(
+        re.search(
+            r"\b(maya|unreal|blender|houdini|unity|motionbuilder|substance)\b",
+            lower,
+        )
+    )
+
+    if code_subject:
+        return "project_code"
+    if host_domain and live_dcc_subject:
         return "dcc"
     if re.search(r"\b(github|git|slack|discord|email|gmail|confluence|jira|vcs)\b", lower):
         return "service_or_mcp"
-    if re.search(r"\b(code|function|class|file|repo|project)\b", lower):
+    if host_domain:
         return "project_code"
     return "general"

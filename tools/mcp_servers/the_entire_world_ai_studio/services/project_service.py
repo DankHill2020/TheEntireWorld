@@ -21,6 +21,10 @@ from models.constants import SKIP_DIRS
 from models.files import is_supported_code_file
 
 
+_FOLDER_ENTRY_CACHE: dict[str, tuple[float, int, list[tuple[str, str, str]]]] = {}
+_FOLDER_ENTRY_CACHE_TTL_SECONDS = 3.0
+
+
 def read_file(path: str) -> tuple[bool, str]:
     try:
         return True, Path(path).read_text(encoding="utf-8", errors="replace")
@@ -62,32 +66,102 @@ def make_file_writable(path: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def populate_folder_entries(folder_path: Path) -> list[tuple[str, str, str]]:
+def populate_folder_entries(
+    folder_path: Path,
+    *,
+    use_cache: bool = True,
+) -> list[tuple[str, str, str]]:
+    """List entries for lazy tree population using cached ``os.scandir`` data.
+
+    Returns ``(name, path, kind)`` tuples where kind is ``folder``, ``file``,
+    or ``error``. Directory metadata from ``DirEntry`` is reused so Windows
+    does not need repeated filesystem probes for each row.
     """
-    List folder entries for lazy tree population.
-    Returns list of (name, path, kind) where kind is 'folder' or 'file'.
-    """
-    entries = []
+
+    folder_path = Path(folder_path)
+    cache_key = str(folder_path.resolve()) if folder_path.exists() else str(folder_path)
+    now = time.monotonic()
+
     try:
-        children = sorted(folder_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-    except Exception as e:
+        stat_result = folder_path.stat()
+        directory_mtime_ns = int(getattr(stat_result, "st_mtime_ns", 0))
+    except Exception as exc:
         return [("[error]", str(folder_path), "error")]
+
+    if use_cache:
+        cached = _FOLDER_ENTRY_CACHE.get(cache_key)
+        if cached:
+            cached_at, cached_mtime_ns, cached_entries = cached
+            if (
+                cached_mtime_ns == directory_mtime_ns
+                and now - cached_at <= _FOLDER_ENTRY_CACHE_TTL_SECONDS
+            ):
+                return list(cached_entries)
+
+    entries: list[tuple[str, str, str]] = []
+    try:
+        with os.scandir(folder_path) as iterator:
+            children = list(iterator)
+    except Exception:
+        return [("[error]", str(folder_path), "error")]
+
+    def entry_sort_key(entry: os.DirEntry) -> tuple[bool, str]:
+        try:
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            is_dir = False
+        return (not is_dir, entry.name.casefold())
+
+    children.sort(key=entry_sort_key)
 
     for child in children:
         if child.name in SKIP_DIRS:
             continue
-        if child.is_dir():
-            entries.append((child.name, str(child), "folder"))
-        elif child.is_file() and is_supported_code_file(child):
-            entries.append((child.name, str(child), "file"))
+
+        try:
+            if child.is_dir(follow_symlinks=False):
+                entries.append((child.name, child.path, "folder"))
+                continue
+
+            if child.is_file(follow_symlinks=False):
+                child_path = Path(child.path)
+                if is_supported_code_file(child_path):
+                    entries.append((child.name, child.path, "file"))
+        except OSError:
+            continue
+
+    _FOLDER_ENTRY_CACHE[cache_key] = (
+        now,
+        directory_mtime_ns,
+        list(entries),
+    )
     return entries
 
 
 def folder_has_children(folder_path: Path) -> bool:
+    """Return whether a folder has entries using a single scandir probe.
+
+    Lazy tree population no longer calls this for every child folder, but the
+    function remains efficient for legacy callers.
+    """
     try:
-        return any(True for _ in folder_path.iterdir())
+        with os.scandir(folder_path) as iterator:
+            return next(iterator, None) is not None
     except Exception:
         return False
+
+
+def invalidate_folder_entry_cache(folder_path: str | Path | None = None) -> None:
+    """Invalidate one cached directory listing or the complete lazy-tree cache."""
+    if folder_path is None:
+        _FOLDER_ENTRY_CACHE.clear()
+        return
+
+    try:
+        key = str(Path(folder_path).resolve())
+    except Exception:
+        key = str(folder_path)
+    _FOLDER_ENTRY_CACHE.pop(key, None)
 
 
 def build_full_project_tree(roots: list[str], max_files_per_root: int = 6000) -> list[dict]:

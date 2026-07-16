@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Callable, Protocol
 
 from .progress_events import ActivityEvent, EngineResult, ProgressEvent
@@ -297,6 +298,12 @@ class TargetDiscoveryEditProvider:
     def can_handle(self, context: RequestContext) -> bool:
         route_decision = _route_decision(context)
         if route_decision:
+            understanding = dict(route_decision.get("request_understanding") or {})
+            if understanding:
+                if bool(understanding.get("read_only_requested")):
+                    return False
+                if not bool(understanding.get("mutation_requested")):
+                    return False
             return route_decision.get("provider") == self.name
         try:
             from services.project_service import is_target_discovery_edit_request
@@ -353,14 +360,64 @@ class TargetDiscoveryEditProvider:
         )
         from services.target_resolution_service import resolve_target_candidates
 
+        route_decision = _route_decision(context)
+        understanding = dict(route_decision.get("request_understanding") or {})
+        read_only_requested = bool(understanding.get("read_only_requested"))
+        mutation_requested = bool(understanding.get("mutation_requested"))
+
+        if understanding and (read_only_requested or not mutation_requested):
+            _activity(
+                activity,
+                "route_guard",
+                "Target discovery rejected request",
+                "The canonical request understanding is read-only or contains no mutation.",
+                status="warn",
+                metadata={
+                    "read_only_requested": read_only_requested,
+                    "mutation_requested": mutation_requested,
+                    "preferred_route": "project_search",
+                },
+            )
+            return EngineResult(
+                action="error",
+                label="Target Discovery",
+                text=(
+                    "TargetDiscoveryHandler refused this request because it is read-only. "
+                    "The dispatcher should route it through ProjectSearchHandler."
+                ),
+                metadata={
+                    "engine_path": self.name,
+                    "result_type": "route_contract_rejected",
+                    "reroute": True,
+                    "preferred_route": "project_search",
+                    "request_understanding": understanding,
+                },
+            )
+
         _emit(emit, "target_discovery", "Finding likely edit targets")
         _activity(activity, "intent", "Project edit request", context.text, status="info")
         _activity(activity, "tool", "Project index", "Searching symbols, usages, and chunks for target concepts", status="info")
+        discovery_started = time.perf_counter()
+        _emit(emit, "target_discovery", "Starting indexed target discovery")
         discovery = discover_edit_targets(
             context.text,
             active_path=context.current_file_path,
             limit=8,
             scope=_route_scope(context),
+        )
+        discovery_elapsed = time.perf_counter() - discovery_started
+        _emit(
+            emit,
+            "target_discovery",
+            f"Indexed target discovery finished in {discovery_elapsed:.2f}s",
+        )
+        _activity(
+            activity,
+            "performance",
+            "Target discovery completed",
+            f"discover_edit_targets finished in {discovery_elapsed:.2f}s",
+            status="ok" if discovery_elapsed < 5.0 else "warn",
+            metadata={"duration_seconds": round(discovery_elapsed, 3)},
         )
         candidates = _augment_explicit_file_candidates(
             context,

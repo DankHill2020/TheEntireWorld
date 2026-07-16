@@ -74,6 +74,7 @@ from services.project_search_service import (
     is_project_scope_request,
 )
 
+from models.constants import SKIP_DIRS
 from models.files import is_supported_code_file
 
 from services.project_service import (
@@ -82,12 +83,86 @@ from services.project_service import (
 )
 
 from ui.project_tree import (
+    append_folder_entries,
     filter_tree_items,
     load_lazy_roots,
     populate_folder_item,
 )
 
 from ui.unreal_editor_dialogs import VCSWorker
+
+
+
+class ProjectFolderLoadWorker(QThread):
+    """Stream one directory into the tree without waiting for a full scan."""
+
+    batch_ready = Signal(str, object, int)
+    completed = Signal(str, int)
+    failed = Signal(str, str)
+
+    def __init__(self, folder_path: str, parent=None, batch_size: int = 24):
+        super().__init__(parent)
+        self.folder_path = str(folder_path or "")
+        self.batch_size = max(8, int(batch_size or 24))
+
+    def run(self):
+        entries = []
+        total = 0
+        try:
+            folder_path = Path(self.folder_path)
+            with os.scandir(folder_path) as iterator:
+                for child in iterator:
+                    if self.isInterruptionRequested():
+                        return
+                    if child.name in SKIP_DIRS:
+                        continue
+
+                    try:
+                        if child.is_dir(follow_symlinks=False):
+                            entry = (child.name, child.path, "folder")
+                        elif child.is_file(follow_symlinks=False):
+                            child_path = Path(child.path)
+                            if not is_supported_code_file(child_path):
+                                continue
+                            entry = (child.name, child.path, "file")
+                        else:
+                            continue
+                    except OSError:
+                        continue
+
+                    entries.append(entry)
+                    total += 1
+
+                    if len(entries) >= self.batch_size:
+                        entries.sort(
+                            key=lambda row: (
+                                row[2] != "folder",
+                                str(row[0]).casefold(),
+                            )
+                        )
+                        self.batch_ready.emit(
+                            self.folder_path,
+                            list(entries),
+                            total,
+                        )
+                        entries.clear()
+
+            if entries:
+                entries.sort(
+                    key=lambda row: (
+                        row[2] != "folder",
+                        str(row[0]).casefold(),
+                    )
+                )
+                self.batch_ready.emit(
+                    self.folder_path,
+                    list(entries),
+                    total,
+                )
+
+            self.completed.emit(self.folder_path, total)
+        except Exception as exc:
+            self.failed.emit(self.folder_path, str(exc))
 
 
 class MainWindowEditorMixin:
@@ -588,6 +663,15 @@ class MainWindowEditorMixin:
     def load_project_tree_lazy(self):
         if not hasattr(self, "project_tree"):
             return
+
+        workers = getattr(self, "_project_tree_folder_workers", {})
+        for worker in list(workers.values()):
+            try:
+                worker.requestInterruption()
+            except Exception:
+                pass
+        self._project_tree_folder_workers = {}
+
         load_lazy_roots(self.project_tree, self.project_roots(), self.style())
         self.status.setText("Project loaded")
         self.update_project_header()
@@ -2372,20 +2456,87 @@ class MainWindowEditorMixin:
         self.append(f"\n[Project] Loaded recent: {active}\n")
 
     def on_project_tree_expanded(self, item):
+        """Stream folder entries progressively while keeping Qt responsive."""
         path = item.text(1)
-        if not path or item.data(0, Qt.UserRole + 1) == "loaded":
+        state = item.data(0, Qt.UserRole + 1)
+        if not path or state in {"loaded", "loading"}:
             return
-        p = Path(path)
-        if p.exists() and p.is_dir():
-            populate_folder_item(
-                item,
-                p,
-                self.style(),
-                is_supported_code_file,
-                folder_has_children,
-                populate_folder_entries,
-            )
-            item.setData(0, Qt.UserRole + 1, "loaded")
+
+        item.setData(0, Qt.UserRole + 1, "loading")
+        item.takeChildren()
+        item.addChild(QTreeWidgetItem(["Loading...", ""]))
+
+        workers = getattr(self, "_project_tree_folder_workers", None)
+        if workers is None:
+            workers = {}
+            self._project_tree_folder_workers = workers
+
+        existing = workers.get(path)
+        if existing is not None and existing.isRunning():
+            return
+
+        worker = ProjectFolderLoadWorker(path, self, batch_size=20)
+        workers[path] = worker
+        first_batch = {"received": False}
+
+        def release_worker():
+            current = workers.get(path)
+            if current is worker:
+                workers.pop(path, None)
+            worker.deleteLater()
+
+        def apply_batch(loaded_path, entries, total_seen):
+            if item.treeWidget() is None or item.text(1) != loaded_path:
+                return
+
+            tree = item.treeWidget()
+            tree.setUpdatesEnabled(False)
+            try:
+                if not first_batch["received"]:
+                    item.takeChildren()
+                    first_batch["received"] = True
+                append_folder_entries(item, entries, self.style())
+                item.setData(0, Qt.UserRole + 1, "loading")
+            finally:
+                tree.setUpdatesEnabled(True)
+                tree.viewport().update()
+
+            try:
+                self.status.setText(
+                    f"Loading {Path(loaded_path).name}: {int(total_seen)} items..."
+                )
+            except Exception:
+                pass
+
+        def finish_loading(loaded_path, total):
+            if item.treeWidget() is not None and item.text(1) == loaded_path:
+                if not first_batch["received"]:
+                    item.takeChildren()
+                item.setData(0, Qt.UserRole + 1, "loaded")
+                try:
+                    self.status.setText(
+                        f"Loaded {Path(loaded_path).name}: {int(total)} items"
+                    )
+                except Exception:
+                    pass
+            release_worker()
+
+        def apply_error(failed_path, message):
+            if item.treeWidget() is not None and item.text(1) == failed_path:
+                item.takeChildren()
+                item.addChild(
+                    QTreeWidgetItem([
+                        f"[error: {message or 'could not read folder'}]",
+                        failed_path,
+                    ])
+                )
+                item.setData(0, Qt.UserRole + 1, "failed")
+            release_worker()
+
+        worker.batch_ready.connect(apply_batch)
+        worker.completed.connect(finish_loading)
+        worker.failed.connect(apply_error)
+        worker.start()
 
     def schedule_project_tree_filter(self):
         timer = getattr(self, "project_filter_timer", None)

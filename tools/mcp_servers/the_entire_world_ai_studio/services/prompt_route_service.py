@@ -66,7 +66,15 @@ class PromptRouteDecision:
     domain_experts: list[dict[str, Any]] = field(default_factory=list)
     capability_gap_plan: dict[str, Any] = field(default_factory=dict)
     request_understanding: dict[str, Any] = field(default_factory=dict)
+    semantic_execution_contract: dict[str, Any] = field(default_factory=dict)
     task_graph: dict[str, Any] = field(default_factory=dict)
+    primary_goal: str = ""
+    goal_type: str = ""
+    estimated_steps: int = 0
+    requires_generation: bool = False
+    requires_project_search: bool = False
+    requires_validation: bool = False
+    requires_execution: bool = False
     # Capability Acquisition & Gap Analysis
     capability_plan_id: str = ""
     capability_gaps: list[str] = field(default_factory=list)
@@ -566,6 +574,88 @@ def _maya_rigging_prerequisite_decision(
     )
 
 
+
+def decision_requires_live_dcc(decision: PromptRouteDecision | dict[str, Any] | None) -> bool:
+    """Return True only when the current request genuinely needs a live DCC.
+
+    A DCC host hint narrows project search and expert context. It does not by
+    itself justify launching a DCC/MCPHost session.
+    """
+    if decision is None:
+        return False
+    data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+
+    if not bool(data.get("requires_dcc_connection")):
+        return False
+
+    operation_mode = str(data.get("operation_mode") or "").lower()
+    route = str(data.get("route") or "").lower()
+    execution_route = str(data.get("execution_route") or "").lower()
+
+    if operation_mode in {"execute", "prototype", "navigate", "query"}:
+        return route in {"dcc_execute", "dcc_prototype", "dcc_query", "unreal_capability"}
+
+    return execution_route in {
+        "dcc.execution_pipeline",
+        "dcc.prototype_pipeline",
+        "dcc.scene_query",
+        "unreal.capability_pipeline",
+    }
+
+
+def decision_is_project_only(decision: PromptRouteDecision | dict[str, Any] | None) -> bool:
+    """Return True when all current goals can be satisfied without a live host."""
+    if decision is None:
+        return False
+    data = decision.to_dict() if hasattr(decision, "to_dict") else dict(decision or {})
+    if bool(data.get("requires_execution")):
+        return False
+
+    route = str(data.get("route") or "").lower()
+    provider = str(data.get("provider") or "").lower()
+    goal_type = str(data.get("goal_type") or "").lower()
+    mutation_scope = str(data.get("mutation_scope") or "").lower()
+    graph = dict(data.get("task_graph") or data.get("goal_graph") or {})
+    goals = list(graph.get("goals") or graph.get("tasks") or [])
+
+    project_routes = {
+        "project_search",
+        "quality_audit",
+        "project_health",
+        "target_discovery",
+        "chat",
+    }
+    project_providers = {
+        "project_search",
+        "project_health",
+        "target_discovery",
+        "llm",
+    }
+    non_live_actions = {
+        "search",
+        "inspect",
+        "design",
+        "generate",
+        "report",
+        "validate",
+        "approval",
+        "respond",
+    }
+
+    if goals:
+        actions = {
+            str(goal.get("action") or "").lower()
+            for goal in goals
+            if isinstance(goal, dict)
+        }
+        if actions and actions.issubset(non_live_actions):
+            return True
+
+    if route in project_routes or provider in project_providers:
+        return mutation_scope != "dcc_scene_mutation"
+
+    return goal_type in {"locate", "learn", "explain", "compare", "generate", "respond", "plan"}
+
 def _finalize_decision(decision: PromptRouteDecision, lower: str) -> PromptRouteDecision:
     if not decision.route_candidates:
         decision.route_candidates = []
@@ -687,14 +777,22 @@ def _finalize_decision(decision: PromptRouteDecision, lower: str) -> PromptRoute
             "requires_dcc_connection": True,
         },
         "dcc_query": {
-            "execution_route": "dcc.execution_pipeline",
+            # Live host-state queries are distinct from scene mutation. Keeping
+            # them off dcc.execution_pipeline prevents read-only DCC queries
+            # from being treated as generic execution requests by the chat UI.
+            "execution_route": "dcc.scene_query",
             "handler_id": "DCCExecutionHandler",
             "operation_mode": "query",
-            "target_type": "dcc_query",
+            "target_type": "dcc_scene_query",
+            "execution_environment": "dcc_host",
             "mutation_scope": "read_only",
             "analysis_depth": "none",
-            "context_resolvers": ["dcc_connection"],
-            "deterministic_steps": ["check_connection", "execute_query_adapter"],
+            "context_resolvers": ["dcc_connection", "scene_context"],
+            "deterministic_steps": [
+                "check_connection",
+                "execute_read_only_query_adapter",
+                "format_query_result",
+            ],
             "model_capability": "none",
             "risk_level": "low",
             "requires_dcc_connection": True,
@@ -984,30 +1082,191 @@ def classify_prompt_route(
         from services.prompt_intent_service import classify_prompt_intent, understand_prompt_request
         from services.prompt_task_splitter_service import build_request_task_graph, task_graph_route
 
-        # Foreground route classification is a hard non-blocking boundary.
-        # Never call Ollama or another semantic model here. Ambiguous requests
-        # receive a safe deterministic route and may be semantically refined by
-        # a background worker after the UI has yielded.
-        request_understanding = understand_prompt_request(text, host=host, allow_model=False)
+        request_understanding = understand_prompt_request(text, host=host)
         phrase_intent = classify_prompt_intent(text, host=host)
-        task_graph = build_request_task_graph(text, host=host, allow_model=False)
+        task_graph = build_request_task_graph(text, host=host)
         semantic_route = task_graph_route(task_graph)
+
+        goal_graph = task_graph
+        primary_goal = str(
+            goal_graph.get("primary_goal")
+            or request_understanding.primary_goal
+            or request_understanding.normalized_goal
+            or ""
+        )
+        goal_type = str(
+            goal_graph.get("goal_type")
+            or request_understanding.goal_type
+            or ""
+        ).lower()
+        goal_count = len(goal_graph.get("goals") or goal_graph.get("tasks") or [])
+        estimated_steps = int(
+            goal_graph.get("estimated_steps")
+            or request_understanding.estimated_steps
+            or goal_count
+            or 0
+        )
+        requires_project_search = bool(
+            goal_graph.get("requires_project_search")
+            or request_understanding.requires_project_search
+        )
+        requires_generation = bool(
+            goal_graph.get("requires_generation")
+            or request_understanding.requires_generation
+        )
+        requires_execution = bool(
+            goal_graph.get("requires_execution")
+            or request_understanding.requires_execution
+        )
+        requires_validation = bool(
+            goal_graph.get("requires_validation")
+            or request_understanding.requires_validation
+        )
+        semantic_execution_contract = dict(
+            goal_graph.get("semantic_execution_contract")
+            or request_understanding.semantic_execution_contract
+            or {}
+        )
     except Exception:
         phrase_intent = None
         request_understanding = None
         task_graph = {}
+        goal_graph = {}
         semantic_route = ""
+        primary_goal = ""
+        goal_type = ""
+        goal_count = 0
+        estimated_steps = 0
+        requires_project_search = False
+        requires_generation = False
+        requires_execution = False
+        requires_validation = False
+        semantic_execution_contract = {}
 
     route_candidates = _route_candidate_diagnostics(text, lower, host=host, hosts=hosts)
+    # ------------------------------------------------------------------
+    # Goal-first routing
+    #
+    # The goal graph owns the user's terminal objective. Supporting search
+    # goals do not turn teaching/example requests into project-search results.
+    # Explicit mutations and host execution remain protected by later guards.
+    # ------------------------------------------------------------------
+    semantic_confidence = float(
+        request_understanding.confidence if request_understanding else 0.0
+    )
+
+    if (
+        request_understanding
+        and semantic_confidence >= 0.78
+        and goal_type in {"learn", "explain", "compare", "respond"}
+        and not request_understanding.mutation_requested
+        and not requires_execution
+    ):
+        return _finalize_decision(
+            PromptRouteDecision(
+                route="chat",
+                provider="llm",
+                confidence=semantic_confidence,
+                intent_category=request_understanding.primary_intent or "code_generation_guidance",
+                host=host,
+                operation_mode="respond",
+                mutation_scope="read_only",
+                required_context=(
+                    ["project_index", "symbol_index", "request_goal_graph"]
+                    if requires_project_search
+                    else ["request_goal_graph"]
+                ),
+                model_tier="local_fast",
+                primary_goal=primary_goal,
+                goal_type=goal_type,
+                estimated_steps=estimated_steps,
+                requires_generation=requires_generation,
+                requires_project_search=requires_project_search,
+                requires_validation=requires_validation,
+                requires_execution=requires_execution,
+                request_understanding=request_understanding.to_dict(),
+                task_graph=goal_graph,
+                route_candidates=route_candidates,
+                selected_route_reason="The terminal goal is explanation or teaching; project search is supporting evidence only.",
+                reasons=[
+                    "The request asks for guidance, explanation, comparison, or an example rather than a project mutation.",
+                    "Any project search goal supports the final explanation instead of becoming the terminal response.",
+                ],
+                rejected_routes=["target_discovery", "dcc_execute"],
+            ),
+            lower,
+        )
+
+    if (
+        request_understanding
+        and semantic_confidence >= 0.78
+        and goal_type == "generate"
+        and not request_understanding.mutation_requested
+        and not requires_execution
+    ):
+        return _finalize_decision(
+            PromptRouteDecision(
+                route="chat",
+                provider="llm",
+                confidence=semantic_confidence,
+                intent_category=request_understanding.primary_intent or "code_generation",
+                host=host,
+                operation_mode="generate",
+                mutation_scope="read_only",
+                required_context=(
+                    ["project_index", "symbol_index", "request_goal_graph"]
+                    if requires_project_search
+                    else ["request_goal_graph"]
+                ),
+                model_tier="local_code",
+                primary_goal=primary_goal,
+                goal_type=goal_type,
+                estimated_steps=estimated_steps,
+                requires_generation=True,
+                requires_project_search=requires_project_search,
+                requires_validation=requires_validation,
+                requires_execution=False,
+                request_understanding=request_understanding.to_dict(),
+                task_graph=goal_graph,
+                route_candidates=route_candidates,
+                selected_route_reason="The terminal goal is code generation without modifying project files.",
+                reasons=[
+                    "Generation is the terminal goal.",
+                    "Project search may supply reusable patterns before the model produces the requested example.",
+                ],
+                rejected_routes=["target_discovery", "dcc_execute"],
+            ),
+            lower,
+        )
 
     # Semantic understanding owns the primary intent for mixed-language requests.
     # Deterministic routing still verifies facts, contracts, and safety.
-    if request_understanding and semantic_route in {"target_discovery", "project_search", "pipeline_graph", "action_graph"}:
-        semantic_confidence = float(request_understanding.confidence or 0.0)
-        if semantic_confidence >= 0.78:
-            if semantic_route == "target_discovery":
-                source_files = _explicit_source_file_references(text)
-                return _finalize_decision(PromptRouteDecision(
+    if (
+        request_understanding
+        and semantic_confidence >= 0.78
+        and semantic_route in {"target_discovery", "project_search", "pipeline_graph", "action_graph"}
+    ):
+        common_goal_metadata = {
+            "primary_goal": primary_goal,
+            "goal_type": goal_type,
+            "estimated_steps": estimated_steps,
+            "requires_generation": requires_generation,
+            "requires_project_search": requires_project_search,
+            "requires_validation": requires_validation,
+            "requires_execution": requires_execution,
+            "request_understanding": request_understanding.to_dict(),
+            "task_graph": goal_graph,
+            "semantic_execution_contract": semantic_execution_contract,
+        }
+
+        if semantic_route == "target_discovery" and (
+            request_understanding.mutation_requested
+            or goal_type == "modify"
+            or bool(goal_graph.get("mutation_goal_ids"))
+        ):
+            source_files = _explicit_source_file_references(text)
+            return _finalize_decision(
+                PromptRouteDecision(
                     route="target_discovery",
                     provider="target_discovery",
                     intent_category=request_understanding.primary_intent or "project_code_edit",
@@ -1015,39 +1274,70 @@ def classify_prompt_route(
                     confidence=semantic_confidence,
                     target_type="code",
                     target_identifier=request_understanding.target_file or (source_files[0] if source_files else ""),
-                    requires_confirmation=True,
-                    required_context=["target_discovery", "symbol_index", "code_chunks", "request_task_graph"],
+                    requires_confirmation=bool(goal_graph.get("approval_goal_ids")) or True,
+                    required_context=["target_discovery", "symbol_index", "code_chunks", "request_goal_graph"],
                     model_tier="local_code",
                     route_candidates=route_candidates,
-                    selected_route_reason="Canonical semantic understanding identified a project code mutation.",
-                    reasons=list(request_understanding.reasons or ["The governing action creates or modifies project code."]),
+                    selected_route_reason="The goal graph contains a project-code mutation.",
+                    reasons=list(
+                        request_understanding.reasons
+                        or ["The terminal goal modifies project code."]
+                    ),
                     rejected_routes=["project_search", "action_graph", "pipeline_graph", "dcc_execute"],
-                    request_understanding=request_understanding.to_dict(),
-                    task_graph=task_graph,
-                ), lower)
-            if semantic_route == "project_search" and request_understanding.read_only_requested:
-                return _finalize_decision(PromptRouteDecision(
-                    route="project_search", provider="project_search",
+                    **common_goal_metadata,
+                ),
+                lower,
+            )
+
+        if (
+            semantic_route == "project_search"
+            and goal_type not in {"learn", "explain", "compare", "generate", "modify", "execute"}
+            and not request_understanding.mutation_requested
+        ):
+            return _finalize_decision(
+                PromptRouteDecision(
+                    route="project_search",
+                    provider="project_search",
                     intent_category=request_understanding.primary_intent or "project_exploration",
-                    host=host, confidence=semantic_confidence, operation_mode="query",
-                    mutation_scope="read_only", required_context=["project_index", "symbol_index", "request_task_graph"],
-                    model_tier="none_deterministic", route_candidates=route_candidates,
-                    selected_route_reason="Canonical semantic understanding identified a read-only project request.",
+                    host=host,
+                    confidence=semantic_confidence,
+                    operation_mode="query",
+                    mutation_scope="read_only",
+                    required_context=["project_index", "symbol_index", "request_goal_graph"],
+                    model_tier="none_deterministic",
+                    route_candidates=route_candidates,
+                    selected_route_reason="The terminal goal is a read-only project lookup.",
                     reasons=list(request_understanding.reasons),
                     rejected_routes=["target_discovery", "dcc_execute", "action_graph"],
-                    request_understanding=request_understanding.to_dict(), task_graph=task_graph,
-                ), lower)
-            if semantic_route in {"pipeline_graph", "action_graph"} and request_understanding.workflow_requested:
-                route_name = "pipeline_graph" if semantic_route == "pipeline_graph" else "action_graph"
-                return _finalize_decision(PromptRouteDecision(
-                    route=route_name, provider="action_graph",
+                    **common_goal_metadata,
+                ),
+                lower,
+            )
+
+        if (
+            semantic_route in {"pipeline_graph", "action_graph"}
+            and (
+                request_understanding.workflow_requested
+                or goal_type == "plan"
+                or bool(goal_graph.get("requires_graph"))
+            )
+        ):
+            route_name = "pipeline_graph" if semantic_route == "pipeline_graph" else "action_graph"
+            return _finalize_decision(
+                PromptRouteDecision(
+                    route=route_name,
+                    provider="action_graph",
                     intent_category=request_understanding.primary_intent or "workflow_pipeline",
-                    host=host, confidence=semantic_confidence, required_context=["project_index", "symbol_index", "workflow_graph", "request_task_graph"],
+                    host=host,
+                    confidence=semantic_confidence,
+                    required_context=["project_index", "symbol_index", "workflow_graph", "request_goal_graph"],
                     route_candidates=route_candidates,
-                    selected_route_reason="Canonical semantic understanding identified explicit workflow orchestration.",
+                    selected_route_reason="The goal graph requires explicit workflow orchestration.",
                     reasons=list(request_understanding.reasons),
-                    request_understanding=request_understanding.to_dict(), task_graph=task_graph,
-                ), lower)
+                    **common_goal_metadata,
+                ),
+                lower,
+            )
 
     # Version 1.0 Recovery precedence law: explicit source-code mutation wins
     # before DCC operation inference and workflow/pipeline classification.
@@ -1067,7 +1357,15 @@ def classify_prompt_route(
             route_candidates=route_candidates,
             selected_route_reason="Explicit source filename plus code-mutation intent has highest precedence.",
             request_understanding=request_understanding.to_dict() if request_understanding else {},
-            task_graph=task_graph,
+            task_graph=goal_graph,
+            semantic_execution_contract=semantic_execution_contract,
+            primary_goal=primary_goal,
+            goal_type=goal_type,
+            estimated_steps=estimated_steps,
+            requires_generation=requires_generation,
+            requires_project_search=requires_project_search,
+            requires_validation=requires_validation,
+            requires_execution=requires_execution,
             reasons=[
                 "Prompt explicitly names a source file and requests a code mutation.",
                 "Project code edits must be resolved by target discovery before any DCC or workflow inference.",
@@ -2204,6 +2502,7 @@ def classify_prompt_route(
         confidence=0.35,
         model_tier="local_fast",
         reasons=["No deterministic route exceeded the confidence threshold."],
+        semantic_execution_contract=semantic_execution_contract,
         alternatives=[
             {"route": "project_search", "reason": "Use for indexed project facts."},
             {"route": "target_discovery", "reason": "Use for code edits/refactors."},

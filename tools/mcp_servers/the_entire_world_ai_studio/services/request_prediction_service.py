@@ -20,6 +20,14 @@ def predict_request(
     prompt = state.original_prompt or ""
     lower = prompt.lower()
     route_data = dict(state.artifacts.get("route_decision") or {})
+    contract = dict(
+        state.artifacts.get("semantic_execution_contract")
+        or route_data.get("semantic_execution_contract")
+        or (route_data.get("request_understanding") or {}).get(
+            "semantic_execution_contract"
+        )
+        or {}
+    )
     history = list(similar_execution_history or [])
 
     complexity = 0.08
@@ -27,8 +35,13 @@ def predict_request(
     word_count = len(prompt.split())
     numbered_steps = len(re.findall(r"^\s*\d+[.)]\s+", prompt, flags=re.MULTILINE))
     connector_count = len(re.findall(r"\b(then|after|before|validate|compile|rollback|repair|report|import|export|connect)\b", lower))
-    mutation = bool(state.mutation_scope and state.mutation_scope != "read_only") or bool(
-        re.search(r"\b(add|create|implement|modify|update|fix|patch|refactor|write|wire|connect|delete|remove)\b", lower)
+    mutation = (
+        bool(contract.get("mutation_requested"))
+        if contract
+        else bool(state.mutation_scope and state.mutation_scope != "read_only")
+        or bool(
+            re.search(r"\b(add|create|implement|modify|update|fix|patch|refactor|write|wire|connect|delete|remove)\b", lower)
+        )
     )
     hosts = {item for item in ("maya", "unreal", "blender", "houdini", "motionbuilder", "unity") if item in lower}
 
@@ -50,6 +63,19 @@ def predict_request(
     elif hosts:
         complexity += 0.08
         reasons.append("request depends on host-specific context")
+    if contract:
+        contract_goal_type = str(contract.get("goal_type") or "")
+        contract_deliverable = str(contract.get("deliverable_type") or "")
+        contract_evidence = list(contract.get("evidence_required") or [])
+        if contract_goal_type in {"modify", "execute", "plan"}:
+            complexity += 0.12
+            reasons.append(f"semantic contract goal type is {contract_goal_type}")
+        if len(contract_evidence) >= 3:
+            complexity += 0.08
+            reasons.append("semantic contract requires multi-source evidence")
+        if contract_deliverable == "file" and contract.get("relationship") == "contains":
+            reasons.append("prediction uses file-plus-contained-symbol retrieval contract")
+
     if route_data.get("requires_plan"):
         complexity += 0.1
         reasons.append("route explicitly requires planning")

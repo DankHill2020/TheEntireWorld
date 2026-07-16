@@ -1,8 +1,9 @@
 """Canonical execution dispatch for routed prompts.
 
-PromptRouteService decides what the user wants. This dispatcher decides which
-handler executes it. Handlers may use the original prompt as payload/query text,
-but they must not reinterpret it to choose intent.
+PromptRouteService decides what the user wants. This dispatcher validates the
+canonical goal graph, identifies the next achievable goals, and selects the
+registered handler for the current execution route. Handlers may use the
+original prompt as payload/query text, but they must not reinterpret intent.
 """
 
 from __future__ import annotations
@@ -68,6 +69,13 @@ class ProviderRouteHandler:
             )
         extras = dict(context.extras or {})
         extras["prompt_route_decision"] = dict(decision or {})
+        extras["request_goal_graph"] = dict(
+            decision.get("goal_graph")
+            or decision.get("task_graph")
+            or {}
+        )
+        extras["current_request_goal"] = dict(decision.get("current_goal") or {})
+        extras["ready_request_goals"] = list(decision.get("ready_goals") or [])
         routed_context = replace(context, extras=extras)
         return self.provider.handle(routed_context, emit, activity)
 
@@ -366,30 +374,242 @@ class PromptDispatchService:
             decision["route_diagnostics"] = build_route_diagnostic_report(decision).to_dict()
         except Exception:
             pass
-        task_graph = dict(decision.get("task_graph") or {})
-        if task_graph and not bool(task_graph.get("valid", True)):
+        goal_graph = dict(decision.get("task_graph") or {})
+        goals = list(goal_graph.get("goals") or goal_graph.get("tasks") or [])
+        goal_type = str(
+            decision.get("goal_type")
+            or goal_graph.get("goal_type")
+            or ""
+        ).lower()
+        primary_goal = str(
+            decision.get("primary_goal")
+            or goal_graph.get("primary_goal")
+            or goal_graph.get("goal")
+            or ""
+        )
+        request_understanding = dict(decision.get("request_understanding") or {})
+
+        if goal_graph and not bool(goal_graph.get("valid", True)):
             result = EngineResult(
                 action="error",
                 label="Request Understanding",
-                text="The request task graph contains invalid dependencies and cannot be executed safely.",
+                text="The request goal graph is invalid and cannot be executed safely.",
                 metadata={
                     "engine_path": "prompt_dispatch",
-                    "result_type": "invalid_task_graph",
+                    "result_type": "invalid_goal_graph",
                     "route_decision": decision,
-                    "task_graph": task_graph,
+                    "goal_graph": goal_graph,
+                    "invalid_dependencies": list(goal_graph.get("invalid_dependencies") or []),
+                    "duplicate_goal_ids": list(goal_graph.get("duplicate_goal_ids") or []),
+                    "dependency_cycles": list(goal_graph.get("dependency_cycles") or []),
                 },
             )
             self._record_metric(decision, result, started)
             return result
-        if activity and task_graph:
-            for task in list(task_graph.get("tasks") or [])[:12]:
-                activity(ActivityEvent(
-                    "request_task",
-                    str(task.get("task_id") or task.get("action") or "Task"),
-                    str(task.get("objective") or ""),
-                    status="info",
-                    metadata={"task": task, "primary_route": task_graph.get("primary_route")},
-                ))
+
+        completed_goal_ids = {
+            str(value)
+            for value in (
+                (context.extras or {}).get("completed_goal_ids")
+                or decision.get("completed_goal_ids")
+                or []
+            )
+        }
+
+        try:
+            from services.prompt_task_splitter_service import next_achievable_goals
+
+            ready_goals = next_achievable_goals(goal_graph, completed_goal_ids)
+        except Exception:
+            ready_goals = []
+            for goal in list(goal_graph.get("ordered_goals") or goals):
+                goal_id = str(goal.get("task_id") or goal.get("goal_id") or "")
+                if not goal_id or goal_id in completed_goal_ids:
+                    continue
+                dependencies = {
+                    str(value)
+                    for value in (goal.get("depends_on") or [])
+                }
+                if dependencies.issubset(completed_goal_ids):
+                    ready_goals.append(goal)
+
+        decision = dict(decision)
+        decision["task_graph"] = goal_graph
+        decision["goal_graph"] = goal_graph
+        decision["primary_goal"] = primary_goal
+        decision["goal_type"] = goal_type
+        decision["ready_goals"] = ready_goals
+        decision["completed_goal_ids"] = sorted(completed_goal_ids)
+
+        if ready_goals:
+            decision["current_goal"] = dict(ready_goals[0])
+            decision["current_goal_id"] = str(
+                ready_goals[0].get("task_id")
+                or ready_goals[0].get("goal_id")
+                or ""
+            )
+        else:
+            decision["current_goal"] = {}
+            decision["current_goal_id"] = ""
+
+        if activity and goal_graph:
+            activity(
+                ActivityEvent(
+                    "request_goal_graph",
+                    primary_goal or "Request goal graph",
+                    (
+                        f"{len(goals)} goal(s), "
+                        f"{len(ready_goals)} currently achievable, "
+                        f"{len(completed_goal_ids)} completed"
+                    ),
+                    status="ok",
+                    metadata={
+                        "framework": goal_graph.get("framework"),
+                        "goal_type": goal_type,
+                        "primary_route": goal_graph.get("primary_route"),
+                        "terminal_goal_ids": list(goal_graph.get("terminal_goal_ids") or []),
+                        "approval_goal_ids": list(goal_graph.get("approval_goal_ids") or []),
+                    },
+                )
+            )
+            for goal in goals[:12]:
+                goal_id = str(goal.get("task_id") or goal.get("goal_id") or "")
+                if goal_id in completed_goal_ids:
+                    status = "done"
+                elif any(
+                    str(item.get("task_id") or item.get("goal_id") or "") == goal_id
+                    for item in ready_goals
+                ):
+                    status = "ready"
+                else:
+                    status = "pending"
+                activity(
+                    ActivityEvent(
+                        "request_goal",
+                        str(goal.get("title") or goal_id or goal.get("action") or "Goal"),
+                        str(goal.get("objective") or ""),
+                        status=status,
+                        metadata={
+                            "goal": goal,
+                            "primary_goal": primary_goal,
+                            "goal_type": goal_type,
+                        },
+                    )
+                )
+
+        read_only_requested = bool(request_understanding.get("read_only_requested"))
+        mutation_requested = bool(request_understanding.get("mutation_requested"))
+        mutation_goal_ids = {
+            str(value)
+            for value in (goal_graph.get("mutation_goal_ids") or [])
+        }
+        current_goal = dict(decision.get("current_goal") or {})
+        current_goal_id = str(decision.get("current_goal_id") or "")
+        current_goal_mutates = bool(
+            current_goal
+            and (
+                not bool(current_goal.get("read_only", True))
+                or current_goal_id in mutation_goal_ids
+                or str(current_goal.get("goal_type") or "").lower() == "modify"
+                or str(current_goal.get("action") or "").lower() == "modify_code"
+            )
+        )
+        graph_has_mutation = bool(mutation_goal_ids) or any(
+            not bool(goal.get("read_only", True))
+            for goal in goals
+        )
+
+        # Validate handler ownership against the canonical goal graph.
+        # Target discovery may only own a real mutation goal.
+        if (
+            str(decision.get("route") or "") == "target_discovery"
+            and (
+                read_only_requested
+                or not mutation_requested
+                or not graph_has_mutation
+                or (current_goal and not current_goal_mutates)
+            )
+        ):
+            previous_route = str(decision.get("route") or "")
+            previous_execution_route = str(decision.get("execution_route") or "")
+            decision["route"] = "project_search"
+            decision["provider"] = "project_search"
+            decision["execution_route"] = "engine.project_search"
+            decision["handler_id"] = "ProjectSearchProvider"
+            decision["operation_mode"] = "query"
+            decision["mutation_scope"] = "read_only"
+            decision["requires_confirmation"] = False
+            decision["can_execute_directly"] = True
+            decision.setdefault("rejected_routes", [])
+            if "target_discovery" not in decision["rejected_routes"]:
+                decision["rejected_routes"].append("target_discovery")
+            decision.setdefault("reasons", [])
+            decision["reasons"].append(
+                "Dispatcher corrected TargetDiscovery because the canonical "
+                "goal graph does not expose an achievable mutation goal."
+            )
+            if activity:
+                activity(
+                    ActivityEvent(
+                        "route_guard",
+                        "Corrected handler ownership",
+                        "Target discovery declined a non-mutating current goal.",
+                        status="warn",
+                        metadata={
+                            "previous_route": previous_route,
+                            "previous_execution_route": previous_execution_route,
+                            "new_route": decision["route"],
+                            "new_execution_route": decision["execution_route"],
+                            "goal_type": goal_type,
+                            "current_goal_id": current_goal_id,
+                            "read_only_requested": read_only_requested,
+                            "mutation_requested": mutation_requested,
+                            "graph_has_mutation": graph_has_mutation,
+                            "current_goal_mutates": current_goal_mutates,
+                        },
+                    )
+                )
+
+        # Teaching, explanation, comparison, and read-only generation must stay
+        # on the LLM route even when project search is a supporting goal.
+        if (
+            goal_type in {"learn", "explain", "compare", "respond", "generate"}
+            and not mutation_requested
+            and str(decision.get("route") or "") == "project_search"
+        ):
+            previous_route = str(decision.get("route") or "")
+            decision["route"] = "chat"
+            decision["provider"] = "llm"
+            decision["execution_route"] = "llm.chat"
+            decision["handler_id"] = "LocalLLMHandler"
+            decision["operation_mode"] = (
+                "generate" if goal_type == "generate" else "respond"
+            )
+            decision["mutation_scope"] = "read_only"
+            decision["requires_confirmation"] = False
+            decision["can_execute_directly"] = True
+            decision.setdefault("reasons", [])
+            decision["reasons"].append(
+                "Dispatcher preserved the terminal learning/generation goal; "
+                "project search remains supporting context."
+            )
+            if activity:
+                activity(
+                    ActivityEvent(
+                        "route_guard",
+                        "Preserved terminal goal",
+                        f"{previous_route} -> chat for goal type {goal_type}",
+                        status="info",
+                        metadata={
+                            "goal_type": goal_type,
+                            "primary_goal": primary_goal,
+                            "ready_goal_ids": [
+                                str(goal.get("task_id") or goal.get("goal_id") or "")
+                                for goal in ready_goals
+                            ],
+                        },
+                    )
+                )
 
         execution_route = str(decision.get("execution_route") or "")
         handler = self.handlers.get(execution_route)
@@ -449,6 +669,10 @@ class PromptDispatchService:
         metadata.setdefault("route_decision", decision)
         metadata.setdefault("route_diagnostics", decision.get("route_diagnostics") or {})
         metadata.setdefault("handler_id", handler.handler_id)
+        metadata.setdefault("goal_graph", decision.get("goal_graph") or decision.get("task_graph") or {})
+        metadata.setdefault("current_goal", decision.get("current_goal") or {})
+        metadata.setdefault("current_goal_id", decision.get("current_goal_id") or "")
+        metadata.setdefault("ready_goals", decision.get("ready_goals") or [])
         try:
             from services.operation_memory_service import update_operation_memory
 
@@ -529,6 +753,18 @@ class PromptDispatchService:
                     "confidence": decision.get("confidence"),
                     "operation_mode": decision.get("operation_mode"),
                     "risk_level": decision.get("risk_level"),
+                    "goal_type": decision.get("goal_type"),
+                    "primary_goal": decision.get("primary_goal"),
+                    "current_goal_id": decision.get("current_goal_id"),
+                    "goal_count": len(
+                        (
+                            decision.get("goal_graph")
+                            or decision.get("task_graph")
+                            or {}
+                        ).get("goals")
+                        or []
+                    ),
+                    "ready_goal_count": len(decision.get("ready_goals") or []),
                     "result_type": result.result_type,
                     "action": result.action,
                     "capability_failure": result.result_type in {"capability_failure", "missing_capabilities"},
