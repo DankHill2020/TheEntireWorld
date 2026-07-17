@@ -111,6 +111,37 @@ def get_latest_unreal_log(uproject_path):
     return latest_log
 
 
+def ensure_unreal_python_plugin_enabled(uproject_path):
+    """
+    Enables PythonScriptPlugin in the .uproject if the project does not already
+    declare it. Unreal needs this plugin for startup Python scripts.
+    """
+    if not os.path.isfile(uproject_path):
+        raise FileNotFoundError(f"uproject not found: {uproject_path}")
+
+    with open(uproject_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    plugins = data.setdefault("Plugins", [])
+    if not isinstance(plugins, list):
+        plugins = []
+        data["Plugins"] = plugins
+
+    for plugin in plugins:
+        if str(plugin.get("Name", "")).lower() == "pythonscriptplugin":
+            if plugin.get("Enabled") is not True:
+                plugin["Enabled"] = True
+                with open(uproject_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4)
+                    f.write("\n")
+            return
+
+    plugins.append({"Name": "PythonScriptPlugin", "Enabled": True})
+    with open(uproject_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+        f.write("\n")
+
+
 def add_unreal_startup_script(uproject_path, script_path):
     """
     Adds a startup script to DefaultEngine.ini for a given Unreal project.
@@ -124,10 +155,14 @@ def add_unreal_startup_script(uproject_path, script_path):
     if not os.path.isfile(script_path):
         raise FileNotFoundError(f"Script not found: {script_path}")
 
+    ensure_unreal_python_plugin_enabled(uproject_path)
     project_dir = os.path.dirname(uproject_path)
+    config_dir = os.path.join(project_dir, "Config")
+    os.makedirs(config_dir, exist_ok=True)
     ini_path = os.path.join(project_dir, "Config", "DefaultEngine.ini")
     if not os.path.exists(ini_path):
-        raise FileNotFoundError(f"DefaultEngine.ini not found at: {ini_path}")
+        with open(ini_path, "w", encoding="utf-8") as f:
+            f.write("")
 
     with open(ini_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()

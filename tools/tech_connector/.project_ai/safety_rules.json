@@ -1,0 +1,11 @@
+{
+  "require_backup": true,
+  "require_preview": true,
+  "no_touch_dirs": [
+    "/Binaries",
+    "/Intermediate",
+    "/Saved",
+    "/DerivedDataCache"
+  ],
+  "confirm_mutations": true
+}

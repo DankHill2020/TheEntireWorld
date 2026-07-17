@@ -12,10 +12,32 @@ import time
 
 script_dir = os.path.dirname(__file__)
 tools_dir = os.path.dirname(script_dir)
-sys.path.append(tools_dir)
+if tools_dir not in sys.path:
+    sys.path.append(tools_dir)
 
 # Shared queue between HTTP server and tick handler
 request_queue = queue.Queue()
+PORT = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
+
+
+def _write_port_files(port):
+    paths = [os.path.join(tools_dir, "unreal_http_port.txt")]
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        paths.append(
+            os.path.join(
+                local_appdata,
+                "TA_Tech_Connector_MCPHost",
+                "unreal_http_port.txt",
+            )
+        )
+    for path in paths:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(str(port))
+        except Exception:
+            pass
 
 
 def import_function(func_path):
@@ -52,7 +74,9 @@ def tick(delta_time):
         finally:
             task["__handled__"] = True
 
-unreal.register_slate_post_tick_callback(tick)
+if not getattr(unreal, "_tech_connector_http_tick_registered", False):
+    unreal.register_slate_post_tick_callback(tick)
+    unreal._tech_connector_http_tick_registered = True
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -104,17 +128,24 @@ def is_port_in_use(port):
 
 
 def run_server():
-    port = 12347
+    port = PORT
     if is_port_in_use(port):
+        _write_port_files(port)
         unreal.log_error(f"Port {port} already in use — HTTP server won't start.")
         return
     server_address = ('127.0.0.1', port)
+    HTTPServer.allow_reuse_address = True
     httpd = HTTPServer(server_address, RequestHandler)
+    _write_port_files(port)
     unreal.log(f"HTTP Server started on port {port}")
     httpd.serve_forever()
 
 
 def start_http_server_in_thread():
+    if getattr(unreal, "_tech_connector_http_server_started", False):
+        unreal.log(f"Tech Connector HTTP server already started on port {PORT}.")
+        return
+    unreal._tech_connector_http_server_started = True
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 

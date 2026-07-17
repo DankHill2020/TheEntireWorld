@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
+  <meta name="theme-color" content="#020304">
+  <title>Tech Connector Remote</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <section class="pair-screen" id="pairScreen" aria-label="Pair Tech Connector Remote">
+    <div class="pair-card">
+      <img class="brand-logo" src="/tech_connector_logo.png" alt="Tech Connector logo">
+      <div class="pair-kicker">Tech Connector Remote</div>
+      <h1>Pair</h1>
+      <p class="muted">Connect this device to the running PC app by scanning its Mobile Second Screen QR code.</p>
+      <button class="pair-button" data-action="start-pairing">Pair with PC</button>
+      <div class="pair-scanner" id="pairScanner" hidden>
+        <video id="qrVideo" playsinline muted hidden></video>
+        <p class="muted small" id="pairHelp">Scan the QR code shown in Tech Connector on the workstation.</p>
+        <div class="toolbar">
+          <input id="pairUrlInput" placeholder="Paste PC QR link">
+          <button data-action="save-pair-url">Connect</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="viewport" id="viewport">
+    <main class="stage" id="stage">
+      <header>
+        <img class="header-logo" src="/tech_connector_logo.png" alt="">
+        <div>
+          <h1>Tech Connector Remote</h1>
+          <div class="muted small">Second screen for the desktop workstation</div>
+        </div>
+        <span class="pill" id="online">Connecting</span>
+        <span class="pill" id="project">Project</span>
+        <span class="pill" id="model">Model</span>
+        <nav class="toolbar push">
+          <button data-action="zoom-out">-</button>
+          <button data-action="zoom-reset">100%</button>
+          <button data-action="zoom-in">+</button>
+          <button data-action="install-app">Install</button>
+          <button data-action="download-app">Download</button>
+          <button data-action="refresh">Refresh</button>
+        </nav>
+      </header>
+
+      <section class="install-grid">
+        <div class="panel install-card" data-menu="install">
+          <h2>Install</h2>
+          <p class="muted">Save this paired client as a home-screen app, or download the mobile bundle for later packaging.</p>
+          <div class="toolbar bottom-space">
+            <button data-action="install-app">Install App</button>
+            <button data-action="download-app">Download Package</button>
+            <button data-action="toggle-install-help">Install Help</button>
+          </div>
+          <div id="installHelp" class="install-help" hidden>
+            <div class="row">
+              <b>Android / Chrome</b>
+              <div>Tap Install App. If the browser does not show an install prompt, use the browser menu and choose Install app or Add to Home screen.</div>
+            </div>
+            <div class="row">
+              <b>iPhone / iPad / Mac</b>
+              <div>Open the QR link in Safari. On iPhone or iPad, tap Share, then Add to Home Screen. On Mac, keep it as a browser app or use Safari Add to Dock when available.</div>
+            </div>
+            <div class="row">
+              <b>Package</b>
+              <div>Download Package saves the current mobile client bundle for later Android/iOS wrapper or store packaging.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="connect-panel panel" id="connectPanel" hidden>
+          <h2>Connect</h2>
+          <p class="muted">Open the desktop Mobile Second Screen URL, or paste the token shown by Tech Connector.</p>
+          <div class="toolbar">
+            <input id="tokenInput" placeholder="Connection token">
+            <button data-action="save-token">Connect</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel wide" data-menu="kickoff">
+          <h2>Kick Off Jobs</h2>
+          <div class="toolbar bottom-space">
+            <input id="pipelineFilter" placeholder="Filter existing pipelines...">
+            <button data-action="refresh-pipelines">Refresh</button>
+          </div>
+          <div id="pipelines" class="list"></div>
+        </div>
+
+        <div class="panel" data-menu="create">
+          <h2>Create Jobs</h2>
+          <input id="jobTitle" placeholder="Job name">
+          <textarea id="prompt" placeholder="Ask Tech Connector..."></textarea>
+          <div class="toolbar bottom-space">
+            <input id="jobProvider" placeholder="Provider/app, e.g. Maya or Unreal">
+            <button data-action="add-job-node">Add Node</button>
+          </div>
+          <div id="jobSteps" class="list compact-list"></div>
+          <div class="toolbar top-space">
+            <button data-action="create-job">Create Job</button>
+            <button data-action="send-prompt">Quick Prompt</button>
+          </div>
+          <p class="muted">Mobile node cards preserve graph intent. The desktop keeps the full node editor and executes the real pipeline path.</p>
+        </div>
+
+        <div class="panel" data-menu="applications">
+          <h2>View PC / Pipeline Progress</h2>
+          <div id="applications" class="list"></div>
+        </div>
+
+        <div class="panel wide" data-menu="screen">
+          <h2>Live Screen</h2>
+          <div class="toolbar bottom-space">
+            <button data-action="refresh-screen">Refresh Screen</button>
+            <button data-command="request_screenshot">Snapshot Job</button>
+          </div>
+          <div class="screen-frame">
+            <img id="screenImage" alt="Current Tech Connector screen">
+          </div>
+          <div id="screenStatus" class="mono muted">Waiting for desktop snapshot...</div>
+        </div>
+
+        <div class="panel" data-menu="jobs">
+          <h2>Active Jobs</h2>
+          <div id="jobs" class="list"></div>
+        </div>
+
+        <div class="panel wide" data-menu="finished">
+          <h2>Finished Jobs</h2>
+          <div id="finishedJobs" class="list"></div>
+        </div>
+
+        <div class="panel wide" data-menu="detail">
+          <h2>Job Output Log</h2>
+          <div id="jobDetail" class="list"></div>
+        </div>
+
+        <div class="panel" data-menu="machine">
+          <h2>Machine View</h2>
+          <div id="status" class="mono muted">Loading...</div>
+        </div>
+
+        <div class="panel" data-menu="events">
+          <h2>Live Events</h2>
+          <div id="events" class="list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav id="contextMenu" aria-label="Context actions">
+    <button data-action="refresh">Refresh</button>
+    <button data-action="send-prompt">Send Prompt</button>
+    <button data-action="create-job">Create Job</button>
+    <button data-action="refresh-screen">Refresh Screen</button>
+    <button data-command="request_screenshot">Request Snapshot</button>
+    <button data-action="cancel-latest">Cancel Latest Job</button>
+    <button data-action="zoom-in">Zoom In</button>
+    <button data-action="zoom-out">Zoom Out</button>
+  </nav>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
