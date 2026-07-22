@@ -633,7 +633,7 @@ class MayaExecutionAdapter(WindowDccExecutionAdapter):
             known_mutating_operation_requires_approval = False
         if known_mutating_operation_requires_approval and not request.missing_slots and not _prompt_mentions_maya_session(context.text or ""):
             return CapabilityCheckResult(ok=True)
-        direct_operations = {"scene.select", "scene.move", "scene.create_locator", "scene.create_control", "node.connect_attr", "node.disconnect_attr", "constraints.create", "modeling.create_primitive"}
+        direct_operations = {"scene.select", "scene.move", "scene.create_locator", "scene.create_control", "node.connect_attr", "node.disconnect_attr", "constraints.create", "modeling.create_primitive", "api.call", "tool.call", "script.run"}
         sessions = _maya_direct_bridge_sessions()
         if len(sessions) > 1 and not (request.keyword_args or {}).get("maya_port"):
             selected_port = _maya_port_for_prompted_session(context.text or "", sessions)
@@ -1987,7 +1987,7 @@ class UnityExecutionAdapter(WindowDccExecutionAdapter):
 
 
 def default_dcc_execution_adapters() -> dict[str, DccExecutionAdapter]:
-    return {
+    adapters = {
         "maya": MayaExecutionAdapter(
             "maya",
             query_methods={"selection": "direct_maya_selection", "file": "direct_maya_file", "default": "direct_maya_selection"},
@@ -2014,6 +2014,24 @@ def default_dcc_execution_adapters() -> dict[str, DccExecutionAdapter]:
         ),
         "unreal": UnrealExecutionAdapter("unreal"),
     }
+
+    try:
+        from tech_connector.services.settings_service import load_settings
+        import importlib
+        settings = load_settings()
+        custom = settings.get("custom_dcc_adapters")
+        if isinstance(custom, dict):
+            for dcc_name, adapter_path in custom.items():
+                if adapter_path and adapter_path != "default":
+                    if "." in adapter_path:
+                        mod_name, class_name = adapter_path.rsplit(".", 1)
+                        mod = importlib.import_module(mod_name)
+                        adapter_class = getattr(mod, class_name)
+                        adapters[dcc_name.lower()] = adapter_class()
+    except Exception as e:
+        print(f"Error loading custom DCC execution adapters: {e}", flush=True)
+
+    return adapters
 
 
 def _format_unreal_user_message(raw: Any) -> str:

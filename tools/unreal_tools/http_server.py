@@ -21,7 +21,15 @@ PORT = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
 
 
 def _write_port_files(port):
-    paths = [os.path.join(tools_dir, "unreal_http_port.txt")]
+    paths = [
+        os.path.join(
+            tools_dir,
+            "tech_connector",
+            "bridges",
+            "ports",
+            "unreal_http_port.txt",
+        )
+    ]
     local_appdata = os.environ.get("LOCALAPPDATA", "")
     if local_appdata:
         paths.append(

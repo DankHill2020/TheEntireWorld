@@ -1,8 +1,0 @@
-# Configuration for Project Analysis inside Tech Connector
-
-project_root: "c:/depot/tools/mcp_servers/the_entire_world_ai_studio"
-include_extensions: ".py,.js,.ts,.java,.cpp,.c,.h"
-sqlite_db: "c:/depot/tools/mcp_servers/the_entire_world_ai_studio/project_analysis/project_analysis.db"
-embed_model: "nomic-embed-text"
-planner_model: "qwen:30b"
-graph_pickle: "c:/depot/tools/mcp_servers/the_entire_world_ai_studio/project_analysis/graph.pkl"

@@ -35,6 +35,18 @@ def _top_level_import_targets(tree: ast.Module, current_module: str) -> set[str]
 
     targets: set[str] = set()
 
+    def is_main_guard(test: ast.expr) -> bool:
+        return (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == "__main__"
+        )
+
     def visit(statements: list[ast.stmt]) -> None:
         for statement in statements:
             if isinstance(statement, ast.Import):
@@ -61,7 +73,7 @@ def _top_level_import_targets(tree: ast.Module, current_module: str) -> set[str]
                     isinstance(statement.test, ast.Attribute)
                     and statement.test.attr == "TYPE_CHECKING"
                 )
-                if not is_type_checking:
+                if not is_type_checking and not is_main_guard(statement.test):
                     visit(statement.body)
                     visit(statement.orelse)
             elif isinstance(statement, (ast.Try, ast.TryStar)):
@@ -145,6 +157,7 @@ def audit_python_package_layout(
         ".venv",
         "__pycache__",
         "data",
+        "installers",
         "node_modules",
     }
     unqualified_imports: list[dict[str, Any]] = []
@@ -155,7 +168,7 @@ def audit_python_package_layout(
     module_paths: dict[str, str] = {}
     personal_references: list[dict[str, Any]] = []
     hardcoded_user_paths: list[dict[str, Any]] = []
-    legacy_marker = "/mcp_servers/the_entire_world_ai_studio"
+    legacy_marker = "/the_entire_world_ai_studio"
 
     for path in package_root.rglob("*.py"):
         if any(part in ignored_dirs for part in path.parts):
@@ -510,6 +523,31 @@ def build_code_intelligence_packet(
     limit: int = 20,
     include_repo_map: bool = True,
 ) -> dict[str, Any]:
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = settings.get("code_intel_provider_module")
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.build_code_intelligence_packet",
+                _build_code_intelligence_packet_impl,
+                objective,
+                active_path=active_path,
+                limit=limit,
+                include_repo_map=include_repo_map
+            )
+    except Exception as e:
+        print(f"Error calling custom build_code_intelligence_packet: {e}", flush=True)
+    return _build_code_intelligence_packet_impl(objective, active_path=active_path, limit=limit, include_repo_map=include_repo_map)
+
+def _build_code_intelligence_packet_impl(
+    objective: str,
+    *,
+    active_path: str | None = None,
+    limit: int = 20,
+    include_repo_map: bool = True,
+) -> dict[str, Any]:
     """Gather deterministic IDE-agent context for code/search/edit prompts."""
 
     from tech_connector.knowledge.search import extract_code_search_terms, search_index_symbols, search_index_usages
@@ -588,6 +626,23 @@ def build_code_intelligence_packet(
 
 
 def render_code_intelligence_packet(packet: dict[str, Any] | None, *, max_context_chars: int = 5000) -> str:
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = settings.get("code_intel_provider_module")
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.render_code_intelligence_packet",
+                _render_code_intelligence_packet_impl,
+                packet,
+                max_context_chars=max_context_chars
+            )
+    except Exception as e:
+        print(f"Error calling custom render_code_intelligence_packet: {e}", flush=True)
+    return _render_code_intelligence_packet_impl(packet, max_context_chars=max_context_chars)
+
+def _render_code_intelligence_packet_impl(packet: dict[str, Any] | None, *, max_context_chars: int = 5000) -> str:
     packet = dict(packet or {})
     if not packet:
         return ""

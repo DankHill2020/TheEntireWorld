@@ -274,6 +274,21 @@ class FileIndexService:
                         (normalized, normalized),
                     ).fetchone()
                 if row is None:
+                    norm_path = Path(requested).as_posix()
+                    parts = norm_path.split("/")
+                    if len(parts) >= 2:
+                        suffix = "/" + "/".join(parts[-2:])
+                        row = conn.execute(
+                            """
+                            SELECT id, root, path, rel_path, module, ext, size, mtime,
+                                   sha1, indexed_at, source_scope
+                            FROM files
+                            WHERE REPLACE(path, '\\', '/') LIKE ? COLLATE NOCASE
+                            LIMIT 1
+                            """,
+                            (f"%{suffix}",),
+                        ).fetchone()
+                if row is None:
                     return None
                 symbols = conn.execute(
                     """

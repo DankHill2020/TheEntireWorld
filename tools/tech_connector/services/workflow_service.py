@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from tech_connector.services.tool_discovery_service import list_internal_functions
+from tech_connector.services.tool_discovery_service import extract_symbols_from_file, list_internal_functions
 
 GITHUB_INGEST_FUNCTION_SUFFIX = "_git_ingest"
 
@@ -351,6 +351,7 @@ def _literal_candidates(prompt: str) -> list[tuple[str, str]]:
     result: list[tuple[str, str]] = []
     quoted = r'"([^"]+)"|\'([^\']+)\''
     patterns = [
+        r"\b(root\s+joint|root|skeleton\s+root)\s+(?:is|=|named|called)\s+([A-Za-z_][A-Za-z0-9_:|.-]*)",
         rf"([A-Za-z_][A-Za-z0-9_ ]{{0,40}}?)\s+(?:as|to|=)\s+(?:{quoted})",
         rf"(?:with|using)\s+([A-Za-z_][A-Za-z0-9_ ]{{0,40}}?)\s+(?:as|to|=)\s+(?:{quoted})",
     ]
@@ -377,6 +378,426 @@ def _literal_values_for_step(prompt: str, symbol: dict[str, Any]) -> dict[str, s
                 literals[param_name] = value
                 break
     return literals
+
+
+def _param_required(param: dict[str, Any]) -> bool:
+    name = str(param.get("name") or "")
+    if not name or name.startswith("*"):
+        return False
+    return "default" not in param
+
+
+def _required_params(symbol: dict[str, Any]) -> list[dict[str, Any]]:
+    return [param for param in _params(symbol) if _param_required(param)]
+
+
+def _output_matches_param(output: dict[str, Any], param: dict[str, Any]) -> tuple[bool, str]:
+    output_name = str(output.get("name") or "")
+    param_name = str(param.get("name") or "")
+    output_norm = _normalize_name(output_name)
+    param_norm = _normalize_name(param_name)
+    if output_norm and param_norm and (
+        output_norm == param_norm
+        or f"_{output_norm}_" in f"_{param_norm}_"
+        or f"_{param_norm}_" in f"_{output_norm}_"
+    ):
+        return True, "matched producer output name to required parameter"
+    out_type = str(output.get("annotation") or output.get("type") or "").replace("typing.", "").strip()
+    param_type = str(param.get("annotation") or param.get("type") or "").replace("typing.", "").strip()
+    if out_type and param_type and out_type == param_type and out_type.lower() not in {"str", "int", "float", "bool", "any", "none", "void", "object"}:
+        return True, f"matched producer output type: {out_type}"
+    return False, ""
+
+
+def _producer_score(symbol: dict[str, Any], param: dict[str, Any], prompt: str) -> tuple[float, dict[str, Any] | None, str]:
+    best_output: dict[str, Any] | None = None
+    best_reason = ""
+    score = 0.0
+    for output in _outputs(symbol):
+        matched, reason = _output_matches_param(output, param)
+        if not matched:
+            continue
+        output_norm = _normalize_name(output.get("name", ""))
+        param_norm = _normalize_name(param.get("name", ""))
+        current = 80.0
+        if output_norm == param_norm:
+            current += 40.0
+        current += min(20.0, _score_symbol(symbol, prompt))
+        name_norm = _normalize_name(symbol.get("name", ""))
+        if any(token in name_norm for token in _tokens(param.get("name", ""))):
+            current += 10.0
+        if current > score:
+            score = current
+            best_output = output
+            best_reason = reason
+    return score, best_output, best_reason
+
+
+def _find_producer_for_param(
+    param: dict[str, Any],
+    symbols: list[dict[str, Any]],
+    prompt: str,
+    used_names: set[str],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
+    scored: list[tuple[float, dict[str, Any], dict[str, Any], str]] = []
+    for symbol in symbols:
+        name = str(symbol.get("name") or "")
+        if not name or name in used_names:
+            continue
+        score, output, reason = _producer_score(symbol, param, prompt)
+        if output is not None and score > 0:
+            scored.append((score, symbol, output, reason))
+    scored.sort(key=lambda item: (-item[0], str(item[1].get("file_path") or ""), int(item[1].get("lineno") or 0)))
+    if not scored:
+        return None, None, ""
+    _score, symbol, output, reason = scored[0]
+    return symbol, output, reason
+
+
+def _clean_annotation(value: Any) -> str:
+    return str(value or "").replace("typing.", "").strip()
+
+
+def _type_family(value: Any) -> str:
+    text = _clean_annotation(value).lower()
+    if text.startswith("dict") or text in {"mapping", "mutablemapping"}:
+        return "dict"
+    if text.startswith("list") or text.startswith("tuple") or text.startswith("set") or text in {"sequence", "iterable"}:
+        return "list"
+    if text in {"str", "string"}:
+        return "str"
+    if text in {"int", "float", "bool"}:
+        return text
+    return text or "Any"
+
+
+def _utility_symbol(kind: str, *, key: str = "", index: int = 0) -> dict[str, Any]:
+    if kind == "dict_key":
+        return {
+            "name": "Get Dict Key",
+            "kind": "utility",
+            "host": "utility",
+            "package": "Utility",
+            "source_kind": "utility",
+            "utility_kind": "dict_key",
+            "params": [
+                {"name": "source", "annotation": "dict", "python_type": "dict"},
+                {"name": "key", "annotation": "str", "python_type": "str", "default": ""},
+                {"name": "default", "annotation": "Any", "python_type": "Any", "default": None},
+            ],
+            "outputs": [{"name": "value", "annotation": "Any", "python_type": "Any"}],
+            "return_annotation": "Any",
+            "description": "Read one key from a dictionary.",
+            "_planner_literal_values": {"key": key},
+        }
+    if kind == "list_item":
+        return {
+            "name": "Get List Item",
+            "kind": "utility",
+            "host": "utility",
+            "package": "Utility",
+            "source_kind": "utility",
+            "utility_kind": "list_item",
+            "params": [
+                {"name": "source", "annotation": "list", "python_type": "list"},
+                {"name": "index", "annotation": "int", "python_type": "int", "default": 0},
+            ],
+            "outputs": [{"name": "item", "annotation": "Any", "python_type": "Any"}],
+            "return_annotation": "Any",
+            "description": "Read one item from a list.",
+            "_planner_literal_values": {"index": index},
+        }
+    return {}
+
+
+def _find_adapter_source_for_param(
+    param: dict[str, Any],
+    symbols: list[dict[str, Any]],
+    prompt: str,
+    used_names: set[str],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, str]:
+    prompt_norm = _normalize_name(prompt)
+    param_name = str(param.get("name") or "")
+    param_norm = _normalize_name(param_name)
+    scored: list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any], str]] = []
+    for symbol in symbols:
+        name = str(symbol.get("name") or "")
+        if not name or name in used_names:
+            continue
+        name_norm = _normalize_name(name)
+        for output in _outputs(symbol):
+            family = _type_family(output.get("annotation") or output.get("type") or output.get("python_type"))
+            if family == "dict":
+                score = 35.0 + min(20.0, _score_symbol(symbol, prompt))
+                if param_norm and f"_{param_norm}_" in f"_{prompt_norm}_":
+                    score += 25.0
+                if name_norm and f"_{name_norm}_" in f"_{prompt_norm}_":
+                    score += 20.0
+                adapter = _utility_symbol("dict_key", key=param_name)
+                scored.append((score, symbol, output, adapter, "adapted dictionary output with Get Dict Key"))
+            elif family == "list":
+                score = 25.0 + min(20.0, _score_symbol(symbol, prompt))
+                if name_norm and f"_{name_norm}_" in f"_{prompt_norm}_":
+                    score += 20.0
+                adapter = _utility_symbol("list_item", index=0)
+                scored.append((score, symbol, output, adapter, "adapted list output with Get List Item"))
+    scored.sort(key=lambda item: (-item[0], str(item[1].get("file_path") or ""), int(item[1].get("lineno") or 0)))
+    if not scored:
+        return None, None, None, ""
+    _score, symbol, output, adapter, reason = scored[0]
+    return symbol, output, adapter, reason
+
+
+def _step_for_symbol(symbol: dict[str, Any], prompt: str, *, dependency_for: str = "", role: str = "") -> dict[str, Any]:
+    literals = _literal_values_for_step(prompt, symbol)
+    literals.update(symbol.get("_planner_literal_values") or {})
+    step = {
+        "symbol": symbol,
+        "params": _params(symbol),
+        "outputs": _outputs(symbol),
+        "literal_values": literals,
+    }
+    if role:
+        step["dependency_role"] = role
+    if dependency_for:
+        step["dependency_for"] = dependency_for
+    return step
+
+
+def _required_links_for_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    links: list[dict[str, Any]] = []
+    for target_index, target_step in enumerate(steps, start=1):
+        target_symbol = target_step.get("symbol") or {}
+        literal_values = target_step.get("literal_values") or {}
+        for param in _required_params(target_symbol):
+            param_name = str(param.get("name") or "")
+            if param_name in literal_values and str(literal_values.get(param_name, "")) != "":
+                continue
+            existing_source: tuple[int, str, str] | None = None
+            for source_index, source_step in enumerate(steps[: target_index - 1], start=1):
+                for output in source_step.get("outputs") or source_step.get("symbol", {}).get("outputs") or []:
+                    matched, reason = _output_matches_param(output, param)
+                    if matched:
+                        existing_source = (source_index, str(output.get("name") or "result"), reason)
+            if existing_source:
+                links.append(
+                    {
+                        "from_step": existing_source[0],
+                        "from_output": existing_source[1],
+                        "to_step": target_index,
+                        "to_input": param_name,
+                        "reason": existing_source[2] or "required input satisfied by upstream producer",
+                    }
+                )
+                continue
+            for source_index, source_step in enumerate(steps[: target_index - 1], start=1):
+                source_symbol = source_step.get("symbol") or {}
+                if source_step.get("dependency_for") != target_symbol.get("name"):
+                    continue
+                if source_symbol.get("utility_kind") not in {"dict_key", "list_item"}:
+                    continue
+                output_name = "value" if source_symbol.get("utility_kind") == "dict_key" else "item"
+                links.append(
+                    {
+                        "from_step": source_index,
+                        "from_output": output_name,
+                        "to_step": target_index,
+                        "to_input": param_name,
+                        "reason": "adapter output satisfies required parameter",
+                    }
+                )
+                break
+    return links
+
+
+def _satisfy_required_dependencies(
+    steps: list[dict[str, Any]],
+    symbols: list[dict[str, Any]],
+    prompt: str,
+    *,
+    max_insertions: int = 12,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Ensure required callable params are bound by literals, defaults, or producers."""
+    diagnostics: list[str] = []
+    capability_gaps: list[dict[str, Any]] = []
+    insertions = 0
+    index = 0
+    while index < len(steps):
+        step = steps[index]
+        symbol = step.get("symbol") or {}
+        literal_values = step.setdefault("literal_values", _literal_values_for_step(prompt, symbol))
+        restarted = False
+        for param in _required_params(symbol):
+            param_name = str(param.get("name") or "")
+            if param_name in literal_values and str(literal_values.get(param_name, "")) != "":
+                continue
+            existing_source = False
+            for source_index, source_step in enumerate(steps[:index], start=1):
+                for output in source_step.get("outputs") or source_step.get("symbol", {}).get("outputs") or []:
+                    matched, _reason = _output_matches_param(output, param)
+                    if matched:
+                        existing_source = True
+            if existing_source:
+                continue
+            existing_adapter = False
+            for source_step in steps[:index]:
+                source_symbol = source_step.get("symbol") or {}
+                if source_step.get("dependency_for") == symbol.get("name") and source_symbol.get("utility_kind") in {"dict_key", "list_item"}:
+                    existing_adapter = True
+                    break
+            if existing_adapter:
+                continue
+
+            later_direct_index: int | None = None
+            for candidate_index, candidate_step in enumerate(steps[index + 1 :], start=index + 1):
+                for output in candidate_step.get("outputs") or candidate_step.get("symbol", {}).get("outputs") or []:
+                    matched, _reason = _output_matches_param(output, param)
+                    if matched:
+                        later_direct_index = candidate_index
+            if later_direct_index is not None:
+                producer_step = steps.pop(later_direct_index)
+                steps.insert(index, producer_step)
+                diagnostics.append(
+                    f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` before `{symbol.get('name')}` for `{param_name}`."
+                )
+                index = max(index - 1, 0)
+                restarted = True
+                break
+
+            later_adapter_index: int | None = None
+            later_adapter: dict[str, Any] | None = None
+            later_adapter_reason = ""
+            for candidate_index, candidate_step in enumerate(steps[index + 1 :], start=index + 1):
+                for output in candidate_step.get("outputs") or candidate_step.get("symbol", {}).get("outputs") or []:
+                    family = _type_family(output.get("annotation") or output.get("type") or output.get("python_type"))
+                    if family == "dict":
+                        later_adapter_index = candidate_index
+                        later_adapter = _utility_symbol("dict_key", key=param_name)
+                        later_adapter_reason = "adapted dictionary output with Get Dict Key"
+                    elif family == "list":
+                        later_adapter_index = candidate_index
+                        later_adapter = _utility_symbol("list_item", index=0)
+                        later_adapter_reason = "adapted list output with Get List Item"
+            if later_adapter_index is not None and later_adapter:
+                producer_step = steps.pop(later_adapter_index)
+                adapter_step = _step_for_symbol(
+                    later_adapter,
+                    prompt,
+                    role="adapter",
+                    dependency_for=str(symbol.get("name") or ""),
+                )
+                steps.insert(index, producer_step)
+                steps.insert(index + 1, adapter_step)
+                insertions += 1
+                diagnostics.append(
+                    f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` and inserted adapter `{later_adapter.get('name')}` before `{symbol.get('name')}` for `{param_name}`."
+                )
+                if later_adapter_reason:
+                    diagnostics.append(later_adapter_reason)
+                index = max(index - 1, 0)
+                restarted = True
+                break
+
+            used_names = {str(item.get("symbol", {}).get("name") or "") for item in steps}
+            producer, output, reason = _find_producer_for_param(param, symbols, prompt, used_names)
+            if producer and output and insertions < max_insertions:
+                producer_step = _step_for_symbol(
+                    producer,
+                    prompt,
+                    role="producer",
+                    dependency_for=str(symbol.get("name") or ""),
+                )
+                steps.insert(index, producer_step)
+                insertions += 1
+                diagnostics.append(
+                    f"Inserted prerequisite `{producer.get('name')}` before `{symbol.get('name')}` for `{param_name}`."
+                )
+                index = max(index - 1, 0)
+                restarted = True
+                break
+
+            adapter_producer, _adapter_source_output, adapter, adapter_reason = _find_adapter_source_for_param(
+                param,
+                symbols,
+                prompt,
+                used_names,
+            )
+            if adapter_producer and adapter and insertions + 2 <= max_insertions:
+                producer_step = _step_for_symbol(
+                    adapter_producer,
+                    prompt,
+                    role="producer",
+                    dependency_for=str(symbol.get("name") or ""),
+                )
+                adapter_step = _step_for_symbol(
+                    adapter,
+                    prompt,
+                    role="adapter",
+                    dependency_for=str(symbol.get("name") or ""),
+                )
+                steps.insert(index, producer_step)
+                steps.insert(index + 1, adapter_step)
+                insertions += 2
+                diagnostics.append(
+                    f"Inserted `{adapter_producer.get('name')}` and adapter `{adapter.get('name')}` before `{symbol.get('name')}` for `{param_name}`."
+                )
+                if adapter_reason:
+                    diagnostics.append(adapter_reason)
+                index = max(index - 1, 0)
+                restarted = True
+                break
+
+            capability_gaps.append(
+                {
+                    "kind": "missing_required_argument",
+                    "capability": f"{symbol.get('name', 'callable')}.{param_name}",
+                    "callable": symbol.get("name", "callable"),
+                    "argument": param_name,
+                    "parameter": param,
+                    "reason": "Required argument was not provided by the user, defaulted by the signature, or produced by an indexed prerequisite function.",
+                    "next_action": "ask_user_for_required_argument",
+                }
+            )
+        if not restarted:
+            index += 1
+
+    data_links = _required_links_for_steps(steps)
+    data_links.extend(_infer_data_links(steps, prompt))
+    by_target: dict[tuple[int, str], dict[str, Any]] = {}
+    for link in data_links:
+        key = (int(link.get("to_step") or 0), str(link.get("to_input") or ""))
+        current = by_target.get(key)
+        if current is None or int(link.get("from_step") or 0) > int(current.get("from_step") or 0):
+            by_target[key] = link
+    deduped = sorted(by_target.values(), key=lambda item: (int(item.get("to_step") or 0), str(item.get("to_input") or "")))
+    return steps, deduped, capability_gaps, diagnostics
+
+
+def _satisfy_required_dependencies_with_escalation(
+    steps: list[dict[str, Any]],
+    primary_symbols: list[dict[str, Any]],
+    prompt: str,
+    *,
+    fallback_symbol_loader: Any | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    steps, data_links, gaps, diagnostics = _satisfy_required_dependencies(steps, primary_symbols, prompt)
+    if not gaps or fallback_symbol_loader is None:
+        return steps, data_links, gaps, diagnostics
+    fallback_symbols = list(fallback_symbol_loader() or [])
+    if not fallback_symbols:
+        return steps, data_links, gaps, diagnostics
+    primary_keys = {
+        (str(symbol.get("file_path") or ""), str(symbol.get("name") or ""), int(symbol.get("lineno") or 0))
+        for symbol in primary_symbols
+    }
+    expanded = list(primary_symbols)
+    for symbol in fallback_symbols:
+        key = (str(symbol.get("file_path") or ""), str(symbol.get("name") or ""), int(symbol.get("lineno") or 0))
+        if key not in primary_keys:
+            expanded.append(symbol)
+    diagnostics.append("Escalated dependency search beyond explicit scope because required inputs remained unresolved.")
+    retry_steps, retry_links, retry_gaps, retry_diagnostics = _satisfy_required_dependencies(steps, expanded, prompt)
+    return retry_steps, retry_links, retry_gaps, diagnostics + retry_diagnostics
 
 
 _DISCOVER_SYMBOLS_CACHE: dict[tuple[str, ...], tuple[float, list[dict[str, Any]]]] = {}
@@ -407,6 +828,106 @@ def _discover_symbols(project_roots: list[str]) -> list[dict[str, Any]]:
     return symbols
 
 
+def _scope_reference_tokens(prompt: str) -> list[str]:
+    tokens: list[str] = []
+    for match in re.finditer(r"(?<!\w)@([A-Za-z0-9_./\\:-]+)", prompt or ""):
+        token = match.group(1).strip().rstrip(".,;:!?")
+        if token and ("/" in token or "\\" in token or "." in token):
+            tokens.append(token)
+    path_pattern = r"(?<![\"'@\w])((?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[A-Za-z0-9_./\\-]+[\\/])[A-Za-z0-9_./\\:-]+)"
+    for match in re.finditer(path_pattern, prompt or ""):
+        token = match.group(1).strip().rstrip(".,;:!?")
+        if token and ("/" in token or "\\" in token):
+            tokens.append(token)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for token in tokens:
+        key = token.replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(token)
+    return unique
+
+
+def _prompt_without_scope_references(prompt: str) -> str:
+    text = re.sub(r"(?<!\w)@[A-Za-z0-9_./\\:-]+", " ", prompt or "")
+    text = re.sub(r"(?<![\"'@\w])(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[A-Za-z0-9_./\\-]+[\\/])[A-Za-z0-9_./\\:-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _resolve_scope_paths(prompt: str, roots: list[str]) -> list[Path]:
+    resolved: list[Path] = []
+    for token in _scope_reference_tokens(prompt):
+        normalized = token.lstrip("@").replace("\\", "/").strip("/")
+        candidates: list[Path] = []
+        raw = Path(token.lstrip("@"))
+        if raw.is_absolute():
+            candidates.append(raw)
+        for root_text in roots:
+            root = Path(root_text)
+            candidates.append(root / normalized)
+            candidates.extend(path for path in root.rglob(Path(normalized).name) if path.name.lower() == Path(normalized).name.lower())
+        for candidate in candidates:
+            try:
+                candidate = candidate.resolve()
+            except Exception:
+                continue
+            if candidate.exists() and candidate not in resolved:
+                resolved.append(candidate)
+                break
+    return resolved
+
+
+def _scope_symbol_pools(symbols: list[dict[str, Any]], scope_paths: list[Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not scope_paths:
+        return symbols, symbols
+    target_symbols: list[dict[str, Any]] = []
+    dependency_symbols: list[dict[str, Any]] = []
+    dependency_roots: list[Path] = []
+    for scope in scope_paths:
+        if scope.is_file():
+            dependency_roots.append(scope.parent)
+        else:
+            dependency_roots.append(scope)
+    for symbol in symbols:
+        try:
+            path = Path(str(symbol.get("file_path") or "")).resolve()
+        except Exception:
+            continue
+        in_target = any((scope.is_file() and path == scope) or (scope.is_dir() and (path == scope or scope in path.parents)) for scope in scope_paths)
+        in_dependency = any(path == root or root in path.parents for root in dependency_roots)
+        if in_target:
+            target_symbols.append(symbol)
+        if in_dependency:
+            dependency_symbols.append(symbol)
+    return target_symbols or symbols, dependency_symbols or target_symbols or symbols
+
+
+_SCOPED_SYMBOL_CACHE: dict[tuple[str, ...], tuple[float, list[dict[str, Any]], list[dict[str, Any]]]] = {}
+
+
+def _discover_scoped_symbol_pools(scope_paths: list[Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cache_key = tuple(sorted(str(path.resolve()) for path in scope_paths if path.exists()))
+    cached = _SCOPED_SYMBOL_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _DISCOVER_SYMBOLS_CACHE_TTL_SECONDS:
+        return list(cached[1]), list(cached[2])
+    target_symbols: list[dict[str, Any]] = []
+    dependency_roots: list[str] = []
+    for scope in scope_paths:
+        if scope.is_file():
+            target_symbols.extend(extract_symbols_from_file(scope))
+            dependency_roots.append(str(scope.parent))
+        elif scope.is_dir():
+            dependency_roots.append(str(scope))
+    dependency_symbols = _discover_symbols(dependency_roots) if dependency_roots else list(target_symbols)
+    if not target_symbols:
+        target_symbols = list(dependency_symbols)
+    _SCOPED_SYMBOL_CACHE[cache_key] = (now, list(target_symbols), list(dependency_symbols))
+    return target_symbols, dependency_symbols
+
+
 def _ordered_candidates(prompt: str, symbols: list[dict[str, Any]]) -> list[dict[str, Any]]:
     scored = [(_score_symbol(symbol, prompt), symbol) for symbol in symbols]
     scored = [(score, symbol) for score, symbol in scored if score >= 4.0]
@@ -435,9 +956,12 @@ def _ordered_candidates(prompt: str, symbols: list[dict[str, Any]]) -> list[dict
 def _requested_callable_names(prompt: str) -> list[str]:
     """Return code-like callable names explicitly requested by the user."""
 
+    prompt = _prompt_without_scope_references(prompt)
     names: list[str] = []
     for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+)\b", prompt or ""):
         name = match.group(1)
+        if re.match(r"\s*=", (prompt or "")[match.end() :]):
+            continue
         if name not in names:
             names.append(name)
     for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", prompt or ""):
@@ -545,26 +1069,25 @@ def resolve_workflow_intent(prompt: str, project_roots: list[str]) -> dict[str, 
 
     roots = [str(Path(root).resolve()) for root in project_roots if root and Path(root).exists()]
 
-    # Automatically scan sibling/peer tool directories (e.g. unreal_tools, maya_tools, motionbuilder_tools)
-    for r in list(roots):
-        p = Path(r)
-        parent = p.parent
-        if parent.name == "mcp_servers":
-            try:
-                for sibling in parent.parent.iterdir():
-                    if sibling.is_dir() and sibling.name.endswith("_tools"):
-                        sibling_path = str(sibling.resolve())
-                        if sibling_path not in roots:
-                            roots.append(sibling_path)
-            except Exception:
-                pass
-
     if not roots:
         return WorkflowIntentPlan(False, 0.0, [], [], [], ["No valid project roots were available for symbol discovery."]).as_dict()
 
-    symbols = _discover_symbols(roots)
+    scope_paths = _resolve_scope_paths(prompt, roots)
+    if scope_paths:
+        target_symbols, dependency_symbols = _discover_scoped_symbol_pools(scope_paths)
+        symbols = list({id(item): item for item in [*target_symbols, *dependency_symbols]}.values())
+        fallback_dependency_loader = lambda: _discover_symbols(roots)
+    else:
+        symbols = _discover_symbols(roots)
+        target_symbols, dependency_symbols = symbols, symbols
+        fallback_dependency_loader = None
     diagnostics.append(f"Indexed symbol candidates: {len(symbols)}")
-    candidates = _explicit_order(prompt, _ordered_candidates(prompt, symbols))
+    if scope_paths:
+        diagnostics.append(
+            "Explicit scope narrowed target candidates to "
+            + ", ".join(str(path) for path in scope_paths[:3])
+        )
+    candidates = _explicit_order(prompt, _ordered_candidates(prompt, target_symbols))
 
     requested_names = _requested_callable_names(prompt)
     if requested_names:
@@ -608,7 +1131,13 @@ def resolve_workflow_intent(prompt: str, project_roots: list[str]) -> dict[str, 
             }
         )
 
-    data_links = _infer_data_links(steps, prompt)
+    steps, data_links, dependency_gaps, dependency_diagnostics = _satisfy_required_dependencies_with_escalation(
+        steps,
+        dependency_symbols,
+        prompt,
+        fallback_symbol_loader=fallback_dependency_loader,
+    )
+    diagnostics.extend(dependency_diagnostics)
     connected_steps = {link["from_step"] for link in data_links} | {link["to_step"] for link in data_links}
     explicit_names = set(requested_names)
     preserve_explicit_steps = bool(explicit_names) and all(
@@ -639,6 +1168,7 @@ def resolve_workflow_intent(prompt: str, project_roots: list[str]) -> dict[str, 
         }
         for name in missing_names
     ]
+    capability_gaps.extend(dependency_gaps)
     success = bool(len(steps) >= 1 and confidence >= 0.35 and not capability_gaps)
     diagnostics.append("Resolved steps: " + ", ".join(step["symbol"].get("name", "unknown") for step in steps))
     if data_links:

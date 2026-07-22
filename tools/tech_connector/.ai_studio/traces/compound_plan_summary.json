@@ -1,0 +1,729 @@
+{
+  "elapsed_seconds": 122.99,
+  "status": "capability_acquisition_required",
+  "target_asset": "/Game/MetaHumans/LesterPhoenix/BP_LesterPhoenix",
+  "behavior_count": 10,
+  "behavior_titles": [
+    "Grapple Zip",
+    "Play Grapple Montage on G Input",
+    "Preserve Ordinary Jump in Space",
+    "Vault Waist-High Obstacle",
+    "Slide While Sprinting",
+    "Wall-Jump Behavior",
+    "Directional Dodge with Invulnerability Window",
+    "Play Dodge Montage on C Input Press",
+    "State Reaches ABP_Manny_Combat Every Update",
+    "Recover from completion, cancellation, and interruption"
+  ],
+  "input_arbitration": [
+    {
+      "input": "G",
+      "policy": "Evaluate in descending priority and execute only the first passing candidate.",
+      "ordered_candidates": [
+        {
+          "behavior_id": "O1_C1",
+          "title": "Grapple Zip",
+          "priority": 300,
+          "reason": "measured world-context opportunity",
+          "guards": [
+            "measured hit is within 2500 cm"
+          ]
+        }
+      ],
+      "unresolved_ties": [],
+      "fallback_behavior_id": ""
+    },
+    {
+      "input": "SPACE",
+      "policy": "Evaluate in descending priority and execute only the first passing candidate.",
+      "ordered_candidates": [
+        {
+          "behavior_id": "O6_C1",
+          "title": "Wall-Jump Behavior",
+          "priority": 400,
+          "reason": "authoritative active-state context",
+          "guards": [
+            "observed climbing condition is active"
+          ]
+        },
+        {
+          "behavior_id": "O4_C1",
+          "title": "Vault Waist-High Obstacle",
+          "priority": 300,
+          "reason": "measured world-context opportunity",
+          "guards": [
+            "waist-high-obstacle is observed"
+          ]
+        },
+        {
+          "behavior_id": "O5_C1",
+          "title": "Slide While Sprinting",
+          "priority": 200,
+          "reason": "locomotion-state context",
+          "guards": [
+            "measured input is SPACE",
+            "current state is sprinting"
+          ]
+        },
+        {
+          "behavior_id": "O3_C1",
+          "title": "Preserve Ordinary Jump in Space",
+          "priority": 101,
+          "reason": "guard-specificity fallback",
+          "guards": [
+            "observed no traversal context exists condition is active"
+          ]
+        }
+      ],
+      "unresolved_ties": [],
+      "fallback_behavior_id": ""
+    },
+    {
+      "input": "C",
+      "policy": "Evaluate in descending priority and execute only the first passing candidate.",
+      "ordered_candidates": [
+        {
+          "behavior_id": "O7_C1",
+          "title": "Directional Dodge with Invulnerability Window",
+          "priority": 101,
+          "reason": "guard-specificity fallback",
+          "guards": [
+            "dodge activation is available"
+          ]
+        }
+      ],
+      "unresolved_ties": [],
+      "fallback_behavior_id": ""
+    }
+  ],
+  "operation_realizations": [
+    {
+      "behavior_id": "O1_C1",
+      "operations": [
+        {
+          "operation": "collision.trace_forward",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "movement.launch_toward_observed_hit",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O2_C1",
+      "operations": [
+        {
+          "operation": "animation.play_grapple_montage",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O3_C1",
+      "operations": [
+        {
+          "operation": "movement.apply_jump_impulse",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O4_C1",
+      "operations": [
+        {
+          "operation": "collision.sweep_obstacle",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "movement.apply_vault_impulse",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O5_C1",
+      "operations": [
+        {
+          "operation": "movement.apply_slide_impulse",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O6_C1",
+      "operations": [
+        {
+          "operation": "movement.apply_wall_jump_vertical_velocity",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "collision.sweep_wall",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "physics.apply_directional_impulse_from_surface_normal",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O7_C1",
+      "operations": [
+        {
+          "operation": "animation.play_dodge",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "physics.apply_directional_dodge_impulse",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "combat.enable_bounded_invulnerability_window",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "combat.schedule_invulnerability_clear",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O8_C1",
+      "operations": [
+        {
+          "operation": "animation.play_dodge_montage",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "O9_C1",
+      "operations": [
+        {
+          "operation": "state.read_owning_character_variables",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        },
+        {
+          "operation": "state.write_anim_instance_variables",
+          "kind": "blueprint_graph_spec",
+          "status": "pending_graph_spec"
+        }
+      ]
+    },
+    {
+      "behavior_id": "runtime.feature_recovery",
+      "operations": [
+        {
+          "operation": "runtime.pie_begin",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "runtime.pie_status",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "runtime.inject_key",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "runtime.inspect_character",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "runtime.pie_end",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "diagnostics.read_log_errors",
+          "kind": "direct_callable",
+          "status": "resolved"
+        },
+        {
+          "operation": "semantic_index.record_runtime_observation",
+          "kind": "capability_acquisition",
+          "status": "missing_callable"
+        }
+      ]
+    }
+  ],
+  "animation_roles": [
+    {
+      "role": "grapple_montage",
+      "target_skeleton": "",
+      "selected_asset": "",
+      "candidate_assets": [
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/MayaHIK/CMU_01_09_MayaHIK_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/NormalizedRetarget/CMU_01_09_NormalizedMotion_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/NormalizedSource/CMU_01_09_NormalizedMotion",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/Retargeted/CMU_01_09_Motion_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/Source/CMU_01_09_Motion",
+        "/Game/AIStudio/DownloadedAnimations/DownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaDancingProbe/Samba_20Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaDownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaRetargetProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/GeneratedAnimations/OpenMocap/CMU/A_CMU_01_03_ClimbHang_Manny",
+        "/Game/AIStudio/GeneratedAnimations/Retargeted/A_CMU_01_03_playground___climb_hang_swing_SKM_Manny_NoGeo",
+        "/Game/AIStudio/GeneratedAnims/Abilities/AI_BlinkDash_Activation",
+        "/Game/AIStudio/GeneratedAnims/Combat/AI_DodgeRoll",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_AI_ClimbLoop_Test",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_DodgeRoll",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_DownloadProbe",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_GrappleZip",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_VaultSlide",
+        "/Game/AIStudio/GeneratedAnims/Traversal/AI_GrappleZip",
+        "/Game/AIStudio/GeneratedAnims/Traversal/AI_VaultSlide",
+        "/Game/AIStudio/RetargetedAnimations/DownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/DownloadProbe/Samba_Dancing_Anim_Target",
+        "/Game/AIStudio/RetargetedAnimations/SambaDirectProbe/Samba_Dancing_Anim_MannyDirect",
+        "/Game/AIStudio/RetargetedAnimations/SambaRetargetProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim_Target",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Back_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_02",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_03",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Left_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Right_01",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS1",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS_AO_CD",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS_AO_CU",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_RecoveryAdditive",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_Start",
+        "/Game/Characters/Mannequins/Anims/Pistol/MF_Pistol_Idle_ADS",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_DryFire",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Equip",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire_Montage",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Reload",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CC",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CD",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CU",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Back_Med_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Hvy_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_02",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_03",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_04",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Med_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Med_02",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Apex",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Fall_Land",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_RecoveryAdditive",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Start",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Start_Loop",
+        "/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_DryFire",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Equip",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Fire",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Reload",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack",
+        "/Game/Characters/Mannequins/Anims/Unarmed/BS_Idle_Walk_Run",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_WallJump",
+        "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Right",
+        "/Game/MetaHumans/Common/Common/Mocap/mh_arkit_mapping_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_calf_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_calf_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_clavicle_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_clavicle_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_foot_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_foot_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_hand_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_hand_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_lowerarm_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_lowerarm_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thigh_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thigh_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_upperarm_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_upperarm_r_anim",
+        "/Game/Variant_Combat/Anims/AM_ChargedAttack",
+        "/Game/Variant_Combat/Anims/AM_ComboAttack",
+        "/Game/Variant_Platforming/Anims/AM_Dash"
+      ],
+      "required_evidence": [
+        "semantic role match",
+        "skeleton compatibility or verified retarget",
+        "root-motion and displacement metrics",
+        "contextual preview acceptance",
+        "consumed AnimGraph slot/layer path",
+        "PIE playback on the possessed target mesh"
+      ],
+      "status": "blocked_until_asset_evidence_passes"
+    },
+    {
+      "role": "dodge_montage",
+      "target_skeleton": "",
+      "selected_asset": "",
+      "candidate_assets": [
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/MayaHIK/CMU_01_09_MayaHIK_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/NormalizedRetarget/CMU_01_09_NormalizedMotion_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/NormalizedSource/CMU_01_09_NormalizedMotion",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/Retargeted/CMU_01_09_Motion_Manny",
+        "/Game/AIStudio/DownloadedAnimations/CMU/Subject01/Source/CMU_01_09_Motion",
+        "/Game/AIStudio/DownloadedAnimations/DownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaDancingProbe/Samba_20Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaDownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaRetargetProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/DownloadedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/GeneratedAnimations/OpenMocap/CMU/A_CMU_01_03_ClimbHang_Manny",
+        "/Game/AIStudio/GeneratedAnimations/Retargeted/A_CMU_01_03_playground___climb_hang_swing_SKM_Manny_NoGeo",
+        "/Game/AIStudio/GeneratedAnims/Abilities/AI_BlinkDash_Activation",
+        "/Game/AIStudio/GeneratedAnims/Combat/AI_DodgeRoll",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_AI_ClimbLoop_Test",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_DodgeRoll",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_DownloadProbe",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_GrappleZip",
+        "/Game/AIStudio/GeneratedAnims/Montages/AM_VaultSlide",
+        "/Game/AIStudio/GeneratedAnims/Traversal/AI_GrappleZip",
+        "/Game/AIStudio/GeneratedAnims/Traversal/AI_VaultSlide",
+        "/Game/AIStudio/RetargetedAnimations/DownloadProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/DownloadProbe/Samba_Dancing_Anim_Target",
+        "/Game/AIStudio/RetargetedAnimations/SambaDirectProbe/Samba_Dancing_Anim_MannyDirect",
+        "/Game/AIStudio/RetargetedAnimations/SambaRetargetProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim",
+        "/Game/AIStudio/RetargetedAnimations/SambaSelectedSkeletonProbe/Samba_Dancing_Anim_Target",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Back_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_02",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_03",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Left_01",
+        "/Game/Characters/Mannequins/Anims/Death/MM_Death_Right_01",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS1",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS_AO_CD",
+        "/Game/Characters/Mannequins/Anims/Pistol/Aim/MF_Pistol_Idle_ADS_AO_CU",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_RecoveryAdditive",
+        "/Game/Characters/Mannequins/Anims/Pistol/Jump/MM_Pistol_Jump_Start",
+        "/Game/Characters/Mannequins/Anims/Pistol/MF_Pistol_Idle_ADS",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_DryFire",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Equip",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire_Montage",
+        "/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Reload",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CC",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CD",
+        "/Game/Characters/Mannequins/Anims/Rifle/AIM/MM_Rifle_Idle_ADS_AO_CU",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Back_Med_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Hvy_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_02",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_03",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_04",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Med_01",
+        "/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Med_02",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Apex",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Fall_Land",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_RecoveryAdditive",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Start",
+        "/Game/Characters/Mannequins/Anims/Rifle/Jump/MM_Rifle_Jump_Start_Loop",
+        "/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_DryFire",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Equip",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Fire",
+        "/Game/Characters/Mannequins/Anims/Rifle/MM_Rifle_Reload",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack",
+        "/Game/Characters/Mannequins/Anims/Unarmed/BS_Idle_Walk_Run",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Fall_Loop",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_WallJump",
+        "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd_Right",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Left",
+        "/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Right",
+        "/Game/MetaHumans/Common/Common/Mocap/mh_arkit_mapping_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_calf_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_calf_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_clavicle_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_clavicle_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_foot_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_foot_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_hand_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_hand_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_index_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_lowerarm_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_lowerarm_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_middle_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_pinky_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_ring_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thigh_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thigh_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_01_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_01_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_02_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_02_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_03_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_thumb_03_r_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_upperarm_l_anim",
+        "/Game/MetaHumans/Common/Male/Medium/NormalWeight/Poses/m_med_nrw_upperarm_r_anim",
+        "/Game/Variant_Combat/Anims/AM_ChargedAttack",
+        "/Game/Variant_Combat/Anims/AM_ComboAttack",
+        "/Game/Variant_Platforming/Anims/AM_Dash"
+      ],
+      "required_evidence": [
+        "semantic role match",
+        "skeleton compatibility or verified retarget",
+        "root-motion and displacement metrics",
+        "contextual preview acceptance",
+        "consumed AnimGraph slot/layer path",
+        "PIE playback on the possessed target mesh"
+      ],
+      "status": "blocked_until_asset_evidence_passes"
+    }
+  ],
+  "fixture_count": 31,
+  "readiness": {
+    "action_count": 33,
+    "unresolved_action_ids": [
+      "action_03",
+      "action_04",
+      "action_05",
+      "action_06",
+      "action_07",
+      "action_08",
+      "action_09",
+      "action_10",
+      "action_11",
+      "action_12",
+      "action_13",
+      "action_14",
+      "action_15",
+      "action_16",
+      "action_17",
+      "action_18",
+      "action_19",
+      "action_22",
+      "action_26",
+      "action_27",
+      "action_32"
+    ],
+    "unresolved_behavior_operations": [
+      "O1_C1:collision.trace_forward",
+      "O1_C1:movement.launch_toward_observed_hit",
+      "O2_C1:animation.play_grapple_montage",
+      "O3_C1:movement.apply_jump_impulse",
+      "O4_C1:collision.sweep_obstacle",
+      "O4_C1:movement.apply_vault_impulse",
+      "O5_C1:movement.apply_slide_impulse",
+      "O6_C1:movement.apply_wall_jump_vertical_velocity",
+      "O6_C1:collision.sweep_wall",
+      "O6_C1:physics.apply_directional_impulse_from_surface_normal",
+      "O7_C1:animation.play_dodge",
+      "O7_C1:physics.apply_directional_dodge_impulse",
+      "O7_C1:combat.enable_bounded_invulnerability_window",
+      "O7_C1:combat.schedule_invulnerability_clear",
+      "O8_C1:animation.play_dodge_montage",
+      "O9_C1:state.read_owning_character_variables",
+      "O9_C1:state.write_anim_instance_variables",
+      "runtime.feature_recovery:runtime.inject_key",
+      "runtime.feature_recovery:semantic_index.record_runtime_observation"
+    ],
+    "errors": [
+      "Animation role assets remain unselected or lack contextual acceptance evidence.",
+      "One or more behavior operations lack a callable with resolved parameters.",
+      "One or more implementation actions lack a callable with resolved parameters."
+    ],
+    "ready_for_approval": false,
+    "ready_for_completion_claim": false
+  },
+  "missing_capabilities": [
+    {
+      "capability": "semantic_index.record_runtime_observation",
+      "reason": "No operation is registered.",
+      "registered": false,
+      "function": ""
+    },
+    {
+      "capability": "feature.execute_generic_plan",
+      "reason": "No operation is registered.",
+      "registered": false,
+      "function": ""
+    },
+    {
+      "capability": "runtime.pie_validate",
+      "reason": "No operation is registered.",
+      "registered": false,
+      "function": ""
+    }
+  ],
+  "rendered_plan": "Unreal implementation plan is not ready for approval\n\nTarget: `/Game/MetaHumans/LesterPhoenix/BP_LesterPhoenix`\nLive bridge evidence: `0.45s`\nDomains: `project_discovery`, `behavior_generated_o1_c1`, `behavior_generated_o2_c1`, `behavior_generated_o3_c1`, `behavior_generated_o4_c1`, `behavior_generated_o5_c1`, `behavior_generated_o6_c1`, `behavior_generated_o7_c1`, `behavior_generated_o8_c1`, `behavior_generated_o9_c1`, `behavior_runtime_feature_recovery`, `orchestration`, `validation`\nSkeletal mesh: `/Game/Characters/Mannequins/Meshes/SKM_Manny_NoGeo.SKM_Manny_NoGeo`\nAnimation Blueprint: `/Game/Variant_Combat/Anims/ABP_Manny_Combat`\nState owner: Reusable ActorComponent generated from the behavior contract\n\nBehavior contract:\n- Observation: observed measured hit is valid 2500 cm fact\n- Observation: measured distance is within 2500 cm\n- Observation: observed grapple_zip activation succeeds event\n- Observation: observed no traversal context exists condition\n- Observation: observed waist high obstacle is observed fact\n- Observation: observed measured input is SPACE fact\n- Observation: observed current state is sprinting fact\n- Observation: observed climbing condition\n- Observation: measured wall surface normal\n- Observation: observed dodge activation is available fact\n- Observation: observed input movement direction\n- Observation: observed directional_dodge_with_invulnerability_window activation succeeds event\n- Observation: observed ABP_Manny_Combat AnimInstance is valid fact\n- Observation: owned movement settings\n- Observation: active animation state\n- Observation: temporary collision or ability state\n- Observation: runtime diagnostics\n- Guard: measured hit is within 2500 cm\n- Guard: grapple_zip activation succeeds\n- Guard: observed no traversal context exists condition is active\n- Guard: waist-high-obstacle is observed\n- Guard: measured input is SPACE\n- Guard: current state is sprinting\n- Guard: observed climbing condition is active\n- Guard: dodge activation is available\n- Guard: directional_dodge_with_invulnerability_window activation succeeds\n- Guard: ABP_Manny_Combat AnimInstance is valid\n- Guard: cleanup is idempotent\n- State: `C1Ready`\n- State: `C1Active`\n- State: `C1Recovery`\n- State: `FallingRecovery`\n- State: `Interrupted`\n- State: `Recovered`\n- State: `ExitingSurface`\n- State: `Searching`\n- Transition: `C1Ready -> C1Active` on `G input is pressed`; guards: measured hit is within 2500 cm\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `G input is pressed`; guards: G input activation is received\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `SPACE input is pressed`; guards: observed no traversal context exists condition is active\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `SPACE input is pressed`; guards: waist-high-obstacle is observed\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `SPACE input is pressed`; guards: measured input is SPACE, current state is sprinting\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `SPACE input is pressed`; guards: observed climbing condition is active\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `C input is pressed`; guards: dodge activation is available\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `C input is pressed`; guards: C input activation is received\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `C1Ready -> C1Active` on `every update`; guards: ABP_Manny_Combat AnimInstance is valid\n- Transition: `C1Active -> C1Ready` on `requested outcome completes`; guards: none\n- Transition: `C1Active -> C1Recovery` on `cancel, interruption, or guard loss`; guards: none\n- Transition: `C1Recovery -> C1Ready` on `owned state cleanup completes`; guards: none\n- Transition: `ExitingSurface -> Recovered` on `cleanup succeeds`; guards: none\n- Transition: `Interrupted -> Recovered` on `cleanup succeeds`; guards: none\n- Transition: `FallingRecovery -> Recovered` on `standard falling state restored`; guards: none\n- Transition: `Recovered -> Searching` on `baseline confirmed`; guards: none\n\nMatched local playbooks:\n\nImplementation:\n1. Inspect exact target assets and dependencies: Target class, components, references, conventions, and reusable assets are supported by live evidence.\n   Operations: `blueprint.scan`, `assets.inspect`\n2. Implement behavior: Grapple Zip: at or within 2500 cm, when measured hit is within 2500 cm, character moves using requested a 2500 cm hit-gated grapple zip, then travels toward the measured hit; above 2500 cm or when any guard fails, activation is rejected and baseline behavior is preserved\n   Operations: `collision.trace_forward`, `movement.launch_toward_observed_hit`\n   Needs acquisition: `collision.trace_forward`, `movement.launch_toward_observed_hit`\n3. Implement behavior: Play Grapple Montage on G Input: plays a grapple montage; invalid context rejects activation and preserves baseline behavior\n   Operations: `animation.play_grapple_montage`\n   Needs acquisition: `animation.play_grapple_montage`\n4. Implement behavior: Preserve Ordinary Jump in Space: character jumps using the baseline ordinary jump; invalid context rejects activation and preserves baseline behavior\n   Operations: `movement.apply_jump_impulse`\n   Needs acquisition: `movement.apply_jump_impulse`\n5. Implement behavior: Vault Waist-High Obstacle: character vaults a waist-high obstacle; invalid context rejects activation and preserves baseline behavior\n   Operations: `collision.sweep_obstacle`, `movement.apply_vault_impulse`\n   Needs acquisition: `collision.sweep_obstacle`, `movement.apply_vault_impulse`\n6. Implement behavior: Slide While Sprinting: character slides; when observed sprinting condition is not active, activation is rejected and authoritative state remains unchanged\n   Operations: `movement.apply_slide_impulse`\n   Needs acquisition: `movement.apply_slide_impulse`\n7. Implement behavior: Wall-Jump Behavior: character moves away from the measured wall normal and gains upward movement; when observed climbing condition is not active, activation is rejected and authoritative state remains unchanged\n   Operations: `movement.apply_wall_jump_vertical_velocity`, `collision.sweep_wall`, `physics.apply_directional_impulse_from_surface_normal`\n   Needs acquisition: `movement.apply_wall_jump_vertical_velocity`, `collision.sweep_wall`, `physics.apply_directional_impulse_from_surface_normal`\n8. Implement behavior: Directional Dodge with Invulnerability Window: character dodges along the observed input direction; character is invulnerable only during the bounded window\n   Operations: `animation.play_dodge`, `physics.apply_directional_dodge_impulse`, `combat.enable_bounded_invulnerability_window`, `combat.schedule_invulnerability_clear`\n   Needs acquisition: `animation.play_dodge`, `physics.apply_directional_dodge_impulse`, `combat.enable_bounded_invulnerability_window`, `combat.schedule_invulnerability_clear`\n9. Implement behavior: Play Dodge Montage on C Input Press: dodge montage plays\n   Operations: `animation.play_dodge_montage`\n   Needs acquisition: `animation.play_dodge_montage`\n10. Implement behavior: State Reaches ABP_Manny_Combat Every Update: ABP_Manny_Combat state variables match owning character state after every update; invalid context rejects activation and preserves baseline behavior\n   Operations: `state.read_owning_character_variables`, `state.write_anim_instance_variables`\n   Needs acquisition: `state.read_owning_character_variables`, `state.write_anim_instance_variables`\n11. Implement behavior: Recover from completion, cancellation, and interruption: cancel and interruption restore every owned setting; repeated activation and cleanup do not accumulate state; adjacent input and animation behavior remain functional\n   Operations: `runtime.pie_begin`, `runtime.pie_status`, `runtime.inject_key`, `runtime.inspect_character`, `runtime.pie_end`, `diagnostics.read_log_errors`, `semantic_index.record_runtime_observation`\n   Needs acquisition: `semantic_index.record_runtime_observation`\n12. Execute the approved dependency graph transactionally: The approved plan can resume after each acquired capability, back up touched assets, and roll back failed stages.\n   Operations: `feature.execute_generic_plan`\n   Needs acquisition: `feature.execute_generic_plan`\n13. Compile, inspect, run, and review diagnostics: All touched assets compile and runtime evidence proves behavior without new warnings or errors.\n   Operations: `blueprint.compile`, `blueprint.scan`, `assets.inspect`, `assets.inspect`, `runtime.pie_validate`, `diagnostics.read_log_errors`\n   Needs acquisition: `runtime.pie_validate`\n\nExecutable action graph:\n- `action_01` `blueprint.scan`: ready\n- `action_02` `assets.inspect`: ready\n- `action_03` `collision.trace_forward`: BLOCKED: \n- `action_04` `movement.launch_toward_observed_hit`: BLOCKED: \n- `action_05` `animation.play_grapple_montage`: BLOCKED: \n- `action_06` `movement.apply_jump_impulse`: BLOCKED: \n- `action_07` `collision.sweep_obstacle`: BLOCKED: \n- `action_08` `movement.apply_vault_impulse`: BLOCKED: \n- `action_09` `movement.apply_slide_impulse`: BLOCKED: \n- `action_10` `movement.apply_wall_jump_vertical_velocity`: BLOCKED: \n- `action_11` `collision.sweep_wall`: BLOCKED: \n- `action_12` `physics.apply_directional_impulse_from_surface_normal`: BLOCKED: \n- `action_13` `animation.play_dodge`: BLOCKED: \n- `action_14` `physics.apply_directional_dodge_impulse`: BLOCKED: \n- `action_15` `combat.enable_bounded_invulnerability_window`: BLOCKED: \n- `action_16` `combat.schedule_invulnerability_clear`: BLOCKED: \n- `action_17` `animation.play_dodge_montage`: BLOCKED: \n- `action_18` `state.read_owning_character_variables`: BLOCKED: \n- `action_19` `state.write_anim_instance_variables`: BLOCKED: \n- `action_20` `runtime.pie_begin`: ready\n- `action_21` `runtime.pie_status`: ready\n- `action_22` `runtime.inject_key`: BLOCKED: key_name\n- `action_23` `runtime.inspect_character`: ready\n- `action_24` `runtime.pie_end`: ready\n- `action_25` `diagnostics.read_log_errors`: ready\n- `action_26` `semantic_index.record_runtime_observation`: BLOCKED: \n- `action_27` `feature.execute_generic_plan`: BLOCKED: \n- `action_28` `blueprint.compile`: ready\n- `action_29` `blueprint.scan`: ready\n- `action_30` `assets.inspect`: ready\n- `action_31` `assets.inspect`: ready\n- `action_32` `runtime.pie_validate`: BLOCKED: \n- `action_33` `diagnostics.read_log_errors`: ready\n\nInput arbitration:\n- `G`: Grapple Zip\n- `SPACE`: Wall-Jump Behavior > Vault Waist-High Obstacle > Slide While Sprinting > Preserve Ordinary Jump in Space\n- `C`: Directional Dodge with Invulnerability Window\n\nAnimation role evidence:\n- `grapple_montage`: blocked_until_asset_evidence_passes; selected asset: `none`\n- `dodge_montage`: blocked_until_asset_evidence_passes; selected asset: `none`\n\nExecutable PIE fixtures: 31\n- `O1_C1_positive` (positive): G input is pressed\n- `O1_C1_negative` (negative): G input is pressed\n- `O1_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O1_C1_boundary` (boundary): G input is pressed\n- `O2_C1_positive` (positive): grapple_zip activation succeeds\n- `O2_C1_negative` (negative): grapple_zip activation succeeds\n- `O2_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O3_C1_positive` (positive): SPACE input is pressed\n- `O3_C1_negative` (negative): SPACE input is pressed\n- `O3_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O4_C1_positive` (positive): SPACE input is pressed\n- `O4_C1_negative` (negative): SPACE input is pressed\n- `O4_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O5_C1_positive` (positive): SPACE input is pressed\n- `O5_C1_negative` (negative): SPACE input is pressed\n- `O5_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O6_C1_positive` (positive): SPACE input is pressed\n- `O6_C1_negative` (negative): SPACE input is pressed\n- `O6_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O7_C1_positive` (positive): C input is pressed\n- `O7_C1_negative` (negative): C input is pressed\n- `O7_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O8_C1_positive` (positive): directional_dodge_with_invulnerability_window activation succeeds\n- `O8_C1_negative` (negative): directional_dodge_with_invulnerability_window activation succeeds\n- `O8_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `O9_C1_positive` (positive): every update\n- `O9_C1_negative` (negative): every update\n- `O9_C1_interruption` (interruption): invoke declared cancellation or force guard loss\n- `behavior_positive` (positive): None\n- `behavior_negative` (negative): None\n- `behavior_interruption` (interruption): invoke declared cancellation or force guard loss\n\nApproval blockers:\n- Animation role assets remain unselected or lack contextual acceptance evidence.\n- One or more behavior operations lack a callable with resolved parameters.\n- One or more implementation actions lack a callable with resolved parameters.\n\nRuntime proof contract:\n- L1 `compilation_milestone_1_only`: Structural correctness (milestone 1) is satisfied. Runtime execution, gameplay behavior, integration, failure handling, and evidence-backed proof (milestones 2\u20136) are NOT satisfied by compilation. All remaining claims must still be verified.\n- L4 `animgraph_pose_reaches_output_pose`: State Machine pose pin is connected through the declared slot and reaches AnimGraph Output Pose node; character does NOT render in T-pose in PIE\n- L4 `invulnerability_tag_applied_and_removed`: Gameplay tag 'State.Invulnerable' (or equivalent) is added to character; tag persists for declared duration; tag is removed after duration expires or ability cancels; damage events during active tag deal 0 damage\n- L2 `feature_constructs_and_initializes`: Required components, references, input mappings, and state bindings initialize on the correct runtime instance with no relevant errors\n- L3 `intended_public_trigger_reaches_active_state`: The public gameplay path receives the trigger and the authoritative feature state enters its active state only after all declared guards pass\n- L4 `requested_gameplay_outcome_is_observed`: The requested player-visible gameplay behavior occurs continuously and is driven by authoritative state rather than a debug-only side effect\n- L4 `animation_presentation_is_contextually_valid`: The intended animation state/slot/layer becomes relevant, reaches Output Pose, plays on the target mesh, and visually matches the active gameplay behavior\n- L5 `invalid_and_boundary_activation_fail_safely`: Activation is rejected or cancelled, baseline state is restored, and no persistent timer, delegate, movement, animation, or spawned-state leak remains\n- L6 `adjacent_gameplay_regressions_are_absent`: Existing locomotion, input, animation composition, ownership, and cleanup remain functional with no new relevant warnings or errors\n\nCapability acquisition loop:\n1. `semantic_index.record_runtime_observation`: `semantic_index.record_runtime_observation` resolves to a real callable and passes its live postcondition test.\n   Current evidence: No operation is registered.\n2. `feature.execute_generic_plan`: `feature.execute_generic_plan` resolves to a real callable and passes its live postcondition test.\n   Current evidence: No operation is registered.\n3. `runtime.pie_validate`: `runtime.pie_validate` resolves to a real callable and passes its live postcondition test.\n   Current evidence: No operation is registered.\n\nValidation:\n- All touched assets compile and runtime evidence proves behavior without new warnings or errors.\n- No source animation or unrelated Blueprint is modified.\n- Every created/modified asset and exact runtime diagnostic is reported.\n\nRollback:\n- Duplicate or back up every existing asset before mutation.\n- Create new feature assets in an isolated project-convention folder so they can be removed independently.\n- On failed compile or postcondition, restore modified assets and remove only assets created by this plan.\n- Never bypass unrelated project compile/runtime errors; report them separately from feature failures.\n\nNo Unreal assets or capability adapters were changed. Approval is required before acquisition or execution."
+}

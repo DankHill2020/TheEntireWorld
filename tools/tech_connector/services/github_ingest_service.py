@@ -42,7 +42,32 @@ class GitHubRepoRef:
         return f"{self.owner}/{self.repo}"
 
 
+def _get_github_ingest_module_path(settings) -> str:
+    prov_type = settings.get("github_ingest_provider_type", "default")
+    if prov_type == "mod_tech_labs":
+        return "tech_connector.services.custom_providers.mod_tech_labs_ingest"
+    elif prov_type == "custom":
+        return settings.get("github_ingest_provider_module", "default")
+    return "default"
+
+
 def parse_github_repo_reference(repo_ref: str) -> GitHubRepoRef:
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = _get_github_ingest_module_path(settings)
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.parse_github_repo_reference",
+                _parse_github_repo_reference_impl,
+                repo_ref
+            )
+    except Exception as e:
+        print(f"Error calling custom parse_github_repo_reference: {e}", flush=True)
+    return _parse_github_repo_reference_impl(repo_ref)
+
+def _parse_github_repo_reference_impl(repo_ref: str) -> GitHubRepoRef:
     """Parse GitHub URL, shorthand, or SSH repo references into a canonical ref."""
     text = (repo_ref or "").strip().rstrip("/")
     if not text:
@@ -115,6 +140,61 @@ def _safe_repo_dir_name(repo_name: str, repo_url: str) -> str:
     return clean.strip("._") or "github_repo"
 
 
+def safe_extract_zip_to_dir(
+    zip_data: bytes,
+    target_dir: Path,
+    *,
+    strip_single_root: bool = True,
+    max_files: int = MAX_EXTRACTED_FILES,
+    max_bytes: int = MAX_EXTRACTED_BYTES,
+    progress_cb=None,
+) -> int:
+    """Extract a zip archive while enforcing path, file count, and size limits."""
+    target_dir = Path(target_dir).expanduser().resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    extracted_files = 0
+    extracted_bytes = 0
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+        infos = zip_ref.infolist()
+        if not infos:
+            raise ValueError("Empty zip archive received.")
+        names = [info.filename.replace("\\", "/") for info in infos if info.filename]
+        root_prefix = ""
+        if strip_single_root:
+            file_names = [name for name in names if not name.endswith("/")]
+            top_parts = {name.split("/", 1)[0] for name in file_names if "/" in name}
+            if top_parts and len(top_parts) == 1:
+                top_part = next(iter(top_parts))
+                if top_part not in {"", ".", ".."} and ":" not in top_part and all(name.startswith(top_part + "/") for name in file_names):
+                    root_prefix = top_part + "/"
+        for info in infos:
+            member = info.filename.replace("\\", "/")
+            if not member or member.endswith("/"):
+                continue
+            rel = member[len(root_prefix):] if root_prefix and member.startswith(root_prefix) else member
+            if not rel:
+                continue
+            parts = rel.split("/")
+            first_part = parts[0] if parts else ""
+            if rel.startswith("/") or ":" in first_part or any(part in {"", ".", ".."} for part in parts):
+                raise ValueError(f"Unsafe archive member path: {info.filename}")
+            if extracted_files >= max_files:
+                raise IOError(f"Repository archive has too many files: more than {max_files}")
+            extracted_bytes += int(info.file_size or 0)
+            if extracted_bytes > max_bytes:
+                raise IOError(f"Repository archive expands too large: more than {max_bytes} bytes")
+            destination = (target_dir / rel).resolve()
+            if destination != target_dir and target_dir not in destination.parents:
+                raise ValueError(f"Unsafe archive member path: {info.filename}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with zip_ref.open(info) as source, open(destination, "wb") as target:
+                shutil.copyfileobj(source, target)
+            extracted_files += 1
+            if extracted_files == 1 or extracted_files % 25 == 0:
+                _emit_progress(progress_cb, f"Extracting files: {extracted_files:,} / {len(infos):,}", extracted_files, len(infos))
+    return extracted_files
+
+
 def _unique_target_dir(target_parent_dir: Path, repo_name: str, repo_url: str) -> Path:
     base = _safe_repo_dir_name(repo_name, repo_url)
     candidate = target_parent_dir / base
@@ -145,6 +225,22 @@ def github_zip_urls(repo_url: str) -> list[str]:
 
 
 def github_api_repo_url(repo_ref: str) -> str:
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = _get_github_ingest_module_path(settings)
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.github_api_repo_url",
+                _github_api_repo_url_impl,
+                repo_ref
+            )
+    except Exception as e:
+        print(f"Error calling custom github_api_repo_url: {e}", flush=True)
+    return _github_api_repo_url_impl(repo_ref)
+
+def _github_api_repo_url_impl(repo_ref: str) -> str:
     return parse_github_repo_reference(repo_ref).api_url
 
 
@@ -160,6 +256,30 @@ def _emit_progress(progress_cb: Optional[Callable], message: str, current: int =
 
 
 def download_and_extract_repo(repo_name: str, repo_url: str, target_parent_dir: Path, progress_cb=None) -> Path:
+    custom_module = "default"
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = _get_github_ingest_module_path(settings)
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.download_and_extract_repo",
+                _download_and_extract_repo_impl,
+                repo_name,
+                repo_url,
+                target_parent_dir,
+                progress_cb,
+                allow_fallback=False,
+            )
+    except Exception as e:
+        if custom_module and custom_module != "default":
+            raise
+        print(f"Error calling custom download_and_extract_repo: {e}", flush=True)
+    return _download_and_extract_repo_impl(repo_name, repo_url, target_parent_dir, progress_cb)
+
+
+def _download_and_extract_repo_impl(repo_name: str, repo_url: str, target_parent_dir: Path, progress_cb=None) -> Path:
     target_parent_dir = Path(target_parent_dir).expanduser().resolve()
     target_parent_dir.mkdir(parents=True, exist_ok=True)
     target_dir = _unique_target_dir(target_parent_dir, repo_name, repo_url)
@@ -210,61 +330,11 @@ def download_and_extract_repo(repo_name: str, repo_url: str, target_parent_dir: 
         
     _emit_progress(progress_cb, "Extracting repository preserving structure...", 0, 0)
         
-    extracted_files = 0
     temp_dir = target_dir.parent / f".{target_dir.name}.extracting"
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
     temp_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
-        namelist = zip_ref.namelist()
-        if not namelist:
-            _log_event(events, target_dir, "ingest_failed", error="Empty zip archive received.")
-            raise ValueError("Empty zip archive received.")
-            
-        root_prefix = namelist[0].split("/")[0] + "/"
-        resolved_target_dir = temp_dir.resolve()
-        extracted_bytes = 0
-        
-        for info in zip_ref.infolist():
-            member = info.filename
-            if member.endswith("/"):
-                continue
-                
-            rel = member.replace(root_prefix, "", 1)
-            if not rel:
-                continue
-            normalized_rel = rel.replace("\\", "/")
-            first_part = Path(normalized_rel).parts[0] if Path(normalized_rel).parts else ""
-            if (
-                normalized_rel.startswith("/")
-                or ":" in first_part
-                or any(part in {"", ".", ".."} for part in normalized_rel.split("/"))
-            ):
-                _log_event(events, target_dir, "ingest_failed", error=f"Unsafe archive member path: {member}")
-                raise ValueError(f"Unsafe archive member path: {member}")
-            if extracted_files >= MAX_EXTRACTED_FILES:
-                raise IOError(f"Repository archive has too many files: more than {MAX_EXTRACTED_FILES}")
-            extracted_bytes += int(info.file_size or 0)
-            if extracted_bytes > MAX_EXTRACTED_BYTES:
-                raise IOError(f"Repository archive expands too large: more than {MAX_EXTRACTED_BYTES} bytes")
-                
-            target = temp_dir / normalized_rel
-            resolved_target = target.resolve()
-            if resolved_target_dir != resolved_target and resolved_target_dir not in resolved_target.parents:
-                _log_event(events, target_dir, "ingest_failed", error=f"Unsafe archive member path: {member}")
-                raise ValueError(f"Unsafe archive member path: {member}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            
-            with zip_ref.open(member) as source, open(target, "wb") as f:
-                shutil.copyfileobj(source, f)
-            extracted_files += 1
-            if extracted_files == 1 or extracted_files % 25 == 0:
-                _emit_progress(
-                    progress_cb,
-                    f"Extracting files: {extracted_files:,} / {len(namelist):,}",
-                    extracted_files,
-                    len(namelist),
-                )
+    extracted_files = safe_extract_zip_to_dir(zip_data, temp_dir, progress_cb=progress_cb)
 
     for extracted in temp_dir.iterdir():
         destination = target_dir / extracted.name
@@ -284,6 +354,28 @@ def download_and_extract_repo(repo_name: str, repo_url: str, target_parent_dir: 
 
 
 def ingest_github_repo(repo_ref: GitHubRepoRef, target_dir: Path, progress_cb=None) -> dict:
+    custom_module = "default"
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = _get_github_ingest_module_path(settings)
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.ingest_github_repo",
+                _ingest_github_repo_impl,
+                repo_ref,
+                target_dir,
+                progress_cb
+            )
+    except Exception as e:
+        if custom_module and custom_module != "default":
+            return {"ok": False, "error": str(e), "provider": custom_module}
+        print(f"Error calling custom ingest_github_repo: {e}", flush=True)
+    return _ingest_github_repo_impl(repo_ref, target_dir, progress_cb)
+
+
+def _ingest_github_repo_impl(repo_ref: GitHubRepoRef, target_dir: Path, progress_cb=None) -> dict:
     """Compatibility wrapper used by acquisition flows.
 
     target_dir names the desired local repo folder. The structured extractor still
@@ -298,6 +390,27 @@ def ingest_github_repo(repo_ref: GitHubRepoRef, target_dir: Path, progress_cb=No
             target_dir.parent,
             progress_cb=progress_cb,
         )
+
+        # Trigger Asset Optimization Hook if configured
+        try:
+            from tech_connector.services.settings_service import load_settings
+            settings = load_settings()
+            opt_module = settings.get("asset_optimizer_provider_module", "default")
+            if opt_module and opt_module != "default":
+                if progress_cb:
+                    try:
+                        progress_cb("Triggering custom asset optimization hook...", 95, 100)
+                    except Exception:
+                        pass
+                from tech_connector.services.modular_provider_utils import invoke_custom_provider
+                invoke_custom_provider(
+                    f"{opt_module}.optimize_assets",
+                    lambda path: None,
+                    local_path
+                )
+        except Exception as opt_err:
+            print(f"[Optimizer] Warning: Custom optimizer failed: {opt_err}", flush=True)
+
         return {"ok": True, "path": str(local_path)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

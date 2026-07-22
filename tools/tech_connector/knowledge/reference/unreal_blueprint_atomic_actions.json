@@ -1,0 +1,264 @@
+{
+  "schema": "ai_studio.unreal_blueprint_atomic_actions.v2",
+  "scope": "Atomic Blueprint vocabulary only; these records are not complete gameplay-system recipes.",
+  "engine_evidence": {
+    "version": "5.8",
+    "source": "live context-filtered FBlueprintActionDatabase reflection",
+    "target_blueprint": "/Game/MetaHumans/LesterPhoenix/BP_LesterPhoenix",
+    "target_graph": "EventGraph",
+    "observed_at": "2026-07-21",
+    "open_information_only": true
+  },
+  "pin_signatures": {
+    "Collision|LineTraceByChannel": {
+      "node_title": "Line Trace By Channel",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "Start", "direction": "input", "type": "struct:Vector"},
+        {"name": "End", "direction": "input", "type": "struct:Vector"},
+        {"name": "TraceChannel", "direction": "input", "type": "byte:ETraceTypeQuery"},
+        {"name": "bTraceComplex", "direction": "input", "type": "bool"},
+        {"name": "ActorsToIgnore", "direction": "input", "type": "object:Actor"},
+        {"name": "DrawDebugType", "direction": "input", "type": "byte:EDrawDebugTrace"},
+        {"name": "bIgnoreSelf", "direction": "input", "type": "bool"},
+        {"name": "TraceColor", "direction": "input", "type": "struct:LinearColor"},
+        {"name": "TraceHitColor", "direction": "input", "type": "struct:LinearColor"},
+        {"name": "DrawTime", "direction": "input", "type": "real"},
+        {"name": "then", "direction": "output", "type": "exec"},
+        {"name": "OutHit", "direction": "output", "type": "struct:HitResult"},
+        {"name": "ReturnValue", "direction": "output", "type": "bool"}
+      ]
+    },
+    "Animation|PlayAnimMontage": {
+      "node_title": "PlayAnimMontage",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "self", "direction": "input", "type": "object:Character"},
+        {"name": "AnimMontage", "direction": "input", "type": "object:AnimMontage"},
+        {"name": "InPlayRate", "direction": "input", "type": "real"},
+        {"name": "StartSectionName", "direction": "input", "type": "name"},
+        {"name": "then", "direction": "output", "type": "exec"},
+        {"name": "ReturnValue", "direction": "output", "type": "real"}
+      ]
+    },
+    "Character|Jump": {
+      "node_title": "Jump",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "self", "direction": "input", "type": "object:Character"},
+        {"name": "then", "direction": "output", "type": "exec"}
+      ]
+    },
+    "Pawn|Components|CharacterMovement|AddImpulse": {
+      "node_title": "AddImpulse",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "self", "direction": "input", "type": "object:CharacterMovementComponent"},
+        {"name": "Impulse", "direction": "input", "type": "struct:Vector"},
+        {"name": "bVelocityChange", "direction": "input", "type": "bool"},
+        {"name": "then", "direction": "output", "type": "exec"}
+      ]
+    },
+    "Utilities|FlowControl|Branch": {
+      "node_title": "Branch",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "Condition", "direction": "input", "type": "bool"},
+        {"name": "then", "direction": "output", "type": "exec"},
+        {"name": "else", "direction": "output", "type": "exec"}
+      ]
+    },
+    "Collision|BreakHitResult": {
+      "node_title": "Break Hit Result",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "Hit", "direction": "input", "type": "struct:HitResult"},
+        {"name": "bBlockingHit", "direction": "output", "type": "bool"},
+        {"name": "Location", "direction": "output", "type": "struct:Vector"},
+        {"name": "ImpactPoint", "direction": "output", "type": "struct:Vector"},
+        {"name": "Normal", "direction": "output", "type": "struct:Vector"},
+        {"name": "ImpactNormal", "direction": "output", "type": "struct:Vector"},
+        {"name": "Distance", "direction": "output", "type": "real"}
+      ]
+    },
+    "Pawn|Input|AddMovementInput": {
+      "node_title": "Add Movement Input",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "self", "direction": "input", "type": "object:Pawn"},
+        {"name": "WorldDirection", "direction": "input", "type": "struct:Vector"},
+        {"name": "ScaleValue", "direction": "input", "type": "real"},
+        {"name": "bForce", "direction": "input", "type": "bool"},
+        {"name": "then", "direction": "output", "type": "exec"}
+      ]
+    },
+    "Utilities|Time|SetTimerbyEvent": {
+      "node_title": "Set Timer by Event",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "Delegate", "direction": "input", "type": "delegate"},
+        {"name": "Time", "direction": "input", "type": "real"},
+        {"name": "bLooping", "direction": "input", "type": "bool"},
+        {"name": "bMaxOncePerFrame", "direction": "input", "type": "bool"},
+        {"name": "InitialStartDelay", "direction": "input", "type": "real"},
+        {"name": "InitialStartDelayVariance", "direction": "input", "type": "real"},
+        {"name": "then", "direction": "output", "type": "exec"},
+        {"name": "ReturnValue", "direction": "output", "type": "struct:TimerHandle"}
+      ]
+    },
+    "Transformation|GetActorLocation": {
+      "node_title": "Get Actor Location",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "self", "direction": "input", "type": "object:Actor"},
+        {"name": "ReturnValue", "direction": "output", "type": "struct:Vector"}
+      ]
+    },
+    "Transformation|GetActorForwardVector": {
+      "node_title": "Get Actor Forward Vector",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "self", "direction": "input", "type": "object:Actor"},
+        {"name": "ReturnValue", "direction": "output", "type": "struct:Vector"}
+      ]
+    },
+    "Pawn|Components|CharacterMovement|SetMovementMode": {
+      "node_title": "Set Movement Mode",
+      "compile_status": "BS_UP_TO_DATE",
+      "probe_reset": true,
+      "original_dirty_unchanged": true,
+      "pins": [
+        {"name": "execute", "direction": "input", "type": "exec"},
+        {"name": "self", "direction": "input", "type": "object:CharacterMovementComponent"},
+        {"name": "NewMovementMode", "direction": "input", "type": "byte:EMovementMode"},
+        {"name": "NewCustomMode", "direction": "input", "type": "byte"},
+        {"name": "then", "direction": "output", "type": "exec"}
+      ]
+    }
+  },
+  "records": [
+    {
+      "operation_patterns": ["movement.launch*"],
+      "search_terms": ["Launch Character"],
+      "verified_actions": ["Character|LaunchCharacter"]
+    },
+    {
+      "operation_patterns": ["collision.trace*", "collision.sweep*"],
+      "search_terms": ["Line Trace", "Sphere Trace", "Capsule Trace", "Box Trace"],
+      "verified_actions": [
+        "Collision|LineTraceByChannel",
+        "Collision|LineTraceForObjects",
+        "Collision|SphereTraceByChannel",
+        "Collision|CapsuleTraceByChannel",
+        "Collision|BoxTraceByChannel"
+      ]
+    },
+    {
+      "operation_patterns": ["animation.*montage*"],
+      "search_terms": ["Play Anim Montage", "Montage Play"],
+      "verified_actions": [
+        "Animation|PlayAnimMontage",
+        "Animation|Montage|MontagePlay",
+        "Animation|Montage|PlayMontage"
+      ]
+    },
+    {
+      "operation_patterns": ["movement.*jump*"],
+      "search_terms": ["Jump", "Launch Character"],
+      "verified_actions": ["Character|Jump", "Character|LaunchCharacter"]
+    },
+    {
+      "operation_patterns": ["physics.*impulse*", "movement.*impulse*"],
+      "search_terms": ["Add Impulse", "Launch Character"],
+      "verified_actions": [
+        "Pawn|Components|CharacterMovement|AddImpulse",
+        "Physics|AddImpulse",
+        "Character|LaunchCharacter"
+      ]
+    },
+    {
+      "operation_patterns": ["flow.branch*", "flow.gate_condition*"],
+      "search_terms": ["Branch"],
+      "verified_actions": ["Utilities|FlowControl|Branch"]
+    },
+    {
+      "operation_patterns": ["collision.read_hit*", "collision.break_hit*"],
+      "search_terms": ["Break Hit Result"],
+      "verified_actions": ["Collision|BreakHitResult"]
+    },
+    {
+      "operation_patterns": ["transform.read_actor*"],
+      "search_terms": ["Get Actor Location", "Get Actor Forward Vector"],
+      "verified_actions": ["Transformation|GetActorLocation", "Transformation|GetActorForwardVector"]
+    },
+    {
+      "operation_patterns": ["movement.set_*movement_mode*"],
+      "search_terms": ["Set Movement Mode"],
+      "verified_actions": ["Pawn|Components|CharacterMovement|SetMovementMode"]
+    },
+    {
+      "operation_patterns": ["movement.add_*input*", "movement.apply_surface_relative_input*"],
+      "search_terms": ["Add Movement Input"],
+      "verified_actions": ["Pawn|Input|AddMovementInput"]
+    },
+    {
+      "operation_patterns": ["combat.schedule*", "time.schedule*"],
+      "search_terms": ["Set Timer by Event"],
+      "verified_actions": ["Utilities|Time|SetTimerbyEvent"]
+    }
+  ],
+  "credits": [
+    {
+      "name": "Epic Games Unreal Engine",
+      "basis": "Public editor reflection and Blueprint action metadata",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/BlueprintAPI"
+    },
+    {
+      "name": "Epic Games: Break Hit Result",
+      "basis": "Public Unreal Engine 5.8 Blueprint API documentation",
+      "url": "https://dev.epicgames.com/documentation/unreal-engine/BlueprintAPI/Collision/BreakHitResult"
+    },
+    {
+      "name": "Epic Games: Add Movement Input",
+      "basis": "Public Unreal Engine 5.8 Blueprint API documentation",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/BlueprintAPI/Pawn/Input/AddMovementInput"
+    },
+    {
+      "name": "Epic Games: Set Timer by Event",
+      "basis": "Public Unreal Engine 5.8 Blueprint API documentation",
+      "url": "https://dev.epicgames.com/documentation/unreal-engine/BlueprintAPI/Utilities/Time/SetTimerbyEvent"
+    },
+    {
+      "name": "Epic Games: Set Movement Mode",
+      "basis": "Public Unreal Engine 5.8 Blueprint API documentation",
+      "url": "https://dev.epicgames.com/documentation/unreal-engine/BlueprintAPI/Pawn/Components/CharacterMovement/SetMovementMode"
+    }
+  ]
+}

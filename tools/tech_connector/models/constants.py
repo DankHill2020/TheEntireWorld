@@ -85,6 +85,19 @@ DCC_TOOL_PACKAGE_NAMES = [
     "substance_painter_tools",
     "unity_tools",
 ]
+
+try:
+    if SETTINGS_PATH.exists():
+        _settings_data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        _custom = _settings_data.get("custom_dcc_packages")
+        if isinstance(_custom, list):
+            for pkg in _custom:
+                pkg_str = str(pkg).strip()
+                if pkg_str and pkg_str not in DCC_TOOL_PACKAGE_NAMES:
+                    DCC_TOOL_PACKAGE_NAMES.append(pkg_str)
+except Exception:
+    pass
+
 DCC_TOOL_PACKAGE_DIRS = [
     TOOLS_ROOT / name
     for name in DCC_TOOL_PACKAGE_NAMES

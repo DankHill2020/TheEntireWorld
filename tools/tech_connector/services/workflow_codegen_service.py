@@ -373,6 +373,50 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
 
         if utility_kind:
             lines.extend(_utility_call_lines(idx, symbol, call_args_by_name, params))
+        elif symbol.get("pipeline_operation") == "dcc_operation" and symbol.get("operation") == "script.run":
+            host_name = str(symbol.get("provider_id") or symbol.get("host") or "").lower()
+            code_expr = call_args_by_name.get("code", "''")
+            output_names = output_names or ["result"]
+            bridge_import = (
+                "from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge as _DccBridge"
+                if host_name == "unreal"
+                else "from tech_connector.bridges.maya.maya_bridge import MayaBridge as _DccBridge"
+            )
+            runtime_pairs = [
+                (param_name, expr)
+                for param_name, expr in call_args_by_name.items()
+                if param_name != "code"
+            ]
+            lines += [
+                f"        {bridge_import}",
+                f"        _script_source = {code_expr}",
+                "        _script_vars = {}",
+            ]
+            for param_name, expr in runtime_pairs:
+                lines.append(f"        _script_vars[{param_name!r}] = {expr}")
+            lines += [
+                "        _prefix = ''.join(f'{key} = {value!r}\\n' for key, value in _script_vars.items())",
+                "        _bridge = _DccBridge()",
+                "        step{0}_result = _bridge.execute_python(_prefix + _script_source, timeout=120.0)".format(idx),
+                f"        step{idx}_outputs = {{}}",
+            ]
+            for out_name in output_names:
+                fallback_param = "fbx_path" if out_name == "fbx_path" else out_name
+                if fallback_param in call_args_by_name and fallback_param != "code":
+                    lines.append(f"        step{idx}_outputs[{out_name!r}] = _script_vars.get({fallback_param!r})")
+                else:
+                    lines.append(f"        step{idx}_outputs[{out_name!r}] = step{idx}_result")
+        elif symbol.get("pipeline_operation") == "dcc_operation" and symbol.get("operation") == "scene.find_joint":
+            name_expr = call_args_by_name.get("name", "None")
+            output_names = output_names or ["result"]
+            lines += [
+                "        import maya.cmds as cmds",
+                f"        _joint_name = {name_expr}",
+                "        if not cmds.objExists(_joint_name):",
+                "            raise RuntimeError('Maya joint not found: ' + str(_joint_name))",
+                f"        step{idx}_result = _joint_name",
+                f"        step{idx}_outputs = {{{output_names[0]!r}: step{idx}_result}}",
+            ]
         else:
             file_path = (symbol.get("file_path") or "").replace("\\", "/")
             module, attr = _module_and_attr(symbol)
@@ -401,7 +445,12 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
                     "        if target is None:",
                     f"            raise RuntimeError('Could not resolve local callable: {attr}')",
                 ]
-            lines.append(f"        step{idx}_result = target({', '.join(call_args)})")
+            callable_name = _safe_identifier(attr, "target")
+            if callable_name != "target":
+                lines.append(f"        {callable_name} = target")
+                lines.append(f"        step{idx}_result = {callable_name}({', '.join(call_args)})")
+            else:
+                lines.append(f"        step{idx}_result = target({', '.join(call_args)})")
             if not output_names:
                 lines.append(f"        step{idx}_outputs = {{}}")
             elif len(output_names) == 1:

@@ -9,6 +9,7 @@ the real A-to-Z path instead of assuming a direct implementation step exists.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 import re
 from typing import Any, Iterable
 
@@ -377,6 +378,36 @@ RESOLUTION_STRATEGIES: tuple[CapabilityResolutionStrategy, ...] = (
         notes=("Use when a known app/plugin capability is likely to solve the missing requirement.",),
     ),
     CapabilityResolutionStrategy(
+        key="asset_source_search",
+        label="Search animation/asset providers",
+        category="asset_acquisition",
+        confidence=0.79,
+        speed=2,
+        reliability=4,
+        maintenance=3,
+        requires_internet=True,
+        requires_approval=True,
+        requires_license_check=True,
+        pause_before_execution=True,
+        approval_prompt="Show asset/provider links, license terms, skeleton/format fit, and the intended import path before download.",
+        notes=("Use for providers such as Mixamo, ActorCore, Rokoko, Fab, or other animation/asset libraries.",),
+    ),
+    CapabilityResolutionStrategy(
+        key="ai_animation_service",
+        label="Search text/video-to-animation services",
+        category="ai_service",
+        confidence=0.62,
+        speed=2,
+        reliability=2,
+        maintenance=2,
+        requires_internet=True,
+        requires_approval=True,
+        requires_license_check=True,
+        pause_before_execution=True,
+        approval_prompt="Show service links, upload/privacy implications, terms, expected output format, and validation plan before use.",
+        notes=("Use when the prompt asks to create animation from text, video, or mocap-like source media.",),
+    ),
+    CapabilityResolutionStrategy(
         key="generate_new_code",
         label="Generate new code or wrapper",
         category="generation",
@@ -636,6 +667,33 @@ PATTERNS: tuple[CapabilityPattern, ...] = (
         ),
     ),
     CapabilityPattern(
+        key="external.asset_acquisition",
+        labels=("External asset acquisition and import",),
+        triggers=("mesh", "model", "3d asset", "asset online", "download asset", "find asset", "texture", "material", "import asset", "text to mesh", "image to mesh"),
+        required_chain=(
+            _node("asset_requirements", "Asset requirements and constraints", produces=("asset query", "format constraints", "license constraints"), verification=("asset type, target host, and license needs are explicit")),
+            _node("external_asset_source", "External asset/marketplace/source candidate", requires=("asset query", "license constraints"), produces=("asset candidate list",), verification=("source link, preview/relevance, license, and format are recorded")),
+            _node("asset_ingest", "Asset download/ingest", requires=("approved source",), produces=("local asset file"), verification=("file exists and format is supported")),
+            _node("asset_import_or_conversion", "Asset import or conversion", requires=("local asset file", "target host/project"), produces=("imported or converted asset"), verification=("asset loads in target host and required materials/textures resolve")),
+        ),
+        resolution_options=(
+            GapResolutionOption(
+                key="review_provider_then_import",
+                label="Review marketplace/source candidates, then import the selected asset",
+                confidence=0.78,
+                steps=("collect provider candidates", "show links/preview/license/fit", "pause for user selection", "download or ingest selected asset", "import/convert and validate"),
+                pros=("keeps provider choice visible", "works for meshes, models, textures, materials, and tools"),
+                cons=("depends on provider availability and license/format compatibility"),
+                requires_approval=True,
+            ),
+        ),
+        learning_recommendations=(
+            "Save validated asset source/import mappings as reusable provider knowledge.",
+            "Register successful asset conversion/import steps as reusable pipeline nodes.",
+        ),
+        questions=("Which target host/project folder should receive the asset if it is not explicit?",),
+    ),
+    CapabilityPattern(
         key="cross_app.animation_transfer",
         labels=("Cross-application animation acquisition and transfer",),
         triggers=("blender", "animation online", "online animation", "import animation", "import into unreal", "fbx", "retarget"),
@@ -765,7 +823,77 @@ def _quick_direct_pattern(prompt: str, decision: dict[str, Any]) -> CapabilityPa
     )
 
 
-def _known_capability_evidence(decision: dict[str, Any]) -> tuple[str, ...]:
+def _contextual_knowledge_evidence(prompt: str, decision: dict[str, Any]) -> tuple[str, ...]:
+    try:
+        from tech_connector.services.ai_work_memory_service import relevant_ai_work_entries, relevant_contextual_knowledge
+
+        rows = relevant_contextual_knowledge(decision.get("settings") or {}, prompt, limit=8)
+        work_rows = relevant_ai_work_entries(decision.get("settings") or {}, prompt, host=str(decision.get("host") or ""), limit=8)
+    except Exception:
+        return ()
+    evidence: list[str] = []
+    for row in rows:
+        subject = str(row.get("subject") or "").strip()
+        relation = str(row.get("relation") or "").strip()
+        value = str(row.get("value") or row.get("fact") or "").strip()
+        if subject or value:
+            evidence.append(f"validated contextual knowledge: {subject} {relation} {value}".strip())
+    for bucket, prefix in (("recent", "validated work memory"), ("locked", "locked work memory")):
+        for row in list(work_rows.get(bucket) or [])[:4]:
+            parts = [
+                row.get("label") or "",
+                row.get("goal") or "",
+                row.get("summary") or "",
+                row.get("local_path") or "",
+                row.get("workflow_path") or "",
+                row.get("knowledge_path") or "",
+            ]
+            text = " ".join(str(part) for part in parts if part).strip()
+            if text:
+                evidence.append(f"{prefix}: {text}")
+    return tuple(evidence)
+
+
+def _capability_registry_evidence(prompt: str, decision: dict[str, Any]) -> tuple[str, ...]:
+    registry = decision.get("capability_registry")
+    if registry is None:
+        registry_path = decision.get("capability_registry_path")
+        if registry_path:
+            try:
+                from tech_connector.services.capability_registry import CapabilityRegistry
+
+                registry = CapabilityRegistry(Path(str(registry_path)))
+            except Exception:
+                registry = None
+    if registry is None or not hasattr(registry, "lookup"):
+        return ()
+    try:
+        entries = registry.lookup(prompt, limit=8)
+    except Exception:
+        return ()
+    evidence: list[str] = []
+    for entry in entries:
+        try:
+            data = entry.to_dict()
+        except Exception:
+            data = dict(entry or {})
+        if not data:
+            continue
+        parts = [
+            data.get("name") or "",
+            data.get("category") or "",
+            data.get("source") or "",
+            " ".join(data.get("keywords") or []),
+            data.get("notes") or "",
+            data.get("file_path") or "",
+        ]
+        text = " ".join(str(part) for part in parts if part).strip()
+        if text:
+            evidence.append(f"registered capability: {text}")
+    return tuple(evidence)
+
+
+def _known_capability_evidence(decision: dict[str, Any], prompt: str = "") -> tuple[str, ...]:
     evidence: list[str] = []
     for item in list(decision.get("context_resolvers") or [])[:6]:
         evidence.append(f"context resolver: {item}")
@@ -773,6 +901,8 @@ def _known_capability_evidence(decision: dict[str, Any]) -> tuple[str, ...]:
         evidence.append(f"deterministic step: {item}")
     for item in list(decision.get("capability_gaps") or [])[:6]:
         evidence.append(f"known gap: {item}")
+    evidence.extend(_contextual_knowledge_evidence(prompt, decision))
+    evidence.extend(_capability_registry_evidence(prompt, decision))
     return _uniq(evidence)
 
 
@@ -793,6 +923,10 @@ def _strategy_keys_for_node(node: CapabilityNode, decision: dict[str, Any]) -> l
     if status == "known":
         return ["internal_function", "internal_workflow", "compose_internal_functions"]
     keys = ["project_index_search", "local_documentation", "compose_internal_functions"]
+    if _is_external_asset_source_node(node) and allow_ingestion:
+        keys.extend(["asset_source_search", "plugin_marketplace"])
+        if _prompt_wants_generated_asset(decision):
+            keys.append("ai_animation_service")
     if any(term in label for term in ("plugin", "pose search", "motion matching", "api", "unreal", "maya", "documentation")):
         keys.append("official_documentation")
     if allow_research and not any(term in label for term in ("plugin", "repository", "marketplace")):
@@ -803,6 +937,163 @@ def _strategy_keys_for_node(node: CapabilityNode, decision: dict[str, Any]) -> l
     if node.requires:
         keys.append("ask_user")
     return list(_uniq(keys))
+
+
+def _is_animation_source_node(node: CapabilityNode) -> bool:
+    text = f"{node.key} {node.label}".lower()
+    return any(term in text for term in ("online_animation_source", "animation source", "motion library", "mocap", "animation asset"))
+
+
+def _is_external_asset_source_node(node: CapabilityNode) -> bool:
+    text = f"{node.key} {node.label}".lower()
+    return _is_animation_source_node(node) or any(
+        term in text
+        for term in ("external_asset_source", "asset source", "marketplace/source", "3d asset", "mesh", "model", "texture", "material")
+    )
+
+
+def _prompt_wants_generated_asset(decision: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(decision.get(key) or "")
+        for key in ("prompt", "original_prompt", "request", "goal", "literal_request")
+    ).lower()
+    return any(
+        term in text
+        for term in (
+            "text to animation", "text-to-animation", "video to animation", "video-to-animation",
+            "text to mesh", "text-to-mesh", "image to mesh", "image-to-mesh", "generate mesh",
+            "from video", "from text", "from image", "ai animation", "ai asset", "ai mesh",
+        )
+    )
+
+
+def _provider_candidates_for_node(node: CapabilityNode, decision: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _is_external_asset_source_node(node):
+        return []
+    prompt_text = " ".join(str(decision.get(key) or "") for key in ("prompt", "original_prompt", "request", "goal", "literal_request")).lower()
+    candidates: list[dict[str, Any]] = []
+    try:
+        from tech_connector.services.capability_acquisition_service import KNOWN_CAPABILITY_SOURCES
+    except Exception:
+        KNOWN_CAPABILITY_SOURCES = {}
+    animation_node = _is_animation_source_node(node)
+    if animation_node:
+        wanted_keys = ("mixamo", "actorcore", "rokoko", "fab_marketplace")
+        preview_plan = "Open the provider link, preview candidate animation clips, inspect motion style, skeleton/FBX options, and license terms."
+        use_plan = "After approval, download/export a compatible animation file, record provenance/license, import into Unreal, retarget if needed, and validate playback."
+    elif any(term in prompt_text for term in ("texture", "material", "hdri")):
+        wanted_keys = ("poly_haven", "quixel", "fab_marketplace")
+        preview_plan = "Open the provider link, preview candidate assets, inspect texture/material quality, resolution, formats, and license terms."
+        use_plan = "After approval, download/export compatible texture/material files, record provenance/license, import into the target host, and validate material assignments."
+    else:
+        wanted_keys = ("poly_haven", "quixel", "fab_marketplace")
+        preview_plan = "Open the provider link, preview candidate assets, inspect mesh/material/texture quality, formats, scale, and license terms."
+        use_plan = "After approval, download/export compatible asset files, record provenance/license, import into the target host, and validate scale/materials."
+    for key in wanted_keys:
+        source = dict(KNOWN_CAPABILITY_SOURCES.get(key) or {})
+        if not source:
+            continue
+        candidates.append(
+            {
+                "provider_key": key,
+                "name": source.get("name") or key,
+                "source_type": source.get("source_type") or "asset_source",
+                "url": source.get("url") or "",
+                "cost": source.get("cost") or "",
+                "license": source.get("license") or "",
+                "automation": source.get("automation") or "",
+                "success_probability": source.get("success_probability") or 0.0,
+                "compatibility": source.get("compatibility") or {},
+                "description": source.get("description") or "",
+                "requires_user_selection": True,
+                "preview_plan": preview_plan,
+                "use_plan": use_plan,
+            }
+        )
+    if _prompt_wants_generated_asset(decision):
+        candidates.extend(
+            [
+                {
+                    "provider_key": "video_to_animation_service",
+                    "name": "Video-to-animation service",
+                    "source_type": "ai_service",
+                    "url": "",
+                    "cost": "Varies",
+                    "license": "Provider terms required",
+                    "automation": "Semi",
+                    "success_probability": 0.68,
+                    "compatibility": {"fbx": "preferred", "unreal": "requires retarget/import validation"},
+                    "description": "Candidate service/tool that extracts motion from uploaded video and exports animation data.",
+                    "requires_user_selection": True,
+                    "privacy_review_required": True,
+                    "preview_plan": "Show service/provider link, required upload inputs, privacy terms, sample output format, and expected skeleton/FBX compatibility.",
+                    "use_plan": "After approval, submit source video or selected local media, export animation data, record provenance/terms, import into Unreal, and validate retargeted motion.",
+                },
+                {
+                    "provider_key": "text_to_animation_service",
+                    "name": "Text-to-animation service",
+                    "source_type": "ai_service",
+                    "url": "",
+                    "cost": "Varies",
+                    "license": "Provider terms required",
+                    "automation": "Semi",
+                    "success_probability": 0.58,
+                    "compatibility": {"fbx": "preferred", "unreal": "requires import validation"},
+                    "description": "Candidate service/tool that generates motion from a text prompt and exports animation data.",
+                    "requires_user_selection": True,
+                    "privacy_review_required": True,
+                    "preview_plan": "Show service/provider link, prompt controls, generated preview options, terms, and available export formats.",
+                    "use_plan": "After approval, generate or select a previewed clip, export animation data, record provenance/terms, import into Unreal, and validate motion quality.",
+                },
+            ]
+        )
+        if not _is_animation_source_node(node):
+            candidates.append(
+                {
+                    "provider_key": "text_or_image_to_mesh_service",
+                    "name": "Text/image-to-mesh service",
+                    "source_type": "ai_service",
+                    "url": "",
+                    "cost": "Varies",
+                    "license": "Provider terms required",
+                    "automation": "Semi",
+                    "success_probability": 0.55,
+                    "compatibility": {"obj": "common", "fbx": "preferred", "unreal": "requires import/material validation"},
+                    "description": "Candidate service/tool that generates a mesh from text or image input.",
+                    "requires_user_selection": True,
+                    "privacy_review_required": True,
+                    "preview_plan": "Show service/provider link, input requirements, generated mesh preview options, texture/material export support, and terms.",
+                    "use_plan": "After approval, generate or select a previewed mesh, export asset files, record provenance/terms, import into the target host, and validate scale/materials.",
+                }
+            )
+    candidates.append(
+        {
+            "provider_key": "github_tool_search",
+            "name": "GitHub tool search",
+            "source_type": "github",
+            "url": "https://github.com/search",
+            "cost": "Free",
+            "license": "Repository-specific",
+            "automation": "Semi",
+            "success_probability": 0.64,
+            "compatibility": {"python": "requires wrapper/indexing"},
+            "description": "Search for a public repository that provides an importer, downloader, retargeter, or animation utility.",
+            "requires_user_selection": True,
+            "preview_plan": "Show the top repository links, README/license summary, maintainer/activity signals, and expected tool entry points before ingesting.",
+            "use_plan": "After approval, ingest the selected repository into external_tools, index callable symbols, register capabilities, and run through a wrapper/validation step.",
+        }
+    )
+    if "mixamo" in prompt_text:
+        candidates.sort(key=lambda item: 0 if item["provider_key"] == "mixamo" else 1)
+    elif "poly haven" in prompt_text or "polyhaven" in prompt_text:
+        candidates.sort(key=lambda item: 0 if item["provider_key"] == "poly_haven" else 1)
+    elif "quixel" in prompt_text or "megascans" in prompt_text:
+        candidates.sort(key=lambda item: 0 if item["provider_key"] == "quixel" else 1)
+    elif _prompt_wants_generated_asset(decision):
+        candidates.sort(key=lambda item: 0 if item["provider_key"] == "github_tool_search" else 1)
+    else:
+        candidates.sort(key=lambda item: (-float(item.get("success_probability") or 0.0), item.get("name", "")))
+    return candidates
 
 
 def _resolution_strategy_plan(
@@ -824,6 +1115,7 @@ def _resolution_strategy_plan(
             ),
         )
         chosen = _choose_strategy_for_node(node, strategies, decision)
+        provider_candidates = _provider_candidates_for_node(node, decision)
         plan.append(
             {
                 "capability": node.key,
@@ -831,6 +1123,8 @@ def _resolution_strategy_plan(
                 "status": node.status,
                 "chosen_strategy": chosen,
                 "strategies": [strategy.to_dict() for strategy in strategies[:max_strategies_per_node]],
+                "provider_candidates": provider_candidates,
+                "review_required": bool(provider_candidates),
             }
         )
     return plan
@@ -852,6 +1146,13 @@ def _choose_strategy_for_node(
         for key in ("internal_function", "internal_workflow", "compose_internal_functions"):
             if key in keys:
                 return key
+    if _is_external_asset_source_node(node):
+        if _prompt_wants_generated_asset(decision) and allow_ingestion and "github_ingest" in keys:
+            return "github_ingest"
+        if _prompt_wants_generated_asset(decision) and "ai_animation_service" in keys:
+            return "ai_animation_service"
+        if allow_ingestion and "asset_source_search" in keys:
+            return "asset_source_search"
     if allow_ingestion and any(term in label for term in ("online", "source", "download", "ingest", "asset")):
         if "github_ingest" in keys:
             return "github_ingest"
@@ -872,7 +1173,7 @@ def _adaptive_sequence(strategy_plan: list[dict[str, Any]]) -> list[dict[str, An
             action = "execute_internal"
         elif chosen in {"project_index_search", "local_documentation", "official_documentation"}:
             action = "discover_then_continue"
-        elif chosen in {"github_ingest", "plugin_marketplace"}:
+        elif chosen in {"github_ingest", "plugin_marketplace", "asset_source_search", "ai_animation_service"}:
             action = "request_approval_acquire_validate_register"
         elif chosen == "generate_new_code":
             action = "generate_validate_register"
@@ -917,6 +1218,10 @@ def _action_keys_for_sequence_item(item: dict[str, Any], decision: dict[str, Any
         keys.extend(["github_candidate_review", "download_or_ingest_asset", "register_capability"])
     elif strategy == "plugin_marketplace":
         keys.extend(["plugin_candidate_review", "register_capability"])
+    elif strategy == "asset_source_search":
+        keys.extend(["plugin_candidate_review", "download_or_ingest_asset", "register_capability"])
+    elif strategy == "ai_animation_service":
+        keys.extend(["plugin_candidate_review", "generate_code_or_wrapper", "download_or_ingest_asset", "register_capability"])
     elif strategy == "generate_new_code":
         keys.extend(["generate_code_or_wrapper", "register_capability"])
     elif strategy == "ask_user":
@@ -1632,8 +1937,27 @@ def _report_outline(needs_detailed_progress: bool) -> list[str]:
 
 
 def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        custom_module = settings.get("planning_provider_module")
+        if custom_module and custom_module != "default":
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            return invoke_custom_provider(
+                f"{custom_module}.build_goal_gap_plan",
+                _build_goal_gap_plan_impl,
+                prompt,
+                decision
+            )
+    except Exception as e:
+        print(f"Error calling custom build_goal_gap_plan: {e}", flush=True)
+    return _build_goal_gap_plan_impl(prompt, decision)
+
+def _build_goal_gap_plan_impl(prompt: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build an A-to-Z plan only after the problem is adequately formulated."""
     decision = dict(decision or {})
+    decision.setdefault("prompt", prompt)
+    decision.setdefault("original_prompt", prompt)
     problem_formulation = _build_problem_formulation(prompt, decision)
     decision["problem_formulation"] = problem_formulation
 
@@ -1657,7 +1981,7 @@ def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> 
         or problem_formulation.get("desired_outcome")
         or _goal_from_prompt(prompt)
     )
-    known_evidence = _known_capability_evidence(decision)
+    known_evidence = _known_capability_evidence(decision, prompt)
     nodes: list[CapabilityNode] = [
         CapabilityNode(
             key="user_goal",

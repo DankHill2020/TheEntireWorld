@@ -765,15 +765,15 @@ class MainWindowEditorMixin:
 
         load_lazy_roots(self.project_tree, self.project_roots(), self.style())
         self.status.setText("Project loaded")
-        self.update_project_header()
+        self.update_project_header(check_vcs=False)
 
-    def update_project_header(self):
+    def update_project_header(self, *, check_vcs: bool = True):
         active = self.settings.get("active_project", "")
         display = active or "No active project"
         if hasattr(self, "project_root_label"):
             self.project_root_label.setText(display)
             self.project_root_label.setToolTip(display)
-        if getattr(self, "_startup_defer_expensive_status", False):
+        if not check_vcs or getattr(self, "_startup_defer_expensive_status", False):
             self.set_card("vcs", "unknown", "Checking later")
             return
         self.update_vcs_status_card()
@@ -803,63 +803,91 @@ class MainWindowEditorMixin:
             self.set_card("vcs", "off", account_hint or "None")
             return
 
-        try:
-            from tech_connector.services.version_control_service import detect_version_controls_for_path
+        import threading
 
-            providers = detect_version_controls_for_path(Path(active))
-        except Exception:
-            providers = [self.service.version_control_for_path(active)]
-            providers = [provider for provider in providers if provider]
-        if not providers:
-            self.set_card("vcs", "off", "None")
+        if getattr(self, "_vcs_status_thread", None) is not None and self._vcs_status_thread.is_alive():
             return
+        self.set_card("vcs", "unknown", "Checking")
+        settings_snapshot = dict(getattr(self, "settings", {}) or {})
 
-        details = []
-        for vcs in providers:
-            if vcs.kind == "git":
-                account_hint = self._vcs_account_hint("git")
-                checkout_state = {}
-                try:
-                    checkout_state = vcs.checkout_state(Path(active))
-                except Exception:
-                    pass
-                detail = checkout_state.get("label") or "Git"
-                if account_hint:
-                    detail += f" / {account_hint}"
-                details.append(detail)
-            elif vcs.kind == "perforce":
-                client = ""
-                checkout_state = {}
-                try:
-                    import subprocess
+        def run():
+            state = "off"
+            detail = "None"
+            try:
+                from tech_connector.services.version_control_service import detect_version_controls_for_path
 
-                    creationflags = 0
-                    if sys.platform == "win32":
-                        creationflags = 0x08000000
-                    res = subprocess.run(
-                        ["p4", "info"],
-                        cwd=active,
-                        capture_output=True,
-                        text=True,
-                        creationflags=creationflags,
-                        check=False,
-                    )
-                    if res.returncode == 0:
-                        for line in res.stdout.splitlines():
-                            if line.startswith("Client name:"):
-                                client = f" ({line.split(':', 1)[1].strip()})"
-                                break
-                    checkout_state = vcs.checkout_state(Path(active))
+                providers = detect_version_controls_for_path(Path(active))
+            except Exception:
+                try:
+                    providers = [self.service.version_control_for_path(active)]
+                    providers = [provider for provider in providers if provider]
                 except Exception:
-                    pass
-                account_hint = self._vcs_account_hint("perforce")
-                detail = f"Perforce{client}"
-                if checkout_state.get("label"):
-                    detail += f" / {checkout_state.get('label')}"
-                if account_hint:
-                    detail += f" / {account_hint}"
-                details.append(detail)
-        self.set_card("vcs", "ok", " | ".join(details))
+                    providers = []
+            if providers:
+                details = []
+                for vcs in providers:
+                    if vcs.kind == "git":
+                        account_hint = self._vcs_account_hint("git")
+                        checkout_state = {}
+                        try:
+                            checkout_state = vcs.checkout_state(Path(active))
+                        except Exception:
+                            pass
+                        item = checkout_state.get("label") or "Git"
+                        if account_hint:
+                            item += f" / {account_hint}"
+                        details.append(item)
+                    elif vcs.kind == "perforce":
+                        client = ""
+                        checkout_state = {}
+                        try:
+                            import subprocess
+
+                            creationflags = 0
+                            if sys.platform == "win32":
+                                creationflags = 0x08000000
+                            res = subprocess.run(
+                                ["p4", "info"],
+                                cwd=active,
+                                capture_output=True,
+                                text=True,
+                                creationflags=creationflags,
+                                check=False,
+                                timeout=2.5,
+                            )
+                            if res.returncode == 0:
+                                for line in res.stdout.splitlines():
+                                    if line.startswith("Client name:"):
+                                        client = f" ({line.split(':', 1)[1].strip()})"
+                                        break
+                            checkout_state = vcs.checkout_state(Path(active))
+                        except Exception:
+                            pass
+                        account_hint = self._vcs_account_hint("perforce")
+                        item = f"Perforce{client}"
+                        if checkout_state.get("label"):
+                            item += f" / {checkout_state.get('label')}"
+                        if account_hint:
+                            item += f" / {account_hint}"
+                        details.append(item)
+                state = "ok"
+                detail = " | ".join(details) if details else "Detected"
+            try:
+                self.vcs_status_ready.emit((state, detail, active, settings_snapshot))
+            except Exception:
+                pass
+
+        self._vcs_status_thread = threading.Thread(target=run, daemon=True, name="vcs-status-card")
+        self._vcs_status_thread.start()
+
+    def _apply_vcs_status_card(self, payload):
+        try:
+            state, detail, active, _settings_snapshot = payload
+        except Exception:
+            state, detail, active = "warn", "Status unavailable", ""
+        if active and active != self.settings.get("active_project", ""):
+            return
+        self.set_card("vcs", state, detail)
 
     def _active_vcs_root(self) -> Path | None:
         active = self.settings.get("active_project", "") or getattr(self, "current_file_path", "")
@@ -2813,7 +2841,7 @@ class MainWindowEditorMixin:
         if p.is_file() and is_supported_code_file(p):
             self.open_code_file(str(p))
 
-    def open_code_file(self, path):
+    def open_code_file(self, path, *, restore: bool = False):
         path = str(Path(path).resolve())
         if path in self.open_editors:
             editor = self.open_editors[path]
@@ -2823,9 +2851,10 @@ class MainWindowEditorMixin:
                 self.current_file_path = path
                 self.file_path_label.setText(path)
                 self.schedule_editor_syntax_status()
-                self.select_path_in_tree(path)
-                self.refresh_editor_structure()
-                self.remember_recent_file(path)
+                if not restore:
+                    self.select_path_in_tree(path)
+                    self.refresh_editor_structure()
+                    self.remember_recent_file(path)
                 return
 
         ok, content = self.service.read_file(path)
@@ -2850,11 +2879,12 @@ class MainWindowEditorMixin:
         self.current_file_path = path
         self.file_path_label.setText(path)
         self.schedule_editor_syntax_status()
-        self.append(f"\n[Opened file: {path}]\n")
-        self.save_editor_state()
-        self.select_path_in_tree(path)
-        self.refresh_editor_structure()
-        self.remember_recent_file(path)
+        if not restore:
+            self.append(f"\n[Opened file: {path}]\n")
+            self.save_editor_state()
+            self.select_path_in_tree(path)
+            self.refresh_editor_structure()
+            self.remember_recent_file(path)
 
     def save_code_file(self):
         path = getattr(self, "current_file_path", "")
@@ -3043,7 +3073,6 @@ class MainWindowEditorMixin:
         if isinstance(editor, CodeEditor):
             self.current_file_path = getattr(editor, "file_path", "")
             self.file_path_label.setText(self.current_file_path)
-            self.select_path_in_tree(self.current_file_path)
         else:
             self.current_file_path = ""
             self.file_path_label.setText("No file open")
@@ -3055,7 +3084,6 @@ class MainWindowEditorMixin:
         if isinstance(editor, CodeEditor):
             self.current_file_path = getattr(editor, "file_path", "")
             self.file_path_label.setText(self.current_file_path)
-            self.select_path_in_tree(self.current_file_path)
             try:
                 editor.setFocus()
             except Exception:
@@ -3249,7 +3277,7 @@ class MainWindowEditorMixin:
         try:
             for path in paths:
                 if Path(path).exists():
-                    self.open_code_file(path)
+                    self.open_code_file(path, restore=True)
         finally:
             self.editor_tabs.blockSignals(False)
 
@@ -3261,6 +3289,8 @@ class MainWindowEditorMixin:
                 self.current_file_path = active
                 self.file_path_label.setText(active)
                 self.update_cursor_status()
+                self.schedule_editor_syntax_status()
+                self.refresh_editor_structure()
         self.refresh_recent_files_dropdown()
 
     def find_in_project(self):
@@ -3819,24 +3849,81 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                 if work_units is None:
                     return None, None
                 generated = {}
-                for leaf_index, kind in enumerate(("define", "integrate", "test"), start=1):
+
+                # 1. Run 'define' stage sequentially (integrate and test depend on it)
+                define_errors = []
+                expected_symbol_define = work_units.helper_name
+                for attempt in range(1, 3):
+                    leaf_stage = build_project_edit_leaf_stage(
+                        work_units,
+                        kind="define",
+                        attempt=attempt,
+                        objective=question,
+                        approved_plan=approved_plan_text,
+                        dependency_source="",
+                    )
+                    leaf_model = model_for_project_edit_stage(
+                        leaf_stage,
+                        settings,
+                        selected_model=model,
+                    )
+                    if callable(status_callback):
+                        status_callback(
+                            f"{leaf_stage.label}; unit 1/3; {leaf_model}; "
+                            "source-only subagent"
+                        )
+                    leaf_response = query_ollama_text(
+                        model=leaf_model,
+                        system_prompt=leaf_stage.system_prompt,
+                        user_prompt=leaf_stage.user_prompt,
+                        num_ctx=leaf_stage.num_ctx,
+                        num_predict=leaf_stage.num_predict,
+                        timeout=leaf_stage.timeout,
+                        prefer_coder=leaf_stage.prefer_coder,
+                        coder_preference=leaf_stage.coder_preference,
+                        think=False,
+                        response_format=leaf_stage.response_format,
+                        temperature=0.0,
+                    )
+                    if not leaf_response:
+                        define_errors = ["The define subagent returned no source."]
+                        continue
+                    leaf_source, define_errors = parse_project_edit_leaf_source(
+                        leaf_response,
+                        kind="define",
+                        expected_symbol=expected_symbol_define,
+                        required_reference="",
+                        objective=question,
+                    )
+                    if not define_errors:
+                        generated["define"] = leaf_source
+                        break
+                    if callable(status_callback):
+                        status_callback(
+                            f"Rejected bounded define unit: "
+                            + "; ".join(define_errors[:2])
+                        )
+                if define_errors or "define" not in generated:
+                    return None, None
+
+                # 2. Run 'integrate' and 'test' stages concurrently
+                import concurrent.futures
+
+                def run_stage(kind, leaf_index):
                     expected_symbol = (
-                        work_units.helper_name
-                        if kind == "define"
-                        else work_units.integration_symbol
+                        work_units.integration_symbol
                         if kind == "integrate"
                         else "test_generated_behavior"
                     )
-                    required_reference = work_units.helper_name if kind in {"integrate", "test"} else ""
-                    dependency_source = generated.get("define", "")
-                    if kind == "test" and generated.get("integrate"):
-                        dependency_source += "\n\n" + generated["integrate"]
-                    leaf_errors = []
-                    for leaf_attempt in range(1, 3):
+                    required_reference = work_units.helper_name
+                    dependency_source = generated["define"]
+                    errors = []
+
+                    for attempt in range(1, 3):
                         leaf_stage = build_project_edit_leaf_stage(
                             work_units,
                             kind=kind,
-                            attempt=leaf_attempt,
+                            attempt=attempt,
                             objective=question,
                             approved_plan=approved_plan_text,
                             dependency_source=dependency_source,
@@ -3862,27 +3949,40 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                             coder_preference=leaf_stage.coder_preference,
                             think=False,
                             response_format=leaf_stage.response_format,
+                            temperature=0.0,
                         )
                         if not leaf_response:
-                            leaf_errors = [f"The {kind} subagent returned no source."]
+                            errors = [f"The {kind} subagent returned no source."]
                             continue
-                        leaf_source, leaf_errors = parse_project_edit_leaf_source(
+                        leaf_source, errors = parse_project_edit_leaf_source(
                             leaf_response,
                             kind=kind,
                             expected_symbol=expected_symbol,
                             required_reference=required_reference,
                             objective=question,
                         )
-                        if not leaf_errors:
-                            generated[kind] = leaf_source
-                            break
+                        if not errors:
+                            return leaf_source, None
                         if callable(status_callback):
                             status_callback(
                                 f"Rejected bounded {kind} unit: "
-                                + "; ".join(leaf_errors[:2])
+                                + "; ".join(errors[:2])
                             )
-                    if leaf_errors:
-                        return None, None
+                    return None, errors
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    future_integrate = executor.submit(run_stage, "integrate", 2)
+                    future_test = executor.submit(run_stage, "test", 3)
+
+                    integrate_source, integrate_errors = future_integrate.result()
+                    test_source, test_errors = future_test.result()
+
+                if integrate_errors or test_errors or integrate_source is None or test_source is None:
+                    return None, None
+
+                generated["integrate"] = integrate_source
+                generated["test"] = test_source
+
                 candidate = build_project_edit_leaf_candidate(
                     work_units,
                     helper_source=generated["define"],

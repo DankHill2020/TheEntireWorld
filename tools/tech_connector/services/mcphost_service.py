@@ -7,11 +7,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tech_connector.bridges.blender.blender_bridge import BlenderBridge
-from tech_connector.bridges.maya.maya_bridge import MayaBridge
-from tech_connector.bridges.substance_painter.substance_painter_bridge import SubstancePainterBridge
-from tech_connector.bridges.unity.unity_bridge import UnityBridge
-from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
 from tech_connector.models.constants import ANSI_RE, DEFAULT_MCPHOST, TOOLS_ROOT, project_index_db_path
 from tech_connector.models.project import all_roots
 from tech_connector.services.settings_service import install_components_to_tools, save_settings
@@ -143,6 +138,12 @@ class MCPHostOutputCleaner:
 
 
 def build_health_check_message(bridge, mcphost_ready: bool) -> str:
+    from tech_connector.bridges.blender.blender_bridge import BlenderBridge
+    from tech_connector.bridges.maya.maya_bridge import MayaBridge
+    from tech_connector.bridges.substance_painter.substance_painter_bridge import SubstancePainterBridge
+    from tech_connector.bridges.unity.unity_bridge import UnityBridge
+    from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
+
     msg = []
     msg.append("Health Check")
     msg.append(f"Knowledge DB: {'OK' if project_index_db_path().exists() else 'Missing'}")

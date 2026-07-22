@@ -149,7 +149,7 @@ class TestProjectEditAgentService(unittest.TestCase):
 
     def test_project_edit_plan_output_requires_target_and_verification_evidence(self) -> None:
         plan = build_project_edit_agent_request(
-            "Add a helper and focused tests in the project edit service.",
+            "Add a helper and focused tests in the project edit service (project_edit_agent_service.py).",
             active_path=str(Path(__file__).parents[1] / "services" / "project_edit_agent_service.py"),
         )
         valid = """Intent: implement the requested helper.
@@ -164,7 +164,7 @@ Plan self-check: target, test scope, and verification all match the objective.
 
     def test_project_edit_plan_output_rejects_detached_code_and_renders_grounded_fallback(self) -> None:
         plan = build_project_edit_agent_request(
-            "Add a helper and focused tests in the project edit service.",
+            "Add a helper and focused tests in the project edit service (project_edit_agent_service.py).",
             active_path=str(Path(__file__).parents[1] / "services" / "project_edit_agent_service.py"),
         )
         detached = """Here is the implementation:
@@ -187,7 +187,7 @@ This should solve the request without any other changes or tests.
 
     def test_project_edit_patch_stage_includes_exact_source_and_preview_contract(self) -> None:
         plan = build_project_edit_agent_request(
-            "Add summarize_validation_failures and reuse it for validation errors. Preview only; do not apply changes.",
+            "In project_edit_agent_service.py, add summarize_validation_failures and reuse it for validation errors. Preview only; do not apply changes.",
             active_path=str(Path(__file__).parents[1] / "services" / "project_edit_agent_service.py"),
         )
 
@@ -200,7 +200,7 @@ This should solve the request without any other changes or tests.
 
     def test_project_edit_repairs_refine_context_and_escalate_one_tier_at_a_time(self) -> None:
         plan = build_project_edit_agent_request(
-            "Add summarize_validation_failures and focused tests.",
+            "In project_edit_agent_service.py, add summarize_validation_failures and focused tests.",
             active_path=str(Path(__file__).parents[1] / "services" / "project_edit_agent_service.py"),
         )
         candidate = "<modify_file path=\"service.py\">\ninvalid candidate\n</modify_file>"
@@ -651,7 +651,7 @@ This should solve the request without any other changes or tests.
                         "path": "service.py",
                         "target_symbol": "render_report",
                         "original_content": "old source",
-                        "new_content": "def summarize(item):\n    return f'{item.get('message')}'",
+                        "new_content": "def summarize(item):\n    return f'{item.get(\"message\")'",
                     }
                 ],
                 "report": {"changed": [], "reused": [], "verification": [], "remaining_gaps": []},

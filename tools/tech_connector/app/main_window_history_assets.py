@@ -82,10 +82,6 @@ from tech_connector.services.ollama_service import (
 
 from tech_connector.services.settings_service import best_config
 from tech_connector.ui.first_run_dialog import FirstRunDialog
-from tech_connector.ui.project_tree import (
-    load_full_project_tree,
-)
-
 from tech_connector.ui.chat_worker_dialogs import CredentialsPromptDialog
 from tech_connector.ui.unreal_editor_dialogs import WebImportDialog
 
@@ -114,7 +110,7 @@ class MainWindowHistoryAssetsMixin:
                     self.confirm_and_run_first_time_dcc_installers()
             except Exception as exc:
                 self.append(f"\n[DCC Setup] First-time installer launch failed: {exc}\n")
-            self.load_project_tree()
+            self.refresh_project_tree_fast()
             if self.settings.get("auto_index_on_first_run") and not project_index_db_path().exists():
                 self.build_index()
 
@@ -570,7 +566,10 @@ class MainWindowHistoryAssetsMixin:
 
     def refresh_history(self):
         self.history.clear()
-        for p in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        for idx, p in enumerate(sorted(HISTORY_DIR.glob("*.json"), reverse=True)):
+            if idx >= 200:
+                self.history.addItem("... older history omitted at startup ...")
+                break
             self.history.addItem(p.name)
 
     def save_history(self):
@@ -733,7 +732,10 @@ class MainWindowHistoryAssetsMixin:
         self.code_list.clear()
         from tech_connector.models.constants import CODE_SNIPPETS_DIR
 
-        for p in sorted(CODE_SNIPPETS_DIR.glob("*.*")):
+        for idx, p in enumerate(sorted(CODE_SNIPPETS_DIR.glob("*.*"))):
+            if idx >= 200:
+                self.code_list.addItem("... more snippets omitted at startup ...")
+                break
             if p.is_file():
                 self.code_snippets.append(str(p.resolve()))
                 self.code_list.addItem(p.name)
@@ -806,10 +808,10 @@ class MainWindowHistoryAssetsMixin:
                 self.append("[Snippets] All code snippets cleared.\n")
 
     def load_project_tree(self):
-        """Full tree build used after first-run setup."""
+        """Refresh the visible project tree without recursively walking roots."""
         if not hasattr(self, "project_tree"):
             return
-        load_full_project_tree(self.project_tree, self.all_roots(), self.style())
+        self.load_project_tree_lazy()
         if hasattr(self, "refresh_workflows_list"):
             self.refresh_workflows_list()
 
@@ -1039,6 +1041,23 @@ class MainWindowHistoryAssetsMixin:
         self.append(
             f"\n[Model Provider] Opened official setup page for {PROVIDERS[provider_id].display_name}: {url}\n"
         )
+
+    def show_customization_panel_dialog(self, active_tab: int = 0):
+        from tech_connector.ui.customization_panel import CustomizationPanel
+        dialog = CustomizationPanel(self, active_tab=active_tab)
+        dialog.exec()
+
+    def show_customization_panel_models(self):
+        self.show_customization_panel_dialog(active_tab=0)
+
+    def show_customization_panel_cloud(self):
+        self.show_customization_panel_dialog(active_tab=1)
+
+    def show_customization_panel_services(self):
+        self.show_customization_panel_dialog(active_tab=2)
+
+    def show_customization_panel_ext(self):
+        self.show_customization_panel_dialog(active_tab=3)
 
     def show_settings_dialog(self):
         dialog = QDialog(self)

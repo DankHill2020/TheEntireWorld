@@ -28,6 +28,30 @@ class DccDirectBridgeCapabilityTests(unittest.TestCase):
 
         self.assertEqual(set(), missing)
 
+    def test_red_status_light_blocks_direct_dcc_execution(self):
+        service = PromptDispatchService()
+        decision = {
+            "execution_environment": "unreal",
+            "host": "unreal",
+            "requires_dcc_connection": True,
+            "requires_confirmation": False,
+            "capability_availability": {
+                "hosts": {
+                    "unreal": {
+                        "connected": False,
+                        "light": "red",
+                        "status": "off",
+                        "detail": "Bridge not detected",
+                    }
+                }
+            },
+        }
+        context = RequestContext(text="In Unreal compile BP_PlayerCharacter.")
+
+        missing = service._missing_capabilities({CAP_DCC_CONNECTION}, decision, context)
+
+        self.assertEqual({CAP_DCC_CONNECTION}, missing)
+
     def test_maya_port_phrase_is_extracted_into_execution_request(self):
         decision = {
             "execution_environment": "maya",

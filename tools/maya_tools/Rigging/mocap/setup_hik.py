@@ -192,33 +192,19 @@ DEFAULT_JOINT_MAP = {
 
 
 def get_descendant_joints(root_joint):
-    """
-        Returns all descendant joints of root_joint (including root).
-    :param root_joint: root joint
-    :return: result
-    """
+    """Returns all descendant joints of root_joint (including root)."""
     if not root_joint or not cmds.objExists(root_joint):
         return []
     return [root_joint] + cmds.listRelatives(root_joint, allDescendents=True, type="joint") or []
 
 
 def find_face_joints(pattern, face_joints):
-    """
-        Return joints in the scene matching the pattern that are descendants of the face root.
-    :param pattern: pattern
-    :param face_joints: list of face joints
-    :return: result
-    """
+    """Return joints in the scene matching the pattern that are descendants of the face root."""
     all_matches = cmds.ls(pattern, type="joint") or []
     return [j for j in all_matches if j in face_joints]
 
 
 def _exists(j):
-    """
-        Exists.
-    :param j: j
-    :return: result
-    """
     return j if j and cmds.objExists(j) else None
 
 
@@ -464,11 +450,7 @@ joint_map = {
 
 
 def populate_default_face_map_from_scene(base_face_map=None):
-    """
-        Fill face map with default scene joints under HIK head reference.
-    :param base_face_map: mapping for base face map
-    :return: result
-    """
+    """Fill face map with default scene joints under HIK head reference."""
     if base_face_map is None:
         dm = copy.deepcopy(DEFAULT_FACE_JOINT_MAP)
     else:
@@ -573,11 +555,6 @@ def guess_joint_map_from_root(root_joint, base_joint_map=None):
         joint_map[key]["joint"] = ""
 
     def is_twist_bone(name):
-        """
-            Is twist bone.
-        :param name: name
-        :return: result
-        """
         return "twist" in name or "roll" in name
 
     all_joints = cmds.listRelatives(root_joint, ad=True, type="joint") or []
@@ -610,11 +587,6 @@ def guess_joint_map_from_root(root_joint, base_joint_map=None):
         name = jnt.lower()
 
         def set_slot(slot):
-            """
-                Sets slot.
-            :param slot: slot
-            :return:
-            """
             if slot in joint_map and not joint_map[slot].get("joint"):
                 joint_map[slot]["joint"] = jnt
 

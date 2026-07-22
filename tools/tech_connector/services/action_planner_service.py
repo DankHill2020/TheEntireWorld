@@ -109,6 +109,36 @@ def _workflow_plan_to_action_graph(prompt: str, roots: list[str]) -> dict[str, A
         if not gaps:
             _WORKFLOW_GRAPH_CACHE[cache_key] = (now, None)
             return None
+        missing_args = [gap for gap in gaps if gap.get("kind") == "missing_required_argument"]
+        acquisition_gaps = [gap for gap in gaps if gap.get("kind") != "missing_required_argument"]
+        if missing_args and not acquisition_gaps:
+            graph = ActionGraph(
+                goal=prompt,
+                intent="pipeline_missing_required_args",
+                confidence=float(plan.get("confidence") or 0.0),
+                diagnostics=list(plan.get("diagnostics") or []),
+            )
+            for gap in missing_args:
+                callable_name = gap.get("callable") or str(gap.get("capability") or "callable").split(".", 1)[0]
+                argument = gap.get("argument") or str(gap.get("capability") or "").split(".")[-1]
+                graph.add(
+                    "request_input",
+                    {
+                        "callable": callable_name,
+                        "argument": argument,
+                        "capability": gap.get("capability") or f"{callable_name}.{argument}",
+                        "question": f"What value should `{argument}` use for `{callable_name}`?",
+                        "reason": gap.get("reason") or "A required argument has no default, user value, or discovered producer.",
+                    },
+                    requires_approval=False,
+                )
+            data = graph.to_dict()
+            data["workflow_plan"] = plan
+            data["missing_required_args"] = missing_args
+            data["capability_gaps"] = gaps
+            data["validation"] = validate_action_graph(data)
+            _WORKFLOW_GRAPH_CACHE[cache_key] = (now, data)
+            return data
         graph = ActionGraph(
             goal=prompt,
             intent="pipeline_capability_acquisition",
@@ -116,12 +146,25 @@ def _workflow_plan_to_action_graph(prompt: str, roots: list[str]) -> dict[str, A
             diagnostics=list(plan.get("diagnostics") or []),
         )
         for gap in gaps:
-            graph.add(
+            internal_search = graph.add(
                 "search_project",
                 {
                     "query": gap.get("capability") or prompt,
                     "reason": gap.get("reason") or "Resolve a missing pipeline callable.",
                 },
+                requires_approval=False,
+            )
+            graph.add(
+                "github_search",
+                {
+                    "query": gap.get("capability") or prompt,
+                    "limit": 5,
+                    "review_required": True,
+                    "fallback_only": True,
+                    "fallback_reason": "No internal callable or registered capability matched the requested pipeline step.",
+                    "internal_search_result": {"from_action": internal_search.id, "result_path": ""},
+                },
+                depends_on=[internal_search.id],
                 requires_approval=False,
             )
         data = graph.to_dict()
@@ -221,7 +264,7 @@ def plan_prompt_to_action_graph(prompt: str, project_roots: list[str] | None = N
     if re.search(r"\b(open|show|go to|jump to)\b", lower) and file_hint:
         resolve = action_graph.add("resolve_file", {"query": file_hint, "path": file_hint}, requires_approval=False)
         action_graph.add("open_file", {"query": file_hint, "path": file_hint}, depends_on=[resolve.id], requires_approval=False)
-    elif re.search(r"\b(find|search|locate|where is|where are)\b", lower):
+    elif re.search(r"\b(find|search|locate|where is|where are)\b", lower) and "github" not in lower:
         function_names = _function_mentions(text)
         if function_names or re.search(r"\b(function|method|symbol)\b", lower):
             query = function_names[0] if function_names else re.sub(r"\b(find|search|locate|where is|where are|function|method|symbol)\b", "", text, flags=re.IGNORECASE).strip()
@@ -237,14 +280,22 @@ def plan_prompt_to_action_graph(prompt: str, project_roots: list[str] | None = N
     elif re.search(r"\b(index)\b", lower) and re.search(r"\b(project|repo|repository|codebase)\b", lower):
         action_graph.intent = "index_project"
         action_graph.add("index_project", {"scope": "project"})
+    elif "github" in lower and re.search(r"\b(ingest|import|install)\b", lower):
+        auto_select = bool(re.search(r"\b(auto(?:matically)?\s+select|auto[- ]?select|use\s+best\s+match|pick\s+the\s+best)\b", lower))
+        action_graph.intent = "github_candidate_review"
+        action_graph.add(
+            "github_search",
+            {
+                "query": text,
+                "limit": 5,
+                "auto_select": auto_select,
+                "review_required": not auto_select,
+            },
+            requires_approval=False,
+        )
     elif "github" in lower and re.search(r"\b(search|find)\b", lower):
         action_graph.intent = "github_search"
-        action_graph.add("github_search", {"query": text}, requires_approval=False)
-    elif "github" in lower and re.search(r"\b(ingest|import|install)\b", lower):
-        action_graph.intent = "github_ingest"
-        action_graph.add("github_search", {"query": text}, requires_approval=False)
-        action_graph.add("github_ingest", {"query": text})
-        action_graph.add("index_repository", {"source": "github_ingest"})
+        action_graph.add("github_search", {"query": text, "limit": 5}, requires_approval=False)
     elif re.search(r"\b(refresh)\b", lower) and "unreal" in lower:
         action_graph.intent = "refresh_unreal"
         action_graph.add("refresh_unreal", {})

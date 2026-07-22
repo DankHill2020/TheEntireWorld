@@ -250,40 +250,43 @@ def _normalize_prompt(prompt: str) -> str:
         return " ".join(str(prompt or "").split())
 
 
-def _model_json(system: str, packet: dict[str, Any], *, timeout: int = 45) -> dict[str, Any]:
+def _model_json(system: str, packet: dict[str, Any], *, timeout: int | None = None) -> dict[str, Any]:
     """Run the configured planning model and return one JSON object."""
     try:
         from tech_connector.services.ollama_service import OLLAMA_BASE_URL
-        from tech_connector.services.ollama_resource_service import build_ollama_options
+        from tech_connector.services.ollama_resource_service import (
+            build_ollama_options,
+            choose_ollama_generation_budget,
+        )
 
+        settings = dict(packet.get("settings") or {})
+        budget = choose_ollama_generation_budget(
+            prompt=str(packet.get("raw_prompt") or ""),
+            evidence_text=json.dumps(packet.get("context_candidates") or [], default=str),
+            route=str((packet.get("semantic_hypothesis") or {}).get("primary_route") or ""),
+            llm_mode="planning",
+            confidence=(packet.get("semantic_hypothesis") or {}).get("confidence"),
+            settings=settings,
+        )
         model = os.environ.get("AI_STUDIO_PLANNING_MODEL", "qwen3:8b")
         options = build_ollama_options(
-            num_ctx=4096,
-            num_predict=600,
+            num_ctx=budget.num_ctx,
+            num_predict=budget.num_predict,
+            settings=settings,
             temperature=0.0,
         )
         options.update({"top_k": 1, "top_p": 0.1, "repeat_penalty": 1.0})
-        payload = json.dumps(
-            {
-                "model": model,
-                "prompt": json.dumps(packet, default=str),
-                "system": system,
-                "stream": False,
-                "format": "json",
-                "think": False,
-                "options": options,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=timeout) as response:
-            raw = json.loads(response.read().decode("utf-8", errors="replace"))
-        value = str(raw.get("response") or "").strip()
+        effective_timeout = int(timeout) if timeout is not None else int(budget.timeout_seconds)
+        
+        from tech_connector.services.llm_router_service import generate_llm_response
+        value = generate_llm_response(
+            model=model,
+            prompt=json.dumps(packet, default=str),
+            system=system,
+            response_format="json",
+            options=options,
+            timeout=effective_timeout
+        ).strip()
         parsed = json.loads(value)
         return dict(parsed) if isinstance(parsed, dict) else {}
     except Exception:
@@ -657,6 +660,7 @@ def plan_prompt_with_context(
     }
     packet = {
         "raw_prompt": prompt,
+        "settings": dict(facts.get("settings") or {}),
         "semantic_hypothesis": compact_understanding,
         "deterministic_contract": compact_contract,
         "problem_formulation": compact_formulation,
@@ -1380,7 +1384,14 @@ def build_prompt_execution_context(
     normalized_prompt = _normalize_prompt(prompt)
     # Stage 1: the small semantic model sees only the normalized request and a
     # host hint. Context guesses are deliberately gathered after this pass.
-    understanding = understand_prompt_request(normalized_prompt, host=host_hint)
+    understanding = understand_prompt_request(
+        normalized_prompt,
+        host=host_hint,
+        context={
+            "active_path": (decision_facts or {}).get("active_path") or "",
+            "settings": dict((decision_facts or {}).get("settings") or {}),
+        },
+    )
     understanding_data = understanding.to_dict()
 
     # PromptIntentService may still provide a compatibility contract during the
@@ -1584,7 +1595,15 @@ def validate_prompt_understanding(
     execution = bool(plan.get("execution_requested") or understanding.get("live_host_execution_requested"))
     route_consistent = not (
         (mutation and route in {"project_search", "chat"} and goal_type not in {"generate", "explain", "learn"})
-        or (execution and route not in {"dcc_execute", "action_graph", "pipeline_graph"})
+        or (
+            execution
+            and route not in {
+                "dcc_execute",
+                "action_graph",
+                "pipeline_graph",
+                "target_discovery",
+            }
+        )
         or (scope == "exact_file" and not target)
     )
     if not route_consistent:

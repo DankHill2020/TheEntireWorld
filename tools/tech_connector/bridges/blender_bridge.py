@@ -6,6 +6,7 @@ import os
 import socket
 
 from tech_connector.bridges.host_bridge import HostBridgeInfo
+from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.models.constants import APP_ROOT, TOOLS_ROOT
 
 
@@ -86,11 +87,13 @@ class BlenderBridge:
                 if isinstance(parsed, dict) and "ok" in parsed:
                     if not parsed.get("ok", True):
                         return False, parsed.get("error") or parsed.get("stderr") or raw
-                    return True, parsed.get("result")
+                    result = parsed.get("result")
+                    return ((False, result) if bridge_output_has_error(result) else (True, result))
                 result = parsed.get("result") or parsed.get("error") or raw
-                return bool(parsed.get("ok", True)), result
+                ok = bool(parsed.get("ok", True)) and not bridge_output_has_error(result)
+                return ok, result
             except Exception:
-                return True, raw
+                return (False, raw) if bridge_output_has_error(raw) else (True, raw)
         except Exception as e:
             return False, str(e)
 

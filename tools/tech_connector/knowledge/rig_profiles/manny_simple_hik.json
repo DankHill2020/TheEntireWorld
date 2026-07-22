@@ -1,0 +1,432 @@
+{
+  "schema_version": 1,
+  "profile_name": "UE5 Manny Simple",
+  "mapping": {
+    "Reference": {
+      "index": 0,
+      "joint": "root"
+    },
+    "Hips": {
+      "index": 1,
+      "joint": "pelvis"
+    },
+    "LeftUpLeg": {
+      "index": 2,
+      "joint": "thigh_l"
+    },
+    "LeftLeg": {
+      "index": 3,
+      "joint": "calf_l"
+    },
+    "LeftFoot": {
+      "index": 4,
+      "joint": "foot_l"
+    },
+    "LeftToeBase": {
+      "index": 16,
+      "joint": "ball_l"
+    },
+    "RightUpLeg": {
+      "index": 5,
+      "joint": "thigh_r"
+    },
+    "RightLeg": {
+      "index": 6,
+      "joint": "calf_r"
+    },
+    "RightFoot": {
+      "index": 7,
+      "joint": "foot_r"
+    },
+    "RightToeBase": {
+      "index": 17,
+      "joint": "ball_r"
+    },
+    "Spine": {
+      "index": 8,
+      "joint": "spine_01"
+    },
+    "Spine1": {
+      "index": 23,
+      "joint": "spine_02"
+    },
+    "Spine2": {
+      "index": 24,
+      "joint": "spine_03"
+    },
+    "Spine3": {
+      "index": 25,
+      "joint": "spine_04"
+    },
+    "Neck": {
+      "index": 20,
+      "joint": "neck_01"
+    },
+    "Neck1": {
+      "index": 32,
+      "joint": "neck_02"
+    },
+    "Head": {
+      "index": 15,
+      "joint": "head"
+    },
+    "LeftShoulder": {
+      "index": 18,
+      "joint": "clavicle_l"
+    },
+    "LeftArm": {
+      "index": 9,
+      "joint": "upperarm_l"
+    },
+    "LeftForeArm": {
+      "index": 10,
+      "joint": "lowerarm_l"
+    },
+    "LeftHand": {
+      "index": 11,
+      "joint": "hand_l"
+    },
+    "LeftInHandIndex": {
+      "index": 147,
+      "joint": ""
+    },
+    "LeftInHandMiddle": {
+      "index": 148,
+      "joint": ""
+    },
+    "LeftInHandRing": {
+      "index": 149,
+      "joint": ""
+    },
+    "LeftInHandPinky": {
+      "index": 150,
+      "joint": ""
+    },
+    "LeftHandThumb1": {
+      "index": 50,
+      "joint": ""
+    },
+    "LeftHandIndex1": {
+      "index": 54,
+      "joint": ""
+    },
+    "LeftHandMiddle1": {
+      "index": 58,
+      "joint": ""
+    },
+    "LeftHandRing1": {
+      "index": 62,
+      "joint": ""
+    },
+    "LeftHandPinky1": {
+      "index": 66,
+      "joint": ""
+    },
+    "LeftHandThumb2": {
+      "index": 51,
+      "joint": ""
+    },
+    "LeftHandIndex2": {
+      "index": 55,
+      "joint": ""
+    },
+    "LeftHandMiddle2": {
+      "index": 59,
+      "joint": ""
+    },
+    "LeftHandRing2": {
+      "index": 63,
+      "joint": ""
+    },
+    "LeftHandPinky2": {
+      "index": 67,
+      "joint": ""
+    },
+    "LeftHandThumb3": {
+      "index": 52,
+      "joint": ""
+    },
+    "LeftHandIndex3": {
+      "index": 56,
+      "joint": ""
+    },
+    "LeftHandMiddle3": {
+      "index": 60,
+      "joint": ""
+    },
+    "LeftHandRing3": {
+      "index": 64,
+      "joint": ""
+    },
+    "LeftHandPinky3": {
+      "index": 68,
+      "joint": ""
+    },
+    "LeftHandThumb4": {
+      "index": 53,
+      "joint": ""
+    },
+    "LeftHandIndex4": {
+      "index": 57,
+      "joint": ""
+    },
+    "LeftHandMiddle4": {
+      "index": 61,
+      "joint": ""
+    },
+    "LeftHandRing4": {
+      "index": 65,
+      "joint": ""
+    },
+    "LeftHandPinky4": {
+      "index": 69,
+      "joint": ""
+    },
+    "RightShoulder": {
+      "index": 19,
+      "joint": "clavicle_r"
+    },
+    "RightArm": {
+      "index": 12,
+      "joint": "upperarm_r"
+    },
+    "RightForeArm": {
+      "index": 13,
+      "joint": "lowerarm_r"
+    },
+    "RightHand": {
+      "index": 14,
+      "joint": "hand_r"
+    },
+    "RightInHandIndex": {
+      "index": 153,
+      "joint": ""
+    },
+    "RightInHandMiddle": {
+      "index": 154,
+      "joint": ""
+    },
+    "RightInHandRing": {
+      "index": 155,
+      "joint": ""
+    },
+    "RightInHandPinky": {
+      "index": 156,
+      "joint": ""
+    },
+    "RightHandThumb1": {
+      "index": 74,
+      "joint": ""
+    },
+    "RightHandIndex1": {
+      "index": 78,
+      "joint": ""
+    },
+    "RightHandMiddle1": {
+      "index": 82,
+      "joint": ""
+    },
+    "RightHandRing1": {
+      "index": 86,
+      "joint": ""
+    },
+    "RightHandPinky1": {
+      "index": 90,
+      "joint": ""
+    },
+    "RightHandThumb2": {
+      "index": 75,
+      "joint": ""
+    },
+    "RightHandIndex2": {
+      "index": 79,
+      "joint": ""
+    },
+    "RightHandMiddle2": {
+      "index": 83,
+      "joint": ""
+    },
+    "RightHandRing2": {
+      "index": 87,
+      "joint": ""
+    },
+    "RightHandPinky2": {
+      "index": 91,
+      "joint": ""
+    },
+    "RightHandThumb3": {
+      "index": 76,
+      "joint": ""
+    },
+    "RightHandIndex3": {
+      "index": 80,
+      "joint": ""
+    },
+    "RightHandMiddle3": {
+      "index": 84,
+      "joint": ""
+    },
+    "RightHandRing3": {
+      "index": 88,
+      "joint": ""
+    },
+    "RightHandPinky3": {
+      "index": 92,
+      "joint": ""
+    },
+    "RightHandThumb4": {
+      "index": 77,
+      "joint": ""
+    },
+    "RightHandIndex4": {
+      "index": 81,
+      "joint": ""
+    },
+    "RightHandMiddle4": {
+      "index": 85,
+      "joint": ""
+    },
+    "RightHandRing4": {
+      "index": 89,
+      "joint": ""
+    },
+    "RightHandPinky4": {
+      "index": 93,
+      "joint": ""
+    },
+    "LeftArmRoll": {
+      "index": 45,
+      "joint": "upperarm_twist_01_l"
+    },
+    "LeafLeftArmRoll1": {
+      "index": 176,
+      "joint": "upperarm_twist_02_l"
+    },
+    "LeafLeftArmRoll2": {
+      "index": 184,
+      "joint": ""
+    },
+    "LeafLeftArmRoll3": {
+      "index": 192,
+      "joint": ""
+    },
+    "RightArmRoll": {
+      "index": 47,
+      "joint": "upperarm_twist_01_r"
+    },
+    "LeafRightArmRoll1": {
+      "index": 178,
+      "joint": "upperarm_twist_02_r"
+    },
+    "LeafRightArmRoll2": {
+      "index": 186,
+      "joint": ""
+    },
+    "LeafRightArmRoll3": {
+      "index": 194,
+      "joint": ""
+    },
+    "LeftForeArmRoll": {
+      "index": 46,
+      "joint": "lowerarm_twist_01_l"
+    },
+    "LeafLeftForearmRoll1": {
+      "index": 177,
+      "joint": "lowerarm_twist_02_l"
+    },
+    "LeafLeftForearmRoll2": {
+      "index": 185,
+      "joint": ""
+    },
+    "LeafLeftForearmRoll3": {
+      "index": 193,
+      "joint": ""
+    },
+    "RightForeArmRoll": {
+      "index": 48,
+      "joint": "lowerarm_twist_01_r"
+    },
+    "LeafRightForearmRoll1": {
+      "index": 179,
+      "joint": "lowerarm_twist_02_r"
+    },
+    "LeafRightForearmRoll2": {
+      "index": 187,
+      "joint": ""
+    },
+    "LeafRightForearmRoll3": {
+      "index": 195,
+      "joint": ""
+    },
+    "LeftUpLegRoll": {
+      "index": 41,
+      "joint": "thigh_twist_01_l"
+    },
+    "LeafLeftUpLegRoll1": {
+      "index": 172,
+      "joint": "thigh_twist_02_l"
+    },
+    "LeafLeftUpLegRoll2": {
+      "index": 180,
+      "joint": ""
+    },
+    "LeafLeftUpLegRoll3": {
+      "index": 188,
+      "joint": ""
+    },
+    "RightUpLegRoll": {
+      "index": 43,
+      "joint": "thigh_twist_01_r"
+    },
+    "LeafRightUpLegRoll1": {
+      "index": 174,
+      "joint": "thigh_twist_02_r"
+    },
+    "LeafRightUpLegRoll2": {
+      "index": 182,
+      "joint": ""
+    },
+    "LeafRightUpLegRoll3": {
+      "index": 190,
+      "joint": ""
+    },
+    "LeftLegRoll": {
+      "index": 42,
+      "joint": ""
+    },
+    "LeafLeftLegRoll1": {
+      "index": 173,
+      "joint": ""
+    },
+    "LeafLeftLegRoll2": {
+      "index": 181,
+      "joint": ""
+    },
+    "RightLegRoll": {
+      "index": 44,
+      "joint": ""
+    },
+    "LeafRightLegRoll1": {
+      "index": 175,
+      "joint": ""
+    },
+    "LeafRightLegRoll2": {
+      "index": 183,
+      "joint": ""
+    }
+  },
+  "provenance": {
+    "method": "validated_hierarchy_name_inference",
+    "source_fbx": "C:\\depot\\ArtSource\\Rigs\\mocap_rigs\\MannyRig_v01.fbx",
+    "source_root": "root",
+    "generated_at_utc": "2026-07-20T13:42:18.814895+00:00",
+    "generator": "tech_connector/scripts/maya_generate_hik_mapping_profile.py"
+  },
+  "validation": {
+    "root": "|MannyRig_v01_retarget:root",
+    "mapped_slot_count": 37,
+    "repairs": [],
+    "unresolved": [],
+    "missing_required": []
+  }
+}

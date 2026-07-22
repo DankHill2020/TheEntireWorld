@@ -701,14 +701,14 @@ def build_project_edit_model_stages(plan: ProjectEditPlan) -> list[ProjectEditPr
         "then validate and repeat. Completion requires working behavior, not a plausible-looking patch. "
         "During planning, never emit code, pseudocode, code fences, or replacement bodies."
     )
-    quick_plan_prompt = f"""User objective:
+    quick_plan_prompt = f"""Focused exact source excerpts:
+{planning_source or '(no source excerpt could be resolved)'}
+
+User objective:
 {objective}
 
 Compact target evidence:
 {compact_discovery}
-
-Focused exact source excerpts:
-{planning_source or '(no source excerpt could be resolved)'}
 
 Selected expert lenses:
 {experts or '(none)'}
@@ -731,14 +731,14 @@ Blockers:
 Plan self-check:
 Approval scope:
 """
-    patch_prompt = f"""User objective:
+    patch_prompt = f"""Focused exact source excerpts:
+{focused_source or '(no source excerpt could be resolved)'}
+
+User objective:
 {objective}
 
 Chosen target:
 {target_path or '(none)'}
-
-Focused exact source excerpts:
-{focused_source or '(no source excerpt could be resolved)'}
 
 Focused target-discovery evidence:
 {discovery}
@@ -1503,16 +1503,16 @@ def build_project_edit_leaf_stage(
             "text must be def test_ and the response must contain exactly that one method."
         ),
     }[normalized_kind]
-    prompt = f"""User objective:
+    prompt = f"""Exact existing source boundary:
+```python
+{exact_source}
+```
+
+User objective:
 {objective}
 
 Approved implementation plan:
 {_trim_text(approved_plan, 3500)}
-
-Exact existing source boundary:
-```python
-{exact_source}
-```
 
 Dependency source produced by an earlier bounded worker:
 ```python
@@ -1691,15 +1691,28 @@ def model_for_project_edit_stage(
         model = settings.get("router_fast_llm_model") or settings.get("router_local_plan") or settings.get("general_model")
     elif tier == "local_code":
         from tech_connector.services.ollama_service import code_model_for_profile
+        import re
 
         profile = str(stage.coder_preference or "small").strip().lower()
+        base_code_model = settings.get("router_local_code") or settings.get("code_model")
+        
         model = (
             settings.get(f"router_local_code_{profile}")
             or settings.get(f"code_model_{profile}")
-            or code_model_for_profile(profile)
-            or settings.get("router_local_code")
-            or settings.get("code_model")
         )
+        if not model:
+            default_profile_model = code_model_for_profile(profile)
+            if base_code_model:
+                def model_size(name: str) -> float:
+                    match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)b\b", str(name or "").lower())
+                    return float(match.group(1)) if match else 0.0
+                
+                if model_size(default_profile_model) > model_size(base_code_model):
+                    model = base_code_model
+                else:
+                    model = default_profile_model
+            else:
+                model = default_profile_model
     else:
         model = None
     return str(model or selected_model or settings.get("model") or "ollama:qwen2.5-coder:14b")
@@ -2186,11 +2199,31 @@ def _edit_python_symbol_source(
         elif len(nested_matches) > 1:
             return False, source, f"Bare method target is ambiguous: {target_symbol} in {filename}"
     if len(parts) == 2 and isinstance(node, ast.ClassDef):
+        class_node = node
         node = next(
-            (item for item in node.body if getattr(item, "name", None) == parts[1]),
+            (item for item in class_node.body if getattr(item, "name", None) == parts[1]),
             None,
         )
+        if node is None and operation in {"insert_before_symbol", "insert_after_symbol"}:
+            if class_node.body:
+                node = class_node.body[-1]
+                operation = "insert_after_symbol"
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        lines = source.splitlines(keepends=True)
+        matching_line_idx = -1
+        target_clean = target_symbol.strip()
+        for idx, line in enumerate(lines):
+            if target_clean in line:
+                matching_line_idx = idx
+                break
+        if matching_line_idx != -1 and operation in {"insert_before_symbol", "insert_after_symbol"}:
+            start_offset = sum(len(line) for line in lines[:matching_line_idx])
+            end_offset = sum(len(line) for line in lines[:matching_line_idx + 1])
+            replacement_text = textwrap.dedent(replacement).strip("\r\n") + "\n"
+            if operation == "insert_before_symbol":
+                return True, source[:start_offset] + replacement_text + source[start_offset:], ""
+            if operation == "insert_after_symbol":
+                return True, source[:end_offset] + replacement_text + source[end_offset:], ""
         return False, source, f"Indexed Python symbol was not found: {target_symbol} in {filename}"
 
     decorators = list(getattr(node, "decorator_list", []) or [])
@@ -2229,6 +2262,8 @@ def _ensure_python_from_import(
         return False, source, f"Invalid import module for {filename}: {module or '(missing)'}"
     if not symbol.isidentifier():
         return False, source, f"Invalid imported symbol for {filename}: {symbol or '(missing)'}"
+    if _is_self_import(Path(filename), module, 0, project_root=None):
+        return True, source, ""
     try:
         tree = ast.parse(source, filename=filename)
     except SyntaxError as exc:

@@ -194,6 +194,24 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
             extras["settings"] = dict(settings)
     except Exception:
         pass
+    try:
+        from tech_connector.services.capability_availability_service import (
+            build_capability_availability,
+            snapshot_status_cards,
+        )
+
+        status_cards = dict(getattr(window, "_status_card_states", {}) or {})
+        if not status_cards:
+            status_cards = snapshot_status_cards(window)
+        extras["status_cards"] = status_cards
+        extras["capability_availability"] = build_capability_availability(
+            status_cards=status_cards,
+            settings=extras.get("settings") or {},
+            command_router=getattr(window, "command_router", None),
+            include_live_checks=False,
+        )
+    except Exception:
+        pass
 
     try:
         snapshot_str = getattr(window, "unreal_project_snapshot", None)

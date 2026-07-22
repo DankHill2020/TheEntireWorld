@@ -88,7 +88,7 @@ port to:
 
 ```text
 %LOCALAPPDATA%\TA_AI_Studio_MCPHost\blender_port.txt
-C:\depot\tools\blender_port.txt
+C:\depot\tools\tech_connector\bridges\ports\blender_port.txt
 ```
 
 ## Substance Painter

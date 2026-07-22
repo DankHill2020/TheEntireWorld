@@ -161,7 +161,7 @@ def decompose_tasks_llm(prompt: str) -> list:
     try:
         import urllib.request
         import json
-        from tech_connector.services.ollama_service import OLLAMA_BASE_URL, FAST_CODE_MODEL
+        from tech_connector.services.ollama_service import OLLAMA_BASE_URL, FAST_CODE_MODEL, model_for_role
 
         system = (
             "You are a capability analyzer for a game development AI assistant. "
@@ -171,26 +171,16 @@ def decompose_tasks_llm(prompt: str) -> list:
             "Do not explain. Output only the JSON array."
         )
 
-        payload = json.dumps({
-            "model": FAST_CODE_MODEL,
-            "prompt": f"User prompt: {prompt}\n\nRequired capabilities (JSON array):",
-            "system": system,
-            "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 150},
-        }).encode()
-
-        req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(proxy_handler)
-        with opener.open(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-
-        raw = result.get("response", "").strip()
+        model_name = model_for_role("code", FAST_CODE_MODEL)
+        from tech_connector.services.llm_router_service import generate_llm_response
+        raw = generate_llm_response(
+            model=model_name,
+            prompt=f"User prompt: {prompt}\n\nRequired capabilities (JSON array):",
+            system=system,
+            response_format="json",
+            options={"temperature": 0.1, "num_predict": 150},
+            timeout=15
+        ).strip()
         # Extract JSON array from response
         match = re.search(r"\[.*?\]", raw, re.DOTALL)
         if match:

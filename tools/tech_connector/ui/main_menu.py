@@ -327,6 +327,7 @@ def build_main_menu_bar(window) -> QMenuBar:
     file_menu.addAction("Open Terminal...", lambda: _open_terminal(window))
     file_menu.addSeparator()
     _add_if_present(file_menu, "Settings...", window, "show_settings_dialog")
+    _add_if_present(file_menu, "Customization Panel...", window, "show_customization_panel_dialog")
     file_menu.addSeparator()
     file_menu.addAction("Exit", window.close)
 
@@ -339,7 +340,8 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_if_present(project_menu, "Open Project Folder", window, "open_active_project_folder")
 
     ai_menu = menu_bar.addMenu("AI")
-    _add_if_present(ai_menu, "AI / Model Settings...", window, "show_settings_dialog")
+    _add_if_present(ai_menu, "Local Model Configuration...", window, "show_customization_panel_models")
+    _add_if_present(ai_menu, "Cloud AI Setup...", window, "show_customization_panel_cloud")
     _add_if_present(ai_menu, "Health Check", window, "health_check")
     activity_action = QAction("Show Activity Details", ai_menu)
     activity_action.setCheckable(True)
@@ -451,6 +453,8 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_if_present(community_tools, "Installed Community Tools", window, "trigger_web_import")
     community_tools.addSeparator()
     _add_if_present(community_tools, "Publish Tool...", window, "trigger_web_import")
+    community_menu.addSeparator()
+    _add_if_present(community_menu, "Custom Integrations & Bridges...", window, "show_customization_panel_ext")
 
     window_menu = menu_bar.addMenu("Window")
     window_menu.addAction("Prompt Assistant...", lambda: _open_prompt_assistant(window))

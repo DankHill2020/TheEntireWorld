@@ -73,6 +73,25 @@ class _ToolPickerFilterEdit(QLineEdit):
         super().keyPressEvent(event)
 
 
+class _ToolPickerListWidget(QListWidget):
+    symbolActivatedWithMode = Signal(dict, str)
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if item is not None:
+            symbol = item.data(Qt.UserRole)
+            if isinstance(symbol, dict):
+                if event.button() == Qt.MiddleButton:
+                    self.symbolActivatedWithMode.emit(symbol, "configured")
+                    event.accept()
+                    return
+                if event.button() == Qt.RightButton:
+                    self.symbolActivatedWithMode.emit(symbol, "workflow_context")
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+
 def _search_tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (text or "").lower().replace("_", " "))
 
@@ -1271,6 +1290,10 @@ class PipelineNodeView(QGraphicsView):
         add_action.setToolTip(tool_tooltip(symbol))
         tool_actions[add_action] = ("add", symbol)
 
+        configured_action = symbol_menu.addAction("Add Configured Node")
+        configured_action.setToolTip("Add this function and apply grounded defaults or registered call-site values.")
+        tool_actions[configured_action] = ("add_configured", symbol)
+
         existing = self.context_connection_suggestions(symbol)
         if existing:
             label = f"Add and Connect Existing Context ({len(existing)})"
@@ -1380,14 +1403,26 @@ class PipelineNodeView(QGraphicsView):
             evidence = pattern.get("evidence") or pattern.get("sources") or ["Registered tool metadata"]
             if isinstance(evidence, str):
                 evidence = [evidence]
-            patterns.append({
+            normalized = {
                 "title": title,
                 "summary": summary or f"Uses {', '.join(predecessors) or 'registered context'} before {symbol.get('name')}.",
                 "usage": usage,
                 "predecessors": predecessors,
                 "evidence": [str(item) for item in evidence],
                 "rank": int(pattern.get("rank") or pattern.get("confidence_rank") or index + 1),
-            })
+            }
+            for key in (
+                "literal_values",
+                "default_literal_values",
+                "hardcoded_args",
+                "configured_args",
+                "kwargs",
+                "bound_arguments",
+                "inputs",
+            ):
+                if key in pattern:
+                    normalized[key] = copy.deepcopy(pattern.get(key))
+            patterns.append(normalized)
         if not patterns and self._context_pattern_predecessor_names(symbol):
             predecessors = self._context_pattern_predecessor_names(symbol)
             patterns.append({
@@ -1440,6 +1475,7 @@ class PipelineNodeView(QGraphicsView):
             "summary": (pattern or {}).get("summary") or "",
             "usage": (pattern or {}).get("usage") or "",
             "evidence": list((pattern or {}).get("evidence") or []),
+            "pattern": copy.deepcopy(pattern or {}),
             "reuse": [],
             "available": [],
             "missing": [],
@@ -1474,6 +1510,155 @@ class PipelineNodeView(QGraphicsView):
         if dialog.exec() == QDialog.Accepted:
             return dialog.selected_plan
         return None
+
+    def _function_literal_values_from_mapping(
+        self,
+        mapping: Any,
+        symbol: dict[str, Any],
+        *,
+        provenance: str,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        if not isinstance(mapping, dict):
+            return {}, {}
+        name = str(symbol.get("name") or "")
+        function_path = str(symbol.get("function_path") or symbol.get("module") or "")
+        candidates = [name, function_path, function_path.rsplit(".", 1)[-1] if function_path else ""]
+        values: dict[str, Any] = {}
+        sources: dict[str, str] = {}
+        if any(key in mapping for key in candidates if key):
+            for key in candidates:
+                nested = mapping.get(key) if key else None
+                if isinstance(nested, dict):
+                    for arg_name, value in nested.items():
+                        values[str(arg_name)] = value
+                        sources[str(arg_name)] = provenance
+        else:
+            for arg_name, value in mapping.items():
+                if not isinstance(value, (dict, list, tuple)) or arg_name in {p.get("name") for p in symbol.get("params") or [] if isinstance(p, dict)}:
+                    values[str(arg_name)] = value
+                    sources[str(arg_name)] = provenance
+        return values, sources
+
+    def literal_values_for_tool_symbol(
+        self,
+        symbol: dict[str, Any],
+        pattern: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        values: dict[str, Any] = {}
+        provenance: dict[str, str] = {}
+        param_names = {
+            str(param.get("name") or "")
+            for param in (symbol.get("params") or [])
+            if isinstance(param, dict) and str(param.get("name") or "")
+        }
+
+        for param in symbol.get("params") or []:
+            if not isinstance(param, dict):
+                continue
+            name = str(param.get("name") or "")
+            if not name or "default" not in param:
+                continue
+            default = param.get("default")
+            if default in {"", None}:
+                continue
+            values[name] = default
+            provenance[name] = "function_default"
+
+        for key, source in (
+            ("literal_values", "registered_literal"),
+            ("default_literal_values", "registered_default"),
+            ("hardcoded_args", "registered_hardcoded"),
+            ("configured_args", "registered_configured"),
+            ("kwargs", "registered_kwargs"),
+        ):
+            found, sources = self._function_literal_values_from_mapping(symbol.get(key), symbol, provenance=source)
+            values.update(found)
+            provenance.update(sources)
+
+        if pattern:
+            for key, source in (
+                ("literal_values", "usage_literal"),
+                ("bound_arguments", "usage_bound_argument"),
+                ("inputs", "usage_input"),
+            ):
+                value = pattern.get(key)
+                if key == "bound_arguments" and isinstance(value, list):
+                    for item in value:
+                        if not isinstance(item, dict):
+                            continue
+                        item_function = str(item.get("node") or item.get("function") or item.get("callable") or "")
+                        symbol_names = {str(symbol.get("name") or ""), str(symbol.get("function_path") or ""), str(symbol.get("module") or "")}
+                        if item_function and item_function not in symbol_names and not any(name and item_function.endswith(f".{name}") for name in symbol_names):
+                            continue
+                        arg_name = str(item.get("argument") or item.get("parameter") or item.get("name") or "")
+                        if not arg_name:
+                            continue
+                        if "value" in item:
+                            values[arg_name] = item.get("value")
+                            provenance[arg_name] = str(item.get("provenance") or source)
+                    continue
+                if key == "inputs" and isinstance(value, dict):
+                    extracted: dict[str, Any] = {}
+                    for arg_name, binding in value.items():
+                        if isinstance(binding, dict):
+                            if "value" in binding:
+                                extracted[str(arg_name)] = binding.get("value")
+                            elif "literal" in binding:
+                                extracted[str(arg_name)] = binding.get("literal")
+                            elif "default" in binding:
+                                extracted[str(arg_name)] = binding.get("default")
+                        elif not isinstance(binding, str) or not binding.startswith("$"):
+                            extracted[str(arg_name)] = binding
+                    found, sources = self._function_literal_values_from_mapping(extracted, symbol, provenance=source)
+                else:
+                    found, sources = self._function_literal_values_from_mapping(value, symbol, provenance=source)
+                values.update(found)
+                provenance.update(sources)
+
+        if param_names:
+            values = {key: value for key, value in values.items() if key in param_names}
+            provenance = {key: value for key, value in provenance.items() if key in values}
+        return values, provenance
+
+    def apply_configured_literals_to_step(
+        self,
+        step_data: dict[str, Any],
+        symbol: dict[str, Any],
+        pattern: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        values, provenance = self.literal_values_for_tool_symbol(symbol, pattern)
+        if not values:
+            return {}
+        step_data.setdefault("literal_values", {}).update(values)
+        step_data.setdefault("literal_value_provenance", {}).update(provenance)
+        step_data["configured_from_usage"] = bool(pattern)
+        return values
+
+    def add_configured_tool_node(
+        self,
+        symbol: dict[str, Any],
+        pattern: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        before_ids = set(self.nodes)
+        step_data = {"symbol": dict(symbol)}
+        self.add_pipeline_step(step_data, symbol.get("params") or [], symbol.get("outputs") or [])
+        if not step_data.get("graph_step_id"):
+            new_ids = [step_id for step_id in self.nodes if step_id not in before_ids]
+            if new_ids:
+                step_data = self.nodes[new_ids[-1]].step_data
+        applied = self.apply_configured_literals_to_step(step_data, symbol, pattern)
+        if applied:
+            step_id = str(step_data.get("graph_step_id") or "")
+            item = self.node_items.get(step_id)
+            if item:
+                for name in applied:
+                    item.refresh_literal_label(name)
+            self.literalChanged.emit({"step_data": step_data, "step_id": step_id, "values": applied})
+            self.graphChanged.emit()
+            self.statusMessage.emit(f"Added configured node: {symbol.get('name')} ({len(applied)} value(s)).")
+        else:
+            self.statusMessage.emit(f"Added node: {symbol.get('name')} (no grounded literals found).")
+        return step_data
 
     def _compatible_context_output(self, target_symbol: dict[str, Any], param: dict[str, Any], source_node: PipelineGraphNode, output: dict[str, Any]) -> bool:
         source_symbol = source_node.symbol or {}
@@ -1591,10 +1776,13 @@ class PipelineNodeView(QGraphicsView):
 
     def add_tool_node_with_context(self, symbol: dict[str, Any], plan: dict[str, Any]) -> None:
         added_names = []
+        pattern = dict(plan.get("pattern") or {})
         for producer in plan.get("available") or []:
             if self._find_existing_context_node(str(producer.get("name") or ""), provider_metadata(producer)["id"]):
                 continue
-            self.add_pipeline_step({"symbol": dict(producer)}, producer.get("params") or [], producer.get("outputs") or [])
+            producer_step = {"symbol": dict(producer)}
+            self.add_pipeline_step(producer_step, producer.get("params") or [], producer.get("outputs") or [])
+            self.apply_configured_literals_to_step(producer_step, producer, pattern)
             added_names.append(str(producer.get("name") or "context"))
         suggestions = self.context_connection_suggestions(symbol)
         self.add_tool_node_with_existing_context(symbol, suggestions)
@@ -1605,6 +1793,7 @@ class PipelineNodeView(QGraphicsView):
                 target_step = node.step_data
                 break
         if isinstance(target_step, dict):
+            self.apply_configured_literals_to_step(target_step, symbol, pattern)
             target_step["context_addition_details"] = {
                 "mode": "Add and Connect Context",
                 "pattern": plan.get("title") or "Selected usage pattern",
@@ -1625,6 +1814,17 @@ class PipelineNodeView(QGraphicsView):
             self.statusMessage.emit(
                 f"Added context node(s): {', '.join(added_names)}; connected compatible context."
             )
+
+    def add_tool_node_with_grounded_context(self, symbol: dict[str, Any]) -> None:
+        plan = self.choose_context_addition_plan(symbol)
+        if plan:
+            self.add_tool_node_with_context(symbol, plan)
+            return
+        suggestions = self.context_connection_suggestions(symbol)
+        if suggestions:
+            self.add_tool_node_with_existing_context(symbol, suggestions)
+            return
+        self.add_configured_tool_node(symbol)
 
     def _populate_context_tool_list(
         self,
@@ -1682,7 +1882,7 @@ class PipelineNodeView(QGraphicsView):
         filter_edit.setStyleSheet("QLineEdit { background:#000711; border:1px solid #1e9bff; color:#d7dde5; padding:4px; }")
         layout.addWidget(filter_edit)
 
-        result_list = QListWidget(picker)
+        result_list = _ToolPickerListWidget(picker)
         result_list.setMinimumHeight(240)
         result_list.setMaximumHeight(360)
         result_list.setMinimumWidth(340)
@@ -1732,12 +1932,20 @@ class PipelineNodeView(QGraphicsView):
         def schedule_refresh(_value: str) -> None:
             refresh_timer.start()
 
+        def add_symbol(symbol: dict[str, Any], mode: str = "plain") -> None:
+            if mode == "configured":
+                self.add_configured_tool_node(symbol)
+            elif mode == "workflow_context":
+                self.add_tool_node_with_grounded_context(symbol)
+            else:
+                self.toolNodeRequested.emit(symbol)
+            add_tool_menu.close()
+            root_menu.close()
+
         def add_selected(item: QListWidgetItem) -> None:
             symbol = item.data(Qt.UserRole)
             if isinstance(symbol, dict):
-                self.toolNodeRequested.emit(symbol)
-                add_tool_menu.close()
-                root_menu.close()
+                add_symbol(symbol, "plain")
 
         refresh_timer.timeout.connect(lambda: refresh(filter_edit.text()))
         def on_filter_changed(value: str) -> None:
@@ -1747,6 +1955,7 @@ class PipelineNodeView(QGraphicsView):
                 schedule_refresh(value)
 
         filter_edit.textChanged.connect(on_filter_changed)
+        result_list.symbolActivatedWithMode.connect(add_symbol)
         result_list.itemActivated.connect(add_selected)
         result_list.itemClicked.connect(add_selected)
 
@@ -2021,7 +2230,12 @@ class PipelineNodeView(QGraphicsView):
         self.add_pipeline_step(step_data, params, outputs)
         return step_data
 
-    def materialize_action_graph(self, graph: dict[str, Any]) -> dict[str, Any]:
+    def clear_pipeline(self, *, push_undo: bool = True, reason: str = "clear pipeline") -> None:
+        if push_undo:
+            self._push_undo_state(reason)
+        self._restore_state({"nodes": [], "links": []})
+
+    def materialize_action_graph(self, graph: dict[str, Any], *, append: bool = False) -> dict[str, Any]:
         """Create a validated node-view pipeline from a canonical action graph."""
 
         from tech_connector.services.action_graph_service import normalize_action_graph, validate_action_graph
@@ -2063,6 +2277,63 @@ class PipelineNodeView(QGraphicsView):
                 flow_specs.append(args)
             elif action_type == "bind_literal":
                 literal_specs.append(args)
+            elif action_type in {"execute_dcc", "validate_dcc_call"}:
+                action_id = str(action.get("id") or action.get("action_id") or f"action_{len(node_specs) + 1}")
+                operation = str(args.get("operation") or "")
+                callable_path = str(args.get("callable") or args.get("callable_name") or "")
+                params = dict(args.get("params") or {})
+                produces = [str(item) for item in (args.get("produces") or []) if str(item)]
+                node_name = action_id
+                if node_name in node_specs:
+                    errors.append(f"Duplicate pipeline node name: {node_name}.")
+                    continue
+                function_name = callable_path.rsplit(".", 1)[-1] if callable_path else operation
+                param_specs = [
+                    {"name": name, "python_type": "Any", "annotation": "Any"}
+                    for name in params
+                    if name
+                ]
+                output_specs = [
+                    {"name": name, "python_type": "Any", "annotation": "Any"}
+                    for name in (produces or ["result"])
+                ]
+                symbol = {
+                    "name": function_name or node_name,
+                    "function_path": callable_path,
+                    "provider_id": str(args.get("host") or ""),
+                    "kind": "function" if callable_path else "dcc_operation",
+                    "operation": operation,
+                    "pipeline_operation": "dcc_operation",
+                    "params": param_specs,
+                    "outputs": output_specs,
+                    "public_tool": True,
+                }
+                node_specs[node_name] = {
+                    "action": action,
+                    "symbol": symbol,
+                    "params": param_specs,
+                    "outputs": output_specs,
+                }
+                for param_name, value in params.items():
+                    if isinstance(value, str) and value.startswith("$"):
+                        source_output = value[1:]
+                        source_node = ""
+                        for existing_node, existing_spec in node_specs.items():
+                            if any(str(output.get("name") or "") == source_output for output in existing_spec["outputs"]):
+                                source_node = existing_node
+                                break
+                        if source_node:
+                            data_specs.append({
+                                "from": {"node": source_node, "port": source_output},
+                                "to": {"node": node_name, "port": str(param_name)},
+                            })
+                        else:
+                            errors.append(f"{node_name}.{param_name} references unresolved output {value}.")
+                    else:
+                        literal_specs.append({"node": node_name, "parameter": str(param_name), "value": value})
+                for dependency in action.get("depends_on") or []:
+                    if dependency:
+                        flow_specs.append({"from": str(dependency), "to": node_name})
 
         bound_inputs = {
             (str(item.get("node") or ""), str(item.get("parameter") or ""))
@@ -2116,6 +2387,9 @@ class PipelineNodeView(QGraphicsView):
         step_ids: dict[str, str] = {}
         self._restoring_undo = True
         try:
+            if not append:
+                self._restore_state({"nodes": [], "links": []})
+                self._restoring_undo = True
             for node_name, spec in node_specs.items():
                 step_data = {
                     "symbol": spec["symbol"],
@@ -2180,7 +2454,42 @@ class PipelineNodeView(QGraphicsView):
             "node_count": len(step_ids),
             "link_count": len(data_specs) + len(flow_specs),
             "execution_order": self.execution_order(),
+            "append": bool(append),
         }
+
+    def materialize_prompt_route_decision(self, decision: dict[str, Any], *, append: bool = False) -> dict[str, Any]:
+        """Materialize resolved prompt operations into nodes and data links."""
+
+        actions: list[dict[str, Any]] = []
+        previous = ""
+        for index, operation in enumerate(list((decision or {}).get("operations") or []), start=1):
+            operation_key = str(operation.get("operation") or "")
+            action_id = str(operation.get("id") or f"operation_{index}")
+            action_type = "validate_dcc_call" if operation_key in {"scene.find_joint", "scene.object_exists"} else "execute_dcc"
+            action = {
+                "id": action_id,
+                "type": action_type,
+                "title": str(operation.get("label") or operation_key or action_id),
+                "args": {
+                    "host": str(operation.get("host") or (decision or {}).get("host") or ""),
+                    "operation": operation_key,
+                    "callable": str(operation.get("callable") or ""),
+                    "params": dict(operation.get("args") or {}),
+                    "produces": list(operation.get("produces") or []),
+                    "requires": list(operation.get("requires") or []),
+                },
+                "depends_on": [previous] if previous else [],
+                "requires_approval": bool(operation.get("requires_confirmation")),
+                "source": "prompt_route_operations",
+            }
+            actions.append(action)
+            previous = action_id
+        return self.materialize_action_graph({
+            "goal": str((decision or {}).get("primary_goal") or (decision or {}).get("intent_category") or "prompt pipeline"),
+            "intent": str((decision or {}).get("intent_category") or "prompt_pipeline"),
+            "planner": "prompt_route_decision",
+            "actions": actions,
+        }, append=append)
 
     def add_pipeline_step(self, step_data, params, outputs):
         self._push_undo_state("add node")
@@ -2371,6 +2680,8 @@ class PipelineNodeView(QGraphicsView):
                 plan = self.choose_context_addition_plan(payload[1], payload[2])
                 if plan:
                     self.add_tool_node_with_context(payload[1], plan)
+            elif isinstance(payload, tuple) and payload and payload[0] == "add_configured":
+                self.add_configured_tool_node(payload[1])
             elif isinstance(payload, tuple) and payload and payload[0] == "add":
                 self.toolNodeRequested.emit(payload[1])
             else:

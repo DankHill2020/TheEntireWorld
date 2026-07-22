@@ -1,0 +1,204 @@
+{
+  "schema": "ai_studio.unreal_expert_techniques.v1",
+  "engine_version": "5.8",
+  "qualification_policy": {
+    "required_checks": ["sources_validated", "operations_resolved", "isolated_probe_passed", "verified_episode_exists"],
+    "qualified_label": "verified_expert",
+    "unqualified_label": "provisional",
+    "rule": "An expert is verified only when every required check has observed evidence for the current engine major/minor."
+  },
+  "techniques": [
+    {
+      "key": "project.semantic_inspection",
+      "expert": "project_index",
+      "always": true,
+      "domains": ["project_discovery"],
+      "trigger_terms": [],
+      "title": "Inspect task-relevant project assets and dependencies",
+      "operations": ["semantic_index.query", "blueprint.scan", "assets.inspect"],
+      "postconditions": ["Exact target classes, dependencies, graph topology, and reusable assets are supported by live evidence."],
+      "sources": []
+    },
+    {
+      "key": "movement.surface_constrained_traversal",
+      "expert": "character_movement",
+      "domains": ["gameplay_logic", "state_machine", "animation_system", "runtime_world"],
+      "trigger_terms": ["climb", "climbing", "wall traversal", "surface traversal", "ledge", "mantle"],
+      "title": "Compose surface-constrained traversal from sensing, movement state, and animation presentation",
+      "architecture": {
+        "state_owner": "The character or traversal component owns authoritative sensing, timers, movement state, and enter/update/exit/cancel transitions.",
+        "animation_consumer": "The current AnimBlueprint or a linked animation layer consumes gameplay state; it does not own wall detection or replace the character movement system.",
+        "movement_policy": "Use a custom movement mode for sustained traversal when prediction/replication matters. A bounded prototype may use another mode only when its limitations are declared and proven.",
+        "sensing_policy": "Use trace or shape-sweep observations with explicit collision channels, normal/geometry acceptance, reachability, and contact-loss hysteresis."
+      },
+      "operations": ["blueprint.scan", "assets.inspect", "blueprint.add_node", "blueprint.connect_node_pins", "blueprint.compile", "runtime.pie_begin", "runtime.pie_status", "runtime.inject_key", "runtime.inspect_character", "runtime.pie_end", "diagnostics.read_log_errors"],
+      "postconditions": [
+        "The intended input and contact-duration threshold reach the public traversal activation path.",
+        "Valid surfaces enter traversal and invalid surfaces, early release, contact loss, interruption, and repeated activation restore a valid movement state.",
+        "The selected animation roles are skeleton-compatible, contextually accepted on the target character, consumed by the current animation architecture, and visibly play in PIE.",
+        "Movement, camera, interaction, combat, and adjacent animation behavior pass regression checks."
+      ],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/traces-with-raycasts-in-unreal-engine", "kind": "official_docs", "claim": "Unreal trace queries provide collision-aware hit observations used to sense world geometry."},
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/movement-components-in-unreal-engine", "kind": "official_docs", "claim": "Movement Components update actor movement and provide the engine movement architecture that traversal must integrate with."},
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/understanding-networked-movement-in-the-character-movement-component-for-unreal-engine", "kind": "official_docs", "claim": "Character Movement supports custom movement modes and networked movement prediction responsibilities."},
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/state-machines-in-unreal-engine", "kind": "official_docs", "claim": "Animation State Machines organize pose states and transition rules inside Animation Blueprints."},
+        {"url": "https://dev.epicgames.com/documentation/unreal-engine/animation-blueprint-linking-in-unreal-engine", "kind": "official_docs", "claim": "Linked Animation Blueprints and layers allow animation logic to be organized without replacing the owning AnimBlueprint."}
+      ]
+    },
+    {
+      "key": "blueprint.transactional_graph_edit",
+      "expert": "blueprint_graph",
+      "domain_default": true,
+      "domains": ["blueprint_topology", "gameplay_logic", "state_machine", "puzzle", "ability"],
+      "trigger_terms": ["blueprint", "graph", "node", "pin", "wire", "state", "ability", "puzzle", "combat", "traversal"],
+      "title": "Stage and apply Blueprint graph operations with postcondition readback",
+      "operations": ["blueprint.scan", "blueprint.add_node", "blueprint.connect_node_pins", "blueprint.compile"],
+      "postconditions": ["Every requested node and pin link exists after readback.", "Touched Blueprints compile with zero new errors."],
+      "sources": []
+    },
+    {
+      "key": "animation.contextual_asset_acceptance",
+      "expert": "animation_asset",
+      "domain_default": true,
+      "domains": ["animation_metadata", "animation_system"],
+      "trigger_terms": ["animation", "anim", "montage", "motion", "climb", "vault", "roll", "attack", "dodge", "locomotion"],
+      "title": "Select animation assets by semantic role and measured compatibility",
+      "operations": ["animation.find_compatible", "assets.inspect", "validate.references"],
+      "postconditions": ["Candidate motion meaning matches the declared role.", "Skeleton, duration, samples, root-motion policy, provenance, and license pass."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-sequences-in-unreal-engine", "kind": "official_docs", "claim": "Animation Sequences contain sampled skeletal transforms and are tied to Skeleton assets."},
+        {"url": "https://dev.epicgames.com/documentation/unreal-engine/root-motion-in-unreal-engine", "kind": "official_guide", "claim": "Root-motion acceptance requires measured root-bone motion, sequence extraction settings, AnimBlueprint policy, movement mode, and runtime capsule behavior."}
+      ]
+    },
+    {
+      "key": "animation.montage_slot_composition",
+      "expert": "animation_graph",
+      "domains": ["animation_metadata", "animation_system"],
+      "trigger_terms": ["montage", "slot", "section", "upper body", "full body", "combo"],
+      "title": "Compose montage sections and slot groups through the AnimGraph",
+      "operations": ["animation.inspect_montage", "blueprint.scan", "blueprint.connect_node_pins", "blueprint.compile"],
+      "postconditions": ["Each montage role uses a declared slot.", "Each slot receives a pose and reaches Output Pose.", "Runtime playback returns a positive duration."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-montage-in-unreal-engine", "kind": "official_docs", "claim": "Montages use sections, slots, and slot groups; separate body regions require AnimGraph slot composition."}
+      ]
+    },
+    {
+      "key": "animation.ik_retarget",
+      "expert": "retargeting",
+      "domains": ["animation_metadata", "retargeting"],
+      "trigger_terms": ["retarget", "skeleton", "skeletal mesh", "ik rig", "fbx"],
+      "title": "Retarget animation through selected source and target rigs",
+      "operations": ["skeletal.inspect_bones", "retarget.validate", "retarget.execute", "assets.inspect"],
+      "postconditions": ["User-selected target skeleton/mesh is recorded.", "Source and target chains map without unresolved required limbs.", "Exported sequence uses the target Skeleton and passes motion preview checks."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/ik-rig-animation-retargeting-in-unreal-engine", "kind": "official_docs", "claim": "IK Rig retargeting transfers animation between different hierarchies using source/target rigs, chains, poses, preview, and export."},
+        {"url": "https://dev.epicgames.com/documentation/unreal-engine/retargeting-operation-stack-in-unreal-engine-5-8", "kind": "official_guide", "claim": "UE 5.8 retarget operations can copy or generate root motion and must identify source and target root drivers."}
+      ]
+    },
+    {
+      "key": "animation.motion_matching",
+      "expert": "pose_search",
+      "domains": ["animation_metadata", "motion_matching"],
+      "trigger_terms": ["motion matching", "pose search", "trajectory", "database"],
+      "title": "Build and validate a Pose Search schema/database/query path",
+      "operations": ["pose_search.inspect", "pose_search.create_schema", "pose_search.create_database", "blueprint.connect_node_pins", "runtime.pie_begin", "runtime.pie_status", "runtime.inspect_character", "runtime.pie_end"],
+      "postconditions": ["Schema targets the selected Skeleton.", "Database contains compatible role-appropriate motion data.", "Motion Matching reaches Output Pose and produces runtime selections."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/motion-matching-in-unreal-engine", "kind": "official_docs", "claim": "Motion Matching composes Pose Search schema channels, a database of animation data, and runtime query nodes; locomotion data requires root motion."}
+      ]
+    },
+    {
+      "key": "external.https_asset_ingestion",
+      "expert": "asset_acquisition",
+      "domains": ["external_assets", "animation_metadata"],
+      "trigger_terms": ["download", "online", "web", "mixamo", "fab", "external asset", "external animation", "fbx"],
+      "title": "Acquire, cache, import, and validate external assets with provenance",
+      "operations": ["external.asset_source_search", "external.asset_license_check", "external.download_asset", "asset.import_local", "animation.import_fbx"],
+      "animation_target_policy": {
+        "target_resolution_order": ["explicit user selection", "live selected character or AnimBlueprint", "validated project knowledge profile", "request target selection"],
+        "unresolved_target_action": "block_mutation_and_resolve_target",
+        "direct_import_requires": ["hierarchy_fingerprint_match", "required_bones_match", "proportions_match", "reference_pose_match"],
+        "otherwise": "retarget_before_gameplay_import",
+        "user_selected_target_has_priority": true
+      },
+      "postconditions": ["HTTPS source identity, license, hash, local cache path, and Unreal destination are recorded.", "Imported asset exists and passes type-specific validation."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/unreal-engine/importing-skeletal-meshes-using-fbx-in-unreal-engine", "kind": "official_docs", "claim": "UE FBX import uses FBX 2020.2 and allows selecting an existing Skeleton for compatible skeletal imports."}
+      ]
+    },
+    {
+      "key": "asset.fbx_import_mode_selection",
+      "expert": "asset_import",
+      "domains": ["external_assets", "animation_metadata", "skeletal_mesh"],
+      "trigger_terms": ["import", "fbx", "mesh", "animation", "skeleton", "retarget"],
+      "title": "Select FBX import mode from asset contents and target compatibility",
+      "operations": ["assets.inspect", "asset.import_local", "animation.import_fbx", "validate.references"],
+      "decision_table": [
+        {
+          "mode": "mesh_or_skeletal_mesh",
+          "when": ["FBX contains renderable geometry", "mesh import requested"],
+          "call": "asset.import_local",
+          "accept": ["Expected mesh class exists", "materials/skeleton/physics outputs match the declared contract"]
+        },
+        {
+          "mode": "animation_on_existing_skeleton",
+          "when": ["FBX contains animation", "compatible Unreal Skeleton is selected"],
+          "call": "animation.import_fbx",
+          "accept": ["AnimSequence exists", "AnimSequence Skeleton identity equals the selected Skeleton"]
+        },
+        {
+          "mode": "new_source_skeleton_for_retarget",
+          "when": ["FBX hierarchy differs from every acceptable target", "retargeting is allowed"],
+          "call": "asset.import_local",
+          "accept": ["Source Skeleton and SkeletalMesh exist", "Source animation is imported on that Skeleton", "Target is selected before retarget execution"]
+        },
+        {
+          "mode": "reject_or_convert_in_dcc",
+          "when": ["Unreal reports no importable objects", "source has armature-only data or unsupported structure"],
+          "call": "external.convert_asset",
+          "accept": ["Converted file has measured skeleton/animation content", "Lineage and tool license are recorded", "Retry creates expected Unreal asset classes"]
+        }
+      ],
+      "postconditions": ["The selected mode explains why its expected Unreal classes should be produced.", "Every imported animation is read back against the caller-selected Skeleton.", "A failed mode becomes repair evidence, not a successful recipe."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/unreal-engine/importing-skeletal-meshes-using-fbx-in-unreal-engine", "kind": "official_guide", "claim": "Skeletal mesh import and existing-Skeleton selection are distinct FBX pipeline choices."}
+      ]
+    },
+    {
+      "key": "runtime.scenario_verification",
+      "expert": "runtime_qa",
+      "always": true,
+      "domains": ["runtime_world", "verification"],
+      "trigger_terms": [],
+      "title": "Run task-specific PIE and automation assertions",
+      "operations": ["runtime.pie_begin", "runtime.pie_status", "runtime.inject_key", "runtime.inspect_character", "runtime.pie_end", "diagnostics.read_log_errors", "semantic_index.record_runtime_observation"],
+      "postconditions": ["A matching PIE scenario records passed assertions and observed evidence.", "No new relevant log errors occur.", "Generated test state is cleaned up."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/automation-test-framework-in-unreal-engine", "kind": "official_docs", "claim": "Unreal Automation supports unit, feature/PIE, content stress, functional, input-driver, and screenshot tests; tests must not assume state and must clean up."}
+      ]
+    },
+    {
+      "key": "knowledge.source_comparison",
+      "expert": "technical_research",
+      "domains": ["knowledge_gap", "architecture", "tutorials"],
+      "trigger_terms": ["tutorial", "guide", "example", "online", "research", "look up", "search", "compare", "newer", "newest", "latest", "current", "modern"],
+      "title": "Compare current tutorials, guides, documentation, and primary examples",
+      "operations": ["knowledge.search_sources", "knowledge.extract_claims", "knowledge.compare_approaches"],
+      "postconditions": ["Every adopted claim retains URL, author/provider, engine version, prerequisites, license, and retrieval date.", "Conflicting approaches are resolved against live project constraints and official API behavior."],
+      "sources": [
+        {"url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-8-documentation", "kind": "official_docs", "claim": "Epic provides versioned documentation, samples, and tutorials that can anchor engine contracts."}
+      ]
+    },
+    {
+      "key": "capability.cpp_python_bridge",
+      "expert": "capability_engineering",
+      "domains": ["cpp_source", "capability_gap"],
+      "trigger_terms": ["not exposed", "python unavailable", "reflection missing", "cpp", "c++", "plugin"],
+      "title": "Add a reflected C++ wrapper only for a proven Python capability gap",
+      "operations": ["cpp_wrapper.preflight", "cpp_wrapper.generate", "cpp_wrapper.build", "cpp_wrapper.reflect", "cpp_wrapper.self_test"],
+      "postconditions": ["Live reflection proved the gap.", "Built module exists before enablement.", "Python reflection exposes the method and its self-test returns structured evidence."],
+      "sources": []
+    }
+  ]
+}

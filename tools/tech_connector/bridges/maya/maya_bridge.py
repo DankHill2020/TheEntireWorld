@@ -8,7 +8,12 @@ import json
 import os
 from pathlib import Path
 import socket
+from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.models.constants import APP_ROOT, DEFAULT_MAYA_PORT, TOOLS_ROOT
+
+
+def _captured_maya_output_has_error(output: str) -> bool:
+    return bridge_output_has_error(output)
 
 
 MAYA_SETUP_CODE = """import base64
@@ -64,8 +69,14 @@ start_command_port(7001)
 """
 
 
-class MayaBridge:
+from tech_connector.services.modular_provider_utils import DCCBridgeDelegateMixin
+
+
+class MayaBridge(DCCBridgeDelegateMixin):
     """Deterministic Maya communication via commandPort."""
+
+    def __init__(self):
+        self.init_delegate("maya")
 
     PORT_FILE = Path(
         os.environ.get(
@@ -225,6 +236,8 @@ print(json.dumps({
             result = "".join(chunks).replace("\x00", "").strip()
             if not result:
                 result = "Maya returned no output."
+            if _captured_maya_output_has_error(result):
+                return False, result
             return True, result
         except Exception as e:
             return False, str(e)

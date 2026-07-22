@@ -24,6 +24,7 @@ ACTION_TYPES = {
     "resolve_file",
     "open_file",
     "open_symbol",
+    "request_input",
     "inspect_function",
     "inspect_workflow",
     "create_node",
@@ -134,6 +135,7 @@ ACTION_MUTABILITY = {
     "resolve_file": MUTABILITY_READ_ONLY,
     "open_symbol": MUTABILITY_LOCAL_REVERSIBLE,
     "open_file": MUTABILITY_LOCAL_REVERSIBLE,
+    "request_input": MUTABILITY_READ_ONLY,
     "inspect_function": MUTABILITY_READ_ONLY,
     "inspect_workflow": MUTABILITY_READ_ONLY,
     "validate": MUTABILITY_READ_ONLY,
@@ -324,6 +326,8 @@ def validate_action_graph(graph: ActionGraph | dict[str, Any]) -> dict[str, Any]
             errors.append(f"{action_id}: file action requires path or query")
         if action_type in {"resolve_function", "resolve_symbol", "resolve_class", "open_symbol"} and not (args.get("query") or args.get("symbol")):
             errors.append(f"{action_id}: symbol action requires query or symbol")
+        if action_type == "request_input" and not (args.get("argument") or args.get("question")):
+            errors.append(f"{action_id}: request_input requires argument or question")
         if action_type == "connect_data":
             if not (args.get("from") and args.get("to")):
                 errors.append(f"{action_id}: connect_data requires from and to endpoints")

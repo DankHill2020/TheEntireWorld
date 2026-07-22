@@ -1,7 +1,7 @@
 """SQLite schema for the reusable DCC local intelligence layer."""
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = [
     """
@@ -183,6 +183,85 @@ DDL = [
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        dcc TEXT NOT NULL,
+        entity_key TEXT NOT NULL,
+        entity_kind TEXT NOT NULL,
+        display_name TEXT,
+        path TEXT,
+        class_name TEXT,
+        parent_key TEXT,
+        fingerprint TEXT,
+        confidence REAL NOT NULL DEFAULT 1.0,
+        source TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, dcc, entity_key),
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        dcc TEXT NOT NULL,
+        source_key TEXT NOT NULL,
+        relation TEXT NOT NULL,
+        target_key TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 1.0,
+        source TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, dcc, source_key, relation, target_key),
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_index_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        dcc TEXT NOT NULL,
+        run_kind TEXT NOT NULL DEFAULT 'full',
+        status TEXT NOT NULL,
+        coverage_json TEXT NOT NULL DEFAULT '{}',
+        errors_json TEXT NOT NULL DEFAULT '[]',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TEXT,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_exclusions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        dcc TEXT NOT NULL,
+        entity_path TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        excluded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, dcc, entity_path),
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS runtime_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        dcc TEXT NOT NULL,
+        scenario_key TEXT NOT NULL,
+        subject_key TEXT,
+        status TEXT NOT NULL,
+        assertions_json TEXT NOT NULL DEFAULT '{}',
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 INDEXES = [
@@ -199,4 +278,10 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_dependencies_target ON dependencies(project_id, target_kind, target_ref)",
     "CREATE INDEX IF NOT EXISTS idx_snapshots_project_created ON editor_state_snapshots(project_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_execution_project_created ON execution_history(project_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_entities_lookup ON semantic_entities(project_id, dcc, entity_kind, entity_key)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_entities_path ON semantic_entities(project_id, dcc, path)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_relations_source ON semantic_relations(project_id, dcc, source_key)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_relations_target ON semantic_relations(project_id, dcc, target_key)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_runs_latest ON semantic_index_runs(project_id, dcc, id)",
+    "CREATE INDEX IF NOT EXISTS idx_runtime_observations_scenario ON runtime_observations(project_id, dcc, scenario_key, id)",
 ]

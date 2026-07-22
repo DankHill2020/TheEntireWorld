@@ -82,12 +82,6 @@ from tech_connector.models.constants import (
 from tech_connector.models.files import is_supported_code_file
 from tech_connector.router.ai_router import AIRouter
 from tech_connector.services.application_service import ApplicationService
-from tech_connector.services.dcc.dcc_bridge_setup import (
-    blender_script_editor_snippet,
-    install_blender_startup_bridge,
-    install_substance_painter_bridge,
-    substance_painter_script_editor_snippet,
-)
 from tech_connector.services.model_provider_service import (
     PROVIDERS,
     credential_requirement_for_model,
@@ -111,7 +105,6 @@ from tech_connector.services.project_service import (
     populate_folder_entries,
 )
 from tech_connector.services.settings_service import best_config
-from tech_connector.services.unreal.graph_patch_service import build_patch, execute_patch
 from tech_connector.services.update_service import GitUpdater
 from tech_connector.ui.branding import application_stylesheet
 from tech_connector.ui.first_run_dialog import FirstRunDialog

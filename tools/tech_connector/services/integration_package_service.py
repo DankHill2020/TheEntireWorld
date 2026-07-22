@@ -359,9 +359,9 @@ def load_integration_packages(base_dir: Path | None = None) -> list[dict[str, An
 
 def summarize_integration_packages(base_dir: Path | None = None) -> dict[str, Any]:
     packages = load_integration_packages(base_dir)
-    connected = sum(1 for pkg in packages if pkg.get("lifecycle", {}).get("connected"))
-    validated = sum(1 for pkg in packages if pkg.get("lifecycle", {}).get("validated"))
-    trusted = sum(1 for pkg in packages if pkg.get("lifecycle", {}).get("trusted"))
+    connected = sum(1 for pkg in packages if _package_state(pkg, "connected"))
+    validated = sum(1 for pkg in packages if _package_state(pkg, "validated"))
+    trusted = sum(1 for pkg in packages if _package_state(pkg, "trusted"))
     return {
         "total": len(packages),
         "connected": connected,
@@ -369,6 +369,12 @@ def summarize_integration_packages(base_dir: Path | None = None) -> dict[str, An
         "trusted": trusted,
         "packages": packages,
     }
+
+
+def _package_state(package: dict[str, Any], key: str) -> bool:
+    lifecycle = dict(package.get("lifecycle") or {})
+    bridge_states = dict((package.get("bridge_manifest") or {}).get("capability_states") or {})
+    return bool(lifecycle.get(key) or bridge_states.get(key))
 
 
 def bridge_setup_summary(base_dir: Path | None = None) -> dict[str, Any]:

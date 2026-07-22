@@ -3,6 +3,7 @@ from __future__ import annotations
 """Route commands to the appropriate bridge."""
 
 import contextlib
+import importlib
 import io
 import json
 import re
@@ -2381,6 +2382,15 @@ print(json.dumps(out))
                 return self._execute_unreal_navigation_operation(operation_key, params)
 
             payload = unreal_operation_payload(operation_key, params)
+            if payload.get("execution_host") == "desktop":
+                module_name, separator, function_name = payload["function"].rpartition(".")
+                if not separator:
+                    raise ValueError("Desktop operation must use a qualified function path")
+                function = getattr(importlib.import_module(module_name), function_name)
+                result = function(*payload["args"], **payload["kwargs"])
+                serialized = json.dumps(result, indent=2, default=str)
+                result_ok = not isinstance(result, dict) or result.get("ok", True) is not False
+                return payload["label"], bool(result_ok), serialized
             ok, result = self.unreal.call(
                 payload["function"],
                 args=payload["args"],
@@ -2388,6 +2398,13 @@ print(json.dumps(out))
                 retry_safe=not bool(payload.get("mutates_project")),
                 operation=operation_key,
             )
+            if ok and isinstance(result, str):
+                try:
+                    structured_result = json.loads(result)
+                except Exception:
+                    structured_result = None
+                if isinstance(structured_result, dict) and structured_result.get("ok") is False:
+                    ok = False
             if ok and operation_key == "blueprint.scan":
                 try:
                     scan_result = json.loads(result) if isinstance(result, str) else result

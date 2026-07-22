@@ -31,11 +31,26 @@ class EvidenceSignal:
 
 
 @dataclass
+class AttributionPath:
+    type: str
+    source: str
+    evidence: str
+    weight: float
+    explanation: str
+    query_fragment: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class RankedTarget:
     path: str
     score: float
     confidence: float
     signals: list[EvidenceSignal] = field(default_factory=list)
+    attributions: list[AttributionPath] = field(default_factory=list)
     excluded: bool = False
     exclusion_reason: str = ""
     original: dict[str, Any] = field(default_factory=dict)
@@ -46,6 +61,7 @@ class RankedTarget:
             "score": round(self.score, 3),
             "confidence": round(self.confidence, 4),
             "signals": [item.to_dict() for item in self.signals],
+            "attributions": [item.to_dict() for item in self.attributions],
             "excluded": self.excluded,
             "exclusion_reason": self.exclusion_reason,
             "original": self.original,
@@ -57,6 +73,7 @@ def rank_target_candidates(
     candidates: Iterable[dict[str, Any] | str],
     *,
     active_file: str = "",
+    active_line: int | None = None,
     open_files: Iterable[str] = (),
     momentum: ContextMomentum | None = None,
     allowed_roots: Iterable[str] = (),
@@ -111,6 +128,9 @@ def rank_target_candidates(
         if active_norm and norm_lower == active_norm:
             score += 360.0
             signals.append(EvidenceSignal("active_file", 360.0, "Candidate is the active editor file."))
+            if active_line and active_line > 0:
+                score += 45.0
+                signals.append(EvidenceSignal("active_cursor_line", 45.0, f"Cursor is currently on line {active_line} in this file."))
         if norm_lower in open_set:
             score += 240.0
             signals.append(EvidenceSignal("open_file", 240.0, "Candidate is open in the editor."))
@@ -203,7 +223,13 @@ def rank_target_candidates(
             score -= 2000.0
             signals.append(EvidenceSignal("hard_exclusion", -2000.0, exclusion_reason))
 
-        ranked.append(RankedTarget(path=path, score=score, confidence=0.0, signals=signals, excluded=excluded, exclusion_reason=exclusion_reason, original=data))
+        attributions = _attributions_from_signals(
+            signals,
+            target=path,
+            prompt=prompt,
+            active_line=active_line,
+        )
+        ranked.append(RankedTarget(path=path, score=score, confidence=0.0, signals=signals, attributions=attributions, excluded=excluded, exclusion_reason=exclusion_reason, original=data))
 
     ranked.sort(key=lambda item: item.score, reverse=True)
     _assign_confidence(ranked)
@@ -216,8 +242,15 @@ def target_resolution_summary(ranked: list[RankedTarget], *, max_items: int = 5)
     lines = ["Target evidence ranking:"]
     for index, item in enumerate(ranked[:max_items], 1):
         lines.append(f"{index}. {item.path} score={item.score:.1f} confidence={item.confidence:.3f}")
-        for signal in sorted(item.signals, key=lambda s: abs(s.score), reverse=True)[:5]:
-            lines.append(f"   {signal.score:+.1f} {signal.reason}")
+        for attribution in sorted(item.attributions, key=lambda s: abs(s.weight), reverse=True)[:5]:
+            lines.append(f"   {attribution.weight:+.1f} {attribution.explanation}")
+    return "\n".join(lines)
+
+
+def attribution_summary(item: RankedTarget, *, max_items: int = 5) -> str:
+    lines = [f"Connected `{Path(item.path).name or item.path}` to the prompt because:"]
+    for index, attribution in enumerate(sorted(item.attributions, key=lambda value: abs(value.weight), reverse=True)[:max_items], 1):
+        lines.append(f"  -> Match {index}: {attribution.explanation} (weight: {attribution.weight:.1f}).")
     return "\n".join(lines)
 
 
@@ -272,6 +305,58 @@ def _assign_confidence(ranked: list[RankedTarget]) -> None:
         absolute = 1.0 / (1.0 + pow(2.718281828, -(item.score - 120.0) / 180.0))
         margin_factor = 1.0 / (1.0 + pow(2.718281828, -(margin if index == 0 else item.score - top) / 160.0))
         item.confidence = max(0.0, min(0.999, 0.68 * absolute + 0.32 * margin_factor))
+
+
+def _attributions_from_signals(
+    signals: list[EvidenceSignal],
+    *,
+    target: str,
+    prompt: str,
+    active_line: int | None = None,
+) -> list[AttributionPath]:
+    attributions: list[AttributionPath] = []
+    for signal in sorted(signals, key=lambda item: abs(item.score), reverse=True):
+        source = "project_index"
+        kind = signal.key
+        query_fragment = ""
+        if signal.key.startswith("explicit"):
+            source = "user_prompt"
+            query_fragment = _best_prompt_fragment(prompt, signal.reason)
+        elif signal.key in {"active_file", "open_file"}:
+            source = "active_editor_context"
+        elif signal.key == "active_cursor_line":
+            source = "active_editor_context"
+        elif signal.key == "context_momentum":
+            source = "operation_memory"
+        elif signal.key == "problem_semantics":
+            source = "semantic_problem_formulation"
+            query_fragment = _best_prompt_fragment(prompt, signal.reason)
+        elif signal.key.endswith("penalty") or signal.score < 0:
+            source = "disqualifier"
+        attributions.append(
+            AttributionPath(
+                type=kind,
+                source=source,
+                evidence=target,
+                weight=round(signal.score, 3),
+                explanation=signal.reason,
+                query_fragment=query_fragment,
+                metadata={"line": active_line} if signal.key == "active_cursor_line" and active_line else {},
+            )
+        )
+    return attributions
+
+
+def _best_prompt_fragment(prompt: str, reason: str) -> str:
+    prompt_text = str(prompt or "")
+    reason_text = str(reason or "")
+    quoted = re.findall(r"[:`] ?([^`.]+)", reason_text)
+    for candidate in quoted:
+        candidate = candidate.strip()
+        if candidate and candidate.lower() in prompt_text.lower():
+            return candidate
+    words = re.findall(r"[A-Za-z0-9_]{3,}", prompt_text)
+    return " ".join(words[:6])
 
 
 def _is_excluded(path: str, explicit_files: list[TargetEntity]) -> tuple[bool, str]:

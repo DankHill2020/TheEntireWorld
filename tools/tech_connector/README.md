@@ -1,12 +1,32 @@
 # The Entire World Tech Connector
 
-⚠️ **License Notice: Source-Available (Non-Commercial, Non-Redistribution)**
+## License Notice
 
-This repository is owned by **The Entire World, LLC**. It is **source-available** for personal study, local run, and educational purposes. It is **not** licensed under a permissive open-source license (like MIT).
+Tech Connector is owned by **The Entire World, LLC** and released under the
+[Tech Connector Community Source License](LICENSE.md).
 
-Under the terms of the [LICENSE](LICENSE.md):
-- **Redistribution is prohibited**: You may not copy, re-host, or distribute this software.
-- **Commercial use and resale are strictly prohibited**: Selling your own version, packaging it as a paid product, or commercially exploiting this software in any form is a direct violation of copyright law.
+This is a **source-available** project, not an OSI open-source project.
+
+The intent is simple:
+
+- Free for individuals, students, educators, hobbyists, researchers, nonprofits,
+  and open-source projects.
+- Free for independent creators and small studios until commercial success.
+- You own what you create with the tools.
+- If you never make money from use of the tools, you never owe royalties.
+- Commercial use above the license threshold requires a commercial license.
+- No resale, sublicensing, repackaging, hosting, or redistribution of Tech
+  Connector or modified Tech Connector without a written commercial agreement.
+- No AI training, model distillation, embedding, benchmarking, or competing
+  automation/tool generation using Tech Connector source, docs, prompts,
+  signatures, traces, or call plans.
+- Programmable function access must go through Tech Connector's licensed app,
+  local service, hosted API, SDK, or another expressly authorized interface.
+- Community contributions are welcome, but submitted contributions may be used
+  in both free community releases and commercial versions of the product.
+
+See [docs/COMMERCIAL_MODEL.md](docs/COMMERCIAL_MODEL.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md) for the practical version of these rules.
 
 ---
 
@@ -16,6 +36,7 @@ Architecture notes:
 - `docs/BRIDGE_ARCHITECTURE.md` covers adding app bridges.
 - `docs/DIRECT_DCC_BRIDGE.md` covers direct Maya, Unreal, Blender, Substance Painter, Unity, and MotionBuilder calls.
 - `docs/LIVE_SOURCE_INGESTION.md` covers local-only versus live web/GitHub sourcing.
+- `docs/HEADLESS_API.md` covers licensed API/function access without starting the UI.
 - `docs/MODEL_PROVIDERS.md` covers OpenAI/Google/Anthropic/local model routing.
 - `docs/UNREAL_SMART_OPERATIONS.md` covers project-aware Unreal scans, navigation, capability validation, and safe prototype operations.
 - `docs/ROUTING_ENTRYPOINT_AUDIT.md` and `docs/ENTERPRISE_INTERACTION_BYPASS_AUDIT.md` cover deterministic routing and remaining migration targets.
@@ -31,7 +52,9 @@ Architecture notes:
 
 ## Current safe patch example
 
-For `BrowseDirectory`, if the class defaults `directory=None` but calls `directory.replace(...)`, the assistant can prepare a fix that guards `None` and initializes the line edit from the normalized stored directory.
+For `BrowseDirectory`, if the class defaults `directory=None` but calls
+`directory.replace(...)`, the assistant can prepare a fix that guards `None` and
+initializes the line edit from the normalized stored directory.
 
 Single launcher:
 `Start_The_Entire_World_AI_Studio.bat`

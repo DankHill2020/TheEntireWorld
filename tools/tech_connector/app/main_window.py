@@ -31,6 +31,7 @@ class MainWindow(
     live_process_update = Signal(str)
     response_started = Signal(str)
     dcc_statuses_ready = Signal(dict)
+    vcs_status_ready = Signal(object)
     autocomplete_suggestions_ready = Signal(int, int, int, object)
 
 
@@ -61,8 +62,7 @@ if __name__ == "__main__":
 
         settings = load_settings()
         warmed = set()
-        for key in ["model", "plan_model", "code_model", "general_model"]:
-            m = settings.get(key)
+        for m in settings.get("ollama_preload_models") or ["qwen3:14b"]:
             if (
                     m
                     and m not in warmed
@@ -71,24 +71,21 @@ if __name__ == "__main__":
             ):
                 warmed.add(m)
                 t = threading.Thread(
-                    target=warm_ollama_model, args=(m, "2h"), daemon=True
+                    target=warm_ollama_model, args=(m, "24h"), daemon=True
                 )
                 t.start()
-        selected_for_policy = settings.get("model") or "ollama:qwen2.5-coder:14b"
+        selected_for_policy = settings.get("model") or "ollama:qwen3:14b"
         if (
                 not warmed
                 and provider_for_model(selected_for_policy) == "ollama"
                 and should_use_local_runtime(selected_for_policy, settings)
         ):
             t = threading.Thread(
-                target=warm_ollama_model, args=("qwen2.5-coder:14b", "2h"), daemon=True
+                target=warm_ollama_model, args=("qwen3:14b", "24h"), daemon=True
             )
             t.start()
     except Exception:
         pass
 
-    app = QApplication(sys.argv)
-    win = MainWindow()
-    show_main_window(win)
-    QTimer.singleShot(250, lambda: show_main_window(win))
-    sys.exit(app.exec())
+    from tech_connector.app.application import run_application
+    run_application()

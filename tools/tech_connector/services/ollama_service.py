@@ -64,6 +64,7 @@ REQUIRED_SEMANTIC_MODELS = [
 REQUIRED_CHAT_MODELS = [
     FAST_GENERAL_MODEL,
     FALLBACK_GENERAL_MODEL,
+    CODE_MODEL_PROFILES["standard"],
 ]
 
 REQUIRED_EMBED_MODELS = [
@@ -95,17 +96,56 @@ def model_for_role(role, default=None):
     and DCC generation use their respective larger models.
     """
     normalized_role = str(role or "").strip().lower()
+
+    # 1. Check custom_model_mappings in settings first
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        mappings = settings.get("custom_model_mappings")
+        if isinstance(mappings, dict) and normalized_role in mappings:
+            return mappings[normalized_role]
+    except Exception:
+        pass
+
+    # 2. Check for role-specific overrides in settings
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+
+        # Check specific model classes
+        if normalized_role in ("intent", "semantic_router", "request_understanding", "task_splitter", "route_disambiguation"):
+            model_key = "semantic_intent_model"
+        elif normalized_role in ("general", "plan", "docs"):
+            model_key = "fast_general_model"
+        elif normalized_role in ("code", "debug", "dcc", "maya", "unreal", "blender", "substance_painter", "motionbuilder"):
+            model_key = "fast_code_model"
+        elif normalized_role == "embed":
+            model_key = "embedding_model"
+        else:
+            model_key = None
+
+        if model_key and settings.get(model_key):
+            return settings.get(model_key)
+    except Exception:
+        pass
+
     return AI_MODELS.get(normalized_role, default or FAST_GENERAL_MODEL)
 
 
 def semantic_intent_model():
     """Return the small model used for the first semantic hypothesis."""
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        if settings.get("semantic_intent_model"):
+            return settings.get("semantic_intent_model")
+    except Exception:
+        pass
     return SEMANTIC_INTENT_MODEL
 
 
 def code_model_for_profile(profile: str) -> str:
     """Return the configured coder for a scoped generation/repair profile."""
-
     normalized = str(profile or "small").strip().lower()
     aliases = {
         "fast": "standard",
@@ -113,7 +153,23 @@ def code_model_for_profile(profile: str) -> str:
         "large": "quality",
         "large_tool": "quality",
     }
-    return CODE_MODEL_PROFILES.get(aliases.get(normalized, normalized), CODE_MODEL_PROFILES["small"])
+    target_profile = aliases.get(normalized, normalized)
+
+    # Allow custom settings overrides
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        if target_profile == "quality" and settings.get("fast_code_model"):
+            return settings.get("fast_code_model")
+        # Check custom mappings for specific profile names as roles
+        custom_mappings = settings.get("custom_model_mappings", {})
+        profile_role = f"profile_{target_profile}"
+        if profile_role in custom_mappings:
+            return custom_mappings[profile_role]
+    except Exception:
+        pass
+
+    return CODE_MODEL_PROFILES.get(target_profile, CODE_MODEL_PROFILES["small"])
 
 
 def is_ollama_running(timeout=2):
@@ -216,7 +272,7 @@ def warm_ollama_model(model, keep_alive="2h"):
         return False
 
 
-def warm_required_models_async(keep_alive="2h"):
+def warm_required_models_async(keep_alive="24h"):
     def run():
         ok, msg = ensure_ollama_server()
         if not ok:
@@ -227,17 +283,26 @@ def warm_required_models_async(keep_alive="2h"):
             from tech_connector.services.settings_service import load_settings
 
             settings = load_settings()
-            selected = settings.get("model")
+            configured_preloads = list(settings.get("ollama_preload_models") or [])
         except Exception:
-            selected = None
+            configured_preloads = []
 
-        # Keep the tiny semantic model warm because it sits on the request path.
-        models = set(REQUIRED_SEMANTIC_MODELS + REQUIRED_CHAT_MODELS)
-        if selected:
-            models.add(normalize_ollama_model_name(selected))
-
+        # Only explicitly resident models are warmed. Installed quality and
+        # escalation models remain cold so they cannot evict the fast planner.
+        models = set()
+        models.update(
+            normalize_ollama_model_name(model)
+            for model in configured_preloads
+            if str(model or "").strip()
+        )
+        # Warm independently so a cold quality model does not postpone the fast
+        # planner becoming available during application startup.
         for model in sorted(models):
-            warm_ollama_model(model, keep_alive=keep_alive)
+            threading.Thread(
+                target=warm_ollama_model,
+                args=(model, keep_alive),
+                daemon=True,
+            ).start()
 
     threading.Thread(target=run, daemon=True).start()
 

@@ -20,10 +20,10 @@ MENU_LABEL = "The Entire World Tools"
 
 COMMAND_PORT_START = 7001
 COMMAND_PORT_FILE = (
-    "C:/Users/Aaron/temp/maya_port.txt"
+    os.path.join(os.path.expanduser("~"), "temp", "maya_port.txt")
 )
 COMMAND_PORT_SESSION_FILE = (
-    "C:/Users/Aaron/temp/maya_sessions.json"
+    os.path.join(os.path.expanduser("~"), "temp", "maya_sessions.json")
 )
 
 

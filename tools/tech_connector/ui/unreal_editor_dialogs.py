@@ -605,36 +605,42 @@ class SearchWorker(QThread):
                 "description": "Official Unreal Engine source repository",
                 "stars": 28500,
                 "html_url": "https://github.com/EpicGames/UnrealEngine",
+                "license": {"spdx_id": "NOASSERTION", "name": "Unreal Engine EULA"},
             },
             {
                 "name": "matusnovak/maya-pymel",
                 "description": "Python scripting in Autodesk Maya",
                 "stars": 450,
                 "html_url": "https://github.com/matusnovak/maya-pymel",
+                "license": {"spdx_id": "MIT", "name": "MIT License"},
             },
             {
                 "name": "Unity-Technologies/UnityCsReference",
                 "description": "Unity C# reference source code",
                 "stars": 12000,
                 "html_url": "https://github.com/Unity-Technologies/UnityCsReference",
+                "license": {"spdx_id": "NOASSERTION", "name": "Unity Companion License"},
             },
             {
                 "name": "Autodesk/maya-usd",
                 "description": "USD plugin for Autodesk Maya",
                 "stars": 320,
                 "html_url": "https://github.com/Autodesk/maya-usd",
+                "license": {"spdx_id": "Apache-2.0", "name": "Apache License 2.0"},
             },
             {
                 "name": "EpicGames/UnrealGenAISupport",
                 "description": "Experimental generative AI hooks for Unreal Engine",
                 "stars": 850,
                 "html_url": "https://github.com/EpicGames/UnrealGenAISupport",
+                "license": {"spdx_id": "MIT", "name": "MIT License"},
             },
             {
                 "name": "DankHill2020/TheEntireWorld",
                 "description": "Creative suite pipeline tools",
                 "stars": 95,
                 "html_url": "https://github.com/DankHill2020/TheEntireWorld",
+                "license": {"spdx_id": "", "name": ""},
             },
         ]
 
@@ -689,7 +695,9 @@ class SearchWorker(QThread):
                     }
                 )
             if results:
-                self.finished.emit(results)
+                from tech_connector.services.external_tool_service import rank_github_candidate_repos
+
+                self.finished.emit(rank_github_candidate_repos(results))
                 return
         except Exception:
             pass
@@ -700,7 +708,9 @@ class SearchWorker(QThread):
             for f in fallbacks
             if q in f["name"].lower() or q in f["description"].lower()
         ]
-        self.finished.emit(filtered if filtered else fallbacks[:10])
+        from tech_connector.services.external_tool_service import rank_github_candidate_repos
+
+        self.finished.emit(rank_github_candidate_repos(filtered if filtered else fallbacks[:10]))
 
 
 class GitHubCandidateSelectionDialog(QDialog):
@@ -732,6 +742,10 @@ class GitHubCandidateSelectionDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
+        self.open_link_btn = QPushButton("Open Link")
+        self.open_link_btn.setEnabled(False)
+        self.open_link_btn.clicked.connect(self.open_selected_link)
+        buttons.addWidget(self.open_link_btn)
         self.ingest_btn = QPushButton("Download / Ingest")
         self.ingest_btn.setEnabled(False)
         self.ingest_btn.clicked.connect(self.accept_selected)
@@ -755,12 +769,14 @@ class GitHubCandidateSelectionDialog(QDialog):
         if not selected:
             self.selected_repo = None
             self.ingest_btn.setEnabled(False)
+            self.open_link_btn.setEnabled(False)
             self.details_box.clear()
             return
 
         repo = selected[0].data(Qt.UserRole) or {}
         self.selected_repo = repo
         self.ingest_btn.setEnabled(True)
+        self.open_link_btn.setEnabled(bool(repo.get("html_url")))
         self.details_box.setPlainText(self._details(repo))
 
     def _details(self, repo):
@@ -784,6 +800,10 @@ class GitHubCandidateSelectionDialog(QDialog):
     def accept_selected(self):
         if self.selected_repo:
             self.accept()
+
+    def open_selected_link(self):
+        if self.selected_repo and self.selected_repo.get("html_url"):
+            QDesktopServices.openUrl(QUrl(str(self.selected_repo["html_url"])))
 
 
 class IngestWorker(QThread):
@@ -984,6 +1004,11 @@ class WebImportDialog(QDialog):
         self.ingest_btn.clicked.connect(self.perform_ingest)
         buttons_layout.addWidget(self.ingest_btn)
 
+        self.open_repo_btn = QPushButton("Open Link")
+        self.open_repo_btn.setEnabled(False)
+        self.open_repo_btn.clicked.connect(self.open_selected_repo_link)
+        buttons_layout.addWidget(self.open_repo_btn)
+
         self.refresh_functions_btn = QPushButton("Refresh Functions")
         self.refresh_functions_btn.clicked.connect(self.load_function_choices)
         buttons_layout.addWidget(self.refresh_functions_btn)
@@ -1055,6 +1080,7 @@ class WebImportDialog(QDialog):
         self.results_list.clear()
         self.details_box.clear()
         self.ingest_btn.setEnabled(False)
+        self.open_repo_btn.setEnabled(False)
         self.search_btn.setEnabled(False)
 
         self.search_worker = SearchWorker(query)
@@ -1063,7 +1089,7 @@ class WebImportDialog(QDialog):
 
     def on_search_finished(self, results):
         self.search_btn.setEnabled(True)
-        self.results = results
+        self.results = list(results or [])[:5]
         if not results:
             self.status_label.setText("No options found.")
             if self.auto_select_after_search:
@@ -1071,9 +1097,9 @@ class WebImportDialog(QDialog):
             return
 
         self.status_label.setText(
-            f"Found {len(results)} closest options. Select to view details."
+            f"Showing top {len(self.results)} GitHub candidates. Select one to review or open."
         )
-        for item in results:
+        for item in self.results:
             list_item = QListWidgetItem(f"{item['name']} (★ {item['stars']})")
             list_item.setData(Qt.UserRole, item)
             self.results_list.addItem(list_item)
@@ -1101,12 +1127,14 @@ class WebImportDialog(QDialog):
         if not selected:
             self.details_box.clear()
             self.ingest_btn.setEnabled(False)
+            self.open_repo_btn.setEnabled(False)
             self.selected_repo = None
             return
 
         item = selected[0].data(Qt.UserRole)
         self.selected_repo = item
         self.ingest_btn.setEnabled(True)
+        self.open_repo_btn.setEnabled(bool(item.get("html_url")))
         from tech_connector.services.external_tool_service import repo_preflight_summary
 
         preflight = repo_preflight_summary(item)
@@ -1121,6 +1149,10 @@ class WebImportDialog(QDialog):
             f"License: {preflight['license'] or 'unknown'}\n"
         )
         self.details_box.setPlainText(details)
+
+    def open_selected_repo_link(self):
+        if self.selected_repo and self.selected_repo.get("html_url"):
+            QDesktopServices.openUrl(QUrl(str(self.selected_repo["html_url"])))
 
     def perform_ingest(self):
         if not self.selected_repo:

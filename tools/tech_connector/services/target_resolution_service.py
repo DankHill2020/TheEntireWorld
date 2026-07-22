@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
 from tech_connector.services.context_momentum_service import ContextMomentum, momentum_from_operation_memory
-from tech_connector.services.evidence_ranking_service import RankedTarget, rank_target_candidates, target_resolution_summary
+from tech_connector.services.evidence_ranking_service import AttributionPath, RankedTarget, rank_target_candidates, target_resolution_summary
 from tech_connector.services.target_entity_service import extract_target_entities
 
 
@@ -97,6 +97,18 @@ def apply_resolution_to_state(state: Any, resolution: TargetResolution) -> Any:
             path=item.get("path", ""),
             score=float(item.get("score") or 0),
             confidence=float(item.get("confidence") or 0),
+            attributions=[
+                AttributionPath(
+                    type=str(attr.get("type") or ""),
+                    source=str(attr.get("source") or ""),
+                    evidence=str(attr.get("evidence") or ""),
+                    weight=float(attr.get("weight") or 0),
+                    explanation=str(attr.get("explanation") or ""),
+                    query_fragment=str(attr.get("query_fragment") or ""),
+                )
+                for attr in (item.get("attributions") or [])
+                if isinstance(attr, dict)
+            ],
             excluded=bool(item.get("excluded", False)),
             exclusion_reason=str(item.get("exclusion_reason") or ""),
             original=dict(item.get("original") or {}),

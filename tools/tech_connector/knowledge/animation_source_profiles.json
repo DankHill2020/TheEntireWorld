@@ -1,0 +1,62 @@
+{
+  "schema": "ai_studio.animation_source_profiles.v1",
+  "profiles": [
+    {
+      "id": "cmu_gbionics_fbx_v1",
+      "display_name": "CMU Motion Capture FBX conversion",
+      "source_scope": "community",
+      "source_url": "https://mocap.cs.cmu.edu/",
+      "conversion_url": "https://huggingface.co/datasets/gbionics/cmu-fbx",
+      "license": "Free for all uses; direct resale of source data prohibited",
+      "required_bones": [
+        "hip", "abdomen", "chest", "neck", "head",
+        "lCollar", "lShldr", "lForeArm", "lHand",
+        "rCollar", "rShldr", "rForeArm", "rHand",
+        "lThigh", "lShin", "lFoot", "rThigh", "rShin", "rFoot"
+      ],
+      "parent_constraints": [
+        ["hip", "abdomen"], ["abdomen", "chest"], ["chest", "neck"],
+        ["neck", "head"], ["chest", "lCollar"], ["lCollar", "lShldr"],
+        ["lShldr", "lForeArm"], ["lForeArm", "lHand"],
+        ["chest", "rCollar"], ["rCollar", "rShldr"],
+        ["rShldr", "rForeArm"], ["rForeArm", "rHand"],
+        ["lThigh", "lShin"], ["lShin", "lFoot"],
+        ["rThigh", "rShin"], ["rShin", "rFoot"]
+      ],
+      "hik_mapping": {
+        "Hips": {"slot": 1, "bone": "hip"},
+        "LeftUpLeg": {"slot": 2, "bone": "lThigh"},
+        "LeftLeg": {"slot": 3, "bone": "lShin"},
+        "LeftFoot": {"slot": 4, "bone": "lFoot"},
+        "RightUpLeg": {"slot": 5, "bone": "rThigh"},
+        "RightLeg": {"slot": 6, "bone": "rShin"},
+        "RightFoot": {"slot": 7, "bone": "rFoot"},
+        "Spine": {"slot": 8, "bone": "abdomen"},
+        "LeftArm": {"slot": 9, "bone": "lShldr"},
+        "LeftForeArm": {"slot": 10, "bone": "lForeArm"},
+        "LeftHand": {"slot": 11, "bone": "lHand"},
+        "RightArm": {"slot": 12, "bone": "rShldr"},
+        "RightForeArm": {"slot": 13, "bone": "rForeArm"},
+        "RightHand": {"slot": 14, "bone": "rHand"},
+        "Head": {"slot": 15, "bone": "head"},
+        "LeftShoulder": {"slot": 18, "bone": "lCollar"},
+        "RightShoulder": {"slot": 19, "bone": "rCollar"},
+        "Neck": {"slot": 20, "bone": "neck"},
+        "Spine1": {"slot": 23, "bone": "chest"}
+      },
+      "verification": {
+        "status": "locally_reproduced",
+        "unreal_version": "5.8",
+        "dcc": "Maya HumanIK",
+        "target_profile": "UE5 Manny",
+        "gates": [
+          "source hierarchy inspected",
+          "HumanIK target response sampled",
+          "target hierarchy baked",
+          "FBX output visually sampled",
+          "AnimSequence imported on selected Skeleton"
+        ]
+      }
+    }
+  ]
+}

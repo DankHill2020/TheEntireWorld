@@ -23,7 +23,7 @@ def _relocate_legacy_app_path(value: object) -> object:
     if not isinstance(value, str) or not value.strip():
         return value
     normalized = value.replace("\\", "/")
-    marker = "/mcp_servers/the_entire_world_ai_studio"
+    marker = "/the_entire_world_ai_studio"
     if marker not in normalized.lower():
         return value
     marker_index = normalized.lower().index(marker)
@@ -106,6 +106,10 @@ def load_settings() -> dict:
         "auto_checkout_on_change": True,
         "external_tools_dir": "",
         "search_github_tools_when_composing": False,
+        "tech_connector_require_login": True,
+        "tech_connector_allow_offline_community": False,
+        "tech_connector_account_email": "",
+        "tech_connector_license_token": "",
         "github_username": "",
         "github_token": "",
         "p4_port": "",
@@ -170,6 +174,32 @@ def load_settings() -> dict:
         "deep_route_scope": "engine_complex_only",
         "deep_code_complexity_threshold": 7,
         "allow_30b_deep_route": False,
+        "semantic_intent_model": "qwen2.5:1.5b",
+        "fast_general_model": "qwen3:14b",
+        "fast_code_model": "qwen2.5-coder:14b",
+        "embedding_model": "nomic-embed-text:latest",
+        "fallback_general_model": "qwen2.5-coder:latest",
+        "fallback_semantic_intent_model": "qwen2.5:1.5b",
+        "fallback_code_model": "qwen2.5-coder:latest",
+        "custom_model_mappings": {},
+        "github_ingest_provider_module": "default",
+        "code_intel_provider_module": "default",
+        "cognitive_routing_provider_module": "default",
+        "planning_provider_module": "default",
+        "vcs_provider_module": "default",
+        "custom_dcc_packages": [],
+        "custom_dcc_adapters": {},
+        "custom_dcc_bridges": {},
+        "github_ingest_provider_type": "default",
+        "mod_tech_labs_api_key": "",
+        "mod_tech_labs_workflow_id": "",
+        "openai_api_key": "",
+        "anthropic_api_key": "",
+        "gemini_api_key": "",
+        "cloud_provider_model": "gpt-4o",
+        "asset_optimizer_provider_module": "default",
+        "use_websocket_bridge": False,
+        "chatbot_provider_module": "default",
     }
     if SETTINGS_PATH.exists():
         try:

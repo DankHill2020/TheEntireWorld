@@ -1,0 +1,125 @@
+{
+  "schema": "ai_studio.unreal_behavior_primitives.v1",
+  "engine_version": "5.8",
+  "policy": {
+    "composition_unit": "atomic_behavior",
+    "unknown_clause": "preserve_and_research",
+    "system_recipe_rule": "A combination becomes a known win only after its complete runtime proof contract passes."
+  },
+  "primitives": [
+    {
+      "key": "world.surface_contact",
+      "title": "Observe a traversable surface",
+      "match_any": ["climb", "wall", "surface", "ledge", "mantle", "vault"],
+      "observations": ["forward shape sweep hit", "surface normal", "surface angle", "collision object type", "contact distance"],
+      "guards": ["hit is blocking", "surface normal and geometry satisfy the requested traversal policy"],
+      "states": ["Searching", "ContactCandidate"],
+      "transitions": [
+        {"from": "Searching", "event": "accepted surface observed", "to": "ContactCandidate"},
+        {"from": "ContactCandidate", "event": "surface becomes invalid", "to": "Searching"}
+      ],
+      "operations": ["blueprint.add_function", "blueprint.add_node", "blueprint.connect_node_pins"],
+      "proof_scenarios": ["accepted surface produces a measured hit", "invalid angle or collision type does not activate traversal"]
+    },
+    {
+      "key": "input.sustained_qualification",
+      "title": "Qualify sustained player intent",
+      "match_any": ["hold", "holding", "more than", "at least", "after", "walk into", "walking into"],
+      "observations": ["input magnitude and direction", "continuous contact duration"],
+      "guards": ["required input remains active for the declared duration", "contact remains valid throughout qualification"],
+      "states": ["Qualifying"],
+      "transitions": [
+        {"from": "ContactCandidate", "event": "required input begins", "to": "Qualifying"},
+        {"from": "Qualifying", "event": "duration threshold reached", "to": "Qualified"},
+        {"from": "Qualifying", "event": "input released or contact lost early", "to": "Searching"}
+      ],
+      "operations": ["input.create_action", "input.add_mapping", "blueprint.add_function", "blueprint.add_node", "blueprint.connect_node_pins"],
+      "proof_scenarios": ["activation occurs at or after the threshold", "release immediately before the threshold cancels activation"]
+    },
+    {
+      "key": "movement.surface_constrained",
+      "title": "Move along an accepted surface",
+      "match_any": ["climb", "climbing", "move along wall", "move up wall", "surface traversal"],
+      "observations": ["surface tangent basis", "player movement input", "contact continuity", "character movement state"],
+      "guards": ["authoritative traversal state is active", "accepted surface remains reachable"],
+      "states": ["EnteringSurface", "SurfaceMoving", "ExitingSurface"],
+      "transitions": [
+        {"from": "ContactCandidate", "event": "activation intent accepted", "to": "EnteringSurface", "unless_primitive": "input.sustained_qualification"},
+        {"from": "Qualified", "event": "enter succeeds", "to": "EnteringSurface", "requires_primitive": "input.sustained_qualification"},
+        {"from": "EnteringSurface", "event": "movement state and pose are ready", "to": "SurfaceMoving"},
+        {"from": "SurfaceMoving", "event": "contact lost, cancel requested, or ledge reached", "to": "ExitingSurface"},
+        {"from": "ExitingSurface", "event": "baseline movement restored", "to": "Searching"}
+      ],
+      "animation_roles": ["climb_loop"],
+      "operations": ["blueprint.create_from_template", "blueprint.add_component", "blueprint.add_function", "blueprint.add_node", "blueprint.connect_node_pins"],
+      "proof_scenarios": ["up/down input produces displacement along the wall plane", "contact loss restores the previous movement state without leaving gravity disabled"]
+    },
+    {
+      "key": "movement.surface_to_surface_transfer",
+      "title": "Transfer from one surface to another",
+      "match_any": ["jump from wall to wall", "jump between walls", "wall to wall", "jump to another wall", "leap to another wall"],
+      "match_concept_groups": [
+        ["jump", "leap", "transfer", "rebound"],
+        ["wall", "surface", "ledge", "hang"],
+        ["another", "other", "between", "wall to wall"]
+      ],
+      "observations": ["current surface normal", "transfer input direction", "candidate destination sweep", "airborne trajectory", "destination reachability"],
+      "guards": ["character is attached to a valid source surface", "transfer direction has a reachable destination candidate"],
+      "states": ["TransferLaunching", "TransferAirborne", "TransferReacquiring"],
+      "transitions": [
+        {"from": "SurfaceMoving", "event": "transfer input accepted", "to": "TransferLaunching"},
+        {"from": "TransferLaunching", "event": "launch applied and source detached", "to": "TransferAirborne"},
+        {"from": "TransferAirborne", "event": "destination candidate observed", "to": "TransferReacquiring"},
+        {"from": "TransferReacquiring", "event": "destination accepted", "to": "EnteringSurface"},
+        {"from": "TransferAirborne", "event": "reacquisition window expires", "to": "FallingRecovery"}
+      ],
+      "animation_roles": ["climb_wall_jump"],
+      "operations": ["blueprint.add_function", "blueprint.add_node", "blueprint.connect_node_pins"],
+      "proof_scenarios": ["transfer launch detaches from the source and has velocity away from its normal", "reachable destination is reacquired", "missing destination falls normally and cannot leave traversal state latched"]
+    },
+    {
+      "key": "movement.ledge_hang",
+      "title": "Hold at a ledge",
+      "match_any": ["ledge hang", "hang from", "climb hang", "hanging"],
+      "observations": ["ledge top clearance", "hand-height ledge position", "capsule placement clearance"],
+      "guards": ["ledge is reachable", "target capsule placement is unblocked"],
+      "states": ["EnteringHang", "Hanging", "LeavingHang"],
+      "transitions": [
+        {"from": "SurfaceMoving", "event": "valid ledge reached", "to": "EnteringHang"},
+        {"from": "EnteringHang", "event": "alignment completes", "to": "Hanging"},
+        {"from": "Hanging", "event": "drop, mantle, or transfer requested", "to": "LeavingHang"}
+      ],
+      "animation_roles": ["climb_hang"],
+      "operations": ["blueprint.add_function", "blueprint.add_node", "blueprint.connect_node_pins"],
+      "proof_scenarios": ["valid ledge aligns without capsule penetration", "blocked ledge placement prevents hang entry"]
+    },
+    {
+      "key": "animation.contextual_state_presentation",
+      "title": "Present authoritative gameplay state through animation",
+      "match_any": ["animation", "anim", "abp", "montage", "climb", "jump", "combat", "traversal"],
+      "observations": ["active gameplay state", "AnimInstance class", "pose branch relevance", "playing asset identity"],
+      "guards": ["role asset is skeleton-compatible and contextually accepted", "pose path reaches Output Pose"],
+      "states": [],
+      "transitions": [],
+      "operations": ["animation.find_compatible", "blueprint.scan", "blueprint.add_node", "blueprint.connect_node_pins", "blueprint.compile"],
+      "proof_scenarios": ["each requested role becomes relevant and visibly plays on the target mesh", "existing locomotion and combat pose paths still work after integration"]
+    },
+    {
+      "key": "runtime.feature_recovery",
+      "title": "Recover from completion, cancellation, and interruption",
+      "always": true,
+      "match_any": [],
+      "observations": ["owned movement settings", "active animation state", "temporary collision or ability state", "runtime diagnostics"],
+      "guards": ["cleanup is idempotent"],
+      "states": ["FallingRecovery", "Interrupted", "Recovered"],
+      "transitions": [
+        {"from": "ExitingSurface", "event": "cleanup succeeds", "to": "Recovered"},
+        {"from": "Interrupted", "event": "cleanup succeeds", "to": "Recovered"},
+        {"from": "FallingRecovery", "event": "standard falling state restored", "to": "Recovered"},
+        {"from": "Recovered", "event": "baseline confirmed", "to": "Searching"}
+      ],
+      "operations": ["runtime.pie_begin", "runtime.pie_status", "runtime.inject_key", "runtime.inspect_character", "runtime.pie_end", "diagnostics.read_log_errors", "semantic_index.record_runtime_observation"],
+      "proof_scenarios": ["cancel and interruption restore every owned setting", "repeated activation and cleanup do not accumulate state", "adjacent input and animation behavior remain functional"]
+    }
+  ]
+}

@@ -257,6 +257,152 @@ class IntelligenceStore:
             )
             return int(cur.lastrowid)
 
+    def upsert_semantic_entity(self, project_id: int, dcc: str, **data: Any) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO semantic_entities(
+                    project_id, dcc, entity_key, entity_kind, display_name, path,
+                    class_name, parent_key, fingerprint, confidence, source,
+                    metadata_json, indexed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(project_id, dcc, entity_key) DO UPDATE SET
+                    entity_kind=excluded.entity_kind,
+                    display_name=excluded.display_name,
+                    path=excluded.path,
+                    class_name=excluded.class_name,
+                    parent_key=excluded.parent_key,
+                    fingerprint=excluded.fingerprint,
+                    confidence=excluded.confidence,
+                    source=excluded.source,
+                    metadata_json=excluded.metadata_json,
+                    indexed_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    project_id,
+                    dcc,
+                    data["entity_key"],
+                    data["entity_kind"],
+                    data.get("display_name"),
+                    data.get("path"),
+                    data.get("class_name"),
+                    data.get("parent_key"),
+                    data.get("fingerprint"),
+                    float(data.get("confidence", 1.0)),
+                    data.get("source"),
+                    _json(data.get("metadata", {})),
+                ),
+            )
+
+    def upsert_semantic_relation(self, project_id: int, dcc: str, **data: Any) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO semantic_relations(
+                    project_id, dcc, source_key, relation, target_key,
+                    confidence, source, metadata_json, indexed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(project_id, dcc, source_key, relation, target_key) DO UPDATE SET
+                    confidence=excluded.confidence,
+                    source=excluded.source,
+                    metadata_json=excluded.metadata_json,
+                    indexed_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    project_id,
+                    dcc,
+                    data["source_key"],
+                    data["relation"],
+                    data["target_key"],
+                    float(data.get("confidence", 1.0)),
+                    data.get("source"),
+                    _json(data.get("metadata", {})),
+                ),
+            )
+
+    def add_semantic_index_run(self, project_id: int, dcc: str, **data: Any) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                INSERT INTO semantic_index_runs(
+                    project_id, dcc, run_kind, status, coverage_json, errors_json,
+                    metadata_json, completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    dcc,
+                    data.get("run_kind", "full"),
+                    data["status"],
+                    _json(data.get("coverage", {})),
+                    _json(data.get("errors", [])),
+                    _json(data.get("metadata", {})),
+                    data.get("completed_at"),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def latest_semantic_index_run(self, project_id: int, dcc: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM semantic_index_runs WHERE project_id=? AND dcc=? ORDER BY id DESC LIMIT 1",
+            (project_id, dcc),
+        ).fetchone()
+        return self._row_to_dict(row) if row else None
+
+    def exclude_semantic_path(self, project_id: int, dcc: str, path: str, **data: Any) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO semantic_exclusions(project_id, dcc, entity_path, reason, source, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, dcc, entity_path) DO UPDATE SET
+                    reason=excluded.reason,
+                    source=excluded.source,
+                    metadata_json=excluded.metadata_json,
+                    excluded_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    project_id,
+                    dcc,
+                    path,
+                    data.get("reason") or "explicit exclusion",
+                    data.get("source") or "unknown",
+                    _json(data.get("metadata", {})),
+                ),
+            )
+
+    def semantic_excluded_paths(self, project_id: int, dcc: str) -> set[str]:
+        rows = self.conn.execute(
+            "SELECT entity_path FROM semantic_exclusions WHERE project_id=? AND dcc=?",
+            (project_id, dcc),
+        ).fetchall()
+        return {str(row["entity_path"]) for row in rows}
+
+    def add_runtime_observation(self, project_id: int, dcc: str, **data: Any) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                INSERT INTO runtime_observations(
+                    project_id, dcc, scenario_key, subject_key, status,
+                    assertions_json, evidence_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    dcc,
+                    data["scenario_key"],
+                    data.get("subject_key"),
+                    data["status"],
+                    _json(data.get("assertions", {})),
+                    _json(data.get("evidence", {})),
+                ),
+            )
+            return int(cur.lastrowid)
+
     def latest_snapshot(self, project_id: int, dcc: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT * FROM editor_state_snapshots WHERE project_id=? AND dcc=? ORDER BY id DESC LIMIT 1",
@@ -390,6 +536,60 @@ class IntelligenceStore:
                 scored.append((score, item))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [x[1] for x in scored[:limit]]
+
+    def search_semantic_entities(
+        self, project_id: int, dcc: str, query: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        q = _norm_key(query)
+        like = f"%{q}%"
+        rows = self.conn.execute(
+            """
+            SELECT e.*
+            FROM semantic_entities AS e
+            WHERE e.project_id=? AND e.dcc=?
+              AND NOT EXISTS (
+                  SELECT 1 FROM semantic_exclusions AS x
+                  WHERE x.project_id=e.project_id AND x.dcc=e.dcc AND x.entity_path=e.path
+              )
+              AND (
+                  lower(e.entity_key) LIKE ? OR
+                  lower(COALESCE(e.entity_kind, '')) LIKE ? OR
+                  lower(COALESCE(e.display_name, '')) LIKE ? OR
+                  lower(COALESCE(e.path, '')) LIKE ? OR
+                  lower(COALESCE(e.class_name, '')) LIKE ? OR
+                  lower(COALESCE(e.metadata_json, '')) LIKE ?
+              )
+            ORDER BY
+                CASE
+                    WHEN lower(COALESCE(e.display_name, '')) = ? THEN 0
+                    WHEN lower(e.entity_key) LIKE ? THEN 1
+                    ELSE 2
+                END,
+                e.indexed_at DESC
+            LIMIT ?
+            """,
+            (project_id, dcc, like, like, like, like, like, like, q, f"{q}%", limit),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def semantic_relations_for(
+        self, project_id: int, dcc: str, entity_keys: Iterable[str], limit: int = 50
+    ) -> list[dict[str, Any]]:
+        keys = list(dict.fromkeys(str(key) for key in entity_keys if key))
+        if not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM semantic_relations
+            WHERE project_id=? AND dcc=?
+              AND (source_key IN ({placeholders}) OR target_key IN ({placeholders}))
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            [project_id, dcc, *keys, *keys, limit],
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
 
     def related_dependencies(self, project_id: int, refs: Iterable[str], limit: int = 50) -> list[dict[str, Any]]:
         refs = list(refs)

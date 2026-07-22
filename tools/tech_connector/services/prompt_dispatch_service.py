@@ -137,6 +137,25 @@ class DccExecutionRouteHandler:
         request = build_dcc_execution_request(decision, context)
         execution_plan = build_execution_plan(decision, request.to_dict())
         emit(ProgressEvent("execution_plan", "I found the operation and am checking what it needs.", 1, len(execution_plan)))
+        if request.approved or bool(decision.get("supervise_execution")):
+            supervised = self._execute_supervised(decision, context)
+            if supervised is not None:
+                status = str(supervised.get("status") or ("succeeded" if supervised.get("ok") else "failed"))
+                return EngineResult(
+                    action="answer" if supervised.get("ok") else "error",
+                    label="DCC Execution",
+                    text=self._format_supervised_result(supervised),
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "result_type": f"dcc_supervised_{status}",
+                        "supervised_result": supervised,
+                        "dcc_request": request.to_dict(),
+                        "selected_adapter": request.execution_environment,
+                        "execution_plan": update_execution_plan(execution_plan, status=status, result_type=f"dcc_supervised_{status}"),
+                        "result_card": build_result_card(decision=decision, request=request.to_dict()),
+                        "recovery_options": recovery_options(result_type=f"dcc_supervised_{status}", dispatch_result=supervised),
+                    },
+                )
         adapters = default_dcc_execution_adapters()
         adapter = adapters.get(request.execution_environment)
         if not adapter:
@@ -205,6 +224,25 @@ class DccExecutionRouteHandler:
             )
 
         emit(ProgressEvent("argument_validation", "The inputs are ready." if not request.missing_slots else "I need one more input before I can run this.", 3, len(execution_plan)))
+        if request.approved or bool(decision.get("supervise_execution")):
+            supervised = self._execute_supervised(decision, context)
+            if supervised is not None:
+                status = str(supervised.get("status") or ("succeeded" if supervised.get("ok") else "failed"))
+                return EngineResult(
+                    action="answer" if supervised.get("ok") else "error",
+                    label="DCC Execution",
+                    text=self._format_supervised_result(supervised),
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "result_type": f"dcc_supervised_{status}",
+                        "supervised_result": supervised,
+                        "dcc_request": request.to_dict(),
+                        "selected_adapter": request.execution_environment,
+                        "execution_plan": update_execution_plan(execution_plan, status=status, result_type=f"dcc_supervised_{status}"),
+                        "result_card": build_result_card(decision=decision, request=request.to_dict()),
+                        "recovery_options": recovery_options(result_type=f"dcc_supervised_{status}", dispatch_result=supervised),
+                    },
+                )
         if request.preview_only or request.operation_mode == "preview":
             result = adapter.preview(request, context)
         elif request.operation_mode == "query":
@@ -267,6 +305,73 @@ class DccExecutionRouteHandler:
                 **clarification_metadata,
             },
         )
+
+    def _execute_supervised(self, decision: dict, context: RequestContext) -> dict[str, Any] | None:
+        from tech_connector.services.action_execution_engine import ActionExecutionEngine, ExecutionContext
+
+        host = str(decision.get("host") or decision.get("execution_environment") or "").strip().lower()
+        params = dict(decision.get("keyword_args") or {})
+        operation = str(decision.get("target_identifier") or decision.get("operation") or "").strip()
+        services = dict((context.extras or {}).get("services") or {})
+        for key, value in dict(context.extras or {}).items():
+            if key.endswith("_bridge") or key in {"execution_repair", "model_escalation"}:
+                services.setdefault(key, value)
+
+        if host == "unreal" and params.get("code"):
+            action = {
+                "type": "execute_unreal_python",
+                "id": "prompt_unreal_python",
+                "args": {"code": params.get("code"), "timeout": params.get("timeout") or 30},
+                "expected_outcomes": list(decision.get("expected_outcomes") or []),
+                "max_retries": int(decision.get("max_retries") or 2),
+            }
+        elif host:
+            action = {
+                "type": "execute_dcc",
+                "id": f"prompt_{host}_{operation.replace('.', '_') or 'execute'}",
+                "args": {
+                    "host": host,
+                    "operation": operation,
+                    "params": params,
+                    "timeout": params.get("timeout") or 30,
+                },
+                "expected_outcomes": list(decision.get("expected_outcomes") or []),
+                "max_retries": int(decision.get("max_retries") or 2),
+            }
+            if params.get("code"):
+                action["args"]["code"] = params.get("code")
+        else:
+            return None
+
+        return ActionExecutionEngine().execute_action(
+            action,
+            ExecutionContext(
+                project_root=str(context.project_roots[0]) if context.project_roots else "",
+                project_roots=list(context.project_roots or []),
+                active_file=str(context.current_file_path or ""),
+                window=(context.extras or {}).get("window"),
+                services=services,
+                approved=True,
+                policy={"goal": context.text},
+            ),
+        )
+
+    @staticmethod
+    def _format_supervised_result(result: dict[str, Any]) -> str:
+        status = result.get("status") or ("succeeded" if result.get("ok") else "failed")
+        lines = [f"Supervised execution {status}."]
+        if result.get("retry_count"):
+            lines.append(f"Repair attempts: {result.get('retry_count')}.")
+        if result.get("failure_category"):
+            lines.append(f"Failure category: {result.get('failure_category')}.")
+        validations = result.get("validation_results") or []
+        if validations:
+            passed = sum(1 for item in validations if item.get("passed"))
+            lines.append(f"Validation: {passed}/{len(validations)} passed.")
+        error = result.get("error") or result.get("stderr") or ""
+        if error and not result.get("ok"):
+            lines.append(str(error)[:1200])
+        return "\n".join(lines)
 
     def _format_capability_failures(self, request, failures: list[dict]) -> str:
         lines = [
@@ -634,6 +739,37 @@ class PromptDispatchService:
         decision["goal_type"] = goal_type
         decision["ready_goals"] = ready_goals
         decision["completed_goal_ids"] = sorted(completed_goal_ids)
+        availability = dict(
+            decision.get("capability_availability")
+            or (context.extras or {}).get("capability_availability")
+            or {}
+        )
+        if not availability:
+            try:
+                from tech_connector.services.capability_availability_service import build_capability_availability
+
+                availability = build_capability_availability(
+                    status_cards=dict((context.extras or {}).get("status_cards") or {}),
+                    settings=dict((context.extras or {}).get("settings") or {}),
+                    include_live_checks=False,
+                )
+            except Exception:
+                availability = {}
+        if availability:
+            decision["capability_availability"] = availability
+            try:
+                from tech_connector.services.capability_availability_service import warning_for_decision
+
+                warning = warning_for_decision(decision, availability)
+            except Exception:
+                warning = ""
+            if warning:
+                decision.setdefault("planner_warnings", [])
+                if warning not in decision["planner_warnings"]:
+                    decision["planner_warnings"].append(warning)
+                decision.setdefault("reasons", [])
+                if warning not in decision["reasons"]:
+                    decision["reasons"].append(warning)
 
         if ready_goals:
             decision["current_goal"] = dict(ready_goals[0])
@@ -793,7 +929,7 @@ class PromptDispatchService:
             result = EngineResult(
                 action="clarify",
                 label="Clarification Needed",
-                text=clarification.text,
+                text=self._prefix_planner_warnings(decision, clarification.text),
                 metadata={
                     "engine_path": "prompt_dispatch",
                     "result_type": "missing_capabilities",
@@ -841,7 +977,7 @@ class PromptDispatchService:
         result = EngineResult(
             action=result.action,
             label=result.label,
-            text=result.text,
+            text=self._prefix_planner_warnings(decision, result.text),
             prompt=result.prompt,
             metadata=metadata,
         )
@@ -880,11 +1016,43 @@ class PromptDispatchService:
         if (
             CAP_DCC_CONNECTION in requires
             and decision.get("requires_dcc_connection")
+            and self._availability_says_disconnected(decision, context)
+        ):
+            missing.add(CAP_DCC_CONNECTION)
+        if (
+            CAP_DCC_CONNECTION in requires
+            and decision.get("requires_dcc_connection")
             and not (context.extras or {}).get("window")
             and not self._has_direct_dcc_connection(decision)
         ):
             missing.add(CAP_DCC_CONNECTION)
         return missing
+
+    def _availability_says_disconnected(self, decision: dict, context: RequestContext) -> bool:
+        availability = dict(
+            decision.get("capability_availability")
+            or (context.extras or {}).get("capability_availability")
+            or {}
+        )
+        hosts = dict(availability.get("hosts") or {})
+        host = str(decision.get("execution_environment") or decision.get("host") or "").strip().lower()
+        if not host or host not in hosts:
+            return False
+        row = dict(hosts.get(host) or {})
+        return row.get("light") == "red" and not bool(row.get("connected"))
+
+    def _prefix_planner_warnings(self, decision: dict, text: str) -> str:
+        warnings = [
+            str(item).strip()
+            for item in (decision.get("planner_warnings") or [])
+            if str(item).strip()
+        ]
+        if not warnings:
+            return text
+        prefix = "\n".join(f"Warning: {item}" for item in warnings[:3])
+        if text and text.startswith(prefix):
+            return text
+        return prefix + ("\n\n" + text if text else "")
 
     def _has_direct_dcc_connection(self, decision: dict) -> bool:
         host = str(decision.get("execution_environment") or decision.get("host") or "").strip().lower()

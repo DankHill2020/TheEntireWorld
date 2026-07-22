@@ -1170,7 +1170,10 @@ def _extend_terms_for_subsystems(terms: list[str], hints: list[dict[str, Any]], 
 def _resolve_hint_path(path_text: str) -> str:
     path = Path(path_text)
     if not path.is_absolute():
-        path = (_PACKAGE_ROOT / path_text).resolve()
+        resolved = (_PACKAGE_ROOT / path_text).resolve()
+        if not resolved.exists() and path_text.startswith("../"):
+            resolved = (_PACKAGE_ROOT / path_text.replace("../", "", 1)).resolve()
+        path = resolved
     return str(path)
 
 
@@ -1226,6 +1229,8 @@ def _path_score(path: str, terms: list[str], active_path: str | None = None) -> 
             score += 12
         if term in p:
             score += 5
+        if term == name or term + ".py" == name or term == Path(p).stem.lower():
+            score += 500
     if active_path:
         try:
             active_parent = str(Path(active_path).resolve().parent).replace("\\", "/").lower()
@@ -1361,10 +1366,12 @@ def discover_edit_targets(
         path = row.get("path") or ""
         if not path or not _is_project_edit_candidate_path(path) or not _path_allowed_for_edit_scope(path, scope):
             continue
+        is_new = path not in file_scores
         entry = file_scores.setdefault(path, {"path": path, "score": 0, "symbols": [], "chunks": []})
-        entry["score"] += _path_score(path, terms, effective_active_path)
-        entry["score"] += _subsystem_hint_score(path, hints)
-        entry["score"] += 8
+        if is_new:
+            entry["score"] += _path_score(path, terms, effective_active_path)
+            entry["score"] += _subsystem_hint_score(path, hints)
+        entry["score"] += 8 if is_new else 1
         src = (row.get("source") or "").lower()
         for term in terms:
             if term in src:
@@ -1375,10 +1382,12 @@ def discover_edit_targets(
         path = row.get("path") or ""
         if not path or not _is_project_edit_candidate_path(path) or not _path_allowed_for_edit_scope(path, scope):
             continue
+        is_new = path not in file_scores
         entry = file_scores.setdefault(path, {"path": path, "score": 0, "symbols": [], "chunks": []})
-        entry["score"] += _path_score(path, terms, effective_active_path)
-        entry["score"] += _subsystem_hint_score(path, hints)
-        entry["score"] += 4
+        if is_new:
+            entry["score"] += _path_score(path, terms, effective_active_path)
+            entry["score"] += _subsystem_hint_score(path, hints)
+        entry["score"] += 4 if is_new else 1
         text = (row.get("text") or "").lower()
         for term in terms:
             if term in text:

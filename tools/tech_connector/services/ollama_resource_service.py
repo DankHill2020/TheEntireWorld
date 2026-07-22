@@ -53,6 +53,9 @@ def build_ollama_options(
         "num_ctx": int(num_ctx),
         "num_predict": int(num_predict),
     }
+    if resolved_temperature == 0.0:
+        options["top_k"] = 1
+        options["top_p"] = 0.1
 
     num_thread = _positive_int(settings.get("ollama_num_thread"))
     if num_thread is None:

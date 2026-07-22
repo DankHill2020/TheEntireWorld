@@ -40,6 +40,28 @@ class TestChatProjectSearchFastPath(unittest.TestCase):
         self.assertLess(result.text.find("create_rig_from_mapping"), result.text.find("create_full_rig") if "create_full_rig" in result.text else len(result.text))
         self.assertIn("Project index answer ready", "\n".join(progress))
 
+    def test_explicit_qualified_symbol_question_inspects_source_not_location_results(self) -> None:
+        prompt = (
+            "@maya_tools.Rigging.create_rig.create_rig_from_mapping "
+            "what does this function do and how i do use it?"
+        )
+        context = RequestContext(
+            text=prompt,
+            project_roots=["C:/depot/tools"],
+        )
+        result = RequestEngine(progress=lambda _event: None).process(context)
+
+        self.assertEqual("answer", result.action)
+        self.assertEqual("Symbol Inspection", result.label)
+        self.assertEqual("symbol_inspection_direct", result.metadata.get("result_type"))
+        self.assertIn("Signature: `create_rig_from_mapping(body_joint_map, face_joint_map)`", result.text)
+        self.assertIn("Behavior from source:", result.text)
+        self.assertIn("Usage:", result.text)
+        self.assertIn("body_joint_map", result.text)
+        self.assertIn("face_joint_map", result.text)
+        self.assertIn("No explicit `return` value was detected", result.text)
+        self.assertNotIn("Next: ask `show functions in that file`", result.text)
+
     def test_project_wide_maya_rig_search_does_not_get_stuck_on_active_file(self) -> None:
         prompt = "What functions create a rig in maya?"
         decision = classify_prompt_route(prompt, active_path="C:/depot/tools/custom_qt/custom_widgets.py")
@@ -99,6 +121,19 @@ class TestChatProjectSearchFastPath(unittest.TestCase):
         self.assertIn("getExistingDirectory", answer)
         self.assertNotIn(".venv", answer)
         self.assertNotIn("pip\\_internal", answer)
+
+    def test_scoped_module_guidance_prompt_returns_functional_qslider_example(self) -> None:
+        prompt = "what would i do if i needed a class to make a QSlider in @custom_qt.custom_widgets"
+        context = RequestContext(text=prompt, project_roots=["C:/depot/tools"])
+
+        result = RequestEngine(progress=lambda _event: None).process(context)
+
+        self.assertEqual("answer", result.action)
+        self.assertEqual("project_index_direct", result.metadata.get("result_type"))
+        self.assertIn("Resolved container: `custom_qt\\custom_widgets.py`", result.text)
+        self.assertIn("class LabeledSlider(QtWidgets.QWidget):", result.text)
+        self.assertIn("QtWidgets.QSlider(QtCore.Qt.Horizontal)", result.text)
+        self.assertNotIn("project_edit_agent_service.py", result.text)
 
     def test_browse_directory_existence_question_stays_on_instant_index_path(self) -> None:
         prompt = "do we have any class to create a Browse to Directory widget?"

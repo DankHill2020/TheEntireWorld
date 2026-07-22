@@ -23,12 +23,12 @@ class RelocatablePackageLayoutTests(unittest.TestCase):
         self.assertEqual(APP_ROOT / "knowledge", KNOWLEDGE_DIR)
 
     def test_saved_paths_from_the_old_checkout_are_relocated(self):
-        old = "D:/legacy/mcp_servers/the_entire_world_ai_studio/data/ai_intel.db"
+        old = "D:/legacy/ai_studio_checkout/the_entire_world_ai_studio/data/ai_intel.db"
         self.assertEqual(str(APP_ROOT / "data" / "ai_intel.db"), _relocate_legacy_app_path(old))
         self.assertEqual(
             str(APP_ROOT),
             _relocate_legacy_app_path(
-                "D:/legacy/mcp_servers/the_entire_world_ai_studio"
+                "D:/legacy/ai_studio_checkout/the_entire_world_ai_studio"
             ),
         )
 

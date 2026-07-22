@@ -29,7 +29,8 @@ class MentionCandidate:
 
     def display(self) -> str:
         suffix = f" - {self.detail}" if self.detail else ""
-        return f"@{self.token}  [{self.kind} | {self.source}]{suffix}"
+        display_name = self.label or self.token
+        return f"@{display_name}  [{self.kind} | {self.source}]{suffix}"
 
     def prompt_line(self) -> str:
         detail = f"; detail={self.detail}" if self.detail else ""
@@ -47,21 +48,29 @@ FILE_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s`'\"<>|]+")
 MENTION_RE = re.compile(r"(?<!\w)@([A-Za-z0-9_./\\:-]+)")
 
 
-def _safe_token(value: str) -> str:
+def _safe_token(value: str, *, keep_qualified: bool = False) -> str:
     text = str(value or "").strip().strip("`'\"")
     if not text:
         return ""
     if text.startswith("@"):
         text = text[1:]
     text = text.replace("\\", "/").rstrip(".,;:)")
-    if "/" in text:
+    if "/" in text and not keep_qualified:
         text = text.rsplit("/", 1)[-1]
-    if "." in text:
+    if "." in text and not keep_qualified:
         parts = [part for part in text.split(".") if part]
         if parts:
             text = parts[-1]
-    text = re.sub(r"[^A-Za-z0-9_:-]+", "_", text).strip("_")
+    allowed = r"[^A-Za-z0-9_.:/-]+" if keep_qualified else r"[^A-Za-z0-9_:-]+"
+    text = re.sub(allowed, "_", text).strip("_")
     return text[:80]
+
+
+def _project_file_token(rel_path: str) -> str:
+    text = str(rel_path or "").replace("\\", "/").strip("/")
+    if text.lower().endswith(".py"):
+        text = text[:-3]
+    return text.replace("/", ".")
 
 
 def _asset_name_from_path(value: str) -> str:
@@ -81,9 +90,10 @@ def _add_candidate(
     detail: str = "",
     priority: int = 50,
     label: str = "",
+    token: str = "",
 ) -> None:
     value = str(value or "").strip().strip("`")
-    token = _safe_token(label or value)
+    token = _safe_token(token, keep_qualified=True) if token else _safe_token(label or value)
     if not value or not token:
         return
     existing = candidates.get(token.lower())
@@ -223,7 +233,8 @@ def candidates_from_index(query: str, *, limit: int = 12) -> list[MentionCandida
                     rel_path,
                     kind="project_file",
                     source="knowledge_index",
-                    label=Path(str(rel_path)).name,
+                    label=Path(str(rel_path)).stem,
+                    token=_project_file_token(str(rel_path)),
                     detail=str(rel_path),
                     priority=40,
                 )

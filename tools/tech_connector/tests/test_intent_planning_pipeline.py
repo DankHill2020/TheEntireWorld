@@ -226,6 +226,145 @@ class IntentPlanningPipelineTests(unittest.TestCase):
         self.assertTrue(understanding.read_only_requested)
         self.assertGreaterEqual(understanding.confidence, 0.9)
 
+    def test_explicit_qualified_symbol_preserves_explanation_and_usage_intent(self) -> None:
+        prompt = (
+            "@maya_tools.Rigging.create_rig.create_rig_from_mapping "
+            "what does this function do and how i do use it?"
+        )
+        understanding = understand_prompt_request(prompt)
+
+        self.semantic_model.assert_not_called()
+        self.assertEqual("project_search", understanding.primary_route)
+        self.assertEqual("code_understanding", understanding.primary_intent)
+        self.assertEqual("symbol_inspection", understanding.requested_artifact)
+        self.assertEqual(
+            "maya_tools.Rigging.create_rig.create_rig_from_mapping",
+            understanding.target_symbol,
+        )
+        self.assertIn("explain_behavior", understanding.behavior_description)
+        self.assertIn("explain_usage", understanding.behavior_description)
+        self.assertTrue(understanding.requires_examples)
+        self.assertFalse(understanding.mutation_requested)
+
+    def test_module_mention_guidance_is_scoped_read_only_class_help(self) -> None:
+        prompt = "what would i do if i needed a class to make a QSlider in @custom_qt.custom_widgets"
+        understanding = understand_prompt_request(prompt)
+
+        self.semantic_model.assert_not_called()
+        self.assertEqual("project_search", understanding.primary_route)
+        self.assertEqual("project_search", understanding.primary_intent)
+        self.assertEqual("scoped_class_search", understanding.requested_artifact)
+        self.assertEqual("custom_qt.custom_widgets", understanding.target_file)
+        self.assertEqual("custom_qt.custom_widgets", understanding.target_container_query)
+        self.assertEqual("class", understanding.requested_member_type)
+        self.assertEqual("make a QSlider", understanding.behavior_description)
+        self.assertFalse(understanding.mutation_requested)
+
+    def test_module_mention_add_class_is_scoped_project_edit(self) -> None:
+        prompt = "add a QSlider class to @custom_qt.custom_widgets"
+        understanding = understand_prompt_request(prompt)
+
+        self.semantic_model.assert_not_called()
+        self.assertEqual("target_discovery", understanding.primary_route)
+        self.assertEqual("project_code_edit", understanding.primary_intent)
+        self.assertTrue(understanding.mutation_requested)
+        self.assertEqual("custom_qt.custom_widgets", understanding.target_file)
+        self.assertEqual("file", understanding.target_container_type)
+        self.assertEqual("custom_qt.custom_widgets", understanding.target_container_query)
+
+    def test_composed_request_distinguishes_and_roles(self) -> None:
+        from tech_connector.services.prompt_task_splitter_service import compose_request
+
+        select_it = compose_request("Create a locator and select it.").to_dict()
+        dont_select = compose_request("Create a locator and don't select it.").to_dict()
+        call_it = compose_request("Create a locator and call it wrist_loc.").to_dict()
+        context = compose_request("Create a locator and the wrist is selected.").to_dict()
+        validate = compose_request("Create a locator and verify it exists.").to_dict()
+        two_goals = compose_request("Create a locator and a control.").to_dict()
+
+        self.assertEqual(["GOAL", "DEPENDENT_GOAL"], [c["role"] for c in select_it["clauses"]])
+        self.assertEqual(["goal_1"], select_it["goals"][1]["depends_on"])
+        self.assertEqual("$goal_1.output", select_it["goals"][1]["consumes"][0])
+
+        self.assertEqual(["GOAL", "CONSTRAINT"], [c["role"] for c in dont_select["clauses"]])
+        self.assertEqual(["don't select it"], dont_select["goals"][0]["constraints"])
+
+        self.assertEqual(["GOAL", "ARGUMENT"], [c["role"] for c in call_it["clauses"]])
+        self.assertEqual("wrist_loc", call_it["goals"][0]["arguments"]["name"])
+
+        self.assertEqual(["GOAL", "CONTEXT"], [c["role"] for c in context["clauses"]])
+        self.assertIn("context_hint", context["shared_context"])
+
+        self.assertEqual(["GOAL", "VALIDATION"], [c["role"] for c in validate["clauses"]])
+        self.assertEqual(["verify it exists"], validate["goals"][0]["validations"])
+
+        self.assertEqual(["GOAL", "GOAL"], [c["role"] for c in two_goals["clauses"]])
+        self.assertEqual(2, len(two_goals["goals"]))
+
+    def test_composed_request_preserves_output_request_as_modifier_not_task(self) -> None:
+        from tech_connector.services.prompt_task_splitter_service import compose_request
+
+        composed = compose_request("Find the rig function and tell me what file it is in.").to_dict()
+
+        self.assertEqual(["GOAL", "OUTPUT_REQUEST"], [c["role"] for c in composed["clauses"]])
+        self.assertEqual(1, len(composed["goals"]))
+        self.assertIn("output:tell me what file it is in", composed["goals"][0]["modifiers"])
+
+    def test_execution_context_carries_composed_request_graph(self) -> None:
+        context = self._build("Create a locator and call it wrist_loc.")
+        composed = context.task_graph["composed_request"]
+
+        self.assertEqual("compositional_request_v1", composed["framework"])
+        self.assertEqual(["GOAL", "ARGUMENT"], [c["role"] for c in composed["clauses"]])
+        self.assertEqual("wrist_loc", composed["goals"][0]["arguments"]["name"])
+
+    def test_composed_request_tracks_shared_context_plural_args_and_both_reference(self) -> None:
+        from tech_connector.services.prompt_task_splitter_service import compose_request
+
+        composed = compose_request(
+            "In Maya, create a locator and a control, name them wrist_loc and wrist_ctrl, "
+            "move both to the wrist joint, but only select the control."
+        ).to_dict()
+
+        self.assertEqual("maya", composed["shared_context"]["host"])
+        self.assertEqual(
+            ["GOAL", "GOAL", "ARGUMENT", "DEPENDENT_GOAL", "CONSTRAINT"],
+            [clause["role"] for clause in composed["clauses"]],
+        )
+        self.assertEqual("wrist_loc", composed["goals"][0]["arguments"]["name"])
+        self.assertEqual("wrist_ctrl", composed["goals"][1]["arguments"]["name"])
+        self.assertEqual(["goal_1", "goal_2"], composed["goals"][2]["depends_on"])
+        self.assertEqual(["$goal_1.output", "$goal_2.output"], composed["goals"][2]["consumes"])
+        self.assertEqual(["only select the control"], composed["goals"][2]["constraints"])
+
+    def test_composed_request_recognizes_code_inspection_and_unpunctuated_chains(self) -> None:
+        from tech_connector.services.prompt_task_splitter_service import compose_request
+
+        inspect_prompt = compose_request(
+            "Inspect prompt_route_service.py and tell me which function decides project search."
+        ).to_dict()
+        chain_prompt = compose_request(
+            "create locator move it to wrist parent it under joint verify it exists"
+        ).to_dict()
+
+        self.assertEqual(["GOAL", "OUTPUT_REQUEST"], [clause["role"] for clause in inspect_prompt["clauses"]])
+        self.assertEqual("find", inspect_prompt["goals"][0]["action"])
+        self.assertEqual(
+            ["GOAL", "DEPENDENT_GOAL", "DEPENDENT_GOAL", "VALIDATION"],
+            [clause["role"] for clause in chain_prompt["clauses"]],
+        )
+        self.assertEqual(3, len(chain_prompt["goals"]))
+        self.assertEqual(["goal_2"], chain_prompt["goals"][2]["depends_on"])
+
+    def test_prompt_route_does_not_promote_project_ui_or_api_queries_to_unreal(self) -> None:
+        project_details = classify_prompt_route("Open project details or refresh the tree if stale.")
+        api_query = classify_prompt_route("are we importing the new api anywhere find that and dont load it")
+
+        self.assertNotEqual("unreal_capability", project_details.route)
+        self.assertEqual("target_discovery", project_details.route)
+        self.assertNotEqual("unreal_capability", api_query.route)
+        self.assertEqual("project_search", api_query.route)
+
     def test_high_confidence_symbol_lookup_skips_planning_model(self) -> None:
         context = self._build("do we have any class to create a Browse to Directory widget?")
 
@@ -352,6 +491,29 @@ class IntentPlanningPipelineTests(unittest.TestCase):
         self.assertFalse(context.planning_result["mutation_requested"])
         self.assertEqual("code_example", context.planning_result["deliverable"])
         self.assertTrue(validation.valid)
+
+    def test_planning_model_receives_existing_ollama_budget_settings(self) -> None:
+        packets = []
+
+        def capture_plan(system: str, packet: dict, **kwargs) -> dict:
+            packets.append(packet)
+            return _plan_for(system, packet, **kwargs)
+
+        self.planner_model.side_effect = capture_plan
+        context = self._build(
+            "help me write a function that finds twist joints",
+            settings={
+                "ai_work_memory_enabled": False,
+                "ollama_max_timeout_seconds": 3,
+                "ollama_max_num_ctx": 2048,
+                "ollama_max_num_predict": 256,
+            },
+        )
+
+        self.assertEqual("chat", context.planning_result["primary_route"])
+        self.assertTrue(packets)
+        self.assertEqual(3, packets[0]["settings"]["ollama_max_timeout_seconds"])
+        self.assertEqual(2048, packets[0]["settings"]["ollama_max_num_ctx"])
 
     def test_how_would_widget_request_is_read_only_guidance_end_to_end(self) -> None:
         prompt = "in custom_widgets.py how would i make a new widget to create a color picker?"

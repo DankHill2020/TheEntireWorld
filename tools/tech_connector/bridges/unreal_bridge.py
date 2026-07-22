@@ -5,6 +5,7 @@ import os
 import socket
 import urllib.request
 
+from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
 
 
@@ -13,7 +14,7 @@ class UnrealBridge:
 
     PORT_FILES = [
         str(APP_DIR / "unreal_http_port.txt"),
-        str(TOOLS_ROOT / "unreal_http_port.txt"),
+        str(TOOLS_ROOT / "tech_connector" / "bridges" / "ports" / "unreal_http_port.txt"),
     ]
     DEFAULT_PORT = 12347
 
@@ -82,7 +83,7 @@ class UnrealBridge:
             except Exception:
                 result = raw
 
-            return True, result
+            return (False, result) if bridge_output_has_error(result) else (True, result)
         except Exception as e:
             return False, str(e)
 

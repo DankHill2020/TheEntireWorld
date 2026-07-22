@@ -334,6 +334,8 @@ def _matching_file_row(active_path: str | None, file_hint: str) -> dict | None:
     if not file_hint:
         return None
     wanted = file_hint.replace("\\", "/").lower()
+    module_path = wanted.replace(".", "/")
+    module_file = f"{module_path}.py" if "." in wanted and "/" not in wanted and not wanted.endswith(".py") else ""
     wanted_name = Path(wanted).name
     active_resolved = ""
     if active_path:
@@ -346,7 +348,12 @@ def _matching_file_row(active_path: str | None, file_hint: str) -> dict | None:
         path = str(row.get("path") or "").replace("\\", "/").lower()
         if active_resolved and path == active_resolved:
             return row
-        if rel.endswith(wanted) or path.endswith(wanted) or Path(rel).name.lower() == wanted_name:
+        if (
+            rel.endswith(wanted)
+            or path.endswith(wanted)
+            or (module_file and (rel.endswith(module_file) or path.endswith(module_file)))
+            or Path(rel).name.lower() == wanted_name
+        ):
             return row
     try:
         from tech_connector.models.constants import project_index_db_path
@@ -371,6 +378,7 @@ def _matching_file_row(active_path: str | None, file_hint: str) -> dict | None:
                         (active_resolved and path == active_resolved)
                         or rel.endswith(wanted)
                         or path.endswith(wanted)
+                        or (module_file and (rel.endswith(module_file) or path.endswith(module_file)))
                         or rel.endswith("/" + wanted_name)
                         or path.endswith("/" + wanted_name)
                     ):
@@ -664,6 +672,8 @@ def _answer_function_location_question(question: str, active_path: str | None = 
 
 def _should_clarify_function_location(question: str, rows: list[dict]) -> bool:
     if len(rows) < 2:
+        return False
+    if re.search(r"\b(?:what|which)\s+file\s+has\s+a\s+function\s+to\b", question or "", re.IGNORECASE):
         return False
     if re.search(r"\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+\b", question or ""):
         return False
@@ -1083,6 +1093,332 @@ def _indexed_symbol_summary(row: dict) -> str:
     return ""
 
 
+def answer_explicit_symbol_inspection_question(
+    question: str,
+    *,
+    project_roots: list[str] | tuple[str, ...] | None = None,
+    active_path: str | None = None,
+) -> str | None:
+    symbol = _explicit_qualified_symbol_reference(question)
+    if not symbol:
+        return None
+    operations = _symbol_inspection_operations(question)
+    if not operations:
+        return None
+
+    resolution = _resolve_explicit_python_symbol(symbol, project_roots or (), active_path=active_path)
+    if not resolution:
+        return None
+    path, rel, node, source, symbol_tail = resolution
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return None
+
+    lines = [
+        "What I understood",
+        f"Inspect the exact project symbol `{symbol}` and answer: {', '.join(operations)}.",
+        "",
+        f"Target: `{symbol}`",
+        f"Source: `{rel}`" + (f":{getattr(node, 'lineno', '')}" if getattr(node, "lineno", None) else ""),
+        "",
+    ]
+
+    if isinstance(node, ast.ClassDef):
+        lines.append(f"Definition: `class {node.name}`")
+    else:
+        lines.append(f"Signature: `{_callable_signature_from_ast(node)}`")
+    doc = ast.get_docstring(node)
+    if doc:
+        lines.extend(["", "Docstring:", _compact_text(doc, 700)])
+
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        params = _parameter_rows_from_ast(node)
+        if params:
+            lines.extend(["", "Parameters:"])
+            for name, defaulted in params:
+                suffix = " optional/defaulted" if defaulted else " required"
+                lines.append(f"- `{name}`: {suffix}")
+
+        if "explain_behavior" in operations or "show_implementation" in operations:
+            summary = _function_behavior_summary(node)
+            if summary:
+                lines.extend(["", "Behavior from source:"])
+                lines.extend(f"- {item}" for item in summary)
+
+        if "explain_usage" in operations:
+            lines.extend(["", "Usage:"])
+            lines.extend(_usage_lines(symbol, node, source, path))
+
+        if "find_callers" in operations:
+            callers = _find_symbol_callers(path, node.name, project_roots or (), limit=8)
+            lines.extend(["", "Callers found:" if callers else "Callers found: none in the scanned project files."])
+            for caller in callers:
+                lines.append(f"- `{caller}`")
+
+        returns = _return_summary(node)
+        if returns:
+            lines.extend(["", "Returns:", returns])
+
+    if "show_implementation" in operations:
+        snippet = ast.get_source_segment(source, node) or ""
+        if snippet:
+            lines.extend(["", "Implementation excerpt:", "```python", _trim_source(snippet, 80), "```"])
+
+    lines.extend([
+        "",
+        "Resolution: exact qualified symbol. Broad fuzzy project search was not used because the explicit target resolved.",
+    ])
+    return "\n".join(lines)
+
+
+def _explicit_qualified_symbol_reference(question: str) -> str:
+    match = re.search(
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,})(?![\w.])",
+        question or "",
+    )
+    return match.group(1) if match else ""
+
+
+def _symbol_inspection_operations(question: str) -> list[str]:
+    lower = (question or "").lower()
+    operations: list[str] = []
+
+    def add(value: str) -> None:
+        if value not in operations:
+            operations.append(value)
+
+    if re.search(r"\b(what\s+does|what\s+do|how\s+does|explain|summari[sz]e|describe|run\s+through)\b", lower):
+        add("explain_behavior")
+    if re.search(r"\b(how\s+(?:do|can|should|would)\s+i\s+use|how\s+to\s+use|usage|example|invoke|call\s+it|call\s+this|use\s+it)\b", lower):
+        add("explain_usage")
+    if re.search(r"\b(who\s+calls|what\s+calls|find\s+callers?|called\s+by|callers?)\b", lower):
+        add("find_callers")
+    if re.search(r"\b(show|read|inspect|open)\s+(?:the\s+)?(?:implementation|source|body|code)\b", lower):
+        add("show_implementation")
+    return operations
+
+
+def _resolve_explicit_python_symbol(
+    symbol: str,
+    project_roots: list[str] | tuple[str, ...],
+    *,
+    active_path: str | None = None,
+) -> tuple[Path, str, ast.AST, str, list[str]] | None:
+    parts = [part for part in str(symbol or "").split(".") if part]
+    if len(parts) < 2:
+        return None
+    roots = [Path(root) for root in project_roots if root]
+    if active_path:
+        active = Path(active_path)
+        if active.exists():
+            roots.insert(0, active.parent if active.is_file() else active)
+    roots.append(Path.cwd())
+
+    for split_at in range(len(parts) - 1, 0, -1):
+        module_parts = parts[:split_at]
+        symbol_tail = parts[split_at:]
+        rel_file = Path(*module_parts).with_suffix(".py")
+        for root in roots:
+            candidate = root / rel_file
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            try:
+                source = candidate.read_text(encoding="utf-8", errors="replace")
+                tree = ast.parse(source)
+            except Exception:
+                continue
+            node = _find_ast_symbol(tree, symbol_tail)
+            if node is None and symbol_tail:
+                node = _find_ast_symbol(tree, [symbol_tail[-1]])
+            if node is not None:
+                rel = str(rel_file).replace("\\", "/")
+                return candidate, rel, node, source, symbol_tail
+    return None
+
+
+def _find_ast_symbol(tree: ast.AST, symbol_tail: list[str]) -> ast.AST | None:
+    if not symbol_tail:
+        return None
+    if len(symbol_tail) == 1:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == symbol_tail[0]:
+                return node
+        return None
+    current: ast.AST = tree
+    for part in symbol_tail:
+        body = getattr(current, "body", [])
+        found = None
+        for child in body:
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and child.name == part:
+                found = child
+                break
+        if found is None:
+            return None
+        current = found
+    return current
+
+
+def _callable_signature_from_ast(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    return _signature_from_ast(node)
+
+
+def _parameter_rows_from_ast(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, bool]]:
+    args = list(node.args.posonlyargs) + list(node.args.args)
+    if args and args[0].arg in {"self", "cls"}:
+        args = args[1:]
+    default_start = len(args) - len(node.args.defaults)
+    rows = [(arg.arg, index >= default_start) for index, arg in enumerate(args)]
+    rows.extend((arg.arg, default is not None) for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults))
+    return rows
+
+
+def _function_behavior_summary(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    summary: list[str] = []
+    calls: list[str] = []
+    assignments: list[str] = []
+    host_effects: set[str] = set()
+    for child in _walk_function_body_without_nested_defs(node):
+        if isinstance(child, ast.Call):
+            name = _call_name(child.func)
+            if name and name not in calls:
+                calls.append(name)
+            if name.startswith("cmds.") or name.startswith("maya.cmds."):
+                host_effects.add("Uses Maya cmds and can mutate/query the current Maya scene.")
+        elif isinstance(child, (ast.Assign, ast.AnnAssign)):
+            targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+            for target in targets:
+                label = _target_name(target)
+                if label and label not in assignments:
+                    assignments.append(label)
+    if calls:
+        summary.append("Calls project/host helpers including " + ", ".join(f"`{name}`" for name in calls[:12]) + ".")
+    if assignments:
+        summary.append("Builds or updates local values including " + ", ".join(f"`{name}`" for name in assignments[:10]) + ".")
+    summary.extend(sorted(host_effects))
+    if not summary:
+        summary.append("The body is small or mostly declarative; inspect the implementation excerpt for exact behavior.")
+    return summary[:6]
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _target_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return _call_name(node)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return ", ".join(filter(None, (_target_name(item) for item in node.elts)))
+    return ""
+
+
+def _usage_lines(symbol: str, node: ast.FunctionDef | ast.AsyncFunctionDef, source: str, path: Path) -> list[str]:
+    params = [name for name, _defaulted in _parameter_rows_from_ast(node)]
+    example_args = ", ".join(f"{name}={name}" for name in params)
+    lines = [f"Call it as `{symbol}({example_args})`." if example_args else f"Call it as `{symbol}()`."]
+    if params:
+        lines.append("Provide " + ", ".join(f"`{name}`" for name in params) + " before calling it.")
+    related = _nearby_mapping_builders(source, node.name)
+    if related:
+        lines.append("Nearby source also defines likely prerequisite/helper functions: " + ", ".join(f"`{name}`" for name in related[:6]) + ".")
+    lines.append(f"Because this comes from `{path.name}`, run it in the host/context expected by that module; inspect imports and helper calls before invoking it outside that environment.")
+    return lines
+
+
+def _nearby_mapping_builders(source: str, target_name: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except Exception:
+        return []
+    names = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name == target_name:
+            continue
+        lowered = node.name.lower()
+        if "mapping" in lowered or "map" in lowered:
+            names.append(node.name)
+    return names
+
+
+def _return_summary(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    values: list[str] = []
+    has_bare = False
+    for child in _walk_function_body_without_nested_defs(node):
+        if not isinstance(child, ast.Return):
+            continue
+        if child.value is None:
+            has_bare = True
+            continue
+        try:
+            text = ast.unparse(child.value)
+        except Exception:
+            text = type(child.value).__name__
+        if text not in values:
+            values.append(text)
+    if values:
+        return "Returns " + ", ".join(f"`{value}`" for value in values[:8]) + "."
+    if has_bare:
+        return "Contains a bare `return`; no explicit value is returned from that path."
+    return "No explicit `return` value was detected, so Python returns `None` unless helper calls raise."
+
+
+def _walk_function_body_without_nested_defs(node: ast.FunctionDef | ast.AsyncFunctionDef):
+    stack = list(reversed(node.body))
+    while stack:
+        child = stack.pop()
+        if child is not node and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield child
+        stack.extend(reversed(list(ast.iter_child_nodes(child))))
+
+
+def _find_symbol_callers(path: Path, function_name: str, project_roots: list[str] | tuple[str, ...], *, limit: int = 8) -> list[str]:
+    roots = [Path(root) for root in project_roots if root] or [path.parent]
+    callers: list[str] = []
+    pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
+    scanned = 0
+    for root in roots:
+        if not root.exists():
+            continue
+        for candidate in root.rglob("*.py"):
+            if scanned >= 4000 or len(callers) >= limit:
+                return callers
+            scanned += 1
+            normalized = str(candidate).replace("\\", "/").lower()
+            if any(part in normalized for part in ("/.git/", "/.venv/", "/venv/", "/__pycache__/")):
+                continue
+            try:
+                for line_no, line in enumerate(candidate.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if candidate == path and line_no == 1:
+                        continue
+                    if pattern.search(line):
+                        callers.append(f"{candidate}:{line_no}")
+                        break
+            except Exception:
+                continue
+    return callers
+
+
+def _compact_text(value: str, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text if len(text) <= limit else text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _trim_source(value: str, max_lines: int) -> str:
+    lines = str(value or "").splitlines()
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[:max_lines] + ["..."])
+
+
 def _answer_file_symbol_question(question: str, active_path: str | None = None) -> str | None:
     lower = (question or "").lower()
     if not re.search(r"\b(functions?|methods?|arguments?|args?|required|signature)\b", lower):
@@ -1418,11 +1754,20 @@ def answer_scoped_member_behavior_question(
     ]
     related_ranked = [row for row in ranked if row not in direct_ranked]
 
+    guidance_example = _scoped_member_guidance_example(
+        question,
+        request=request,
+        rel_path=rel_path,
+        rows=rows,
+    )
+
     if not ranked:
         lines.append(
             f"No. I did not find a {request.member_type} in that file that "
             f"directly `{request.behavior_description}`."
         )
+        if guidance_example:
+            lines.extend(["", guidance_example])
     else:
         if direct_ranked:
             lines.append(
@@ -1456,6 +1801,8 @@ def answer_scoped_member_behavior_question(
                 signature = row.get("signature") or row.get("qualname") or row.get("name") or ""
                 line = row.get("start_line")
                 lines.append(f"- `{signature}`" + (f" on line `{line}`" if line else ""))
+        if guidance_example:
+            lines.extend(["", guidance_example])
 
     lines.extend(
         [
@@ -1469,6 +1816,64 @@ def answer_scoped_member_behavior_question(
         ]
     )
     return "\n".join(lines)
+
+
+def _scoped_member_guidance_example(
+    question: str,
+    *,
+    request,
+    rel_path: str,
+    rows: list[dict],
+) -> str:
+    lower = (question or "").lower()
+    if not re.search(r"\b(what would|how would|needed|example|look like)\b", lower):
+        return ""
+    if request.member_type != "class":
+        return ""
+    if "qslider" not in lower and "slider" not in lower:
+        return ""
+
+    existing_classes = [
+        str(row.get("name") or row.get("qualname") or "")
+        for row in rows
+        if str(row.get("kind") or "").lower() == "class"
+    ]
+    context_line = ""
+    if existing_classes:
+        context_line = (
+            "Nearby class patterns in this file include "
+            + ", ".join(f"`{name}`" for name in existing_classes[:5] if name)
+            + "."
+        )
+    return "\n".join(
+        [
+            "Example functional class you could add in that module:",
+            "",
+            "```python",
+            "class LabeledSlider(QtWidgets.QWidget):",
+            "    def __init__(self, label=\"Value\", minimum=0, maximum=100, value=0, parent=None):",
+            "        super(LabeledSlider, self).__init__(parent)",
+            "        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)",
+            "        self.slider.setRange(minimum, maximum)",
+            "        self.slider.setValue(value)",
+            "",
+            "        self.label = QtWidgets.QLabel(label)",
+            "        self.value_label = QtWidgets.QLabel(str(value))",
+            "        self.slider.valueChanged.connect(self._on_value_changed)",
+            "",
+            "        layout = QtWidgets.QHBoxLayout(self)",
+            "        layout.addWidget(self.label)",
+            "        layout.addWidget(self.slider)",
+            "        layout.addWidget(self.value_label)",
+            "",
+            "    def _on_value_changed(self, value):",
+            "        self.value_label.setText(str(value))",
+            "```",
+            "",
+            f"That matches `{rel_path}` by using the already-imported `QtWidgets` and `QtCore` aliases.",
+            context_line,
+        ]
+    ).strip()
 
 _CONDITIONAL_FALLBACK_RE = re.compile(
     r"\b("
@@ -1905,6 +2310,17 @@ def answer_simple_project_index_question(
     if not is_project_scope_request(question):
         return None
 
+    scoped_answer = answer_scoped_member_behavior_question(
+        question,
+        active_path=active_path,
+    )
+    if scoped_answer:
+        return scoped_answer
+
+    location_answer = _answer_function_location_question(question, active_path=active_path)
+    if location_answer:
+        return location_answer
+
     contract_file_answer = _answer_contract_file_location_question(
         question,
         active_path=active_path,
@@ -1912,13 +2328,6 @@ def answer_simple_project_index_question(
     )
     if contract_file_answer:
         return contract_file_answer
-
-    scoped_answer = answer_scoped_member_behavior_question(
-        question,
-        active_path=active_path,
-    )
-    if scoped_answer:
-        return scoped_answer
 
     research_answer = answer_project_research_question(question, active_path=active_path)
     if research_answer:
@@ -1931,10 +2340,6 @@ def answer_simple_project_index_question(
     symbol_answer = _answer_file_symbol_question(question, active_path=active_path)
     if symbol_answer:
         return symbol_answer
-
-    location_answer = _answer_function_location_question(question, active_path=active_path)
-    if location_answer:
-        return location_answer
 
     maya_qt_answer = _answer_maya_qt_ui_class_question(
         question,

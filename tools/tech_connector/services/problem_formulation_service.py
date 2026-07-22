@@ -114,6 +114,13 @@ _DCC_NOUNS = re.compile(
 )
 _FILE_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_./\\-]*\.[A-Za-z0-9_]+)\b")
 _SYMBOL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b")
+_UNREAL_ASSET_RE = re.compile(r"(?<![A-Za-z0-9_])(/Game/[A-Za-z0-9_./-]+)")
+_PLAN_ONLY_RE = re.compile(
+    r"\b(?:plan\s+only|implementation\s+plan|plan\s+for\s+approval|"
+    r"first\s+produce.{0,40}\bplan|do\s+not\s+(?:mutate|edit|modify|save|execute)|"
+    r"before\s+(?:any\s+)?mutation)\b",
+    re.IGNORECASE,
+)
 
 
 def build_problem_formulation(
@@ -327,6 +334,7 @@ def _collect_facts(
         value for value in _SYMBOL_RE.findall(prompt)
         if not value.lower().endswith((".py", ".json", ".txt", ".md"))
     )
+    assets = _uniq(value.rstrip(".,;:)") for value in _UNREAL_ASSET_RE.findall(prompt))
     momentum = context.get("context_momentum") or decision.get("context_momentum") or {}
     recent_targets = list(momentum.get("targets") or []) if isinstance(momentum, dict) else []
     return {
@@ -334,6 +342,7 @@ def _collect_facts(
         "semantic_contract": semantic_contract,
         "explicit_files": files,
         "explicit_symbols": symbols,
+        "explicit_assets": assets,
         "question_form": bool(_QUESTION_START.search(prompt)),
         "mutation_language": _uniq(match.group(0).lower() for match in _MUTATION.finditer(prompt)),
         "execution_language": _uniq(match.group(0).lower() for match in _EXECUTION.finditer(prompt)),
@@ -465,6 +474,13 @@ def _deterministic_formulation(
 
 def _action_mode(prompt: str, facts: dict[str, Any], intent: dict[str, Any], contract: dict[str, Any]) -> str:
     lower = prompt.lower()
+    if _PLAN_ONLY_RE.search(prompt):
+        return "design"
+    action = str(intent.get("action") or "")
+    if action == "execute" and (
+        contract.get("execution_requested") or facts.get("execution_language")
+    ):
+        return "execute"
     contract_goal = str(contract.get("goal_type") or "")
     if contract_goal in {"locate", "explain", "inspect", "compare"}:
         return "read_only"
@@ -475,7 +491,6 @@ def _action_mode(prompt: str, facts: dict[str, Any], intent: dict[str, Any], con
 
     question = bool(facts.get("question_form"))
     source_language = bool(facts.get("source_language"))
-    action = str(intent.get("action") or "")
     if question and source_language:
         return "read_only"
     if action == "inspect":
@@ -491,6 +506,8 @@ def _action_mode(prompt: str, facts: dict[str, Any], intent: dict[str, Any], con
 
 
 def _deliverables(prompt: str, intent: dict[str, Any], contract: dict[str, Any]) -> list[str]:
+    if _PLAN_ONLY_RE.search(prompt):
+        return ["implementation_plan"]
     explicit = str(contract.get("deliverable_type") or "")
     if explicit:
         mapping = {
@@ -564,6 +581,9 @@ def _scope(prompt: str, facts: dict[str, Any], intent: dict[str, Any], contract:
     files = list(facts.get("explicit_files") or [])
     if files:
         return files[0]
+    assets = list(facts.get("explicit_assets") or [])
+    if assets:
+        return ", ".join(assets)
     requested = str(intent.get("requested_scope") or "")
     if requested:
         return requested
@@ -593,6 +613,8 @@ def _knowns(prompt: str, facts: dict[str, Any], scope: str) -> list[str]:
         values.append(f"Explicit file: {path}")
     for symbol in facts.get("explicit_symbols") or []:
         values.append(f"Explicit symbol: {symbol}")
+    for asset in facts.get("explicit_assets") or []:
+        values.append(f"Explicit Unreal asset: {asset}")
     if scope and not scope.startswith("conversation_reference"):
         values.append(f"Requested scope: {scope}")
     host = str(facts.get("host") or "")
@@ -637,7 +659,12 @@ def _unknowns(
                 re.IGNORECASE,
             )
         )
-        if not facts.get("explicit_files") and not facts.get("explicit_symbols") and not explicit_callable:
+        if (
+            not facts.get("explicit_files")
+            and not facts.get("explicit_symbols")
+            and not facts.get("explicit_assets")
+            and not explicit_callable
+        ):
             unknowns.append("The exact target to modify or execute.")
             blocking.append("Resolve one concrete mutation/execution target.")
         unknowns.append("The observable validation that proves the operation succeeded.")
@@ -709,6 +736,14 @@ def _prerequisites(
             "Define the helper contract and insertion point.",
             "Define validation before implementation.",
         ]
+    if deliverables == ["implementation_plan"]:
+        return [
+            "Resolve every explicit project and Unreal asset target.",
+            "Preserve each requested behavior, constraint, and failure observation.",
+            "Inspect live project evidence before choosing architecture.",
+            "Compare applicable current techniques and callable operations.",
+            "Define mutation stages, rollback, and runtime proof without executing them.",
+        ]
     if action_mode == "mutate":
         return [
             "Resolve exact target.",
@@ -748,6 +783,13 @@ def _evidence_required(
             "Call sites or consumers of the proposed result.",
             "Focused static/runtime validation path.",
         ]
+    if deliverables == ["implementation_plan"]:
+        return [
+            "Live target assets, ownership, dependencies, and current graph topology.",
+            "A clause-complete behavior/state/transition contract.",
+            "Versioned technique evidence and callable operation availability.",
+            "Positive, negative, boundary, regression, and rollback criteria.",
+        ]
     if action_mode in {"mutate", "execute"}:
         return ["Resolved target", "pre-action state", "post-action result", "validation evidence"]
     return ["Evidence directly supporting the answer."]
@@ -763,6 +805,8 @@ def _desired_outcome(
         return f"The user knows which source files contain the primary implementation of '{subject}', and why."
     if "function_design" in deliverables:
         return f"The user has a justified design or implementation path for a helper that {subject}, without duplicating existing capability."
+    if deliverables == ["implementation_plan"]:
+        return f"The user receives an evidence-grounded, approval-ready implementation plan for '{subject}' and no project mutation occurs."
     if action_mode == "mutate":
         return f"The requested change to '{subject}' is applied narrowly and verified."
     if action_mode == "execute":
@@ -788,6 +832,8 @@ def _interpreted_problem(
             f"Determine whether {scope} already contains a reusable capability for "
             f"'{subject}'; if not, design the smallest compatible helper and its validation."
         )
+    if deliverables == ["implementation_plan"]:
+        return f"Inspect and decompose '{subject}', then produce a complete approval-gated implementation and proof plan within {scope}."
     if action_mode == "mutate":
         return f"Resolve and safely modify the exact target for '{subject}', preserving unrelated behavior."
     if action_mode == "execute":
@@ -816,6 +862,14 @@ def _success_conditions(
             "The proposed helper has a clear signature, behavior, placement, and return contract.",
             "The recommendation follows existing project conventions.",
             "A concrete validation path is defined before implementation.",
+        ]
+    if deliverables == ["implementation_plan"]:
+        return [
+            "Every explicit target and requested behavior clause appears in the plan.",
+            "Architecture choices are tied to live project and versioned source evidence.",
+            "Every action names a real callable or remains an explicit capability gap.",
+            "Rollback and runtime proof scenarios are concrete and ordered.",
+            "No project or DCC mutation occurs before approval.",
         ]
     if action_mode in {"mutate", "execute"}:
         return [
@@ -980,11 +1034,21 @@ def _candidate_plan(
         add("report_or_implement", "report", "Return the design or hand it to the mutation planner if implementation was explicitly requested.", ["define_validation"], ["final_answer"], "The user receives the requested design/implementation path.")
         return steps
 
+    if deliverables == ["implementation_plan"]:
+        add("resolve_targets", "resolve", "Resolve explicit Unreal assets, runtime owners, and touched boundaries.", produces=["resolved_targets"], success="Every named target is uniquely resolved.")
+        add("inspect_live_state", "inspect", "Inspect live graph, input, animation, asset, and runtime evidence.", ["resolve_targets"], ["live_evidence"], "The current failure and reusable project patterns are evidenced.")
+        add("decompose_behavior", "analyze", "Preserve all requested stimuli, observations, guards, states, transitions, effects, and failure paths.", ["inspect_live_state"], ["behavior_contract"], "Every behavior clause is represented without selecting a canned mechanic.")
+        add("compare_techniques", "discover", "Compare current applicable techniques and verify callable operations.", ["decompose_behavior"], ["technique_evidence", "capability_matrix"], "Choices are source-grounded and missing operations remain explicit.")
+        add("synthesize_plan", "plan", "Produce exact staged actions, asset impacts, rollback, and acceptance criteria.", ["compare_techniques"], ["approval_plan"], "The plan is detailed, executable, and mutation remains gated.")
+        add("define_runtime_proof", "validate", "Define positive, negative, boundary, regression, visual, and log proof scenarios.", ["synthesize_plan"], ["proof_contract"], "Completion cannot be claimed from compilation or asset existence alone.")
+        add("report_plan", "report", "Present the approval-ready plan and unresolved choices.", ["define_runtime_proof"], ["final_answer"], "The user can approve, revise, add, or remove plan stages before mutation.")
+        return steps
+
     if action_mode == "mutate":
         add("resolve_target", "resolve", "Resolve exact target and boundaries.", produces=["resolved_target"], success="Mutation target is unique.")
         add("inspect_context", "inspect", "Inspect current implementation, dependencies, and reusable patterns.", ["resolve_target"], ["target_context"], "Enough evidence exists for a safe change.")
         add("design_change", "plan", "Design the smallest behavior-preserving change.", ["inspect_context"], ["change_plan"], "Exact edits and rollback are defined.")
-        add("apply_change", "modify", "Apply the scoped change.", ["design_change"], ["changed_state"], "Only intended targets changed.")
+        add("apply_change", "modify", "Apply the scoped change.", ["design_change"], ["changed_state"], "Only intended targets changed.", read_only=False)
         add("validate", "validate", "Run focused validation and inspect resulting behavior.", ["apply_change"], ["validation_result"], "Validation proves success or identifies repair.")
         add("report", "report", "Report changes, evidence, warnings, and remaining risks.", ["validate"], ["final_answer"], "Accountable verified outcome is delivered.")
         return steps
@@ -992,7 +1056,7 @@ def _candidate_plan(
     if action_mode == "execute":
         add("resolve_callable", "resolve", "Resolve callable, host, inputs, and target.", produces=["execution_contract"], success="Operation is unambiguous.")
         add("preflight", "preflight", "Check host connection, safety, and observable success.", ["resolve_callable"], ["preflight_result"], "Execution is safe and measurable.")
-        add("execute", "execute", "Execute through the deterministic bridge.", ["preflight"], ["execution_result"], "Structured result is returned.")
+        add("execute", "execute", "Execute through the deterministic bridge.", ["preflight"], ["execution_result"], "Structured result is returned.", read_only=False)
         add("validate", "validate", "Verify resulting host/project state.", ["execute"], ["validation_result"], "State satisfies objective.")
         add("report", "report", "Report operation, outcome, and warnings.", ["validate"], ["final_answer"], "Verified result is delivered.")
         return steps

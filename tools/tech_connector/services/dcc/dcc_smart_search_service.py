@@ -88,6 +88,31 @@ def _matches(query: str, *values: str) -> bool:
     return all(part in " ".join(values).lower() for part in needle.split())
 
 
+def _tool_path_matches(query: str, *values: str) -> bool:
+    needle = str(query or "").strip().lower().replace("\\", "/")
+    if not needle:
+        return True
+    haystack = " ".join(str(value or "") for value in values).lower().replace("\\", "/")
+    if needle in haystack:
+        return True
+    normalized_needle = re.sub(r"[./]+", ".", needle).strip(".")
+    normalized_haystack = re.sub(r"[./]+", ".", haystack)
+    if normalized_needle and normalized_needle in normalized_haystack:
+        return True
+    parts = [part for part in re.split(r"[\s./]+", needle) if part]
+    return bool(parts) and all(part in normalized_haystack for part in parts)
+
+
+def _same_tool_reference(left: str, right: str) -> bool:
+    return re.sub(r"[\\/]+", ".", str(left or "").lower()).strip(".") == re.sub(
+        r"[\\/]+", ".", str(right or "").lower()
+    ).strip(".")
+
+
+def _query_allows_private_symbols(query: str) -> bool:
+    return any(part.startswith("_") for part in re.split(r"[\s./\\]+", str(query or "")) if part)
+
+
 def _module_for_file(package: str, rel_path: str, module: str) -> str:
     normalized_module = str(module or "").strip(".")
     if normalized_module:
@@ -226,11 +251,16 @@ def _package_function_candidates(
         return []
 
     candidates: dict[str, SmartSearchCandidate] = {}
+    include_private = _query_allows_private_symbols(query)
     for name, qualname, kind, signature, docstring, rel_path, module in rows:
         if str(kind or "").lower() not in _FUNCTION_KINDS:
             continue
-        module_name = _module_for_file(package, str(rel_path or ""), str(module or ""))
+        if str(name or "").startswith("_") and not include_private:
+            continue
         symbol_name = str(qualname or name or "").strip(".")
+        if "." in symbol_name and not include_private:
+            continue
+        module_name = _module_for_file(package, str(rel_path or ""), str(module or ""))
         if not module_name or not symbol_name:
             continue
         full_name = symbol_name if symbol_name.startswith(f"{module_name}.") else f"{module_name}.{symbol_name}"
@@ -240,9 +270,9 @@ def _package_function_candidates(
         searchable = " ".join(
             [str(name or ""), relative_name, str(signature or ""), str(docstring or ""), str(rel_path or "")]
         )
-        if not _matches(query, searchable):
+        if not _tool_path_matches(query, searchable):
             continue
-        token = f"{package}/{relative_name}"
+        token = f"{package}.{relative_name}"
         key = token.lower()
         candidates[key] = SmartSearchCandidate(
             token=token,
@@ -310,7 +340,9 @@ def smart_search_suggestions(
     """Return hierarchical suggestions for text following ``@``.
 
     ``Application.`` searches registered host operations and associated indexed
-    tools. ``package/`` searches only functions indexed beneath that package.
+    tools. ``package.`` searches indexed Python modules/functions beneath that
+    package. Slash package references are accepted as compatibility input, but
+    function suggestions are emitted as real dotted Python paths.
     """
 
     db_path = Path(db_path) if db_path is not None else project_index_db_path()
@@ -394,12 +426,12 @@ def smart_search_suggestions(
             continue
         roots.append(
             SmartSearchCandidate(
-                token=f"{package}/",
+                token=f"{package}.",
                 label=package,
                 kind="tool package",
                 value=str(path),
                 source="project intelligence",
-                detail="indexed functions only",
+                detail="indexed Python modules and functions",
                 priority=90,
             )
         )
@@ -436,16 +468,48 @@ def smart_search_context_block(text: str, *, db_path: Path | None = None) -> str
                     f"callable `{getattr(operation, 'function', '')}`"
                 )
                 continue
+            if host:
+                matches = _application_candidates(
+                    host,
+                    operation_key,
+                    package_dirs=package_dirs,
+                    db_path=Path(db_path),
+                    limit=5,
+                )
+                item = matches[0] if matches else None
+                if item:
+                    if item.kind == "DCC operation":
+                        lines.append(
+                            f"- @{token}: matched {HOST_LABELS[host]} operation `{item.value}`; "
+                            f"candidate token `@{item.token}`"
+                        )
+                    else:
+                        lines.append(
+                            f"- @{token}: matched indexed tool function `{item.value}` from `{item.detail}`"
+                        )
+                    continue
+            if owner.lower() in package_dirs:
+                matches = _package_function_candidates(
+                    owner.lower(), operation_key, db_path=Path(db_path), limit=10
+                )
+                exact = next((item for item in matches if _same_tool_reference(item.token, token)), None)
+                item = exact or (matches[0] if matches else None)
+                if item:
+                    lines.append(
+                        f"- @{token}: indexed tool function `{item.value}` from `{item.detail}`"
+                    )
+                    continue
         if "/" in token:
             package, function_name = token.split("/", 1)
             if package.lower() in package_dirs:
                 matches = _package_function_candidates(
                     package.lower(), function_name, db_path=Path(db_path), limit=10
                 )
-                exact = next((item for item in matches if item.token.lower() == token.lower()), None)
-                if exact:
+                exact = next((item for item in matches if _same_tool_reference(item.token, token)), None)
+                item = exact or (matches[0] if matches else None)
+                if item:
                     lines.append(
-                        f"- @{token}: indexed tool function `{exact.value}` from `{exact.detail}`"
+                        f"- @{token}: indexed tool function `{item.value}` from `{item.detail}`"
                     )
                     continue
                 lines.append(f"- @{token}: requested function in tool package `{package}`; exact index evidence unresolved")

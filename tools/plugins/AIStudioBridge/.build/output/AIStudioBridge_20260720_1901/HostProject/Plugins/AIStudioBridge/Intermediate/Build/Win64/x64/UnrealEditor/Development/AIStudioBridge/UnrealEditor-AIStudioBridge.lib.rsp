@@ -1,0 +1,14 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/experimental:deterministic
+/DEF
+/NAME:"UnrealEditor-AIStudioBridge.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"C:/depot/tools/plugin_build_output/AIStudioBridge_20260720_1901/HostProject/Intermediate/Build/Win64/x64/UnrealEditor/Development/UnrealEd/SharedPCH.UnrealEd.Cpp20.h.obj"
+"C:/depot/tools/plugin_build_output/AIStudioBridge_20260720_1901/HostProject/Plugins/AIStudioBridge/Intermediate/Build/Win64/x64/UnrealEditor/Development/AIStudioBridge/Module.AIStudioBridge.cpp.obj"
+"C:/depot/tools/plugin_build_output/AIStudioBridge_20260720_1901/HostProject/Plugins/AIStudioBridge/Intermediate/Build/Win64/x64/UnrealEditor/Development/AIStudioBridge/AIStudioBridge.cpp.obj"
+"C:/depot/tools/plugin_build_output/AIStudioBridge_20260720_1901/HostProject/Plugins/AIStudioBridge/Intermediate/Build/Win64/x64/UnrealEditor/Development/AIStudioBridge/AIStudioBridgeLibrary.cpp.obj"
+/OUT:"C:/depot/tools/plugin_build_output/AIStudioBridge_20260720_1901/HostProject/Plugins/AIStudioBridge/Intermediate/Build/Win64/x64/UnrealEditor/Development/AIStudioBridge/UnrealEditor-AIStudioBridge.lib"

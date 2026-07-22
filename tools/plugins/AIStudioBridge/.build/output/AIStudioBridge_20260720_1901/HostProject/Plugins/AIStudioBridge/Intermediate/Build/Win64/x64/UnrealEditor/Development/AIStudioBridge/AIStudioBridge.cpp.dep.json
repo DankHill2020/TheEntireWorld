@@ -1,0 +1,14 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "c:\\depot\\tools\\plugin_build_output\\aistudiobridge_20260720_1901\\hostproject\\plugins\\aistudiobridge\\source\\aistudiobridge\\private\\aistudiobridge.cpp",
+        "ProvidedModule": "",
+        "PCH": "c:\\depot\\tools\\plugin_build_output\\aistudiobridge_20260720_1901\\hostproject\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\unrealed\\sharedpch.unrealed.cpp20.h.pch",
+        "Includes": [
+            "c:\\depot\\tools\\plugin_build_output\\aistudiobridge_20260720_1901\\hostproject\\plugins\\aistudiobridge\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\aistudiobridge\\definitions.aistudiobridge.h",
+            "c:\\depot\\tools\\plugin_build_output\\aistudiobridge_20260720_1901\\hostproject\\plugins\\aistudiobridge\\source\\aistudiobridge\\public\\aistudiobridge.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

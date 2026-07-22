@@ -23,8 +23,14 @@ from tech_connector.dcc_intelligence.runtime import TTLMemoryCache, elapsed_ms, 
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
 
 
-class UnrealBridge:
+from tech_connector.services.modular_provider_utils import DCCBridgeDelegateMixin
+
+
+class UnrealBridge(DCCBridgeDelegateMixin):
     """Deterministic Unreal communication via HTTP bridge."""
+
+    def __init__(self):
+        self.init_delegate("unreal")
 
     PORT_FILES = [
         str(APP_DIR / "unreal_http_port.txt"),
@@ -448,25 +454,51 @@ print(json.dumps(result))
     def bootstrap_unreal_python_paths(self, timeout: float = 3.0, force: bool = False) -> dict[str, Any]:
         """Add Tech Connector paths to Unreal's sys.path and verify helper imports.
 
-        This intentionally uses the bridge server's legacy eval endpoint because
-        the dynamic helper may not be importable until after the bootstrap runs.
+        Prefer the packaged dynamic executor. The legacy eval endpoint is only a
+        bootstrap fallback for installs where the helper is not yet importable.
         """
         cache_key = "unreal_python_bootstrap"
         if not force:
             cached = self._request_cache.get(cache_key, 300.0)
             if isinstance(cached, dict) and cached.get("ok"):
                 return dict(cached)
-        result = self.safe_call(
-            "eval",
-            args=[self._build_unreal_python_bootstrap_source()],
-            kwargs={},
-            timeout=timeout,
-            retries=0,
-            retry_safe=False,
-            label="python_path_bootstrap",
-            operation="bootstrap_unreal_python_paths",
-        )
-        normalized = self._normalize_execute_python_response(result)
+        source = self._build_unreal_python_bootstrap_source()
+        normalized = {}
+        for function_path in (
+            "tech_connector.bridges.unreal.unreal_dynamic_exec.run_python",
+            "unreal_dynamic_exec.run_python",
+        ):
+            result = self.safe_call(
+                function_path,
+                args=[source],
+                kwargs={"reset_globals": False},
+                timeout=timeout,
+                retries=0,
+                retry_safe=False,
+                label="python_path_bootstrap",
+                operation="bootstrap_unreal_python_paths",
+            )
+            normalized = self._normalize_execute_python_response(result)
+            if normalized.get("ok"):
+                break
+            if not self._looks_like_missing_dynamic_exec(normalized):
+                break
+        if not normalized.get("ok") and self._looks_like_missing_dynamic_exec(normalized):
+            result = self.safe_call(
+                "eval",
+                args=[source],
+                kwargs={},
+                timeout=timeout,
+                retries=0,
+                retry_safe=False,
+                label="python_path_bootstrap_legacy_eval",
+                operation="bootstrap_unreal_python_paths",
+            )
+            normalized = self._normalize_execute_python_response(
+                result,
+                fallback_used=True,
+                fallback_name="legacy_eval_bootstrap",
+            )
         data = normalized.get("data")
         if isinstance(data, str):
             parsed = self._parse_raw(data)

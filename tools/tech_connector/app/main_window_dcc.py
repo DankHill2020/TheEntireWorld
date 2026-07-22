@@ -42,8 +42,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tech_connector.services.unreal.graph_patch_service import build_patch
-
 from tech_connector.ui.unreal_editor_dialogs import (
     UnrealCapabilityValidationDialog,
     UnrealOperationConfirmDialog,
@@ -530,6 +528,8 @@ class MainWindowDccMixin:
         return dlg.exec() == QDialog.Accepted
 
     def build_unreal_graph_patch_from_plan(self, plan):
+        from tech_connector.services.unreal.graph_patch_service import build_patch
+
         rewrite_plan = (plan or {}).get("rewrite_plan") or {}
         candidate = rewrite_plan.get("graph_patch_candidate") or {}
         target_asset = (

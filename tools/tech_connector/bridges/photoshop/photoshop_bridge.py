@@ -5,6 +5,7 @@ import json
 import os
 import socket
 from pathlib import Path
+from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
@@ -286,9 +287,10 @@ class PhotoshopBridge:
             try:
                 parsed = json.loads(raw)
                 result = parsed.get("result") or parsed.get("error") or raw
-                return bool(parsed.get("ok", True)), str(result).strip() or "Photoshop returned no output."
+                ok = bool(parsed.get("ok", True)) and not bridge_output_has_error(result)
+                return ok, str(result).strip() or "Photoshop returned no output."
             except Exception:
-                return True, raw
+                return (False, raw) if bridge_output_has_error(raw) else (True, raw)
         except Exception as e:
             return False, str(e)
 

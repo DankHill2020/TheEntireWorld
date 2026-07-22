@@ -155,6 +155,7 @@ def query_ollama_text(
     coder_preference: str = "balanced",
     think: bool | None = None,
     response_format: str | dict | None = None,
+    temperature: float | None = None,
 ):
     import urllib.request
     import json
@@ -162,11 +163,16 @@ def query_ollama_text(
         from tech_connector.services.ollama_resource_service import build_ollama_options, ollama_keep_alive
         from tech_connector.services.settings_service import load_settings
         settings = load_settings()
-        options = build_ollama_options(num_ctx=num_ctx, num_predict=num_predict, settings=settings)
+        options = build_ollama_options(
+            num_ctx=num_ctx,
+            num_predict=num_predict,
+            settings=settings,
+            temperature=temperature,
+        )
         keep_alive = ollama_keep_alive(settings)
     except Exception:
         options = {
-            "temperature": 0.2,
+            "temperature": 0.2 if temperature is None else temperature,
             "num_ctx": num_ctx,
             "num_predict": num_predict,
         }
@@ -217,6 +223,102 @@ def query_ollama_text(
     except Exception as e:
         print(f"Error querying Ollama ({model}): {e}")
         return None
+
+
+def query_ollama_json_until_complete(
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    num_ctx: int = 4096,
+    timeout: int = 1800,
+    temperature: float = 0.0,
+    progress_callback=None,
+):
+    """Stream until one complete JSON value exists, then close the generation."""
+
+    import json
+    import time
+    import urllib.request
+
+    try:
+        from tech_connector.services.ollama_resource_service import build_ollama_options, ollama_keep_alive
+        from tech_connector.services.settings_service import load_settings
+
+        settings = load_settings()
+        options = build_ollama_options(
+            num_ctx=num_ctx,
+            # The client, not a token estimate, decides when the product is done.
+            num_predict=-1,
+            settings=settings,
+            temperature=temperature,
+        )
+        keep_alive = ollama_keep_alive(settings)
+    except Exception:
+        options = {"temperature": temperature, "num_ctx": num_ctx, "num_predict": -1}
+        keep_alive = "24h"
+
+    model = (model or "").replace("ollama:", "", 1).strip()
+    model = resolve_installed_ollama_model(
+        model,
+        get_installed_ollama_models(),
+        prefer_coder=True,
+        coder_preference="fast",
+    ).replace("ollama:", "", 1).strip()
+    print(f"[Ollama Status] Active streaming JSON model: {model}", flush=True)
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": True,
+            "keep_alive": keep_alive,
+            "format": "json",
+            "think": False,
+            "options": options,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "http://127.0.0.1:11434/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    decoder = json.JSONDecoder()
+    accumulated = ""
+    started = time.monotonic()
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            for raw_line in response:
+                if time.monotonic() - started > timeout:
+                    raise TimeoutError(f"Streaming JSON generation exceeded {timeout} seconds.")
+                event = json.loads(raw_line.decode("utf-8"))
+                chunk = str(dict(event.get("message") or {}).get("content") or "")
+                if chunk:
+                    accumulated += chunk
+                    if progress_callback:
+                        progress_callback(chunk, accumulated)
+                    candidate = accumulated.strip()
+                    if candidate.startswith("```json"):
+                        candidate = candidate[7:].lstrip()
+                    elif candidate.startswith("```"):
+                        candidate = candidate[3:].lstrip()
+                    try:
+                        _value, end = decoder.raw_decode(candidate)
+                    except json.JSONDecodeError:
+                        continue
+                    trailing = candidate[end:].strip()
+                    if not trailing or trailing == "```":
+                        return candidate[:end]
+                if event.get("done"):
+                    break
+    except Exception as exc:
+        print(f"Error streaming Ollama JSON ({model}): {exc}", flush=True)
+        return None
+    return accumulated.strip() or None
 
 
 def is_scrolling_restoration_query(question: str) -> bool:
@@ -1095,7 +1197,13 @@ def _connect_index():
     if not db.exists():
         raise FileNotFoundError(f"Knowledge index not found: {db}")
     uri = db.resolve().as_uri() + "?mode=ro&immutable=1"
-    conn = sqlite3.connect(uri, timeout=30, uri=True)
+
+    class ClosingConnection(sqlite3.Connection):
+        def __exit__(self, exc_type, exc_value, traceback):
+            super().__exit__(exc_type, exc_value, traceback)
+            self.close()
+
+    conn = sqlite3.connect(uri, timeout=30, uri=True, factory=ClosingConnection)
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA query_only = ON")
     conn.row_factory = sqlite3.Row
@@ -1455,14 +1563,11 @@ def search_index_symbols(terms: list[str], *, limit: int = 80, active_path: str 
         query += scope_sql
         params.extend(scope_params)
         order = []
-        if active_path:
-            order.append("CASE WHEN f.path = ? THEN 0 ELSE 1 END")
-            params.append(str(Path(active_path).resolve()))
         if class_bias:
             order.append("CASE WHEN s.kind = 'class' THEN 0 WHEN s.kind = 'method' THEN 1 ELSE 2 END")
         order.extend(["f.path", "s.start_line"])
         query += " ORDER BY " + ", ".join(order) + " LIMIT ?"
-        params.append(int(limit) * 8)
+        params.append(max(int(limit) * 100, 3000))
         rows = _as_dict_rows(cur.execute(query, params).fetchall())
         return _rank_scoped_rows(rows, active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
@@ -1484,7 +1589,7 @@ def search_index_chunks(terms: list[str], *, limit: int = 80, active_path: str |
         query += scope_sql
         params.extend(scope_params)
         query += " ORDER BY f.path, c.chunk_index LIMIT ?"
-        params.append(int(limit) * 8)
+        params.append(max(int(limit) * 100, 3000))
         rows = _as_dict_rows(cur.execute(query, params).fetchall())
         return _rank_scoped_rows(rows, active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 

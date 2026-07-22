@@ -250,6 +250,21 @@ def _resolve_blueprint_path(unreal, target):
     target = str(target or "").strip()
     if target.startswith("/"):
         return target.split(".", 1)[0]
+    if not target:
+        selected = list(unreal.EditorUtilityLibrary.get_selected_assets() or [])
+        blueprint_paths = []
+        for asset in selected:
+            try:
+                class_name = str(asset.get_class().get_name())
+                path = str(asset.get_path_name()).split(".", 1)[0]
+            except Exception:
+                continue
+            if class_name in {"Blueprint", "AnimBlueprint"}:
+                blueprint_paths.append(path)
+        if len(blueprint_paths) == 1:
+            return blueprint_paths[0]
+        if len(blueprint_paths) > 1:
+            raise ValueError("Expected one selected Blueprint, found %s" % len(blueprint_paths))
     matches = []
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
     for data in registry.get_assets_by_path("/Game", recursive=True):

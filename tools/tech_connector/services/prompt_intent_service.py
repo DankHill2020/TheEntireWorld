@@ -139,6 +139,14 @@ def _has(text: str, pattern: str) -> bool:
 
 
 def _target_from_host_state_query(lower: str) -> str:
+    try:
+        from tech_connector.services.request_frame_service import analyze_request_frame
+
+        frame = analyze_request_frame(lower)
+        if frame.selection_role == "scope" and frame.object_kind == "properties":
+            return "selection.properties"
+    except Exception:
+        pass
     if _has(lower, r"\b(project snapshot|snapshot)\b") or (
         _has(lower, r"\bproject\b") and _has(lower, r"\b(report|inspect|scan|snapshot)\b")
     ):
@@ -174,6 +182,18 @@ def _host_state_query_kind(lower: str, host: str) -> str:
     """Return the concrete read-only host-state shape, if one is requested."""
     if not host:
         return ""
+    try:
+        from tech_connector.services.request_frame_service import analyze_request_frame
+
+        frame = analyze_request_frame(lower, host=host)
+        if frame.wants_execution or frame.wants_mutation:
+            return ""
+        if frame.selection_role == "scope" and frame.object_kind == "properties":
+            return "selection.properties"
+        if frame.selection_role == "subject":
+            return "selection"
+    except Exception:
+        pass
     affirmative_text = re.sub(
         r"\b(?:do\s+not|don't|dont|never|without)\s+"
         r"(?:run|execute|apply|create|add|modify|change|set|delete|remove)\b",
@@ -193,7 +213,11 @@ def _host_state_query_kind(lower: str, host: str) -> str:
     if host == "unreal":
         if re.search(r"\b(current\s+project|project\s+snapshot|snapshot)\b", lower):
             return "project"
-        if re.search(r"\bselected\s+(?:actors?|assets?)\b|\bwhat(?:'s|\s+is)\s+selected\b", lower):
+        if re.search(r"\bwhat(?:'s|\s+is)\s+selected\b", lower):
+            return "selection"
+        if re.search(r"\bselected\s+(?:actors?|assets?)\b", lower) and re.search(
+            r"\b(report|list|show|get|inspect|scan)\b", lower
+        ):
             return "selection"
         if re.search(r"\b(open|focus)\b", lower) and re.search(
             r"\b(bp_[a-z0-9_]+|blueprint|asset|event\s*graph|node)\b",
@@ -208,7 +232,7 @@ def _host_state_query_kind(lower: str, host: str) -> str:
             return "assets"
         return ""
 
-    if re.search(r"\b(selected|selection|what(?:'s|\s+is)\s+(?:currently\s+)?selected)\b", lower):
+    if re.search(r"\bwhat(?:'s|\s+is)\s+(?:currently\s+)?selected\b|\bcurrent\s+selection\s*\??\s*$", lower):
         return "selection"
     if re.search(r"\b(joints?|bones?|skeleton)\b", lower):
         return "joints"
@@ -495,8 +519,10 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
             lower,
         )
     )
+    explicit_qualified_symbol = _explicit_qualified_symbol_reference(text)
+    explicit_module_reference = _explicit_module_reference(text)
     symbol_match = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)", text)
-    target_symbol = symbol_match.group(1) if symbol_match else ""
+    target_symbol = explicit_qualified_symbol or (symbol_match.group(1) if symbol_match else "")
     if not target_symbol:
         execution_symbol_match = re.search(
             r"\b(?:run|execute|call|launch|perform)\s+"
@@ -506,9 +532,17 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         )
         if execution_symbol_match and execution_symbol_match.group(1).lower() not in {"a", "an", "the", "this", "that"}:
             target_symbol = execution_symbol_match.group(1)
-    explicit_read_only = bool(re.search(r"\b(do not|don't|dont|never|without)\s+(edit|change|modify|write|save|apply|create|add|insert|execute|run)\b", lower))
+    explicit_read_only = bool(
+        re.search(r"\b(do not|don't|dont|never|without)\s+(edit|change|modify|write|save|apply|create|add|insert|execute|run|mutate)\b", lower)
+        or re.search(r"\b(not an edit|no edit|no edits|not editing|don't mutate|dont mutate|do not mutate|no wait just explain|example only|explain the fix)\b", lower)
+    )
     location_query = _is_project_symbol_location_query(lower)
-    mutation_requested = bool(re.search(r"\b(add|insert|edit|modify|change|create|build|make|delete|remove|save|write|wire|connect|implement|patch|fix|refactor|rename|improve|document)\b", lower)) and not explicit_read_only and not location_query
+    symbol_operations = _symbol_code_operations(lower)
+    explicit_symbol_code_question = bool(explicit_qualified_symbol and symbol_operations)
+    mutation_requested = bool(
+        re.search(r"\b(add|insert|edit|modify|change|create|build|make|put|delete|remove|save|write|wire|connect|implement|patch|fix|refactor|rename|improve|document)\b", lower)
+        or re.search(r"\btest\s+that\b", lower)
+    ) and not explicit_read_only and not location_query
     execution_requested = bool(host and re.search(r"\b(run|execute|call|launch|perform|apply)\b", lower))
     workflow_requested = bool(re.search(r"\b(workflow|pipeline|action graph|node graph|multi[- ]step|sequence|compose)\b", lower))
 
@@ -525,7 +559,7 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
     explanation_or_example = bool(re.search(
         r"\b(how would i|how would you|how do i|how can i|how should i|"
         r"show me how|example of|write an example|what would .* look like|"
-        r"if i wanted .* how)\b",
+        r"if i wanted .* how|what would .* class look like|show .* example|example only|no wait just explain)\b",
         lower,
     ))
     code_learning_request = bool(
@@ -579,6 +613,13 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         and re.search(r"\b(code|application|files?|function|method|class|module|service|ui|handler|system)\b", lower)
         and not mutation_requested
     )
+    scoped_context_reference = bool(explicit_module_reference or files or re.search(r"\bcustom\s+widgets(?:\s+py)?\b|\bcustom_widgets(?:\.py)?\b|\bcustom_qt\b", lower))
+    scoped_example_request = bool(
+        scoped_context_reference
+        and re.search(r"\b(slider|qslider|widget|class|helper)\b", lower)
+        and re.search(r"\b(what would|how would|could .* use|show|example|look like|should i add|already have|is there already|do we already|pretend)\b", lower)
+        and (explicit_read_only or not re.search(r"^\s*(?:add|create|implement|write|patch|put|make)\b", lower))
+    )
 
     if unimported_files_query:
         primary_route = "project_health"
@@ -591,6 +632,17 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         reasons = [
             "The request explicitly asks for files that are not imported.",
             "This requires deterministic import/dependency graph analysis, not behavior search.",
+        ]
+    elif scoped_example_request and scoped_query is None:
+        primary_route = "project_search"
+        primary_intent = "project_search"
+        primary_action = "search"
+        requested_artifact = "scoped_class_search"
+        behavior = _read_only_behavior_phrase(lower) or lower
+        mutation_requested = False
+        confidence = 0.9
+        reasons = [
+            "The request asks for scoped project guidance or existence evidence, not a file mutation.",
         ]
     elif host_state_query:
         primary_route = "dcc_query"
@@ -675,6 +727,18 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         reasons = [
             "The request scopes a member search to a described project container.",
             "The container must be resolved before members are ranked by behavior.",
+        ]
+    elif explicit_symbol_code_question:
+        primary_route = "project_search"
+        primary_intent = "code_understanding"
+        primary_action = "inspect"
+        requested_artifact = "symbol_inspection"
+        behavior = ", ".join(symbol_operations)
+        mutation_requested = False
+        confidence = 0.97
+        reasons = [
+            "The request gives an explicit qualified project symbol target.",
+            "The requested operation is source inspection, not generic symbol location.",
         ]
     elif location_query:
         primary_route = "project_search"
@@ -791,13 +855,13 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         primary_action=primary_action,
         requested_artifact=requested_artifact,
         behavior_description=behavior,
-        target_file=files[0] if files else "",
+        target_file=files[0] if files else explicit_module_reference,
         target_symbol=target_symbol,
         target_container_type=(
-            scoped_query.container_type if scoped_query is not None else ("directory" if explicit_scope_path else "")
+            scoped_query.container_type if scoped_query is not None else ("file" if explicit_module_reference else "directory" if explicit_scope_path else "")
         ),
         target_container_query=(
-            scoped_query.container_query if scoped_query is not None else explicit_scope_path
+            scoped_query.container_query if scoped_query is not None else explicit_module_reference or explicit_scope_path
         ),
         target_container_path=(
             files[0] if files and scoped_query is not None else explicit_scope_path
@@ -805,6 +869,8 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         requested_member_type=(
             scoped_query.member_type
             if scoped_query is not None
+            else "symbol"
+            if explicit_symbol_code_question
             else _project_symbol_kind(lower)
             if location_query
             else ""
@@ -835,7 +901,7 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         requires_validation=any(task.action == "validate" for task in tasks),
         requires_execution=any(task.action == "execute" for task in tasks),
         requires_clarification=False,
-        requires_examples=goal_type in {"learn", "explain", "generate"},
+        requires_examples=goal_type in {"learn", "explain", "generate"} or "explain_usage" in symbol_operations,
         requires_reuse_search=any(task.task_id == "inspect_existing" for task in tasks),
         constraints=_extract_constraints(text),
         expected_outputs=_expected_outputs(primary_route, requested_artifact),
@@ -854,6 +920,18 @@ def _apply_clause_plan_to_understanding(
     host: str = "",
 ) -> RequestUnderstanding:
     """Use deterministic clause structure when a request has multiple actions."""
+    if (
+        understanding.read_only_requested
+        and not understanding.mutation_requested
+        and understanding.primary_intent in {
+            "code_generation_guidance",
+            "project_search",
+            "code_understanding",
+            "read_only_code_planning",
+        }
+    ):
+        return understanding
+
     clauses = [
         dict(item)
         for item in (clause_plan.get("clauses") or [])
@@ -1240,6 +1318,45 @@ def _is_project_symbol_location_query(lower: str) -> bool:
     return location_language and code_artifact and behavior_or_concept
 
 
+def _explicit_qualified_symbol_reference(text: str) -> str:
+    match = re.search(
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,})(?![\w.])",
+        text or "",
+    )
+    return match.group(1) if match else ""
+
+
+def _explicit_module_reference(text: str) -> str:
+    symbol = _explicit_qualified_symbol_reference(text)
+    match = re.search(
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)(?![\w.])",
+        text or "",
+    )
+    value = match.group(1) if match else ""
+    if value and value != symbol:
+        return value
+    return ""
+
+
+def _symbol_code_operations(lower: str) -> list[str]:
+    operations: list[str] = []
+
+    def add(kind: str) -> None:
+        if kind not in operations:
+            operations.append(kind)
+
+    text = lower or ""
+    if re.search(r"\b(what\s+does|what\s+do|how\s+does|explain|summari[sz]e|describe|run\s+through)\b", text):
+        add("explain_behavior")
+    if re.search(r"\b(how\s+(?:do|can|should|would)\s+i\s+use|how\s+to\s+use|usage|example|invoke|call\s+it|call\s+this|use\s+it)\b", text):
+        add("explain_usage")
+    if re.search(r"\b(who\s+calls|what\s+calls|find\s+callers?|called\s+by|callers?)\b", text):
+        add("find_callers")
+    if re.search(r"\b(show|read|inspect|open)\s+(?:the\s+)?(?:implementation|source|body|code)\b", text):
+        add("show_implementation")
+    return operations
+
+
 def _project_symbol_kind(text: str) -> str:
     match = re.search(
         r"^\s*(?:do\s+(?:we|i)\s+have\s+(?:any\s+)?|are\s+there\s+(?:any\s+)?|"
@@ -1341,7 +1458,7 @@ def _model_understanding(
         def semantic_intent_model():
             return "qwen2.5:1.5b"
 
-        def build_semantic_understanding_options():
+        def build_semantic_understanding_options(settings=None):
             return {
                 "temperature": 0.0,
                 "num_ctx": 2048,
@@ -1351,7 +1468,7 @@ def _model_understanding(
                 "repeat_penalty": 1.0,
             }
 
-        def choose_semantic_understanding_budget():
+        def choose_semantic_understanding_budget(settings=None):
             return type("Budget", (), {"timeout_seconds": 30})()
 
     system = """You are the first semantic understanding and planning stage for a local coding and DCC execution system.
@@ -1436,27 +1553,20 @@ JSON schema:
         "Interpret each clause, then select the terminal goal and return the JSON object."
     )
     model_name = semantic_intent_model()
-    semantic_options = build_semantic_understanding_options()
-    semantic_budget = choose_semantic_understanding_budget()
-    payload = json.dumps({
-        "model": model_name,
-        "prompt": prompt,
-        "system": system,
-        "stream": False,
-        "format": "json",
-        "options": semantic_options,
-    }).encode("utf-8")
+    settings = dict(context.get("settings") or {})
+    semantic_options = build_semantic_understanding_options(settings=settings)
+    semantic_budget = choose_semantic_understanding_budget(settings=settings)
     try:
-        req = urllib.request.Request(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=max(5, int(semantic_budget.timeout_seconds))) as response:
-            raw_response = json.loads(response.read().decode("utf-8", errors="replace"))
-        parsed = _parse_json_object(str(raw_response.get("response") or ""))
+        from tech_connector.services.llm_router_service import generate_llm_response
+        raw_text = generate_llm_response(
+            model=model_name,
+            prompt=prompt,
+            system=system,
+            response_format="json",
+            options=semantic_options,
+            timeout=max(5, int(semantic_budget.timeout_seconds))
+        ).strip()
+        parsed = _parse_json_object(raw_text)
         if not parsed:
             return None
         goal_rows = parsed.get("goals") or parsed.get("tasks") or []
@@ -1573,6 +1683,22 @@ def _merge_and_verify(baseline: RequestUnderstanding, model: RequestUnderstandin
         model.goal_type = baseline.goal_type
         model.tasks = baseline.tasks
         model.reasons.append("Deterministic verification preserved an unambiguous specialized intent.")
+    if baseline.confidence >= 0.9 and str(baseline.requested_artifact or "").startswith("scoped_"):
+        model.primary_route = baseline.primary_route
+        model.primary_intent = baseline.primary_intent
+        model.primary_action = baseline.primary_action
+        model.requested_artifact = baseline.requested_artifact
+        model.behavior_description = baseline.behavior_description
+        model.target_file = baseline.target_file
+        model.target_container_type = baseline.target_container_type
+        model.target_container_query = baseline.target_container_query
+        model.requested_member_type = baseline.requested_member_type
+        model.member_behavior = baseline.member_behavior
+        model.reference_scope = baseline.reference_scope
+        model.mutation_requested = baseline.mutation_requested
+        model.read_only_requested = baseline.read_only_requested
+        model.tasks = baseline.tasks
+        model.reasons.append("Deterministic verification preserved scoped member target and behavior fields.")
     model.confidence = max(model.confidence, baseline.confidence if model.primary_route == baseline.primary_route else 0.0)
     if not model.tasks:
         model.tasks = baseline.tasks

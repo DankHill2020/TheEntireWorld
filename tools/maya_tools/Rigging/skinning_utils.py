@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import maya.cmds as cmds
 import maya.mel as mel
 from collections import OrderedDict
@@ -292,3 +293,299 @@ def import_skin_weights(meshes, export_dir="C:/temp/weights"):
 
 #export_skin_weights(cmds.ls(sl=True), "C:/temp/weights")
 # import_skin_weights(cmds.ls(sl=True), export_dir)
+=======
+import maya.cmds as cmds
+import maya.mel as mel
+from collections import OrderedDict
+import json
+import os
+
+
+def transfer_skin_weights_from_selection(remove_unused_influences=True):
+    """
+    Transfer skin weights from selected source meshes to the last selected mesh.
+    """
+    selection = cmds.ls(selection=True)
+
+    if len(selection) < 2:
+        cmds.error("Select one or more source meshes and a target mesh last.")
+        return False
+
+    return transfer_skin_weights(
+        source_meshes=selection[:-1],
+        target_mesh=selection[-1],
+    )
+
+
+def transfer_skin_weights(
+    source_meshes,
+    target_mesh,
+):
+    """
+    Transfer skin weights from source meshes to a target mesh.
+
+    Args:
+        source_meshes (list[str])
+        target_mesh (str)
+
+    Returns:
+        dict | bool
+    """
+    cmds.undoInfo(openChunk=True)
+
+    try:
+        if _has_skin_cluster(target_mesh):
+            cmds.warning("Target mesh already has a skinCluster.")
+            return False
+
+        skin_data = _collect_skin_data(source_meshes)
+        if not skin_data["influences"]:
+            cmds.warning("No valid influences found on source meshes.")
+            return False
+
+        target_skin = _create_target_skin(target_mesh, skin_data)
+        _copy_weights(source_meshes, target_mesh)
+
+        cmds.setAttr(
+            f"{target_mesh}.inheritsTransform",
+            skin_data["inherits_transform"]
+        )
+
+        return {
+            "skinCluster": target_skin,
+            "influences": skin_data["influences"]
+        }
+
+    except Exception as exc:
+        cmds.warning(f"Skin weight transfer failed: {exc}")
+        return False
+
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+
+def _has_skin_cluster(mesh):
+    return bool(cmds.ls(cmds.listHistory(mesh), type="skinCluster"))
+
+
+def _find_skin_cluster(mesh):
+    skins = (
+        cmds.ls(cmds.listConnections(mesh, type="skinCluster"), type="skinCluster")
+        or cmds.ls(cmds.listHistory(mesh), type="skinCluster")
+    )
+    return skins[0] if skins else None
+
+
+def _collect_skin_data(meshes):
+    influences = []
+    max_influences = 1
+    inherits_transform = False
+
+    for mesh in meshes:
+        skin = _find_skin_cluster(mesh)
+        if not skin:
+            continue
+
+        influences.extend(cmds.skinCluster(skin, q=True, inf=True))
+        inherits_transform |= cmds.getAttr(f"{mesh}.inheritsTransform")
+
+        if cmds.getAttr(f"{skin}.maintainMaxInfluences"):
+            max_influences = max(
+                max_influences,
+                cmds.skinCluster(skin, q=True, maximumInfluences=True)
+            )
+        else:
+            max_influences = max(max_influences, 4)
+
+    unique_influences = list(OrderedDict.fromkeys(influences))
+
+    return {
+        "influences": unique_influences,
+        "joints": [i for i in unique_influences if cmds.nodeType(i) == "joint"],
+        "transforms": [i for i in unique_influences if cmds.nodeType(i) == "transform"],
+        "max_influences": max_influences,
+        "inherits_transform": inherits_transform,
+    }
+
+
+def _create_target_skin(target_mesh, skin_data):
+    joints = skin_data["joints"] or [
+        cmds.createNode("joint", name="temp_transfer_joint")
+    ]
+
+    skin = cmds.skinCluster(
+        joints,
+        target_mesh,
+        maximumInfluences=skin_data["max_influences"],
+        dropoffRate=3.0,
+        toSelectedBones=True
+    )[0]
+
+    for transform in skin_data["transforms"]:
+        cmds.skinCluster(
+            target_mesh,
+            e=True,
+            ai=transform,
+            lw=True,
+            wt=0.0
+        )
+
+    for influence in cmds.skinCluster(skin, q=True, inf=True):
+        if cmds.getAttr(f"{influence}.liw"):
+            cmds.setAttr(f"{influence}.liw", 0)
+
+    return skin
+
+
+def _copy_weights(source_meshes, target_mesh):
+    cmds.select(source_meshes + [target_mesh], r=True)
+    cmds.copySkinWeights(
+        noMirror=True,
+        ia=["oneToOne", "label", "closestJoint"],
+        sa="closestPoint",
+        normalize=True
+    )
+
+
+def _run_weight_hammer(mesh):
+    previous_selection = cmds.ls(selection=True) or []
+    try:
+        vertex_count = cmds.polyEvaluate(mesh, vertex=True) or 0
+        if vertex_count < 1:
+            cmds.warning(f"Weight Hammer skipped for '{mesh}': no vertices found.")
+            return
+
+        cmds.select(f"{mesh}.vtx[0]", replace=True)
+        mel.eval("WeightHammer;")
+    except Exception as exc:
+        cmds.warning(f"Weight Hammer failed for '{mesh}': {exc}")
+    finally:
+        if previous_selection:
+            cmds.select(previous_selection, replace=True)
+        else:
+            cmds.select(clear=True)
+
+
+def export_skin_weights(meshes, export_dir="C:/temp/weights"):
+    """
+    Exports skin weights for a list of meshes to XML using deformerWeights.
+    Saves influence order in individual JSON sidecar files.
+    :param meshes: list of mesh names to export
+    :param export_dir: target directory to save all files
+    """
+    export_dir = os.path.normpath(export_dir)
+    if not os.path.exists(export_dir):
+        os.makedirs(export_dir)
+
+    for mesh in meshes:
+        if not cmds.objExists(mesh):
+            print(f"[!] Skipping '{mesh}': does not exist.")
+            continue
+
+        shape_node = cmds.listRelatives(mesh, shapes=True, fullPath=True)
+        if not shape_node:
+            print(f"[!] Skipping '{mesh}': no shape node found.")
+            continue
+        shape_node = shape_node[0]
+
+        skin_cluster = None
+        for hist in cmds.listHistory(mesh, pdo=True) or []:
+            if cmds.nodeType(hist) == "skinCluster":
+                skin_cluster = hist
+                break
+
+        if not skin_cluster:
+            print(f"[!] Skipping '{mesh}': no skinCluster found.")
+            continue
+
+        influences = cmds.skinCluster(skin_cluster, query=True, influence=True)
+        if not influences:
+            print(f"[!] Skipping '{mesh}': no influences found.")
+            continue
+
+        export_name = f"{mesh}_weights.xml"
+        json_name = f"{mesh}_weights_influences.json"
+
+        try:
+            cmds.deformerWeights(export_name,
+                                 path=export_dir,
+                                 deformer=skin_cluster,
+                                 export=True,
+                                 shape=shape_node)
+        except Exception as e:
+            print(f"[!] Failed to export weights for '{mesh}': {e}")
+            continue
+
+        with open(os.path.join(export_dir, json_name), 'w') as f:
+            json.dump(influences, f, indent=2)
+
+        print(f"[?] Exported: {mesh}")
+
+
+def import_skin_weights(meshes, export_dir="C:/temp/weights"):
+    """
+    Imports skin weights for a list of meshes from XML and JSON files.
+    :param meshes: list of mesh names to import to
+    :param export_dir: directory where XML and JSON files are stored
+    """
+    export_dir = os.path.normpath(export_dir)
+
+    for mesh in meshes:
+        if not cmds.objExists(mesh):
+            print(f"[!] Skipping '{mesh}': does not exist.")
+            continue
+
+        export_file = f"{mesh}_weights.xml"
+        json_file = f"{mesh}_weights_influences.json"
+
+        xml_path = os.path.join(export_dir, export_file)
+        json_path = os.path.join(export_dir, json_file)
+
+        if not os.path.exists(json_path):
+            print(f"[!] Skipping '{mesh}': missing JSON {json_path}")
+            continue
+
+        if not os.path.exists(xml_path):
+            print(f"[!] Skipping '{mesh}': missing XML {xml_path}")
+            continue
+
+        with open(json_path, "r") as f:
+            influences = json.load(f)
+
+        if not all(cmds.objExists(jnt) for jnt in influences):
+            print(f"[!] Skipping '{mesh}': missing influences in scene.")
+            continue
+
+        # Remove old skinCluster
+        existing = cmds.listHistory(mesh, pdo=True) or []
+        existing_skin = next((h for h in existing if cmds.nodeType(h) == "skinCluster"), None)
+        if existing_skin:
+            cmds.delete(existing_skin)
+
+        # Create new skinCluster
+        try:
+            skin_cluster = cmds.skinCluster(influences, mesh, toSelectedBones=True,
+                                            normalizeWeights=1, bindMethod=0,
+                                            skinMethod=0, removeUnusedInfluence=False)[0]
+        except Exception as e:
+            print(f"[!] Failed to create skinCluster for '{mesh}': {e}")
+            continue
+
+        try:
+            cmds.deformerWeights(export_file,
+                                 path=export_dir,
+                                 deformer=skin_cluster,
+                                 im=True,
+                                 method="index")
+        except Exception as e:
+            print(f"[!] Failed to import weights for '{mesh}': {e}")
+            continue
+
+        _run_weight_hammer(mesh)
+        print(f"[?] Imported: {mesh}")
+
+
+
+#export_skin_weights(cmds.ls(sl=True), "C:/temp/weights")
+# import_skin_weights(cmds.ls(sl=True), export_dir)
+>>>>>>> 05fd66e (Sync local depot)

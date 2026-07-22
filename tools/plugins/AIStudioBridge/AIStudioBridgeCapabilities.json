@@ -1,0 +1,56 @@
+{
+  "plugin": "AIStudioBridge",
+  "module": "AIStudioBridge",
+  "library_class": "AIStudioBridgeLibrary",
+  "capabilities": [
+    {
+      "name": "inspect_anim_blueprint_graph",
+      "label": "Inspect Anim Blueprint Graph",
+      "function": "InspectAnimBlueprintGraph",
+      "python_call": "unreal.AIStudioBridgeLibrary.inspect_anim_blueprint_graph(anim_bp)",
+      "summary": "Read graph, node, pin, and link topology from an AnimBlueprint."
+    },
+    {
+      "name": "inspect_animation_sequence",
+      "label": "Inspect Animation Sequence",
+      "function": "InspectAnimationSequence",
+      "python_call": "unreal.AIStudioBridgeLibrary.inspect_animation_sequence(animation)",
+      "summary": "Read skeleton, duration, sample rate, sampled keys, and root-motion facts."
+    },
+    {
+      "name": "inspect_character_in_pie",
+      "label": "Inspect Character In PIE",
+      "function": "InspectCharacterInPIE",
+      "python_call": "unreal.AIStudioBridgeLibrary.inspect_character_in_pie(character_class, expected_anim_class_contains, property_names)",
+      "summary": "Read a live character's movement, AnimInstance, active montage, and requested reflected properties."
+    },
+    {
+      "name": "validate_character_montages_in_pie",
+      "label": "Validate Character Montages In PIE",
+      "function": "ValidateCharacterMontagesInPIE",
+      "python_call": "unreal.AIStudioBridgeLibrary.validate_character_montages_in_pie(character_class, montages, expected_anim_class_contains)",
+      "summary": "Validate in PIE that a character class has a runtime AnimInstance matching the expected AnimBlueprint and that required montages can be played."
+    },
+    {
+      "name": "inject_key_in_pie",
+      "label": "Inject Key In PIE",
+      "function": "InjectKeyInPIE",
+      "python_call": "unreal.AIStudioBridgeLibrary.inject_key_in_pie(key, pressed)",
+      "summary": "Inject a simulated keyboard or gamepad key event through the active PIE player controller."
+    },
+    {
+      "name": "describe_blueprint_node_action",
+      "label": "Describe Blueprint Node Action",
+      "function": "DescribeBlueprintNodeAction",
+      "python_call": "unreal.AIStudioBridgeLibrary.describe_blueprint_node_action(blueprint, graph_name, palette_action)",
+      "summary": "Resolve an exact graph-context palette action on a transient graph and return its node ownership and typed pin signature without modifying the source Blueprint."
+    },
+    {
+      "name": "search_blueprint_node_actions",
+      "label": "Search Blueprint Node Actions",
+      "function": "SearchBlueprintNodeActions",
+      "python_call": "unreal.AIStudioBridgeLibrary.search_blueprint_node_actions(blueprint, graph_name, query, max_results)",
+      "summary": "Search context-filtered live Blueprint palette actions and return ranked exact action identifiers without modifying the source Blueprint."
+    }
+  ]
+}

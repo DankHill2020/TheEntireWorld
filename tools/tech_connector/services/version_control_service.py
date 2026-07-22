@@ -617,6 +617,24 @@ def detect_version_controls_for_path(path: Path) -> list[VersionControlProvider]
     p4_prov = PerforceProvider()
     providers = []
 
+    try:
+        from tech_connector.services.settings_service import load_settings
+        import importlib
+        settings = load_settings()
+        vcs_module_path = settings.get("vcs_provider_module")
+        if vcs_module_path and vcs_module_path != "default":
+            if "." in vcs_module_path:
+                mod_name, class_name = vcs_module_path.rsplit(".", 1)
+                mod = importlib.import_module(mod_name)
+                vcs_class = getattr(mod, class_name)
+                custom_vcs = vcs_class()
+                for parent in [current] + list(current.parents):
+                    if custom_vcs.detect(parent):
+                        providers.append(custom_vcs)
+                        break
+    except Exception as e:
+        print(f"Error loading custom VCS provider: {e}", flush=True)
+
     for parent in [current] + list(current.parents):
         if git_prov.detect(parent) and not any(p.kind == "git" for p in providers):
             providers.append(git_prov)

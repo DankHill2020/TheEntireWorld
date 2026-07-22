@@ -737,6 +737,7 @@ class ProjectSearchProvider:
     def handle(self, context: RequestContext, emit: ProgressCallback, activity: ActivityCallback | None = None) -> EngineResult:
         from tech_connector.services.project_search_service import (
             answer_project_dependency_question,
+            answer_explicit_symbol_inspection_question,
             answer_simple_project_index_question,
             build_deterministic_project_search_answer,
             gather_project_search_context,
@@ -759,6 +760,39 @@ class ProjectSearchProvider:
             or (context.extras or {}).get("semantic_execution_contract")
             or {}
         )
+        explicit_symbol_answer = answer_explicit_symbol_inspection_question(
+            query_text,
+            project_roots=list(context.project_roots or []),
+            active_path=effective_active_path,
+        )
+        if explicit_symbol_answer:
+            _emit(emit, "project_search", "Exact symbol inspected", 1, 1)
+            _activity(
+                activity,
+                "result",
+                "Exact symbol inspected",
+                "Resolved the explicit @symbol before broad project search",
+                status="ok",
+            )
+            return EngineResult(
+                action="answer",
+                label="Symbol Inspection",
+                text=explicit_symbol_answer,
+                metadata={
+                    "engine_path": self.name,
+                    "result_type": "symbol_inspection_direct",
+                    "deep_search_candidate": False,
+                    "deep_search_query": query_text,
+                    "original_query": context.text,
+                    "deep_search_scope": _route_scope(context),
+                    "selected_file": "",
+                    "resolved_target_file": "",
+                    "reference_scope_locked": True,
+                    "evidence_tier": 2,
+                    "workspace_update": {},
+                    "conversation_entities": {},
+                },
+            )
         direct_answer = answer_simple_project_index_question(
             query_text,
             active_path=effective_active_path,

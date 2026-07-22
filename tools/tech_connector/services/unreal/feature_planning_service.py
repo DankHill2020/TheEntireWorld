@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -85,101 +86,135 @@ print(json.dumps(out))
     return data if isinstance(data, dict) else {"ok": False, "error": str(data)}
 
 
+def _feature_plan_seal_payload(plan: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(plan or {})
+    payload.pop("plan_seal", None)
+    payload.pop("authorization", None)
+    return payload
+
+
+def seal_feature_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Bind approval to the exact serialized plan that was shown to the user."""
+
+    sealed = _feature_plan_seal_payload(plan)
+    canonical = json.dumps(sealed, sort_keys=True, separators=(",", ":"), default=str)
+    sealed["plan_seal"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return sealed
+
+
+def authorize_feature_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Authorize only an intact sealed plan; later edits invalidate execution."""
+
+    authorized = dict(plan or {})
+    supplied = str(authorized.get("plan_seal") or "")
+    expected = str(seal_feature_plan(authorized).get("plan_seal") or "")
+    if not supplied or supplied != expected:
+        raise ValueError("Feature plan is unsealed or changed after sealing")
+    authorized["authorization"] = {"approved": True, "plan_seal": supplied}
+    return authorized
+
+
+def _decoded_operation_result(raw: Any) -> Any:
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw
+
+
 def execute_approved_unreal_feature_plan(
     plan: dict[str, Any],
     *,
     progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Execute a previously approved, exact Unreal feature plan."""
+    """Execute a sealed feature-independent operation list and require runtime proof."""
 
-    if plan.get("feature") != "stamina_sprint":
-        return {"status": "blocked", "errors": ["Unsupported approved Unreal feature."], "plan": plan}
-    if plan.get("missing_capabilities"):
-        return {"status": "blocked", "errors": ["Approved plan still has unresolved capabilities."], "plan": plan}
     from tech_connector.router.command_router import CommandRouter
-    from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
+    from tech_connector.services.unreal.unreal_operation_service import (
+        UNREAL_OPERATIONS,
+        unreal_operation_payload,
+    )
+
+    plan = dict(plan or {})
+    errors: list[str] = []
+    if plan.get("framework") != "unreal_generic_feature_plan_v2":
+        errors.append("Unsupported or missing generic feature-plan framework.")
+    authorization = dict(plan.get("authorization") or {})
+    supplied_seal = str(plan.get("plan_seal") or "")
+    expected_seal = str(seal_feature_plan(plan).get("plan_seal") or "")
+    if not authorization.get("approved") or authorization.get("plan_seal") != supplied_seal:
+        errors.append("The exact plan has not been approved.")
+    if not supplied_seal or supplied_seal != expected_seal:
+        errors.append("The approved plan changed after it was sealed.")
+    if plan.get("missing_capabilities"):
+        errors.append("Approved plan still has unresolved capabilities.")
+
+    calls = list(plan.get("operation_calls") or [])
+    if not calls:
+        errors.append("Approved plan contains no concrete operation calls.")
+    required_verification = [str(value) for value in plan.get("required_verification_operations") or []]
+    if not required_verification:
+        errors.append("Approved plan declares no required verification operations.")
+    if errors:
+        return {"status": "blocked", "errors": errors, "plan": plan}
 
     router = CommandRouter()
-    bridge = UnrealBridge()
-    results = []
-
-    def report(message: str) -> None:
+    results: list[dict[str, Any]] = []
+    passed_verification: list[str] = []
+    for index, call in enumerate(calls, 1):
+        call = dict(call or {})
+        operation = str(call.get("operation") or "")
+        params = dict(call.get("params") or {})
+        postconditions = list(call.get("postconditions") or [])
+        if operation == "feature.execute_generic_plan":
+            errors.append("A generic plan cannot recursively execute its own orchestrator.")
+            break
+        if operation not in UNREAL_OPERATIONS:
+            errors.append(f"Operation {index} is not registered: {operation or '<missing>'}")
+            break
+        if not postconditions:
+            errors.append(f"Operation {index} has no declared postconditions: {operation}")
+            break
+        try:
+            unreal_operation_payload(operation, params)
+        except Exception as exc:
+            errors.append(f"Operation {index} parameters are invalid: {exc}")
+            break
         if progress:
-            progress(message)
-
-    report("Backing up the approved Blueprint target")
-    backup_code = """
-import unreal, json
-source = '/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter'
-target = '/Game/TimeFighters/AIStudioBackups/BP_ThirdPersonCharacter_PreStamina_20260716'
-created = False
-if not unreal.EditorAssetLibrary.does_asset_exist(target):
-    created = bool(unreal.EditorAssetLibrary.duplicate_asset(source, target))
-print(json.dumps({'ok': unreal.EditorAssetLibrary.does_asset_exist(target), 'backup': target, 'created': created}))
-"""
-    backup = bridge.execute_python(backup_code, timeout=12, reset_globals=True)
-    results.append({"stage": "backup_character", "ok": bool(backup.get("ok")), "result": backup.get("data") or backup})
-    if not backup.get("ok"):
-        return {"status": "failed", "results": results, "errors": ["Character backup failed."]}
-
-    report("Creating or validating IA_Sprint")
-    label, ok, result = router.execute_unreal_operation(
-        "input.create_action",
-        {
-            "asset_path": "/Game/TimeFighters/Input/IA_Sprint",
-            "value_type": "boolean",
-            "description": "Hold to sprint while stamina is available.",
-        },
-    )
-    results.append({"stage": "input.create_action", "label": label, "ok": ok, "result": result})
-    if not ok:
-        rollback = _rollback_stamina_feature()
-        return {"status": "failed", "results": results, "errors": ["IA_Sprint creation failed."], "rollback_result": rollback}
-
-    for key_name in ("LeftShift", "Gamepad_LeftShoulder"):
-        report("Verifying sprint mapping: " + key_name)
-        label, ok, result = router.execute_unreal_operation(
-            "input.add_mapping",
+            progress(f"Executing {index}/{len(calls)}: {operation}")
+        label, ok, raw = router.execute_unreal_operation(operation, params)
+        decoded = _decoded_operation_result(raw)
+        payload_ok = not isinstance(decoded, dict) or decoded.get("ok", True) is not False
+        passed = bool(ok and payload_ok)
+        results.append(
             {
-                "mapping_context_path": "/Game/Input/IMC_Default",
-                "action_path": "/Game/TimeFighters/Input/IA_Sprint",
-                "key_name": key_name,
-            },
-        )
-        results.append({"stage": "input.add_mapping", "key": key_name, "label": label, "ok": ok, "result": result})
-        if not ok:
-            rollback = _rollback_stamina_feature()
-            return {"status": "failed", "results": results, "errors": ["Sprint input mapping failed."], "rollback_result": rollback}
-
-    module = "tech_connector.bridges.unreal.unreal_stamina_sprint_feature"
-    bridge.execute_python(
-        "import importlib\nimport " + module + " as feature\nimportlib.reload(feature)",
-        timeout=10,
-        reset_globals=True,
-    )
-    for stage, function_name in (
-        ("create_stamina_component", "create_stamina_component"),
-        ("integrate_stamina_character", "integrate_stamina_character"),
-        ("validate_stamina_feature", "validate_stamina_feature"),
-    ):
-        report(stage.replace("_", " ").title())
-        ok, result = _call_feature_function(module + "." + function_name)
-        results.append({"stage": stage, "ok": ok, "result": result})
-        if not ok or not isinstance(result, dict) or not result.get("ok"):
-            rollback_result = _rollback_stamina_feature()
-            return {
-                "status": "failed",
-                "results": results,
-                "errors": [stage.replace("_", " ").title() + " failed."],
-                "rollback": plan.get("rollback") or [],
-                "rollback_result": rollback_result,
+                "index": index,
+                "operation": operation,
+                "label": label,
+                "ok": passed,
+                "declared_postconditions": postconditions,
+                "result": decoded,
             }
+        )
+        if not passed:
+            errors.append(f"Operation failed: {operation}")
+            break
+        if operation in required_verification and operation not in passed_verification:
+            passed_verification.append(operation)
+
+    missing_verification = [
+        operation for operation in required_verification if operation not in passed_verification
+    ]
+    if missing_verification:
+        errors.append("Required verification did not pass: " + ", ".join(missing_verification))
     return {
-        "status": "completed",
-        "feature": "stamina_sprint",
+        "status": "failed" if errors else "completed",
+        "feature": plan.get("feature"),
         "target_asset": plan.get("target_asset"),
         "results": results,
-        "validation": results[-1].get("result"),
+        "passed_verification_operations": passed_verification,
+        "errors": errors,
         "rollback": plan.get("rollback") or [],
     }
 
@@ -202,12 +237,20 @@ def render_unreal_feature_execution(result: dict[str, Any]) -> str:
 
 
 def _asset_token(prompt: str) -> str:
+    path_match = re.search(r"(?<![A-Za-z0-9_])(/Game/[A-Za-z0-9_./-]+)", prompt or "")
+    if path_match:
+        return path_match.group(1).rstrip(".,;:)").split(".", 1)[0]
     match = re.search(r"\b(?:ABP|BP)_[A-Za-z0-9_]+\b", prompt or "")
     return match.group(0) if match else ""
 
 
 def is_unreal_feature_plan_request(prompt: str) -> bool:
     lower = (prompt or "").lower()
+    has_target = bool(
+        _asset_token(prompt)
+        or re.search(r"\bresolve\b.{0,50}\b(?:character\s+)?blueprint\b", lower)
+        or re.search(r"\b(?:selected|played|active)\s+character\b", lower)
+    )
     subsystem_hits = sum(
         bool(re.search(pattern, lower))
         for pattern in (
@@ -232,8 +275,8 @@ def is_unreal_feature_plan_request(prompt: str) -> bool:
     )
     return bool(
         "unreal" in lower
-        and _asset_token(prompt)
-        and re.search(r"\b(add|create|build|implement|set up|setup)\b", lower)
+        and has_target
+        and re.search(r"\b(add|create|build|implement|repair|fix|set up|setup)\b", lower)
         and (explicit_plan or complex_feature)
     )
 
@@ -482,7 +525,9 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
     }
 
 
-def _generic_requirement_specs(prompt: str) -> list[dict[str, Any]]:
+def _generic_requirement_specs(
+    prompt: str, behavior_decomposition: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     lower = prompt.lower()
     specs: list[dict[str, Any]] = [
         {
@@ -514,7 +559,11 @@ def _generic_requirement_specs(prompt: str) -> list[dict[str, Any]]:
                 },
             ]
         )
-    if any(term in lower for term in ("bone", "socket", "skeletal", "hand")):
+    attachment_requested = bool(
+        re.search(r"\b(?:attach|attachment|socket)\b", lower)
+        or re.search(r"\b(?:bone|hand)\b.{0,40}\b(?:attach|spawn|parent|socket)\b", lower)
+    )
+    if attachment_requested:
         specs.extend(
             [
                 {
@@ -553,7 +602,7 @@ def _generic_requirement_specs(prompt: str) -> list[dict[str, Any]]:
                 "success": "Only a proven compatible animation duplicate is modified, with source and destination reported.",
             }
         )
-    if any(term in lower for term in ("input", "preview", "play the", "plays the")):
+    if any(term in lower for term in ("preview", "play the", "plays the")):
         specs.append(
             {
                 "domain": "preview_path",
@@ -588,7 +637,7 @@ def _generic_requirement_specs(prompt: str) -> list[dict[str, Any]]:
                 },
             ]
         )
-    if any(term in lower for term in ("combo", "damage", "attack", "montage", "melee")):
+    if any(term in lower for term in ("combo", "damage", "attack", "melee")):
         specs.append(
             {
                 "domain": "combat_animation",
@@ -646,6 +695,48 @@ def _generic_requirement_specs(prompt: str) -> list[dict[str, Any]]:
                 "success": "Visual/audio parameters are driven from one gameplay state and return to stable defaults.",
             }
         )
+    behavior = dict(behavior_decomposition or {})
+    for row in behavior.get("selected_primitives") or []:
+        row = dict(row)
+        operations = list(dict.fromkeys(str(value) for value in row.get("operations") or [] if value))
+        if not operations:
+            continue
+        specs.append(
+            {
+                "domain": "behavior_" + str(row.get("key") or "generated").replace(".", "_"),
+                "title": "Implement behavior: " + str(row.get("title") or row.get("key") or "prompt behavior"),
+                "operations": operations,
+                "success": "; ".join(str(value) for value in row.get("proof_scenarios") or [])
+                or "The behavior's declared states, guards, outcomes, and failure paths pass runtime proof.",
+            }
+        )
+    if re.search(r"\bstate\w*\b", lower) and re.search(
+        r"\b(?:anim(?:ation)?\s*blueprint|anim\s*instance|abp_[a-z0-9_]+)\b", lower
+    ):
+        specs.append(
+            {
+                "domain": "animation_state_integration",
+                "title": "Propagate authoritative character state into the AnimBlueprint",
+                "operations": [
+                    "state.read_owning_character_variables",
+                    "state.write_anim_instance_variables",
+                ],
+                "success": "Every requested animation state is copied from the owning character on each animation update and read back from the compiled graph.",
+            }
+        )
+    if any(term in lower for term in ("animation", "montage", "animblueprint", "anim blueprint")):
+        specs.append(
+            {
+                "domain": "animation_graph_integration",
+                "title": "Bind contextually accepted animation roles through the final pose path",
+                "operations": [
+                    "animation.find_compatible",
+                    "animation.bind_contextual_roles",
+                    "animation.verify_slot_output_pose",
+                ],
+                "success": "Each behavior has a skeleton-compatible, contextually accepted animation and its required slot or state reaches Output Pose.",
+            }
+        )
     specs.append(
         {
             "domain": "orchestration",
@@ -676,13 +767,21 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
     """Build an evidence-backed plan that turns unknown operations into acquisition work."""
 
     from tech_connector.services.task_playbook_service import matching_playbooks
+    from tech_connector.services.gameplay_proof_contract_service import build_gameplay_proof_contract
+    from tech_connector.services.unreal.behavior_capability_decomposition_service import (
+        decompose_prompt_behaviors,
+        requires_prompt_specific_behavior_synthesis,
+        synthesize_novel_behavior_contract,
+    )
+    from tech_connector.services.unreal.evidence_driven_feature_synthesis_service import (
+        build_feature_research_plan,
+        derive_prompt_requirement_contract,
+    )
+    from tech_connector.services.unreal.expert_technique_registry import select_expert_techniques
+    from tech_connector.services.unreal.implementation_plan_synthesis_service import (
+        synthesize_detailed_implementation_plan,
+    )
 
-    requirements = _generic_requirement_specs(prompt)
-    operation_status: dict[str, dict[str, Any]] = {}
-    for requirement in requirements:
-        for operation in requirement["operations"]:
-            operation_status.setdefault(operation, _local_operation_status(operation))
-    missing = [status for status in operation_status.values() if not status["callable_found"]]
     playbooks = matching_playbooks(prompt, host="unreal", limit=4)
     blueprint = dict(evidence.get("blueprint") or {})
     assets = dict(evidence.get("assets") or {})
@@ -696,6 +795,64 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
     )
     animation_blueprints = list(evidence.get("animation_blueprints") or [])
     related_animations = list(assets.get("related_animations") or [])
+    unknowns = []
+    lower = prompt.lower()
+    if re.search(r"\b(?:attach|attachment|socket)\b", lower) or re.search(
+        r"\b(?:bone|hand)\b.{0,40}\b(?:attach|spawn|parent|socket)\b", lower
+    ):
+        unknowns.append("Exact target bone/socket is not yet present in the live evidence and must be queried from the skeleton.")
+    if "duplicate" in lower and not related_animations:
+        unknowns.append("No compatible source animation has been selected yet.")
+    elif "duplicate" in lower:
+        unknowns.append("A compatible source animation must be selected from the live candidates before duplication.")
+    if "niagara" in lower:
+        unknowns.append("Existing Niagara systems/materials/modules have not yet been inventoried for reuse.")
+    target = str(evidence.get("target_asset") or "")
+    project_context = {
+        "target_asset": target,
+        "target_parent_class": blueprint.get("parent_class"),
+        "skeletal_mesh": skeletal_mesh,
+        "animation_blueprint": (animation_blueprints[0].get("asset_path") if animation_blueprints else ""),
+        "target_skeleton": assets.get("target_skeleton") or assets.get("skeleton") or "",
+    }
+    requirement_contract = derive_prompt_requirement_contract(prompt)
+    initial_behavior = decompose_prompt_behaviors(prompt)
+    model_synthesis = {}
+    if (
+        requires_prompt_specific_behavior_synthesis(prompt, initial_behavior)
+        and evidence.get("allow_model_behavior_synthesis")
+    ):
+        model_synthesis = synthesize_novel_behavior_contract(
+            prompt,
+            project_context=project_context,
+        )
+    behavior = decompose_prompt_behaviors(prompt, model_synthesis=model_synthesis)
+    requirements = _generic_requirement_specs(prompt, behavior)
+    operation_status: dict[str, dict[str, Any]] = {}
+    for requirement in requirements:
+        for operation in requirement["operations"]:
+            operation_status.setdefault(operation, _local_operation_status(operation))
+    for operation in (
+        "blueprint.apply_graph_spec",
+        "blueprint.get_compile_errors",
+        "runtime.pie_begin",
+        "runtime.pie_status",
+        "runtime.pie_end",
+        "runtime.inject_key",
+        "runtime.inspect_character",
+        "runtime.validate_character_montages",
+    ):
+        operation_status.setdefault(operation, _local_operation_status(operation))
+    missing = [status for status in operation_status.values() if not status["callable_found"]]
+    graph_namespaces = {"animation", "collision", "combat", "input", "movement", "physics", "state"}
+    graph_executor_ready = operation_status["blueprint.apply_graph_spec"]["callable_found"]
+    acquisition_missing = [
+        status for status in missing
+        if not (
+            graph_executor_ready
+            and str(status.get("operation") or "").partition(".")[0] in graph_namespaces
+        )
+    ]
     detected_domains = list(dict.fromkeys(row["domain"] for row in requirements))
     implementation_steps = []
     for index, requirement in enumerate(requirements, 1):
@@ -712,7 +869,7 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             }
         )
     acquisition_steps = []
-    for index, status in enumerate(missing, 1):
+    for index, status in enumerate(acquisition_missing, 1):
         operation = status["operation"]
         acquisition_steps.append(
             {
@@ -730,20 +887,47 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
                 "done_when": f"`{operation}` resolves to a real callable and passes its live postcondition test.",
             }
         )
-    unknowns = []
-    lower = prompt.lower()
-    if any(term in lower for term in ("bone", "socket", "hand")):
-        unknowns.append("Exact target bone/socket is not yet present in the live evidence and must be queried from the skeleton.")
-    if "duplicate" in lower and not related_animations:
-        unknowns.append("No compatible source animation has been selected yet.")
-    elif "duplicate" in lower:
-        unknowns.append("A compatible source animation must be selected from the live candidates before duplication.")
-    if "niagara" in lower:
-        unknowns.append("Existing Niagara systems/materials/modules have not yet been inventoried for reuse.")
-    target = str(evidence.get("target_asset") or "")
-    return {
+    technique_selection = select_expert_techniques(
+        prompt,
+        required_domains=detected_domains,
+        project_context=project_context,
+    )
+    gameplay_proof = build_gameplay_proof_contract(prompt).to_dict()
+    architecture_decision = {
+        "state_owner": "Reusable ActorComponent generated from the behavior contract",
+        "character_integration": "Thin Enhanced Input and lifecycle calls on the resolved played character",
+        "animation_integration": "Extend the current AnimBlueprint through explicit state data and verified slot/layer paths",
+        "selection_basis": "Live project ownership, composed behavior count, existing project conventions, and selected versioned techniques",
+        "network_policy": "Preserve CharacterMovement authority; require explicit replication/prediction proof before multiplayer completion",
+    }
+    detailed_plan = synthesize_detailed_implementation_plan(
+        prompt,
+        requirement_contract=requirement_contract,
+        project_context=project_context,
+        architecture_decision=architecture_decision,
+        techniques=technique_selection.get("techniques") or [],
+        implementation_steps=implementation_steps,
+        operation_status=operation_status.values(),
+        gameplay_proof_contract=gameplay_proof,
+        animation_candidates=related_animations,
+        behavior_decomposition=behavior,
+    )
+    research_plan = build_feature_research_plan(
+        prompt,
+        engine_version="5.8",
+        project_evidence=evidence,
+    )
+    detailed_readiness = dict(detailed_plan.get("readiness") or {})
+    plan_status = (
+        "capability_acquisition_required"
+        if acquisition_missing
+        else "approval_ready"
+        if detailed_readiness.get("ready_for_approval")
+        else "implementation_spec_incomplete"
+    )
+    result = {
         "framework": "unreal_generic_feature_plan_v2",
-        "status": "capability_acquisition_required" if missing else "approval_ready",
+        "status": plan_status,
         "request": prompt,
         "feature": "generic_unreal_feature",
         "target_asset": target,
@@ -752,6 +936,14 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             {"key": playbook.key, "title": playbook.title, "summary": playbook.summary}
             for playbook in playbooks
         ],
+        "requirement_contract": requirement_contract,
+        "behavior_decomposition": behavior,
+        "novel_behavior_synthesis": model_synthesis,
+        "expert_technique_selection": technique_selection,
+        "architecture_decision": architecture_decision,
+        "detailed_implementation_plan": detailed_plan,
+        "gameplay_proof_contract": gameplay_proof,
+        "research_plan": research_plan,
         "evidence": {
             "target_parent_class": blueprint.get("parent_class"),
             "skeletal_mesh": skeletal_mesh,
@@ -774,7 +966,7 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
                 "registered": row["registered"],
                 "function": row["function"],
             }
-            for row in missing
+            for row in acquisition_missing
         ],
         "capability_acquisition": acquisition_steps,
         "unknowns": unknowns,
@@ -794,7 +986,11 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             "required": True,
             "changes_applied": False,
             "scope": "capability adapters, then exact Unreal assets",
-            "message": "Approve this plan before implementing missing adapters or mutating Unreal assets.",
+            "message": (
+                "Approve this plan before mutating Unreal assets."
+                if plan_status == "approval_ready"
+                else "Approval is disabled until every detailed-readiness error and callable gap is resolved."
+            ),
         },
         "self_review": {
             "request_covered": bool(detected_domains),
@@ -802,9 +998,17 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             "unknowns_are_explicit": True,
             "fabricated_operations": False,
             "all_operations_verified": not missing,
+            "implementation_spec_ready": bool(detailed_readiness.get("ready_for_approval")),
             "original_goal_preserved_after_acquisition": True,
         },
     }
+    if behavior.get("knowledge_required"):
+        result["unknowns"] = list(dict.fromkeys([
+            *result.get("unknowns", []),
+            *behavior.get("unmatched_behavior_clauses", []),
+        ]))
+        result["status"] = "capability_acquisition_required"
+    return result
 
 
 def build_live_unreal_feature_plan(
@@ -832,6 +1036,7 @@ def build_live_unreal_feature_plan(
     if "stamina" in lower and "sprint" in lower:
         plan = _stamina_sprint_plan(prompt, evidence)
     else:
+        evidence["allow_model_behavior_synthesis"] = True
         plan = _generic_unreal_feature_plan(prompt, evidence)
     plan["bridge_seconds"] = bridge_seconds
     plan["live_evidence"] = evidence
@@ -840,7 +1045,12 @@ def build_live_unreal_feature_plan(
 
 def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
     status = str(plan.get("status") or "")
-    if status not in {"approval_ready", "capability_acquisition_required"}:
+    if status not in {
+        "approval_ready",
+        "capability_acquisition_required",
+        "implementation_spec_incomplete",
+        "knowledge_choice_required",
+    }:
         errors = list((plan.get("evidence") or {}).get("errors") or [])
         return "Unreal feature planning stopped because live evidence was insufficient.\n\n" + (
             "Errors: " + "; ".join(str(item) for item in errors)
@@ -848,17 +1058,47 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
         )
     evidence = dict(plan.get("evidence") or {})
     if plan.get("framework") == "unreal_generic_feature_plan_v2":
+        detailed = dict(plan.get("detailed_implementation_plan") or {})
+        behavior = dict(plan.get("behavior_decomposition") or {})
+        proof = dict(plan.get("gameplay_proof_contract") or {})
         lines = [
-            "Unreal implementation and capability plan ready for approval",
+            (
+                "Unreal implementation plan ready for approval"
+                if status == "approval_ready"
+                else "Unreal implementation plan is not ready for approval"
+            ),
             "",
             f"Target: `{plan.get('target_asset')}`",
             f"Live bridge evidence: `{plan.get('bridge_seconds', 0):.2f}s`",
             "Domains: " + ", ".join(f"`{item}`" for item in plan.get("detected_domains") or []),
             f"Skeletal mesh: `{evidence.get('skeletal_mesh') or 'not resolved'}`",
             f"Animation Blueprint: `{evidence.get('animation_blueprint') or 'not resolved'}`",
+            "State owner: " + str(dict(detailed.get("proposed_architecture") or {}).get("state_owner") or "not resolved"),
+            "",
+            "Behavior contract:",
+        ]
+        lines.extend(f"- Observation: {item}" for item in behavior.get("observations") or [])
+        lines.extend(f"- Guard: {item}" for item in behavior.get("guards") or [])
+        lines.extend(f"- State: `{item}`" for item in behavior.get("states") or [])
+        for transition in behavior.get("transitions") or []:
+            transition = dict(transition)
+            lines.append(
+                "- Transition: `{} -> {}` on `{}`; guards: {}".format(
+                    transition.get("from"),
+                    transition.get("to"),
+                    transition.get("event"),
+                    ", ".join(str(value) for value in transition.get("guards") or []) or "none",
+                )
+            )
+        if behavior.get("unmatched_behavior_clauses"):
+            lines.append(
+                "- Unresolved clauses: "
+                + "; ".join(str(item) for item in behavior["unmatched_behavior_clauses"])
+            )
+        lines.extend([
             "",
             "Matched local playbooks:",
-        ]
+        ])
         lines.extend(
             f"- `{row.get('key')}`: {row.get('title')}"
             for row in plan.get("matched_playbooks") or []
@@ -869,6 +1109,50 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
             lines.append("   Operations: " + ", ".join(f"`{item}`" for item in row.get("operations") or []))
             if row.get("missing_operations"):
                 lines.append("   Needs acquisition: " + ", ".join(f"`{item}`" for item in row["missing_operations"]))
+        if detailed.get("action_graph"):
+            lines.extend(["", "Executable action graph:"])
+            for action in detailed.get("action_graph") or []:
+                unresolved = list(action.get("unresolved_params") or [])
+                blocked = bool(unresolved or not action.get("callable"))
+                suffix = "BLOCKED: " + ", ".join(unresolved) if blocked else "ready"
+                lines.append(f"- `{action.get('id')}` `{action.get('operation')}`: {suffix}")
+        if detailed.get("input_arbitration"):
+            lines.extend(["", "Input arbitration:"])
+            for arbitration in detailed.get("input_arbitration") or []:
+                order = " > ".join(
+                    str(value.get("title") or value.get("behavior_id"))
+                    for value in arbitration.get("ordered_candidates") or []
+                )
+                lines.append(f"- `{arbitration.get('input')}`: {order}")
+                for tie in arbitration.get("unresolved_ties") or []:
+                    lines.append("  BLOCKED tie: " + " vs ".join(str(value) for value in tie))
+        role_bindings = list(dict(detailed.get("animation_integration") or {}).get("role_bindings") or [])
+        if role_bindings:
+            lines.extend(["", "Animation role evidence:"])
+            for binding in role_bindings:
+                lines.append(
+                    f"- `{binding.get('role')}`: {binding.get('status')}; selected asset: "
+                    f"`{binding.get('selected_asset') or 'none'}`"
+                )
+        fixtures = list(dict(detailed.get("proof_plan") or {}).get("fixtures") or [])
+        if fixtures:
+            lines.extend(["", f"Executable PIE fixtures: {len(fixtures)}"])
+            lines.extend(
+                f"- `{fixture.get('id')}` ({fixture.get('category')}): {fixture.get('action')}"
+                for fixture in fixtures
+            )
+        readiness = dict(detailed.get("readiness") or {})
+        if readiness.get("errors"):
+            lines.extend(["", "Approval blockers:"])
+            lines.extend(f"- {item}" for item in readiness.get("errors") or [])
+        claims = list(proof.get("proof_claims") or [])
+        if claims:
+            lines.extend(["", "Runtime proof contract:"])
+            for claim in claims:
+                lines.append(
+                    f"- L{claim.get('evidence_level')} `{claim.get('claim_id')}`: "
+                    f"{claim.get('then_assertion') or claim.get('description')}"
+                )
         if plan.get("unknowns"):
             lines.extend(["", "Evidence still to resolve:"])
             lines.extend(f"- {item}" for item in plan.get("unknowns") or [])

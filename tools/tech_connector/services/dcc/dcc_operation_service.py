@@ -180,6 +180,14 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
         mutates_project=True,
         description="Call a Maya Python API function such as maya.cmds.setAttr with explicit args/kwargs.",
     ),
+    "script.run": DccOperation(
+        key="script.run",
+        label="Maya Run Script",
+        function="ai_studio.maya.generated.script_run",
+        required=("code",),
+        mutates_project=True,
+        description="Run explicit Maya Python code through the direct bridge.",
+    ),
     "tool.call": DccOperation(
         key="tool.call",
         label="Maya Tool Call",
@@ -215,6 +223,21 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
         optional={"start_frame": 1, "end_frame": 120, "selected_only": True},
         mutates_project=False,
         description="Export animation curves or FBX clips from Maya.",
+    ),
+    "animation.hik_retarget": DccOperation(
+        key="animation.hik_retarget",
+        label="Maya HumanIK Retarget FBX",
+        function="maya_tools.Rigging.mocap.hik_retarget.retarget_fbx_hik",
+        required=("target_rig", "source_fbx", "output_fbx", "source_mapping"),
+        optional={
+            "target_character": "Character1",
+            "source_character": "AIStudioSourceCharacter",
+            "source_namespace": "AIStudioSource",
+            "target_namespace": "MannyRig_v01_retarget",
+            "reset_scene": True,
+        },
+        mutates_project=True,
+        description="Retarget an explicitly mapped animated FBX through locked HumanIK character definitions and export the baked target skeleton.",
     ),
     "modeling.create_primitive": DccOperation(
         key="modeling.create_primitive",
@@ -1035,18 +1058,26 @@ def dcc_prompt_to_operation(
             return "skin.set_weights"
         if re.search(r"\b(openmaya|open maya|maya\.api\.openmaya|maya\.openmaya|om\.|om2\.)\b", q):
             return "api.call"
+        if re.search(r"\b(maya python|python script|run script|execute script|script editor)\b", q):
+            return "script.run"
         if re.search(r"\b(maya\.cmds|cmds\.|api call|call api|python api)\b", q):
             return "api.call"
         if re.search(r"\b(maya_tools\.|tool call|call tool|run tool)\b", q):
             return "tool.call"
         if (
-            ("create_rig" in q or "create rig" in q or "build rig" in q or "create control rig" in q)
+            (
+                "create_rig" in q
+                or re.search(r"\b(?:create|make|build)\s+(?:a\s+)?rig\b", q)
+                or "create control rig" in q
+            )
             and re.search(r"\b(run|execute|call|create|build|make)\b", q)
             and not re.search(r"^\s*(what|which|where|find|show|list|identify|explain)\b", q)
         ):
             return "rigging.create_rig"
         if "auto_skinner" in q or "auto skin" in q or "skin weights" in q or "skinning" in q or "smooth skin" in q:
             return "rigging.auto_skinner"
+        if re.search(r"\b(retarget|retargeting)\b", q) and re.search(r"\b(hik|human\s*ik|fbx|animation)\b", q):
+            return "animation.hik_retarget"
         if "export anim" in q or "anim_export" in q or "export animation" in q:
             return "animation.export"
         if any(term in q for term in ("cube", "sphere", "cylinder", "cone", "plane", "torus", "primitive")):
@@ -1072,7 +1103,7 @@ def dcc_prompt_to_operation(
             return "modeling.create_primitive"
         if "render" in q or "screenshot" in q or "capture viewport" in q:
             return "render.render_scene"
-        if "export fbx" in q or "export selection to fbx" in q or "save as fbx" in q:
+        if "export fbx" in q or "export selection to fbx" in q or "export selected" in q and "fbx" in q or "save as fbx" in q:
             return "io.export_fbx"
         if "import fbx" in q or "load fbx" in q or "open fbx" in q:
             return "io.import_fbx"
@@ -1112,7 +1143,7 @@ def dcc_prompt_to_operation(
             return "scene.select"
         if re.search(r"\b(list|show|display|scan)\s+(nodes?|objects?|networks?|scene)\b", q):
             return "scene.list"
-        if re.search(r"\b(create|make|new|add)\s+(node|geo|sop|dop|rop|cop|vop|lop|material|mat|light|camera|rig|object)\b", q):
+        if re.search(r"\b(create|make|new|add)\s+(?:a\s+|an\s+)?(?:node|geo|sop|dop|rop|cop|vop|lop|material|mat|light|camera|rig|object)\b", q):
             return "node.create"
         if re.search(r"\b(set|change|edit|modify)\s+(param|parameter|parm)\b", q) or re.search(r"\bset parm\b", q):
             return "node.set_parm"
@@ -1608,6 +1639,15 @@ def _build_maya_operation_params(operation: str, text: str) -> dict[str, Any]:
             if component_matches:
                 params["components"] = component_matches
 
+    elif operation == "script.run":
+        code_match = re.search(r"\b(?:code|script)\s*[:=]\s*(.+)$", text or "", re.IGNORECASE | re.DOTALL)
+        if code_match:
+            params["code"] = code_match.group(1).strip()
+        elif "cmds." in (text or ""):
+            params["code"] = (text or "")[(text or "").find("cmds."):]
+        elif "maya." in (text or ""):
+            params["code"] = (text or "")[(text or "").find("maya."):]
+
     elif operation in {"api.call", "tool.call"}:
         function = _extract_function_path(text)
         if operation == "tool.call" and function and not function.startswith("maya_tools."):
@@ -1947,6 +1987,12 @@ try:
         components = _as_list(params.get("components")) or cmds.ls(selection=True, flatten=True) or [mesh]
         cmds.skinPercent(cluster, components, transformValue=[(influence, float(weight))])
         print("Set skin weight " + str(weight) + " for " + influence + " on " + str(components))
+
+    elif operation == "script.run":
+        code = str(params.get("code") or "")
+        if not code.strip():
+            raise RuntimeError("code is required")
+        exec(code, {{"cmds": cmds, "om": om, "om2": om2, "json": json}})
 
     elif operation in {{"api.call", "tool.call"}}:
         function = params.get("function")

@@ -10,6 +10,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import re
+import time
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QEvent, QPoint
 from PySide6.QtGui import QTextCursor, QKeySequence, QShortcut
@@ -1532,88 +1533,6 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         }
         cache[key] = cached
         return cached
-
-    def _filter_discovered_symbols_legacy_unused(self, text):
-        query = text.strip().lower()
-        self.wf_build_func_box.clear()
-        self._refresh_pipeline_node_view_tool_symbols()
-
-        selected_dcc = self._current_pipeline_dcc_filter()
-        terms = query.split()
-
-        matched_items = []
-        for idx, sym in enumerate(self.all_discovered_symbols):
-            if str(sym.get("name") or "").strip() == "__init__":
-                continue
-            symbol_dcc_keys = self._pipeline_symbol_dcc_keys(sym)
-            if selected_dcc not in {"", "all"} and selected_dcc not in symbol_dcc_keys:
-                continue
-
-            name = sym.get("name", "unnamed").lower()
-            kind = sym.get("kind", "function").lower()
-            host = str(sym.get("host", "")).lower()
-            package = str(sym.get("package", "") or sym.get("source_package", "")).lower()
-            module = str(sym.get("module", "") or sym.get("function_path", "")).lower()
-            file_path = sym.get("file_path", "").lower()
-            file_name = Path(sym.get("file_path", "")).name.lower()
-
-            matches = True
-            for term in terms:
-                if (
-                        term not in name
-                        and term not in kind
-                        and term not in host
-                        and term not in package
-                        and term not in module
-                        and term not in file_name
-                        and term not in file_path
-                ):
-                    matches = False
-                    break
-
-            if matches:
-                display_name = sym.get("name", "unnamed")
-                display_kind = sym.get("kind", "function")
-                display_file = Path(sym.get("file_path", "")).name
-                dcc_label = "/".join(sorted(symbol_dcc_keys))
-                display = f"{display_kind}: {display_name} [{display_file}] - {dcc_label}"
-                matched_items.append((display, idx))
-
-        # Fuzzy match fallback if no strict matches are found and there is a search query
-        if not matched_items and query:
-            import difflib
-
-            scored_items = []
-            for idx, sym in enumerate(self.all_discovered_symbols):
-                if str(sym.get("name") or "").strip() == "__init__":
-                    continue
-                symbol_dcc_keys = self._pipeline_symbol_dcc_keys(sym)
-                if selected_dcc not in {"", "all"} and selected_dcc not in symbol_dcc_keys:
-                    continue
-                name = sym.get("name", "unnamed").lower()
-                ratio = difflib.SequenceMatcher(None, query, name).ratio()
-                if ratio > 0.4:
-                    display_name = sym.get("name", "unnamed")
-                    display_kind = sym.get("kind", "function")
-                    display_file = Path(sym.get("file_path", "")).name
-                    dcc_label = "/".join(sorted(symbol_dcc_keys))
-                    display = f"{display_kind}: {display_name} [{display_file}] - {dcc_label} (Fuzzy Match)"
-                    scored_items.append((ratio, display, idx))
-            scored_items.sort(key=lambda x: x[0], reverse=True)
-            for ratio, display, idx in scored_items[:10]:
-                matched_items.append((display, idx))
-
-        for display, idx in matched_items:
-            try:
-                self.wf_build_func_box.addItem(display, self.all_discovered_symbols[idx])
-            except Exception:
-                self.wf_build_func_box.addItem(display, idx)
-
-        if matched_items:
-            try:
-                self.wf_build_func_box.setCurrentIndex(0)
-            except Exception:
-                pass
 
     def filter_discovered_symbols(self, text):
         query = (text or "").strip().lower()
@@ -3461,16 +3380,24 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
             allowed = {".py", ".cpp", ".h", ".hpp", ".cs", ".json", ".yaml", ".yml", ".txt", ".md"}
             skip_names = {".git", "__pycache__", "Intermediate", "Saved", "DerivedDataCache", ".ai_studio"}
+            started = time.monotonic()
+            scanned_files = 0
+            max_files = 2500
+            time_budget_seconds = 4.0
             for root in project_roots_for_search():
                 if not root.exists():
                     continue
                 for file_path in root.rglob("*"):
                     if count >= max_results:
                         return
+                    if scanned_files >= max_files or time.monotonic() - started >= time_budget_seconds:
+                        QTimer.singleShot(0, results.setFocus if results.count() > 0 else search.setFocus)
+                        return
                     if not file_path.is_file() or file_path.suffix.lower() not in allowed:
                         continue
                     if any(part in skip_names for part in file_path.parts):
                         continue
+                    scanned_files += 1
                     try:
                         content = file_path.read_text(encoding="utf-8", errors="replace")
                     except Exception:
@@ -4125,16 +4052,23 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         allowed = {".py", ".pyw", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".cs", ".json", ".yaml", ".yml", ".txt",
                    ".md"}
         skip = {".git", "__pycache__", "Intermediate", "Saved", "DerivedDataCache", ".ai_studio"}
+        started = time.monotonic()
+        scanned_files = 0
+        max_files = 2500
+        time_budget_seconds = 4.0
         for root in [Path(r) for r in roots if r]:
             if not root.exists():
                 continue
             for file_path in root.rglob("*"):
                 if len(results) >= max_results:
                     return results
+                if scanned_files >= max_files or time.monotonic() - started >= time_budget_seconds:
+                    return results
                 if not file_path.is_file() or file_path.suffix.lower() not in allowed:
                     continue
                 if any(part in skip for part in file_path.parts):
                     continue
+                scanned_files += 1
                 try:
                     content = file_path.read_text(encoding="utf-8", errors="replace")
                 except Exception:
@@ -4461,6 +4395,10 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
     def keyPressEvent(self, event):
         try:
             if event.modifiers() & Qt.ControlModifier:
+                if event.key() == Qt.Key_Z:
+                    if self._handle_global_undo_shortcut():
+                        event.accept()
+                        return
                 if event.key() == Qt.Key_S:
                     self.save_current_file()
                     event.accept()
@@ -4492,10 +4430,57 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         except Exception:
             event.ignore()
 
+    def _focus_is_inside_widget(self, focus, root) -> bool:
+        if focus is None or root is None:
+            return False
+        if focus is root:
+            return True
+        try:
+            return root.isAncestorOf(focus)
+        except Exception:
+            return False
+
+    def _handle_global_undo_shortcut(self) -> bool:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            return False
+
+        node_view = getattr(self, "wf_node_view", None)
+        if node_view is not None and self._focus_is_inside_widget(focus, node_view):
+            if hasattr(node_view, "can_undo") and node_view.can_undo():
+                node_view.undo_last_change()
+            else:
+                try:
+                    node_view.statusMessage.emit("Nothing to undo in the node graph.")
+                except Exception:
+                    pass
+            return True
+
+        tabs = getattr(self, "wf_builder_tabs", None)
+        graph_tab = getattr(self, "wf_graph_mode_tab", None)
+        if (
+            node_view is not None
+            and tabs is not None
+            and graph_tab is not None
+            and getattr(tabs, "currentWidget", lambda: None)() is graph_tab
+            and not isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit))
+        ):
+            if hasattr(node_view, "can_undo") and node_view.can_undo():
+                node_view.undo_last_change()
+            else:
+                try:
+                    node_view.statusMessage.emit("Nothing to undo in the node graph.")
+                except Exception:
+                    pass
+            return True
+        return False
+
     def eventFilter(self, obj, event):
         try:
             if event.type() == QEvent.KeyPress and self.isActiveWindow():
                 if event.modifiers() & Qt.ControlModifier:
+                    if event.key() == Qt.Key_Z:
+                        return self._handle_global_undo_shortcut()
                     if event.key() == Qt.Key_S:
                         self.save_current_file()
                         return True

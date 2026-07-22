@@ -317,6 +317,10 @@ def build_request_task_graph(
         clause_plan = split_prompt_clauses(prompt).to_dict()
     except Exception:
         clause_plan = {}
+    try:
+        composed_request = compose_request(prompt).to_dict()
+    except Exception:
+        composed_request = {}
 
     if understanding is None:
         understanding = understand_prompt_request(prompt, host=host)
@@ -415,6 +419,13 @@ def build_request_task_graph(
         "framework": "canonical_request_goal_graph_v4",
         "compatibility_framework": "canonical_request_task_graph_v1",
         "problem_formulation": problem_formulation,
+        "composed_request": composed_request,
+        "composition_framework": composed_request.get("framework", ""),
+        "composition_goals": list(composed_request.get("goals") or []),
+        "composition_clauses": list(composed_request.get("clauses") or []),
+        "composition_shared_context": dict(composed_request.get("shared_context") or {}),
+        "composition_global_constraints": list(composed_request.get("global_constraints") or []),
+        "composition_unresolved_relationships": list(composed_request.get("unresolved_relationships") or []),
         "clause_framework": clause_plan.get("framework", ""),
         "clauses": list(clause_plan.get("clauses") or []),
         "clause_confidence": float(clause_plan.get("confidence") or 0.0),
@@ -492,6 +503,9 @@ def task_graph_route(task_graph: dict[str, Any]) -> str:
 
     if primary_route == "dcc_query" or "dcc_query" in capabilities:
         return "dcc_query"
+
+    if primary_route == "project_search" and bool(task_graph.get("requires_project_search")):
+        return "project_search"
 
     if goal_type in {"learn", "explain", "compare", "respond"}:
         return "chat"
@@ -752,6 +766,84 @@ class PromptClausePlan:
         }
 
 
+@dataclass(frozen=True)
+class GoalClause:
+    goal_id: str
+    source_clause_id: str
+    action: str
+    object_type: str = ""
+    target: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    modifiers: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    validations: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
+    consumes: tuple[str, ...] = ()
+    produces: tuple[str, ...] = ()
+    confidence: float = 0.5
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["modifiers"] = list(self.modifiers)
+        data["constraints"] = list(self.constraints)
+        data["validations"] = list(self.validations)
+        data["depends_on"] = list(self.depends_on)
+        data["consumes"] = list(self.consumes)
+        data["produces"] = list(self.produces)
+        return data
+
+
+@dataclass(frozen=True)
+class ComposedClause:
+    clause_id: str
+    source_text: str
+    normalized_text: str
+    role: str
+    action: str = ""
+    object_type: str = ""
+    target: str = ""
+    attaches_to: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    references: dict[str, str] = field(default_factory=dict)
+    depends_on: tuple[str, ...] = ()
+    source_span: tuple[int, int] = (0, 0)
+    confidence: float = 0.5
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["depends_on"] = list(self.depends_on)
+        data["source_span"] = list(self.source_span)
+        return data
+
+
+@dataclass(frozen=True)
+class ComposedRequest:
+    original_text: str
+    normalized_text: str
+    primary_objective: str
+    goals: tuple[GoalClause, ...]
+    clauses: tuple[ComposedClause, ...]
+    shared_context: dict[str, Any] = field(default_factory=dict)
+    global_constraints: tuple[str, ...] = ()
+    unresolved_relationships: tuple[str, ...] = ()
+    confidence: float = 0.5
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "framework": "compositional_request_v1",
+            "original_text": self.original_text,
+            "normalized_text": self.normalized_text,
+            "primary_objective": self.primary_objective,
+            "goals": [goal.to_dict() for goal in self.goals],
+            "clauses": [clause.to_dict() for clause in self.clauses],
+            "shared_context": dict(self.shared_context),
+            "global_constraints": list(self.global_constraints),
+            "unresolved_relationships": list(self.unresolved_relationships),
+            "confidence": self.confidence,
+        }
+
+
 def normalize_prompt_text(text: str) -> str:
     """Normalize spacing and a small set of safe, high-confidence typos."""
     value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -768,12 +860,569 @@ def normalize_prompt_text(text: str) -> str:
         r"\bfunciton\b": "function",
         r"\bfuncton\b": "function",
         r"\btaht\b": "that",
+        r"\bcahnge\b": "change",
+        r"\bcrete\b": "create",
     }
     for pattern, replacement in typo_map.items():
         value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
     value = re.sub(r"[ \t]+", " ", value)
     value = re.sub(r"\n[ \t]+", "\n", value)
     return value.strip()
+
+
+def compose_request(text: str) -> ComposedRequest:
+    """Build a role-aware request graph before route selection.
+
+    Separators are treated as evidence only. Each phrase is classified as a
+    goal, argument, context, validation, constraint, output request, alternative,
+    or dependent goal, then attached to the goal it modifies.
+    """
+    original = str(text or "")
+    normalized = normalize_prompt_text(original)
+    if not normalized:
+        return ComposedRequest(original, "", "", (), (), confidence=1.0)
+
+    shared_context, body = _extract_shared_context(normalized)
+    segments = _composition_segments_with_spans(body)
+    clauses: list[ComposedClause] = []
+    goal_builders: list[dict[str, Any]] = []
+    last_goal_id = ""
+    unresolved: list[str] = []
+    global_constraints: list[str] = []
+
+    for index, (segment, start, end, connector) in enumerate(segments, start=1):
+        cleaned = segment.strip(" \t,;.?!")
+        if not cleaned:
+            continue
+        clause_id = f"clause_{len(clauses) + 1}"
+        role, action, object_type, target, args, reason, confidence = _classify_composed_clause(
+            cleaned,
+            connector=connector,
+            prior_goal=goal_builders[-1] if goal_builders else {},
+        )
+        if (
+            clauses
+            and clauses[-1].role == "ARGUMENT"
+            and clauses[-1].action == "name"
+            and re.match(r"^[A-Za-z_][A-Za-z0-9_:.-]*$", cleaned)
+        ):
+            role, action, object_type, target = "ARGUMENT", "name", "", ""
+            args = {"name": cleaned.rstrip(".?!,;:")}
+            reason, confidence = "additional plural naming argument", 0.9
+        references = _clause_references(cleaned, last_goal_id)
+        attaches_to = ""
+        depends_on: list[str] = []
+
+        if role == "GOAL":
+            goal_id = f"goal_{len(goal_builders) + 1}"
+            produces = [f"${goal_id}.output"] if action in {"create", "make", "build", "add", "generate"} else []
+            goal_args = dict(args)
+            if goal_args.get("names"):
+                goal_args.pop("name", None)
+                goal_args.pop("names", None)
+            goal_builders.append(
+                {
+                    "goal_id": goal_id,
+                    "source_clause_id": clause_id,
+                    "action": action,
+                    "object_type": object_type,
+                    "target": target,
+                    "arguments": goal_args,
+                    "modifiers": [],
+                    "constraints": [],
+                    "validations": [],
+                    "depends_on": [],
+                    "consumes": [],
+                    "produces": produces,
+                    "confidence": confidence,
+                }
+            )
+            if args.get("names"):
+                _merge_plural_name_arguments(goal_builders, list(args.get("names") or []))
+            last_goal_id = goal_id
+            attaches_to = goal_id
+        elif role == "DEPENDENT_GOAL":
+            goal_id = f"goal_{len(goal_builders) + 1}"
+            dependencies = _dependent_goal_dependencies(cleaned, goal_builders, last_goal_id)
+            depends_on.extend(dependencies)
+            consumes = [f"${dependency}.output" for dependency in dependencies] if _uses_prior_output(cleaned) else []
+            goal_builders.append(
+                {
+                    "goal_id": goal_id,
+                    "source_clause_id": clause_id,
+                    "action": action,
+                    "object_type": object_type,
+                    "target": target,
+                    "arguments": dict(args),
+                    "modifiers": [],
+                    "constraints": [],
+                    "validations": [],
+                    "depends_on": list(depends_on),
+                    "consumes": consumes,
+                    "produces": [f"${goal_id}.output"] if action in {"create", "make", "build", "add", "generate"} else [],
+                    "confidence": confidence,
+                }
+            )
+            last_goal_id = goal_id
+            attaches_to = goal_id
+        elif role in {"ARGUMENT", "MODIFIER", "CONTEXT", "VALIDATION", "CONSTRAINT", "OUTPUT_REQUEST", "ALTERNATIVE"}:
+            attaches_to = _argument_attachment_goal(goal_builders, args, cleaned) or last_goal_id
+            if not attaches_to and role not in {"CONTEXT", "CONSTRAINT"}:
+                unresolved.append(f"{clause_id}:{role}:no_goal_to_attach")
+            if role == "CONTEXT":
+                shared_context.update(args)
+            elif role == "CONSTRAINT":
+                if attaches_to:
+                    _append_goal_list(goal_builders, attaches_to, "constraints", cleaned)
+                else:
+                    global_constraints.append(cleaned)
+            elif role == "VALIDATION":
+                _append_goal_list(goal_builders, attaches_to, "validations", cleaned)
+            elif role == "ARGUMENT":
+                if args.get("names"):
+                    _merge_plural_name_arguments(goal_builders, list(args.get("names") or []))
+                else:
+                    _merge_goal_arguments(goal_builders, attaches_to, args)
+            elif role == "MODIFIER":
+                _append_goal_list(goal_builders, attaches_to, "modifiers", cleaned)
+                _merge_goal_arguments(goal_builders, attaches_to, args)
+            elif role == "OUTPUT_REQUEST":
+                _append_goal_list(goal_builders, attaches_to, "modifiers", f"output:{cleaned}")
+            elif role == "ALTERNATIVE":
+                existing = _goal_by_id(goal_builders, attaches_to)
+                if existing is not None:
+                    existing.setdefault("arguments", {}).setdefault("alternatives", []).extend(args.get("alternatives", []))
+
+        clauses.append(
+            ComposedClause(
+                clause_id=clause_id,
+                source_text=segment,
+                normalized_text=cleaned,
+                role=role,
+                action=action,
+                object_type=object_type,
+                target=target,
+                attaches_to=attaches_to,
+                arguments=dict(args),
+                references=references,
+                depends_on=tuple(depends_on),
+                source_span=(start, end),
+                confidence=confidence,
+                reason=reason,
+            )
+        )
+
+    goals = tuple(
+        GoalClause(
+            goal_id=str(item.get("goal_id") or ""),
+            source_clause_id=str(item.get("source_clause_id") or ""),
+            action=str(item.get("action") or ""),
+            object_type=str(item.get("object_type") or ""),
+            target=str(item.get("target") or ""),
+            arguments=dict(item.get("arguments") or {}),
+            modifiers=tuple(item.get("modifiers") or ()),
+            constraints=tuple(item.get("constraints") or ()),
+            validations=tuple(item.get("validations") or ()),
+            depends_on=tuple(item.get("depends_on") or ()),
+            consumes=tuple(item.get("consumes") or ()),
+            produces=tuple(item.get("produces") or ()),
+            confidence=float(item.get("confidence") or 0.5),
+        )
+        for item in goal_builders
+    )
+    primary = _primary_objective(goals, normalized)
+    confidence = round(
+        sum(clause.confidence for clause in clauses) / len(clauses),
+        3,
+    ) if clauses else 1.0
+    return ComposedRequest(
+        original_text=original,
+        normalized_text=normalized,
+        primary_objective=primary,
+        goals=goals,
+        clauses=tuple(clauses),
+        shared_context=shared_context,
+        global_constraints=tuple(global_constraints),
+        unresolved_relationships=tuple(unresolved),
+        confidence=confidence,
+    )
+
+
+_COMPOSITION_CONNECTOR = re.compile(
+    r"\s*(?P<connector>;|,|\+|\b(?:and then|then|after that|next|finally|but|plus|also|and|while|before|after|with|using)\b)\s*",
+    re.IGNORECASE,
+)
+
+
+def _extract_shared_context(text: str) -> tuple[dict[str, Any], str]:
+    shared: dict[str, Any] = {}
+    body = text
+    host_match = re.match(r"^\s*in\s+(maya|unreal|blender|houdini|unity)\s*,?\s*(.+)$", text, re.IGNORECASE)
+    if host_match:
+        shared["host"] = host_match.group(1).lower()
+        body = host_match.group(2).strip()
+    return shared, body
+
+
+def _composition_segments_with_spans(text: str) -> list[tuple[str, int, int, str]]:
+    text = _protect_plural_name_connectors(text)
+    parts: list[tuple[str, int, int, str]] = []
+    cursor = 0
+    connector = ""
+    for match in _COMPOSITION_CONNECTOR.finditer(text):
+        piece = text[cursor:match.start()].strip()
+        if piece:
+            leading = len(text[cursor:match.start()]) - len(text[cursor:match.start()].lstrip())
+            piece_start = cursor + leading
+            parts.append((piece, piece_start, piece_start + len(piece), connector))
+        connector = match.group("connector").strip().lower()
+        cursor = match.end()
+    piece = text[cursor:].strip()
+    if piece:
+        leading = len(text[cursor:]) - len(text[cursor:].lstrip())
+        piece_start = cursor + leading
+        parts.append((piece, piece_start, piece_start + len(piece), connector))
+    expanded: list[tuple[str, int, int, str]] = []
+    for piece, start, end, piece_connector in parts:
+        implicit = _implicit_action_segments(piece)
+        if len(implicit) <= 1:
+            expanded.append((piece, start, end, piece_connector))
+            continue
+        for implicit_index, (implicit_piece, implicit_start, implicit_end, implicit_connector) in enumerate(implicit):
+            expanded.append((
+                implicit_piece,
+                start + implicit_start,
+                start + implicit_end,
+                piece_connector if implicit_index == 0 else implicit_connector,
+            ))
+    return expanded or parts or [(text, 0, len(text), "")]
+
+
+def _protect_plural_name_connectors(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        return f"{match.group(1)} & {match.group(2)}"
+
+    protected = str(text or "")
+    pattern = re.compile(
+        r"\b((?:call|name|rename)\s+them\s+[A-Za-z_][A-Za-z0-9_:.-]*)\s+and\s+([A-Za-z_][A-Za-z0-9_:.-]*)\b",
+        re.IGNORECASE,
+    )
+    previous = None
+    while previous != protected:
+        previous = protected
+        protected = pattern.sub(replace, protected)
+    return protected
+
+
+_IMPLICIT_ACTION_RE = re.compile(
+    r"\b(create|make|build|add|generate|find|locate|search|identify|inspect|review|read|open|refresh|export|run|plan|propose|suggest|connect|wire|attach|parent|constrain|assign|move|place|position|aim|orient|skin|freeze|select|name|rename|verify|validate|check|confirm|explain|show|list|summari[sz]e|report|change|update|delete|remove)\b",
+    re.IGNORECASE,
+)
+
+
+def _implicit_action_segments(text: str) -> list[tuple[str, int, int, str]]:
+    matches = list(_IMPLICIT_ACTION_RE.finditer(text or ""))
+    if len(matches) < 2:
+        return [(text, 0, len(text), "")]
+    segments: list[tuple[str, int, int, str]] = []
+    prefix_added = False
+    first_action = matches[0].group(1).lower()
+    if (
+        matches[0].start() > 0
+        and first_action not in {"name", "rename"}
+        and _looks_like_additional_object(text[:matches[0].start()])
+    ):
+        prefix = text[:matches[0].start()].strip(" ,;.?!")
+        if prefix:
+            leading = len(text[:matches[0].start()]) - len(text[:matches[0].start()].lstrip(" ,;.?!"))
+            segments.append((prefix, leading, leading + len(prefix), ""))
+            prefix_added = True
+    for index, match in enumerate(matches):
+        start = match.start() if prefix_added or index > 0 else 0
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        piece = text[start:end].strip(" ,;.?!")
+        if piece:
+            leading = len(text[start:end]) - len(text[start:end].lstrip(" ,;.?!"))
+            piece_start = start + leading
+            segments.append((piece, piece_start, piece_start + len(piece), "implicit" if index else ""))
+    return segments
+
+
+def _classify_composed_clause(
+    text: str,
+    *,
+    connector: str,
+    prior_goal: dict[str, Any],
+) -> tuple[str, str, str, str, dict[str, Any], str, float]:
+    lower = text.lower()
+    args = _extract_clause_arguments(text)
+
+    if re.search(r"\b(?:are we|do we|where|which|what|check if|check whether|see if)\b.*\b(?:import|imports|importing|load|loads|loading|refresh|route|call|calls|called)\b", lower):
+        return "GOAL", "find", _infer_object_type(text), text.strip(" ."), args, "code/project question requiring discovery", 0.9
+    if not prior_goal and re.search(r"\bcheck\b.*\b(?:api|project|tree|details|import|route|refresh|tab)\b", lower):
+        return "GOAL", "find", _infer_object_type(text), text.strip(" ."), args, "project check requiring discovery", 0.88
+    if not prior_goal and re.search(r"\bcheck\b.*\b(?:startup|path|ui|slow|slowness|freeze|freezes)\b", lower):
+        return "GOAL", "find", _infer_object_type(text), text.strip(" ."), args, "project check requiring discovery", 0.88
+    if not prior_goal and re.search(r"\bcheck\b.*\b(?:@|class|file|module|widget|slider|qslider|custom_widgets|custom_qt)\b", lower):
+        return "GOAL", "find", _infer_object_type(text), text.strip(" ."), args, "project check requiring discovery", 0.88
+    if not prior_goal and re.search(r"\b(?:tree|details|project details|project tree|tab change|startup|ui)\b", lower) and re.search(r"\b(?:slow|stale|refresh|freeze|freezes|hang|hangs)\b", lower):
+        return "GOAL", "inspect", _infer_object_type(text), text.strip(" ."), args, "reported project/UI behavior requiring investigation", 0.84
+    if not prior_goal and re.search(r"\b(what would|how would|show me how|example|pretend)\b", lower):
+        return "GOAL", "explain", _infer_object_type(text), text.strip(" ."), args, "guidance/example request", 0.86
+
+    if re.search(r"\b(?:include|return|output|summari[sz]e|tell me|show)\b.*\b(?:line numbers?|names? only|path|file|side effects?|signature|public methods?)\b", lower):
+        return "OUTPUT_REQUEST", "report", "answer", "", args, "requested output format/detail", 0.9
+
+    if prior_goal and re.match(r"^\s*(?:summari[sz]e|report|list|explain|describe|tell me|show|propose|suggest|include)\b", lower):
+        return "OUTPUT_REQUEST", "report", "answer", "", args, "requested follow-up output/detail", 0.9
+    if not prior_goal and re.match(r"^\s*include\b", lower):
+        return "GOAL", "include", _infer_object_type(text), re.sub(r"^\s*include\s+", "", text, flags=re.IGNORECASE).strip(" ."), args, "leading include command", 0.82
+
+    leading_action = bool(re.match(
+        r"^\s*(?:create|make|build|add|generate|find|locate|search|identify|inspect|review|read|open|refresh|export|run|plan|connect|wire|change|update|move|parent|select)\b",
+        lower,
+    ))
+    if not leading_action and re.search(r"\b(?:do not|don't|dont|never|without|only|keep|leave|avoid|preserve|wait for approval|before editing|before changing)\b", lower):
+        role = "CONSTRAINT"
+        if re.search(r"\b(verify|validate|check|confirm|make sure)\b", lower):
+            role = "VALIDATION"
+        return role, "constrain", "", "", args, "constraint or final-state language", 0.9
+
+    if re.search(r"\b(verify|validate|confirm|make sure|ensure)\b", lower) or re.search(r"\bcheck\b(?!\s+(?:if|whether|where|which|what|for))", lower):
+        return "VALIDATION", "validate", _infer_object_type(text), "", args, "validation phrase", 0.92
+
+    if re.search(r"\b(tell me|return|output|show me what file|what file|which file|file it is in|include)\b", lower):
+        return "OUTPUT_REQUEST", "report", "answer", "", args, "requested output format/detail", 0.88
+
+    if connector == "or" or re.search(r"\bwhichever\b|\bi don't care which\b", lower):
+        alternatives = [part.strip(" .") for part in re.split(r"\bor\b", text, flags=re.IGNORECASE) if part.strip()]
+        if alternatives:
+            args["alternatives"] = alternatives
+        return "ALTERNATIVE", "choose", _infer_object_type(text), "", args, "alternative implementation/target set", 0.84
+
+    if re.match(r"^\s*(?:named|called|call it|name it|call them|name them|name|rename)\b", lower):
+        return "ARGUMENT", "name", "", "", args, "naming argument attached to prior goal", 0.94
+
+    if re.match(r"^\s*(?:the\s+)?[A-Za-z_][A-Za-z0-9_:-]*\s+(?:is|are)\s+", text):
+        args.setdefault("context_hint", text)
+        return "CONTEXT", "context", "", "", args, "state/context evidence", 0.82
+
+    if connector in {"and", "+", "plus", "implicit"} and prior_goal and _looks_like_additional_object(text):
+        prior_action = str(prior_goal.get("action") or "create")
+        object_type = _infer_object_type(text)
+        return "GOAL", prior_action, object_type, text.strip(" ."), args, "additional object using prior action", 0.84
+
+    action, object_type, target = _composed_action_object(text, prior_goal=prior_goal)
+    if action:
+        if _is_argument_like_action(action, lower, prior_goal):
+            args.update(_position_arguments(text))
+            return "ARGUMENT", action, object_type, target, args, "action supplies argument/postcondition for prior creation goal", 0.86
+        if _uses_prior_output(text) or action in {
+            "parent", "attach", "constrain", "assign", "move", "select",
+            "orient", "skin", "freeze", "modify", "connect",
+        } and prior_goal:
+            return "DEPENDENT_GOAL", action, object_type, target, args, "depends on prior produced object or explicit follow-up action", 0.88
+        return "GOAL", action, object_type, target, args, "independent objective", 0.9
+
+    if connector in {"with", "using"} or (prior_goal and re.match(r"^\s*with\b", lower)):
+        args.setdefault("modifier", text)
+        return "MODIFIER", "modify", "", "", args, "with/using modifier", 0.78
+
+    args.setdefault("context_hint", text)
+    return "CONTEXT", "context", "", "", args, "unverbed phrase treated as context", 0.62
+
+
+def _composed_action_object(text: str, *, prior_goal: dict[str, Any]) -> tuple[str, str, str]:
+    lower = text.lower()
+    action_map = (
+        ("create", r"\b(create|make|build|add|generate)\b\s+(.+)"),
+        ("find", r"\b(find|locate|search for|search|identify|inspect|review|read)\b\s+(.+)"),
+        ("list", r"\b(list|show|get|summari[sz]e)\b\s+(.+)"),
+        ("open", r"\b(open)\b\s+(.+)"),
+        ("refresh", r"\b(refresh)\b\s+(.+)"),
+        ("export", r"\b(export)\b\s+(.+)"),
+        ("run", r"\b(run)\b\s+(.+)"),
+        ("plan", r"\b(plan|propose|suggest)\b\s+(.+)"),
+        ("include", r"\b(include)\b\s+(.+)"),
+        ("modify", r"\b(change|update|modify|edit|patch)\b\s+(.+)"),
+        ("connect", r"\b(connect|wire)\b\s+(.+)"),
+        ("attach", r"\b(attach)\b\s+(.+)"),
+        ("parent", r"\b(parent)\b\s+(.+)"),
+        ("delete", r"\b(delete|remove|stop)\b\s+(.+)"),
+        ("constrain", r"\b(constrain)\b\s+(.+)"),
+        ("assign", r"\b(assign)\b\s+(.+)"),
+        ("move", r"\b(move|place|position|aim|orient)\b\s+(.+)"),
+        ("skin", r"\b(skin)\b\s+(.+)"),
+        ("freeze", r"\b(freeze)\b\s+(.+)"),
+        ("select", r"\b(select|keep selected|leave selected)\b\s*(.*)"),
+        ("expose", r"\b(expose)\b\s+(.+)"),
+        ("drive", r"\b(drive|drives)\b\s+(.+)"),
+        ("explain", r"\b(explain|describe|what does|how does)\b\s*(.*)"),
+    )
+    for action, pattern in action_map:
+        match = re.search(pattern, lower)
+        if not match:
+            continue
+        object_text = match.group(2).strip(" .") if match.lastindex and match.lastindex >= 2 else ""
+        return action, _infer_object_type(object_text or text), object_text or text.strip(" .")
+    return "", "", ""
+
+
+def _extract_clause_arguments(text: str) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    plural_name_match = re.search(
+        r"\b(?:call them|name them|rename them)\s+([A-Za-z_][A-Za-z0-9_:.-]*(?:\s*(?:,|and|&)\s*[A-Za-z_][A-Za-z0-9_:.-]*)+)",
+        text,
+        re.IGNORECASE,
+    )
+    if plural_name_match:
+        names = [
+            item.strip(" .?!,;:")
+            for item in re.split(r"\s*(?:,|and|&)\s*", plural_name_match.group(1))
+            if item.strip(" .?!,;:")
+        ]
+        if names:
+            args["names"] = names
+    name_match = re.search(r"\b(?:named|called|call it|name it|call them|name them|name)\s+([A-Za-z_][A-Za-z0-9_:.-]*)", text, re.IGNORECASE)
+    if name_match:
+        args["name"] = name_match.group(1).rstrip(".?!,;:")
+    color_match = re.search(r"\b(red|blue|green|yellow|white|black|purple|orange|gray|grey)\b", text, re.IGNORECASE)
+    if color_match:
+        args["color"] = color_match.group(1).lower()
+    args.update(_position_arguments(text))
+    return args
+
+
+def _position_arguments(text: str) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    pos_match = re.search(r"\b(?:at|to|on|under|above|below)\s+(?:the\s+)?([A-Za-z_][A-Za-z0-9_ -]*(?:joint|bone|wrist|hand|control|ctrl)?)\b", text, re.IGNORECASE)
+    if pos_match:
+        args["position_source"] = pos_match.group(1).strip()
+    amount_match = re.search(r"\b(up|down|left|right|forward|back)\s+([0-9]+(?:\.[0-9]+)?)\s*(?:units?)?\b", text, re.IGNORECASE)
+    if amount_match:
+        args["translation"] = {"direction": amount_match.group(1).lower(), "amount": float(amount_match.group(2))}
+    target_match = re.search(r"\b(?:to|under|onto)\s+(?:the\s+)?([A-Za-z_][A-Za-z0-9_:.-]*)\b", text, re.IGNORECASE)
+    if target_match:
+        args.setdefault("target", target_match.group(1))
+    return args
+
+
+def _infer_object_type(text: str) -> str:
+    lower = text.lower()
+    for key, value in (
+        ("niagara", "niagara_emitter"),
+        ("emitter", "emitter"),
+        ("locator", "locator"),
+        ("control", "control"),
+        ("ctrl", "control"),
+        ("material", "material"),
+        ("cube", "cube"),
+        ("function", "function"),
+        ("file", "file"),
+        ("project details", "project_details"),
+        ("selection", "selection"),
+        ("skeleton", "skeleton"),
+        ("notify", "animation_notify"),
+        ("parameter", "parameter"),
+    ):
+        if key in lower:
+            return value
+    return ""
+
+
+def _is_argument_like_action(action: str, lower: str, prior_goal: dict[str, Any]) -> bool:
+    if not prior_goal:
+        return False
+    if action == "move" and re.search(r"\b(place|position)\s+(?:it|this|that)\s+at\b", lower):
+        return True
+    return False
+
+
+def _uses_prior_output(text: str) -> bool:
+    return bool(re.search(r"\b(it|this|that|them|those|these|the result|the created|both)\b", text, re.IGNORECASE))
+
+
+def _dependent_goal_dependencies(text: str, goals: list[dict[str, Any]], last_goal_id: str) -> list[str]:
+    if re.search(r"\bboth\b|\bthem\b|\bthose\b|\bthese\b", text, re.IGNORECASE) and len(goals) >= 2:
+        return [
+            str(goal.get("goal_id") or "")
+            for goal in goals
+            if str(goal.get("goal_id") or "")
+        ]
+    return [last_goal_id] if last_goal_id else []
+
+
+def _argument_attachment_goal(goals: list[dict[str, Any]], args: dict[str, Any], text: str) -> str:
+    if "name" in args and re.search(r"\bthem\b|\bthose\b|\bthese\b", text, re.IGNORECASE):
+        for goal in goals:
+            if not dict(goal.get("arguments") or {}).get("name"):
+                return str(goal.get("goal_id") or "")
+    if "name" in args:
+        previous_name_count = sum(1 for goal in goals if dict(goal.get("arguments") or {}).get("name"))
+        if previous_name_count and previous_name_count < len(goals):
+            for goal in goals:
+                if not dict(goal.get("arguments") or {}).get("name"):
+                    return str(goal.get("goal_id") or "")
+    return ""
+
+
+def _looks_like_additional_object(text: str) -> bool:
+    return bool(re.match(r"^\s*(?:a|an|the)?\s*(locator|control|ctrl|material|cube|emitter|notify|parameter)\b", text, re.IGNORECASE))
+
+
+def _clause_references(text: str, last_goal_id: str) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    for token in re.findall(r"\b(it|this|that|them|those|these|the result|the created asset|the created object|both)\b", text, re.IGNORECASE):
+        refs[token.lower()] = f"${last_goal_id}.output" if last_goal_id else "unresolved"
+    return refs
+
+
+def _append_goal_list(goals: list[dict[str, Any]], goal_id: str, key: str, value: str) -> None:
+    goal = _goal_by_id(goals, goal_id)
+    if goal is None or not value:
+        return
+    values = goal.setdefault(key, [])
+    if value not in values:
+        values.append(value)
+
+
+def _merge_goal_arguments(goals: list[dict[str, Any]], goal_id: str, args: dict[str, Any]) -> None:
+    goal = _goal_by_id(goals, goal_id)
+    if goal is None:
+        return
+    target = goal.setdefault("arguments", {})
+    for key, value in args.items():
+        if value in (None, "", [], {}):
+            continue
+        if key not in target:
+            target[key] = value
+
+
+def _merge_plural_name_arguments(goals: list[dict[str, Any]], names: list[str]) -> None:
+    clean_names = [str(name).strip(" .?!,;:") for name in names if str(name).strip(" .?!,;:")]
+    if not clean_names:
+        return
+    unnamed_goals = [
+        goal
+        for goal in goals
+        if not dict(goal.get("arguments") or {}).get("name")
+    ]
+    for goal, name in zip(unnamed_goals, clean_names):
+        goal.setdefault("arguments", {})["name"] = name
+
+
+def _goal_by_id(goals: list[dict[str, Any]], goal_id: str) -> dict[str, Any] | None:
+    for goal in goals:
+        if str(goal.get("goal_id") or "") == str(goal_id or ""):
+            return goal
+    return None
+
+
+def _primary_objective(goals: tuple[GoalClause, ...], fallback: str) -> str:
+    if not goals:
+        return fallback
+    first = goals[0]
+    return " ".join(part for part in (first.action, first.object_type or first.target) if part).strip() or fallback
 
 
 def split_prompt_clauses(text: str) -> PromptClausePlan:

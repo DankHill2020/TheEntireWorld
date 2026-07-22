@@ -68,5 +68,5 @@ if exist "%CFG%" copy /Y "%CFG%" "%CFG%.bak" >nul 2>nul
 @echo off
 for %%I in ("%~dp0..") do set TOOLS_ROOT=%%~fI
 cd /d "%TOOLS_ROOT%"
-start "" "%PYTHONW_EXE%" %PYTHON_ARGS% -m tech_connector.app.main_window
+start "" "%PYTHONW_EXE%" %PYTHON_ARGS% -m tech_connector.studio_main
 exit

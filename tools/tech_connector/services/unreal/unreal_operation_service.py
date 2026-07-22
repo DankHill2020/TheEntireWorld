@@ -85,6 +85,7 @@ class UnrealOperation:
     required: tuple[str, ...] = ()
     optional: dict[str, Any] = field(default_factory=dict)
     mutates_project: bool = False
+    execution_host: str = "unreal"
     description: str = ""
 
 
@@ -386,6 +387,74 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         mutates_project=True,
         description="Rollback the latest tracked safe operation when the Unreal side supports rollback data.",
     ),
+    "runtime.pie_begin": UnrealOperation(
+        key="runtime.pie_begin",
+        label="Unreal Begin PIE",
+        function="unreal_tools.runtime.begin_pie",
+        optional={"simulate": False},
+        description="Request Play In Editor and report whether PIE was already active or started.",
+    ),
+    "runtime.pie_status": UnrealOperation(
+        key="runtime.pie_status",
+        label="Unreal Inspect PIE Status",
+        function="unreal_tools.runtime.pie_status",
+        description="Read the current PIE lifecycle state and available PIE worlds.",
+    ),
+    "runtime.pie_end": UnrealOperation(
+        key="runtime.pie_end",
+        label="Unreal End PIE",
+        function="unreal_tools.runtime.end_pie",
+        description="Request PIE shutdown and report the observed prior state.",
+    ),
+    "runtime.inject_key": UnrealOperation(
+        key="runtime.inject_key",
+        label="Unreal Inject PIE Key",
+        function="unreal_tools.runtime.inject_key",
+        required=("key_name",),
+        optional={"pressed": True},
+        description="Inject a public keyboard input into the active PIE viewport through AIStudioBridge.",
+    ),
+    "runtime.inspect_character": UnrealOperation(
+        key="runtime.inspect_character",
+        label="Unreal Inspect Character In PIE",
+        function="unreal_tools.runtime.inspect_character",
+        required=("character_blueprint_path",),
+        optional={"expected_anim_class_contains": "", "property_names": []},
+        description="Observe a live PIE character, its requested properties, active AnimInstance, and active montage.",
+    ),
+    "runtime.validate_character_montages": UnrealOperation(
+        key="runtime.validate_character_montages",
+        label="Unreal Validate Character Montages In PIE",
+        function="unreal_tools.runtime.validate_character_montages",
+        required=("character_blueprint_path", "montage_paths"),
+        optional={"expected_anim_class_contains": ""},
+        description="Play and observe montage assets on the live character AnimInstance; asset existence alone is not accepted.",
+    ),
+    "runtime.pie_validate": UnrealOperation(
+        key="runtime.pie_validate",
+        label="Unreal Validate PIE Scenario",
+        function="unreal_tools.runtime.pie_validate",
+        optional={"target_assets": [], "expected": {}, "start_pie": False},
+        description="Fail-closed PIE validation of target assets and structured runtime expectations.",
+    ),
+    "semantic_index.record_runtime_observation": UnrealOperation(
+        key="semantic_index.record_runtime_observation",
+        label="Record Unreal Runtime Observation",
+        function="tech_connector.services.unreal.semantic_project_index_service.record_unreal_runtime_observation",
+        required=("scenario_key", "status", "assertions", "evidence"),
+        optional={"subject_key": "", "project_root": None},
+        execution_host="desktop",
+        description="Persist structured PIE evidence in the project semantic index.",
+    ),
+    "feature.execute_generic_plan": UnrealOperation(
+        key="feature.execute_generic_plan",
+        label="Unreal Execute Generic Feature Plan",
+        function="tech_connector.unreal.orchestration.execute_generic_plan",
+        required=("plan",),
+        optional={"dry_run": True},
+        execution_host="desktop",
+        description="Validate generic approved-plan execution readiness without embedding feature recipes.",
+    ),
     # ── Expanded DCC Operation Catalog ──
 
     # ── Asset Management Additions ──
@@ -577,6 +646,78 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         required=("blueprint_path", "graph_name", "source_node", "source_pin", "target_node", "target_pin"),
         mutates_project=True,
         description="Connect pin A of node X to pin B of node Y in a Blueprint graph (EventGraph or AnimGraph).",
+    ),
+    "blueprint.apply_graph_spec": UnrealOperation(
+        key="blueprint.apply_graph_spec",
+        label="Unreal Apply Approved Blueprint Graph Spec",
+        function="unreal_tools.blueprint.apply_graph_spec",
+        required=("blueprint_path", "graph_name", "graph_spec"),
+        optional={"save": True},
+        mutates_project=True,
+        description="Apply an explicit node, pin-value, and link specification; reject incomplete or schema-invalid graph work.",
+    ),
+    "blueprint.describe_node_action": UnrealOperation(
+        key="blueprint.describe_node_action",
+        label="Unreal Describe Blueprint Node Action",
+        function="unreal_tools.blueprint.describe_node_action",
+        required=("blueprint_path", "graph_name", "palette_action"),
+        description="Verify one exact context-filtered palette action and return its typed pins without modifying the Blueprint.",
+    ),
+    "blueprint.search_node_actions": UnrealOperation(
+        key="blueprint.search_node_actions",
+        label="Unreal Search Blueprint Node Actions",
+        function="unreal_tools.blueprint.search_node_actions",
+        required=("blueprint_path", "graph_name", "query"),
+        optional={"max_results": 50},
+        description="Search the live context-filtered Blueprint action database without modifying the Blueprint.",
+    ),
+    "blueprint.probe_node_action": UnrealOperation(
+        key="blueprint.probe_node_action",
+        label="Unreal Probe Blueprint Node Action",
+        function="unreal_tools.blueprint.probe_node_action",
+        required=("blueprint_path", "graph_name", "palette_action"),
+        optional={"temp_folder": "/Game/AIStudio/Temp/NodeProbes"},
+        mutates_project=True,
+        description="Create and remove an action on a retained disposable Blueprint copy, verifying real pins, compile status, and reset state.",
+    ),
+    "blueprint.discover_action_candidates": UnrealOperation(
+        key="blueprint.discover_action_candidates",
+        label="Discover Blueprint Action Candidates",
+        function="tech_connector.services.unreal.blueprint_action_discovery_service.discover_action_candidates",
+        required=("blueprint_path", "graph_name", "semantic_operations"),
+        optional={
+            "max_results_per_query": 15,
+            "use_reasoning": True,
+            "reasoning_model": "qwen2.5-coder:7b",
+        },
+        execution_host="desktop",
+        description="Search live context-filtered Blueprint actions for semantic operations without selecting nodes or mutating assets.",
+    ),
+    "blueprint.probe_selected_actions": UnrealOperation(
+        key="blueprint.probe_selected_actions",
+        label="Probe Selected Blueprint Actions",
+        function="tech_connector.services.unreal.blueprint_action_discovery_service.probe_selected_actions",
+        required=("blueprint_path", "graph_name", "selections"),
+        optional={"approved": False, "temp_folder": "/Game/AIStudio/Temp/NodeProbes"},
+        mutates_project=True,
+        execution_host="desktop",
+        description="After approval, recover real pins by adding and removing selected actions on a retained disposable Blueprint copy.",
+    ),
+    "blueprint.build_graph_spec_prompt": UnrealOperation(
+        key="blueprint.build_graph_spec_prompt",
+        label="Build Evidence-Bounded Blueprint Graph Prompt",
+        function="tech_connector.services.unreal.blueprint_graph_spec_service.build_graph_spec_prompt",
+        required=("semantic_operations", "available_actions"),
+        execution_host="desktop",
+        description="Prepare a model request containing only live-verified palette actions and exact pin signatures; does not mutate assets or claim success.",
+    ),
+    "blueprint.validate_graph_spec_evidence": UnrealOperation(
+        key="blueprint.validate_graph_spec_evidence",
+        label="Validate Blueprint Graph Spec Evidence",
+        function="tech_connector.services.unreal.blueprint_graph_spec_service.validate_graph_spec_against_pin_evidence",
+        required=("graph_spec",),
+        execution_host="desktop",
+        description="Fail closed on missing action evidence, invented pins, reversed directions, or incompatible pin types before Unreal mutation.",
     ),
     "blueprint.get_compile_errors": UnrealOperation(
         key="blueprint.get_compile_errors",
@@ -795,6 +936,7 @@ def operation_catalog() -> list[dict[str, Any]]:
             "required": list(op.required),
             "optional": op.optional,
             "mutates_project": op.mutates_project,
+            "execution_host": op.execution_host,
             "description": op.description,
         }
         for op in UNREAL_OPERATIONS.values()
@@ -829,6 +971,7 @@ def unreal_operation_payload(
         "args": [],
         "kwargs": kwargs,
         "mutates_project": op.mutates_project,
+        "execution_host": op.execution_host,
     }
 
 

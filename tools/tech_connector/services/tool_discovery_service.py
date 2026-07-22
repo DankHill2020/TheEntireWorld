@@ -1,6 +1,7 @@
 """Service for indexing and discovering project internal functions and ingested third-party tools."""
 
 import ast
+import time
 from pathlib import Path
 
 
@@ -195,9 +196,16 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
     return symbols
 
 
-def list_internal_functions(project_roots: list[str]) -> list[dict]:
+def list_internal_functions(
+    project_roots: list[str],
+    *,
+    max_files: int = 1500,
+    time_budget_seconds: float = 5.0,
+) -> list[dict]:
     all_funcs = []
-    skip_dirs = {"external_tools", "thirdparty", "venv", ".git", "__pycache__", "build", "dist", ".agents", ".gemini", "node_modules", ".idea", ".vscode", "tests"}
+    skip_dirs = {"external_tools", "thirdparty", "venv", ".venv", ".git", "__pycache__", "build", "dist", ".agents", ".gemini", "node_modules", ".idea", ".vscode", "tests", ".ai_studio", "Intermediate", "Saved", "DerivedDataCache"}
+    started = time.monotonic()
+    scanned = 0
     
     for root in project_roots:
         root_path = Path(root)
@@ -205,28 +213,39 @@ def list_internal_functions(project_roots: list[str]) -> list[dict]:
             continue
             
         for path in root_path.rglob("*.py"):
+            if scanned >= max_files or time.monotonic() - started >= time_budget_seconds:
+                return all_funcs
             # Check if any parent part is in skip_dirs
             if any(part in skip_dirs for part in path.parts):
                 continue
             if not path.is_file():
                 continue
-                
+            scanned += 1
             all_funcs.extend(extract_symbols_from_file(path))
             
     return all_funcs
 
 
-def list_ingested_tools(external_tools_dir: Path) -> list[dict]:
+def list_ingested_tools(
+    external_tools_dir: Path,
+    *,
+    max_files: int = 800,
+    time_budget_seconds: float = 3.0,
+) -> list[dict]:
     all_tools = []
     if not external_tools_dir.exists() or not external_tools_dir.is_dir():
         return all_tools
-        
+    started = time.monotonic()
+    scanned = 0
+
     for path in external_tools_dir.rglob("*.py"):
+        if scanned >= max_files or time.monotonic() - started >= time_budget_seconds:
+            return all_tools
         if "__pycache__" in path.parts:
             continue
         if not path.is_file():
             continue
-            
+        scanned += 1
         all_tools.extend(extract_symbols_from_file(path))
         
     return all_tools

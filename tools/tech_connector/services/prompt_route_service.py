@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 import re
 from typing import Any
 
@@ -10,8 +12,8 @@ from typing import Any
 ENGINE_PROVIDERS = {"action_graph", "connection_status", "project_health", "target_discovery", "project_search", "import_coverage"}
 
 HOST_ALIASES = {
-    "maya": ("maya",),
-    "unreal": ("unreal", "ue5", "ue4"),
+    "maya": ("maya", "mayya"),
+    "unreal": ("unreal", "ue5", "ue4", "unrel"),
     "blender": ("blender",),
     "substance_painter": ("substance painter", "substance", "painter"),
     "motionbuilder": ("motionbuilder", "motion builder", "mobu"),
@@ -76,6 +78,7 @@ class PromptRouteDecision:
     requires_project_search: bool = False
     requires_validation: bool = False
     requires_execution: bool = False
+    expected_outcomes: list[dict[str, Any]] = field(default_factory=list)
     # Capability Acquisition & Gap Analysis
     capability_plan_id: str = ""
     capability_gaps: list[str] = field(default_factory=list)
@@ -104,6 +107,603 @@ def _detect_hosts(text: str) -> list[str]:
         if any(_word_in(lower, alias) for alias in aliases):
             hosts.append(host)
     return hosts
+
+
+def _maya_create_locator_then_move_decision(text: str, *, no_execute: bool) -> PromptRouteDecision | None:
+    lower = _normalize_prompt_for_routing((text or "").lower())
+    if not re.search(r"\b(?:then|and then|after that)\b", lower):
+        return None
+    if not (re.search(r"\b(create|make|new|add)\b", lower) and "locator" in lower and re.search(r"\b(move|translate|offset|nudge)\b", lower)):
+        return None
+    name_match = re.search(r"\b(?:named|called|name)\s+['\"]?([A-Za-z_][A-Za-z0-9_:|.-]*)['\"]?", text or "", re.IGNORECASE)
+    if not name_match:
+        return None
+    name = name_match.group(1)
+    amount = 0.0
+    axis = "y"
+    axis_match = re.search(r"\b(?:to|on|along|in)\s+([XYZ])\s*(-?\d+(?:\.\d+)?)\b", text or "", re.IGNORECASE)
+    if axis_match:
+        axis = axis_match.group(1).lower()
+        amount = float(axis_match.group(2))
+    else:
+        amount_match = re.search(r"\b(?:up|down|left|right|forward|back|backward)?\s*(-?\d+(?:\.\d+)?)\s*(?:units?)?\b", text or "", re.IGNORECASE)
+        amount = float(amount_match.group(1)) if amount_match else 0.0
+        if re.search(r"\b(up|down)\b", lower):
+            axis = "y"
+        elif re.search(r"\b(left|right)\b", lower):
+            axis = "x"
+        elif re.search(r"\b(forward|back|backward)\b", lower):
+            axis = "z"
+        if re.search(r"\b(down|left|back|backward)\b", lower):
+            amount = -abs(amount)
+    translation = {
+        "x": [amount, 0.0, 0.0],
+        "y": [0.0, amount, 0.0],
+        "z": [0.0, 0.0, amount],
+    }.get(axis, [0.0, amount, 0.0])
+    return PromptRouteDecision(
+        route="action_graph",
+        confidence=0.95,
+        provider="action_graph",
+        intent_category="dcc_execution",
+        host="maya",
+        execution_route="engine.action_graph",
+        operation_mode="execute_sequence",
+        target_type="dcc_action_sequence",
+        target_identifier=name,
+        compound_kind="sequence",
+        requires_confirmation=not no_execute,
+        required_context=["dcc_connection", "argument_validation"],
+        model_tier="none_deterministic",
+        operations=[
+            {
+                "id": "create_locator",
+                "label": f"Create locator {name}",
+                "operation": "scene.create_locator",
+                "host": "maya",
+                "args": {"name": name, "select": False},
+                "requires_confirmation": False,
+            },
+            {
+                "id": "move_locator",
+                "label": f"Move locator {name}",
+                "operation": "scene.move",
+                "host": "maya",
+                "args": {"objects": [name], "translation": translation, "relative": False},
+                "requires_confirmation": False,
+            },
+        ],
+        reasons=["Prompt requested an ordered Maya locator creation and move sequence."],
+        rejected_routes=["target_discovery", "project_search", "dcc_execute"],
+    )
+
+
+def _maya_to_unreal_fbx_pipeline_decision(text: str, *, no_execute: bool) -> PromptRouteDecision | None:
+    lower = _normalize_prompt_for_routing((text or "").lower())
+    if not (
+        "maya" in lower
+        and "unreal" in lower
+        and "fbx" in lower
+        and re.search(r"\b(pipeline|workflow|then|after|import|export)\b", lower)
+        and re.search(r"\bexport(?:s|ed|ing)?\b", lower)
+        and re.search(r"\bimport(?:s|ed|ing)?\b", lower)
+    ):
+        return None
+    fbx_path_match = re.search(r"([A-Za-z]:[\\/][^\"'\s]+\.fbx)", text or "", re.IGNORECASE)
+    fbx_path = (fbx_path_match.group(1) if fbx_path_match else "C:/tmp/ai_studio/maya_selected_to_unreal.fbx").replace("\\", "/")
+    dest_match = re.search(r"(/Game/[A-Za-z0-9_./-]+)", text or "")
+    destination_path = (dest_match.group(1) if dest_match else "/Game/AIStudio/Imported").rstrip("/")
+    maya_code = r"""
+import json
+import os
+import maya.cmds as cmds
+import maya.mel as mel
+
+selection = cmds.ls(selection=True, long=True) or []
+selection_source = "current_selection"
+if not selection:
+    fallback_roots = [name for name in ("origin", "LJ_rig") if cmds.objExists(name)]
+    hierarchy = []
+    for root in fallback_roots:
+        hierarchy.append(root)
+        hierarchy.extend(cmds.listRelatives(root, allDescendents=True, fullPath=True) or [])
+    selection = list(dict.fromkeys(hierarchy))
+    selection_source = "origin_and_LJ_rig_hierarchy" if selection else "whole_scene"
+if selection:
+    cmds.select(selection, replace=True)
+else:
+    cmds.select(all=True)
+    selection = cmds.ls(selection=True, long=True) or []
+os.makedirs(os.path.dirname(fbx_path), exist_ok=True)
+if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
+    cmds.loadPlugin("fbxmaya")
+mel.eval("FBXResetExport;")
+mel.eval("FBXExportInputConnections -v false;")
+mel.eval('FBXExport -f "{}" -s;'.format(fbx_path.replace("\\", "/")))
+print(json.dumps({"ok": True, "fbx_path": fbx_path, "selection_source": selection_source, "selection": selection}))
+""".strip()
+    unreal_code = r"""
+import json
+import os
+import unreal
+
+if not os.path.exists(fbx_path):
+    raise RuntimeError("FBX does not exist on disk: " + str(fbx_path))
+task = unreal.AssetImportTask()
+task.filename = fbx_path
+task.destination_path = destination_path
+task.automated = True
+task.save = True
+task.replace_existing = False
+unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+imported_paths = [str(path) for path in task.imported_object_paths]
+if not imported_paths:
+    raise RuntimeError("Unreal import completed without imported object paths.")
+print(json.dumps({"ok": True, "fbx_path": fbx_path, "destination_path": destination_path, "asset_path": imported_paths[0], "imported_paths": imported_paths}))
+""".strip()
+    return PromptRouteDecision(
+        route="pipeline_graph",
+        confidence=0.96,
+        provider="action_graph",
+        intent_category="workflow_pipeline",
+        host="maya",
+        execution_route="engine.action_graph",
+        operation_mode="compose_pipeline",
+        target_type="pipeline_graph",
+        execution_environment="ui_pipeline_graph",
+        mutation_scope="dcc_mutation",
+        required_context=["dcc_bridge_status", "workflow_graph"],
+        deterministic_steps=[
+            "validate Maya selection",
+            "export selected Maya content to FBX",
+            "verify FBX exists on disk",
+            "import FBX into Unreal destination path",
+        ],
+        model_tier="none_deterministic",
+        compound_kind="ordered_pipeline",
+        operations=[
+            {
+                "id": "maya_export_selected_fbx",
+                "host": "maya",
+                "operation": "script.run",
+                "label": "Maya export selected FBX",
+                "args": {"code": maya_code, "fbx_path": fbx_path},
+                "produces": ["fbx_path"],
+                "evidence": ["Prompt requested Maya export to FBX before Unreal import."],
+            },
+            {
+                "id": "unreal_import_fbx",
+                "host": "unreal",
+                "operation": "script.run",
+                "label": "Unreal import FBX",
+                "args": {"code": unreal_code, "fbx_path": "$fbx_path", "destination_path": destination_path},
+                "produces": ["asset_path", "imported_paths"],
+                "requires": ["fbx_path"],
+                "evidence": ["Uses the FBX path produced by the Maya export step."],
+            },
+        ],
+        requires_confirmation=not no_execute,
+        requires_dcc_connection=True,
+        requires_generation=True,
+        requires_validation=True,
+        requires_execution=not no_execute,
+        primary_goal="Export selected Maya content to FBX, then import that FBX into Unreal.",
+        goal_type="execute" if not no_execute else "plan",
+        expected_outcomes=[
+            {"type": "file", "name": "fbx_path", "value": fbx_path},
+            {"type": "unreal_asset", "name": "asset_path", "destination_path": destination_path},
+        ],
+        selected_route_reason="The prompt names an ordered Maya-to-Unreal FBX workflow, so it should materialize as a connected pipeline.",
+        reasons=[
+            "Cross-DCC ordered workflow language was detected.",
+            "The Unreal step consumes the FBX path produced by the Maya step.",
+        ],
+        rejected_routes=["target_discovery", "project_search", "dcc_execute"],
+    )
+
+
+def _extract_maya_root_joint(text: str) -> str:
+    match = re.search(
+        r"\b(?:root\s+joint|root|skeleton\s+root)\s+(?:is|=|named|called)?\s*['\"]?([A-Za-z_][A-Za-z0-9_:|.-]*)['\"]?",
+        text or "",
+        re.IGNORECASE,
+    )
+    return match.group(1).rstrip(".?!,;:") if match else "origin"
+
+
+def _module_path_from_file(path: Path, project_roots: list[str]) -> str:
+    for root_text in project_roots:
+        try:
+            root = Path(root_text).resolve()
+            resolved = path.resolve()
+            rel = resolved.relative_to(root)
+            if rel.suffix == ".py":
+                rel = rel.with_suffix("")
+            return ".".join(part for part in rel.parts if part != "__init__")
+        except Exception:
+            continue
+    if path.suffix == ".py":
+        path = path.with_suffix("")
+    return ".".join(path.parts[-4:])
+
+
+def _find_function_node(path: Path, function_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return node
+    return None
+
+
+def _required_args_from_function(node: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[str]:
+    if node is None:
+        return []
+    args = list(node.args.posonlyargs) + list(node.args.args)
+    if args and args[0].arg in {"self", "cls"}:
+        args = args[1:]
+    default_count = len(node.args.defaults)
+    required_positional = args[: len(args) - default_count] if default_count else args
+    required = [arg.arg for arg in required_positional]
+    keyword_defaults = list(node.args.kw_defaults)
+    for arg, default in zip(node.args.kwonlyargs, keyword_defaults):
+        if default is None:
+            required.append(arg.arg)
+    return required
+
+
+def _returned_names_from_function(node: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[str]:
+    if node is None:
+        return []
+    names: list[str] = []
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Return) or child.value is None:
+            continue
+        values = child.value.elts if isinstance(child.value, (ast.Tuple, ast.List)) else [child.value]
+        for value in values:
+            if isinstance(value, ast.Name):
+                names.append(value.id)
+            elif isinstance(value, ast.Constant) and isinstance(value.value, str):
+                names.append(value.value)
+    return list(dict.fromkeys(names))
+
+
+def _producer_score_for_args(
+    *,
+    producer_name: str,
+    producer_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    required_args: list[str],
+) -> tuple[int, list[str]]:
+    returned = _returned_names_from_function(producer_node)
+    doc = ast.get_docstring(producer_node) if producer_node is not None else ""
+    text = " ".join([producer_name, doc or "", " ".join(returned)]).lower()
+    matched = [arg for arg in required_args if arg.lower() in text or arg in returned]
+    score = len(matched) * 100
+    if "mapping" in producer_name and any("map" in arg for arg in required_args):
+        score += 35
+    if producer_name.startswith("create_") or producer_name.startswith("make_") or producer_name.startswith("build_"):
+        score += 20
+    return score, matched
+
+
+def _discover_callable_prerequisite_chain(
+    *,
+    target_callable: str,
+    project_roots: list[str],
+    host: str,
+    root_joint: str = "origin",
+) -> dict[str, Any] | None:
+    """Resolve target callable inputs from project functions that produce them.
+
+    This is intentionally conservative: it only returns a chain when every
+    required target argument has a named producer output backed by source
+    evidence. It is generic enough to stop the rig route from being a canned
+    chain, while still avoiding speculative wiring.
+    """
+    module_name, _, function_name = target_callable.rpartition(".")
+    roots = [Path(root) for root in project_roots if root]
+    if not roots:
+        roots = [Path.cwd()]
+
+    target_path: Path | None = None
+    target_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    module_rel = Path(*module_name.split(".")).with_suffix(".py") if module_name else None
+    candidate_target_files: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        if module_rel is not None:
+            direct = root / module_rel
+            if direct.is_file():
+                candidate_target_files.append(direct)
+    if not candidate_target_files:
+        for root in roots:
+            if root.exists():
+                candidate_target_files.extend(root.rglob(f"{function_name}.py"))
+                candidate_target_files.extend(root.rglob("*.py"))
+    for path in candidate_target_files:
+        node = _find_function_node(path, function_name)
+        if node is not None:
+            module_path = _module_path_from_file(path, project_roots)
+            if target_callable.endswith(f"{module_path}.{function_name}") or function_name == node.name:
+                target_path = path
+                target_node = node
+                break
+    required_args = _required_args_from_function(target_node)
+    if not target_path or not required_args:
+        return None
+
+    search_roots = [target_path.parent]
+    if target_path.parent.name.lower() != "maya_tools":
+        search_roots.append(target_path.parent / "mocap")
+    candidate_files: list[Path] = []
+    for search_root in search_roots:
+        if search_root.exists():
+            candidate_files.extend(
+                path
+                for path in search_root.rglob("*.py")
+                if path.is_file() and path.name != "__init__.py"
+            )
+    candidate_files = list(dict.fromkeys(candidate_files))
+
+    best: tuple[int, Path, ast.FunctionDef | ast.AsyncFunctionDef, list[str]] | None = None
+    for path in candidate_files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except Exception:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if path == target_path and node.name == function_name:
+                continue
+            score, matched = _producer_score_for_args(
+                producer_name=node.name,
+                producer_node=node,
+                required_args=required_args,
+            )
+            if not matched:
+                continue
+            if best is None or score > best[0]:
+                best = (score, path, node, matched)
+
+    if best is None:
+        return None
+    _score, producer_path, producer_node, matched = best
+    produced = _returned_names_from_function(producer_node)
+    if not produced:
+        produced = matched
+    missing = [arg for arg in required_args if arg not in produced]
+    if missing:
+        return None
+
+    producer_callable = f"{_module_path_from_file(producer_path, project_roots)}.{producer_node.name}"
+    target_module = _module_path_from_file(target_path, project_roots)
+    target_callable_resolved = f"{target_module}.{function_name}"
+    producer_args: dict[str, Any] = {}
+    producer_required = _required_args_from_function(producer_node)
+    unsupported_producer_args = [arg for arg in producer_required if arg != "root_joint"]
+    if unsupported_producer_args:
+        return None
+    if "root_joint" in producer_required or "root_joint" in [arg.arg for arg in producer_node.args.args]:
+        producer_args["root_joint"] = root_joint
+
+    operations: list[dict[str, Any]] = []
+    if "root_joint" in producer_args:
+        operations.append(
+            {
+                "id": "verify_root_joint",
+                "label": f"Verify root joint {root_joint}",
+                "operation": "scene.find_joint",
+                "host": host,
+                "args": {"name": root_joint},
+                "requires_confirmation": False,
+                "produces": ["root_joint"],
+                "evidence": ["Prompt supplied a root joint required by the discovered producer function."],
+            }
+        )
+
+    producer_id = producer_node.name
+    operations.append(
+        {
+            "id": producer_id,
+            "label": f"Run prerequisite producer {producer_node.name}",
+            "operation": "python.call",
+            "host": host,
+            "callable": producer_callable,
+            "args": producer_args,
+            "requires_confirmation": True,
+            "requires": ["root_joint"] if "root_joint" in producer_args else [],
+            "produces": produced,
+            "evidence": [
+                f"{producer_path.as_posix()}:{producer_node.name} returns {tuple(produced)!r}",
+                f"Matched required target args: {', '.join(required_args)}",
+            ],
+        }
+    )
+    operations.append(
+        {
+            "id": function_name,
+            "label": f"Run target callable {function_name}",
+            "operation": "python.call",
+            "host": host,
+            "callable": target_callable_resolved,
+            "args": {arg: f"${arg}" for arg in required_args},
+            "requires_confirmation": True,
+            "requires": required_args,
+            "produces": ["rig_build_state", "generated_controls"] if function_name == "create_rig_from_mapping" else ["result"],
+            "evidence": [
+                f"{target_path.as_posix()}:{function_name} requires {tuple(required_args)!r}",
+                f"Inputs are produced by {producer_node.name}.",
+            ],
+        }
+    )
+    return {
+        "target_callable": target_callable_resolved,
+        "target_function": function_name,
+        "target_required_args": required_args,
+        "producer_callable": producer_callable,
+        "producer_function": producer_node.name,
+        "producer_outputs": produced,
+        "operations": operations,
+        "evidence": [
+            f"Discovered target signature from {target_path.as_posix()}",
+            f"Discovered producer returns from {producer_path.as_posix()}",
+        ],
+    }
+
+
+def _maya_create_rig_from_current_scene_decision(
+    text: str,
+    *,
+    no_execute: bool,
+    project_roots: list[str] | None = None,
+) -> PromptRouteDecision | None:
+    lower = (text or "").lower()
+    if "maya" not in lower:
+        return None
+    if not re.search(r"\b(?:create|make|build)\s+(?:a\s+)?(?:control\s+)?rig\b", lower):
+        return None
+    if (
+        re.search(r"\b(?:for|named|called)\s+['\"]?[A-Za-z_][A-Za-z0-9_:|.-]*['\"]?\s+(?:character|mesh|asset)\b", lower)
+        and not re.search(r"\b(?:current\s+scene|scene|skeleton|root\s+joint|root)\b", lower)
+    ):
+        return None
+    root_joint = _extract_maya_root_joint(text)
+    chain = _discover_callable_prerequisite_chain(
+        target_callable="maya_tools.Rigging.create_rig.create_rig_from_mapping",
+        project_roots=project_roots or [str(Path.cwd())],
+        host="maya",
+        root_joint=root_joint,
+    )
+    operations = chain["operations"] if chain else [
+        {
+            "id": "verify_root_joint",
+            "label": f"Verify root joint {root_joint}",
+            "operation": "scene.find_joint",
+            "host": "maya",
+            "args": {"name": root_joint},
+            "requires_confirmation": False,
+            "produces": ["root_joint"],
+        },
+        {
+            "id": "create_rig_mapping",
+            "label": f"Create rig mapping from {root_joint}",
+            "operation": "python.call",
+            "host": "maya",
+            "callable": "maya_tools.Rigging.mocap.setup_hik.create_rig_mapping",
+            "args": {"root_joint": root_joint},
+            "requires_confirmation": True,
+            "requires": ["root_joint"],
+            "produces": ["body_joint_map", "face_joint_map"],
+        },
+        {
+            "id": "create_rig_from_mapping",
+            "label": "Create rig from generated body/face maps",
+            "operation": "python.call",
+            "host": "maya",
+            "callable": "maya_tools.Rigging.create_rig.create_rig_from_mapping",
+            "args": {"body_joint_map": "$body_joint_map", "face_joint_map": "$face_joint_map"},
+            "requires_confirmation": True,
+            "requires": ["body_joint_map", "face_joint_map"],
+            "produces": ["rig_build_state", "generated_controls"],
+        },
+    ]
+    code = f"""
+import json
+import traceback
+
+import maya.cmds as cmds
+from maya_tools.Rigging.mocap import setup_hik
+from maya_tools.Rigging import create_rig
+
+root_joint = {root_joint!r}
+payload = {{"root_joint": root_joint}}
+
+try:
+    if not cmds.objExists(root_joint):
+        raise RuntimeError("Root joint not found: " + root_joint)
+    body_joint_map, face_joint_map = setup_hik.create_rig_mapping(root_joint=root_joint)
+    if not body_joint_map:
+        raise RuntimeError("create_rig_mapping did not return a body_joint_map from root: " + root_joint)
+    payload["body_joint_count"] = len(body_joint_map) if hasattr(body_joint_map, "__len__") else 0
+    payload["face_joint_count"] = len(face_joint_map) if hasattr(face_joint_map, "__len__") else 0
+    result = create_rig.create_rig_from_mapping(body_joint_map, face_joint_map)
+    controls = cmds.ls("*_ctrl", type="transform") or []
+    payload.update({{
+        "ok": True,
+        "result": str(result),
+        "control_count": len(controls),
+        "sample_controls": controls[:25],
+        "marker": "AI_STUDIO_RIG_FROM_MAPPING_DONE",
+    }})
+    print(json.dumps(payload, sort_keys=True))
+except Exception as exc:
+    payload.update({{
+        "ok": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+        "marker": "AI_STUDIO_RIG_FROM_MAPPING_FAILED",
+    }})
+    print(json.dumps(payload, sort_keys=True))
+    raise
+""".strip()
+    return PromptRouteDecision(
+        route="dcc_execute",
+        confidence=0.96,
+        provider="dcc",
+        intent_category="maya_rig_from_current_scene",
+        host="maya",
+        callable_name="ai_studio.maya.generated.script_run",
+        target_identifier="script.run",
+        keyword_args={"code": code, "timeout": 180},
+        operation_mode="execute",
+        target_type="dcc_callable",
+        execution_environment="maya",
+        mutation_scope="dcc_scene_mutation",
+        analysis_depth="prerequisite_graph",
+        required_context=[
+            "dcc_connection",
+            "maya_scene_context",
+            "skeleton_exists",
+            "root_joint",
+            "create_rig_mapping",
+            "create_rig_from_mapping",
+        ],
+        deterministic_steps=[
+            "verify_root_joint_exists",
+            "call_setup_hik_create_rig_mapping",
+            "pass_body_and_face_joint_maps_to_create_rig_from_mapping",
+            "validate_generated_controls",
+        ],
+        compound_kind="prerequisite_chain",
+        requires_plan=True,
+        requires_confirmation=not no_execute,
+        can_execute_directly=True,
+        expected_outcomes=[
+            {"name": "rig_script_completed", "path": "result.raw_result", "contains": "AI_STUDIO_RIG_FROM_MAPPING_DONE"},
+            {"name": "root_joint_used", "path": "result.raw_result", "contains": f'"root_joint": "{root_joint}"'},
+        ],
+        model_tier="none_deterministic",
+        operations=operations,
+        reasons=[
+            "Prompt asks Maya to build a rig for the current scene.",
+            f"Resolved prerequisite root joint to `{root_joint}`.",
+            (
+                "Generic prerequisite resolver discovered create_rig_from_mapping requires "
+                "body_joint_map and face_joint_map, and create_rig_mapping produces them."
+                if chain
+                else "Fallback prerequisite chain used because generic callable discovery did not return a complete chain."
+            ),
+        ],
+        semantic_execution_contract={
+            "dependency_resolution": chain or {},
+            "resolution_strategy": "callable_signature_to_producer_outputs",
+        },
+        rejected_routes=["dcc_query", "project_search", "target_discovery"],
+    )
 
 
 def _has_file_ref(text: str) -> bool:
@@ -206,6 +806,33 @@ def _route_candidate_diagnostics(text: str, lower: str, *, host: str, hosts: lis
     ]
 
 
+def _rank_route_candidates_with_fnn(
+    text: str,
+    candidates: list[dict[str, Any]],
+    *,
+    host: str,
+    hosts: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    try:
+        from tech_connector.services.dcc.dcc_operation_service import dcc_prompt_to_operation
+        from tech_connector.services.request_understanding_fnn_service import SUPPORTED_DCC_HOSTS, score_prompt_routes
+
+        registered_dcc_hint = bool(host in SUPPORTED_DCC_HOSTS and dcc_prompt_to_operation(host, text))
+        result = score_prompt_routes(text, host=host, hosts=hosts, registered_dcc_hint=registered_dcc_hint)
+    except Exception:
+        return candidates, {}
+    by_route = {str(item.get("route") or ""): dict(item) for item in candidates}
+    for item in result.scores:
+        row = by_route.get(item.route) or {"route": item.route, "score": 0.0, "reasons": []}
+        row["fnn_score"] = item.score
+        row["fnn_reasons"] = list(item.reasons)
+        # Keep deterministic score primary, but let the FNN signal break close ties.
+        row["combined_score"] = round(float(row.get("score") or 0.0) + float(item.score) * 0.25, 4)
+        by_route[item.route] = row
+    ranked = sorted(by_route.values(), key=lambda row: float(row.get("combined_score", row.get("score", 0.0)) or 0.0), reverse=True)
+    return ranked, result.to_dict()
+
+
 def _looks_like_read_only_project_question(lower: str) -> bool:
     if not re.search(
         r"\b(what|which|where|list|show|find|file|path|how many|arguments|args|required|dependencies|classes|functions|methods)\b",
@@ -227,8 +854,12 @@ def _looks_like_read_only_project_question(lower: str) -> bool:
 
 def _is_connection_status_question(lower: str) -> bool:
     text = lower or ""
-    if re.search(r"\b(connect|connection|connected|status|health)\b", text) is None:
+    if re.search(r"\b(connect|connection|connected|status|health|up|online|available|running)\b", text) is None:
         return False
+    if re.search(r"\b(compile|create|make|add|edit|modify|run|execute|import|export|spawn|duplicate)\b", text):
+        return False
+    if re.search(r"\b(?:is|are|am)\b.*\b(?:up|online|available|running|connected)\b", text):
+        return True
     if re.search(r"\b(testing connection|test connection|connection status|am i connected|are we connected|what am i connected to|what is connected)\b", text):
         return True
     if re.fullmatch(r"\s*(?:am i )?connected\s*\??\s*", text):
@@ -267,6 +898,13 @@ def _has_explicit_dcc_mutation(lower: str) -> bool:
         r"\b(move|translate|rotate|scale|select|frame|create|make|build|spawn|delete|remove|set|modify|change|connect|disconnect|assign|bind|skin|constrain|parent\s+constrain|orient\s+constrain|point\s+constrain)\b",
         lower or "",
     ))
+
+
+def _has_explicit_dcc_operation(lower: str) -> bool:
+    return bool(
+        _has_explicit_dcc_mutation(lower)
+        or re.search(r"\b(run|execute|call|launch|perform|export|import|bake|render|simulate|cook)\b", lower or "")
+    )
 
 
 def _simple_project_fact_progress() -> dict[str, Any]:
@@ -403,6 +1041,18 @@ def _has_no_execute_guard(lower: str) -> bool:
             lower,
         )
         or re.search(r"\b(just|only)\s+(show|explain|preview|plan)\b", lower)
+        or re.search(r"\b(not an edit|no edit|no edits|not editing|don't mutate|dont mutate|do not mutate|no wait just explain|example only|explain the fix)\b", lower)
+    )
+
+
+def _is_scoped_project_guidance_request(lower: str) -> bool:
+    return bool(
+        _has_no_execute_guard(lower)
+        and re.search(r"\b(qslider|slider|widget|class|helper|example)\b", lower)
+        and re.search(
+            r"\b@[A-Za-z_][A-Za-z0-9_.]*|custom_widgets(?:\.py)?|custom_qt(?:[./\\]custom_widgets)?\b",
+            lower,
+        )
     )
 
 
@@ -1108,6 +1758,34 @@ def _is_vague_senior_improvement(lower: str) -> bool:
     )
 
 
+def _normalize_prompt_for_routing(lower: str) -> str:
+    replacements = {
+        "mayya": "maya",
+        "unrel": "unreal",
+        "cretae": "create",
+        "exprot": "export",
+        "crowling": "crawling",
+        "anm": "anim",
+        "combt": "combat",
+    }
+    text = lower or ""
+    for typo, replacement in replacements.items():
+        text = re.sub(rf"\b{re.escape(typo)}\b", replacement, text)
+    return text
+
+
+def _is_unreal_animation_blueprint_feature_request(lower: str) -> bool:
+    text = lower or ""
+    action = re.search(r"\b(make|create|build|add|set up|setup|get|implement|wire)\b", text)
+    abp_context = re.search(r"\b(abp(?:_[a-z0-9_]+)?|anim blueprint|animation blueprint|anm blueprint|anim bp|animation bp)\b", text)
+    animation_context = re.search(r"\b(anim|animation|anm|crawl|crawling|crowling|locomotion|state machine|blendspace|combat|combt)\b", text)
+    if action and abp_context and animation_context:
+        return True
+    if re.search(r"\b(crawl|crawling|crowling)\b", text) and re.search(r"\b(abp|combat|combt)\b", text):
+        return True
+    return False
+
+
 def _looks_like_staged_long_contract(text: str, lower: str) -> bool:
     """Return True for long checklist prompts that should be staged through LLM planning."""
     if len(text or "") < 900:
@@ -1145,12 +1823,41 @@ def classify_prompt_route(
     task_graph: dict[str, Any] | None = None,
 ) -> PromptRouteDecision:
     """Return the intended route without performing model, filesystem, DCC, or broad index work."""
-    text = re.sub(r"\s+", " ", prompt or "").strip()
-    lower = text.lower()
+    raw_text = prompt or ""
+    text = re.sub(r"\s+", " ", raw_text).strip()
+    lower = _normalize_prompt_for_routing(text.lower())
     roots = project_roots or []
     host = _detect_host(text)
     hosts = _detect_hosts(text)
     no_execute = _has_no_execute_guard(lower)
+    if _is_unreal_animation_blueprint_feature_request(lower):
+        return _finalize_decision(PromptRouteDecision(
+            route="unreal_capability",
+            provider="unreal",
+            intent_category="dcc_unreal_capability",
+            host="unreal",
+            target_identifier="animation_blueprint.feature_request",
+            operation_mode="plan_or_execute",
+            mutation_scope="dcc_scene_mutation",
+            confidence=0.86,
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=not no_execute,
+            requires_plan=True,
+            required_context=[
+                "unreal_reflection_index",
+                "capability_graph",
+                "animation_blueprint_context",
+                "argument_validation",
+            ],
+            model_tier="local_code",
+            reasons=[
+                "Prompt references an Unreal animation blueprint/ABP workflow even without explicitly naming Unreal.",
+                "Animation blueprint feature requests should use Unreal capability planning before mutation.",
+            ],
+            alternatives=[
+                {"route": "target_discovery", "reason": "Use if the user meant local code edits rather than live Unreal asset work."},
+            ],
+        ), lower)
     try:
         from tech_connector.services.prompt_intent_service import RequestTask, RequestUnderstanding
         from tech_connector.services.prompt_task_splitter_service import task_graph_route
@@ -1276,6 +1983,20 @@ def classify_prompt_route(
         canonical_visible_progress = dict(
             context_data.get("visible_progress") or {}
         )
+        if _is_scoped_project_guidance_request(lower):
+            return _finalize_with_context(PromptRouteDecision(
+                route="project_search",
+                provider="project_search",
+                intent_category="code_generation_guidance",
+                host="",
+                confidence=0.88,
+                operation_mode="query",
+                mutation_scope="read_only",
+                required_context=["project_index", "symbol_index", "scoped_file_context"],
+                model_tier="none_deterministic",
+                reasons=["Prompt asks for a scoped code example/guidance and explicitly avoids mutation."],
+                rejected_routes=["unreal_capability", "dcc_execute", "target_discovery"],
+            ))
     except Exception:
         context_data = {}
         phrase_intent = None
@@ -1295,7 +2016,12 @@ def classify_prompt_route(
         canonical_reasoning_pipeline = {}
         canonical_visible_progress = {}
 
-    route_candidates = _route_candidate_diagnostics(text, lower, host=host, hosts=hosts)
+    route_candidates, fnn_route_scoring = _rank_route_candidates_with_fnn(
+        text,
+        _route_candidate_diagnostics(text, lower, host=host, hosts=hosts),
+        host=host,
+        hosts=hosts,
+    )
     explicit_scope_path = _extract_explicit_scope_path(text)
 
     # Import coverage is structural dependency analysis, not semantic behavior
@@ -1304,6 +2030,18 @@ def classify_prompt_route(
 
     def _finalize_with_context(decision: PromptRouteDecision, *_ignored) -> PromptRouteDecision:
         """Attach the canonical understanding package before execution routing."""
+        if not decision.route_candidates:
+            decision.route_candidates = [dict(item) for item in route_candidates]
+        if fnn_route_scoring:
+            decision.reasoning_pipeline = {
+                **dict(decision.reasoning_pipeline or {}),
+                "fnn_route_scoring": dict(fnn_route_scoring),
+            }
+            if not decision.selected_route_reason:
+                decision.selected_route_reason = (
+                    f"Rule route `{decision.route}` with FNN top route "
+                    f"`{fnn_route_scoring.get('top_route')}` at confidence {fnn_route_scoring.get('confidence')}."
+                )
         if request_understanding is not None and not decision.request_understanding:
             decision.request_understanding = request_understanding.to_dict()
         if goal_graph and not decision.task_graph:
@@ -1338,8 +2076,41 @@ def classify_prompt_route(
         if canonical_visible_progress:
             finalized.visible_progress = dict(canonical_visible_progress)
         if canonical_reasoning_pipeline:
-            finalized.reasoning_pipeline = dict(canonical_reasoning_pipeline)
+            finalized.reasoning_pipeline = {
+                **dict(canonical_reasoning_pipeline),
+                **dict(finalized.reasoning_pipeline or {}),
+            }
+        if fnn_route_scoring:
+            finalized.reasoning_pipeline = {
+                **dict(finalized.reasoning_pipeline or {}),
+                "fnn_route_scoring": dict(fnn_route_scoring),
+            }
+            if not finalized.selected_route_reason:
+                finalized.selected_route_reason = (
+                    f"Rule route `{finalized.route}` with FNN top route "
+                    f"`{fnn_route_scoring.get('top_route')}` at confidence {fnn_route_scoring.get('confidence')}."
+                )
+        try:
+            from tech_connector.services.cognitive_routing_service import upgrade_route_decision
+            finalized = upgrade_route_decision(raw_text, finalized, active_path=context_data.get("active_path", ""))
+        except Exception:
+            pass
         return finalized
+
+    if host == "maya":
+        maya_unreal_pipeline = _maya_to_unreal_fbx_pipeline_decision(raw_text, no_execute=no_execute)
+        if maya_unreal_pipeline:
+            return _finalize_with_context(maya_unreal_pipeline, lower)
+        maya_sequence = _maya_create_locator_then_move_decision(raw_text, no_execute=no_execute)
+        if maya_sequence:
+            return _finalize_with_context(maya_sequence, lower)
+        maya_rig_scene = _maya_create_rig_from_current_scene_decision(
+            raw_text,
+            no_execute=no_execute,
+            project_roots=roots,
+        )
+        if maya_rig_scene:
+            return _finalize_with_context(maya_rig_scene, lower)
     # ------------------------------------------------------------------
     # Goal-first routing
     #
@@ -1350,6 +2121,73 @@ def classify_prompt_route(
     semantic_confidence = float(
         request_understanding.confidence if request_understanding else 0.0
     )
+
+    if no_execute and re.search(r"\b(review|inspect|analyze|analyse|explain|find)\b", lower) and re.search(
+        r"\b(planner|service|code|files?|functions?|dependencies|hotspots?|line numbers?|performance|graph mutation)\b",
+        lower,
+    ):
+        return _finalize_with_context(PromptRouteDecision(
+            route="project_search",
+            provider="project_search",
+            intent_category="read_only_project_review",
+            host=host,
+            confidence=0.88,
+            operation_mode="query",
+            mutation_scope="read_only",
+            requires_confirmation=False,
+            required_context=["project_index", "symbol_index", "code_chunks", "request_goal_graph"],
+            model_tier="none_deterministic",
+            reasons=["Prompt asks for a read-only project/code review with evidence, not a mutation."],
+            rejected_routes=["target_discovery", "dcc_execute", "unreal_capability"],
+        ))
+
+    if re.search(r"\b(create|add|build|implement|write)\b", lower) and re.search(
+        r"\b(pyside|pyqt|qt|ui|tool|panel|dialog)\b",
+        lower,
+    ) and re.search(r"\b(maya|rigging|skin|bind|influence|joints?)\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="dcc_tool_code_edit",
+            host=host,
+            confidence=0.9,
+            operation_mode="edit",
+            mutation_scope="file_modification" if not no_execute else "read_only",
+            requires_confirmation=not no_execute,
+            requires_plan=True,
+            required_context=["target_discovery", "symbol_index", "maya_rigging_functions", "project_ui_patterns", "tests"],
+            model_tier="local_code",
+            reasons=["Prompt asks to discover existing Maya rigging functions and create project UI/tool code."],
+            rejected_routes=["project_search", "dcc_execute", "dcc_query"],
+        ))
+
+    gameplay_feature_terms = bool(re.search(
+        r"\b(stamina|sprint|dodg(?:e|ing)|melee|combo|inventory|pickup|replicated|authority|save/load|enemy ai|patrol|perception|blackboard|behavior tree|behaviour tree|chase|debug draw|hud|gameplay)\b",
+        lower,
+    ))
+    gameplay_mutation_terms = bool(re.search(r"\b(add|create|build|implement|make|update|wire|integrate)\b", lower))
+    if gameplay_feature_terms and gameplay_mutation_terms and not no_execute:
+        return _finalize_with_context(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="gameplay_feature_implementation",
+            host=host or ("unreal" if re.search(r"\b(blueprints?|anim\s*bp|character bp|behavior tree|blackboard|replicated|authority|hud)\b", lower) else ""),
+            confidence=0.86,
+            operation_mode="edit",
+            mutation_scope="file_modification",
+            requires_confirmation=True,
+            requires_plan=True,
+            required_context=[
+                "target_discovery",
+                "symbol_index",
+                "gameplay_architecture",
+                "asset_or_blueprint_ownership",
+                "validation_plan",
+            ],
+            model_tier="local_code",
+            reasons=["Prompt describes a multi-part gameplay feature; discover owning code/assets and dependencies before editing."],
+            rejected_routes=["chat", "project_search", "dcc_execute"],
+        ))
 
     if authoritative_import_coverage:
         scoped_path = (
@@ -1415,6 +2253,46 @@ def classify_prompt_route(
             rejected_routes=["action_graph", "pipeline_graph", "dcc_execute"],
         ))
 
+    if (
+        host
+        and no_execute
+        and not _is_scoped_project_guidance_request(lower)
+        and re.search(r"\b(show|explain|teach|preview|plan)\b", lower)
+        and re.search(r"\b(how|would|create|make|run|execute|call|export|import)\b", lower)
+    ):
+        return _finalize_with_context(PromptRouteDecision(
+            route="chat",
+            provider="llm",
+            intent_category="dcc_guidance",
+            host=host,
+            confidence=0.86,
+            operation_mode="explain",
+            mutation_scope="read_only",
+            requires_confirmation=False,
+            requires_dcc_connection=False,
+            model_tier="local_fast",
+            reasons=["Prompt asks for DCC guidance and explicitly blocks execution."],
+            rejected_routes=["dcc_execute", "dcc_query", "action_graph"],
+        ))
+
+    if (
+        not host
+        and re.search(r"\b(failed|error|exception|traceback|broken|doesn't work|does not work)\b", lower)
+        and re.search(r"\b(fix|repair|resolve|debug)\b", lower)
+        and re.search(r"\b(validate|test|confirm|verify)\b", lower)
+    ):
+        return _finalize_with_context(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="failure_repair",
+            confidence=0.78,
+            requires_confirmation=True,
+            required_context=["target_discovery", "symbol_index", "error_context", "code_chunks"],
+            model_tier="local_code",
+            reasons=["Prompt asks to repair a failure and validate the result; discover the failing target before responding."],
+            rejected_routes=["chat", "project_search", "dcc_execute"],
+        ))
+
     if host == "maya" and not _is_explicit_source_code_mutation(text, lower):
         try:
             from tech_connector.services.dcc.dcc_operation_service import (
@@ -1450,6 +2328,37 @@ def classify_prompt_route(
         and not request_understanding.mutation_requested
         and not requires_execution
     ):
+        if semantic_route == "project_search" and _is_scoped_project_guidance_request(lower):
+            return _finalize_with_context(
+                PromptRouteDecision(
+                    route="project_search",
+                    provider="project_search",
+                    confidence=semantic_confidence,
+                    intent_category=request_understanding.primary_intent or "code_generation_guidance",
+                    host=host,
+                    operation_mode="query",
+                    mutation_scope="read_only",
+                    required_context=["project_index", "symbol_index", "scoped_file_context", "request_goal_graph"],
+                    model_tier="none_deterministic",
+                    primary_goal=primary_goal,
+                    goal_type=goal_type,
+                    estimated_steps=estimated_steps,
+                    requires_generation=requires_generation,
+                    requires_project_search=True,
+                    requires_validation=requires_validation,
+                    requires_execution=False,
+                    request_understanding=request_understanding.to_dict(),
+                    task_graph=goal_graph,
+                    route_candidates=route_candidates,
+                    selected_route_reason="The terminal request is a read-only scoped project example, so project evidence is the answer source.",
+                    reasons=[
+                        "The prompt asks for a scoped code example/guidance and explicitly avoids mutation.",
+                        "Host wording is contextual and does not make the project-file example a DCC action.",
+                    ],
+                    rejected_routes=["chat", "target_discovery", "dcc_execute"],
+                ),
+                lower,
+            )
         return _finalize_with_context(
             PromptRouteDecision(
                 route="chat",
@@ -1697,6 +2606,33 @@ def classify_prompt_route(
 
     # Version 1.0 Recovery precedence law: explicit source-code mutation wins
     # before DCC operation inference and workflow/pipeline classification.
+    if _is_scoped_project_guidance_request(lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="project_search",
+            provider="project_search",
+            intent_category="code_generation_guidance",
+            host=host,
+            confidence=0.89,
+            operation_mode="query",
+            mutation_scope="read_only",
+            required_context=["project_index", "symbol_index", "scoped_file_context"],
+            model_tier="none_deterministic",
+            route_candidates=route_candidates,
+            selected_route_reason="The prompt explicitly asks for a read-only scoped project example.",
+            request_understanding=request_understanding.to_dict() if request_understanding else {},
+            task_graph=goal_graph,
+            semantic_execution_contract=semantic_execution_contract,
+            primary_goal=primary_goal,
+            goal_type=goal_type,
+            estimated_steps=estimated_steps,
+            requires_generation=requires_generation,
+            requires_project_search=True,
+            requires_validation=requires_validation,
+            requires_execution=False,
+            reasons=["Prompt asks for scoped code guidance and explicitly blocks project mutation."],
+            rejected_routes=["target_discovery", "dcc_execute", "dcc_prototype"],
+        ))
+
     if _is_explicit_source_code_mutation(text, lower):
         source_files = _explicit_source_file_references(text)
         return _finalize_with_context(PromptRouteDecision(
@@ -1729,7 +2665,7 @@ def classify_prompt_route(
             rejected_routes=["action_graph", "pipeline_graph", "dcc_execute", "dcc_prototype"],
         ))
 
-    if phrase_intent and phrase_intent.kind == "host_state_query" and not _has_explicit_dcc_mutation(lower):
+    if phrase_intent and phrase_intent.kind == "host_state_query" and not _has_explicit_dcc_operation(lower):
         target = phrase_intent.target or "selection"
         if host == "unreal" and target == "project":
             return _finalize_with_context(PromptRouteDecision(
@@ -1777,6 +2713,31 @@ def classify_prompt_route(
             rejected_routes=["navigation.open_asset", "unreal_capability", "dcc_execute", "action_graph"],
         ))
 
+    if host == "maya" and no_execute and re.search(r"\b(list|show|find|get|inspect)\b", lower) and re.search(r"\b(joints?|bones?)\b", lower):
+        try:
+            from tech_connector.services.dcc.dcc_operation_service import build_dcc_operation_params
+
+            keyword_args = dict(build_dcc_operation_params("maya", "scene.list_joints", text) or {})
+        except Exception:
+            keyword_args = {}
+        return _finalize_with_context(PromptRouteDecision(
+            route="dcc_query",
+            provider="dcc",
+            intent_category="dcc_query",
+            host="maya",
+            callable_name="ai_studio.maya.generated.scene_list_joints",
+            target_identifier="scene.list_joints",
+            keyword_args=keyword_args,
+            operation_mode="query",
+            mutation_scope="read_only",
+            confidence=0.9,
+            requires_confirmation=False,
+            required_context=["dcc_connection", "scene_context"],
+            model_tier="none_deterministic",
+            reasons=["Brief prompt asks for a read-only Maya joint/bone inventory query."],
+            rejected_routes=["llm.chat", "dcc_execute", "project_search"],
+        ))
+
     if not host and no_execute and re.search(r"\b(inspect|check|analyze|analyse|find|review|determine|identify)\b", lower) and re.search(
         r"\b(project|code|codebase|files|classes|functions|systems?|implementation|architecture)\b",
         lower,
@@ -1792,6 +2753,52 @@ def classify_prompt_route(
             model_tier="local_fast",
             reasons=["Prompt asks for read-only project investigation and explicitly avoids editing."],
             rejected_routes=["unreal_capability", "action_graph", "target_discovery"],
+        ))
+
+    if no_execute and re.search(r"\b(qslider|slider|widget|class|example)\b", lower) and re.search(r"\b@[A-Za-z_][A-Za-z0-9_.]*|custom_widgets(?:\.py)?|custom_qt\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="project_search",
+            provider="project_search",
+            intent_category="code_generation_guidance",
+            host="",
+            confidence=0.86,
+            operation_mode="query",
+            mutation_scope="read_only",
+            required_context=["project_index", "symbol_index", "scoped_file_context"],
+            model_tier="none_deterministic",
+            reasons=["Prompt asks for a scoped code example/guidance and explicitly avoids mutation."],
+            rejected_routes=["unreal_capability", "dcc_execute", "target_discovery"],
+        ))
+
+    if not host and re.search(r"\b(autocomplete|@ menu|at menu|mention candidate|label builder|custom widgets|custom_widgets)\b", lower) and re.search(r"\b(find|inspect|explain|why|where|says py|showing as py)\b", lower) and not re.search(r"\b(fix|patch|change|update|test that|make it|ensure)\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="project_search",
+            provider="project_search",
+            intent_category="project_exploration",
+            host=host,
+            confidence=0.84,
+            operation_mode="query",
+            mutation_scope="read_only",
+            required_context=["project_index", "symbol_index", "ui_code"],
+            model_tier="none_deterministic",
+            reasons=["Prompt asks to explain project autocomplete behavior, not mutate it."],
+            rejected_routes=["unreal_capability", "dcc_execute"],
+        ))
+
+    if not host and re.search(r"\b(autocomplete|@ menu|at menu|mention candidate|label builder|custom widgets|custom_widgets)\b", lower) and re.search(r"\b(fix|patch|change|update|test that|make it|ensure)\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="project_code_edit",
+            host=host,
+            confidence=0.86,
+            operation_mode="edit",
+            mutation_scope="file_modification",
+            requires_confirmation=not no_execute,
+            required_context=["target_discovery", "symbol_index", "ui_code"],
+            model_tier="local_code",
+            reasons=["Prompt asks to change or test project autocomplete behavior."],
+            rejected_routes=["unreal_capability", "dcc_execute"],
         ))
 
     if _looks_like_staged_long_contract(text, lower):
@@ -1864,6 +2871,7 @@ def classify_prompt_route(
                 MAYA_OPERATIONS,
                 BLENDER_OPERATIONS,
                 SUBSTANCE_PAINTER_OPERATIONS,
+                HOUDINI_OPERATIONS,
                 MOTIONBUILDER_OPERATIONS,
                 UNITY_OPERATIONS,
             )
@@ -1873,11 +2881,12 @@ def classify_prompt_route(
                     "maya": MAYA_OPERATIONS,
                     "blender": BLENDER_OPERATIONS,
                     "substance_painter": SUBSTANCE_PAINTER_OPERATIONS,
+                    "houdini": HOUDINI_OPERATIONS,
                     "motionbuilder": MOTIONBUILDER_OPERATIONS,
                     "unity": UNITY_OPERATIONS,
                 }
                 op = catalogs[host][op_key]
-                params = build_dcc_operation_params(host, op_key, text)
+                params = build_dcc_operation_params(host, op_key, raw_text if op_key == "script.run" else text)
                 missing_info = [
                     arg for arg in op.required
                     if arg not in params or params.get(arg) in (None, "", [])
@@ -1942,6 +2951,28 @@ def classify_prompt_route(
             model_tier="local_fast",
             reasons=["Prompt asks where/how to add something; answer from indexed project architecture before host execution."],
             rejected_routes=["dcc_execute", "dcc_prototype", "unreal_capability"],
+        ))
+
+    if host == "unreal" and re.search(r"\b(?:run|execute)\s+(?:unreal\s+)?python\b", lower):
+        code = ""
+        match = re.search(r"\b(?:code|script|python)\s*[:=]\s*(.+)$", raw_text or "", re.IGNORECASE | re.DOTALL)
+        if match:
+            code = match.group(1).strip()
+        return _finalize_with_context(PromptRouteDecision(
+            route="dcc_execute",
+            confidence=0.95,
+            provider="dcc",
+            intent_category="dcc_execution",
+            host="unreal",
+            callable_name="tech_connector.bridges.unreal.unreal_bridge.execute_python",
+            target_identifier="python.run",
+            keyword_args={"code": code} if code else {},
+            requires_confirmation=not no_execute,
+            required_context=["dcc_connection", "argument_validation"],
+            missing_info=[] if code else ["code"],
+            model_tier="none_deterministic",
+            reasons=["Prompt explicitly asks to run Python in Unreal."],
+            rejected_routes=["action_graph", "project_search", "target_discovery"],
         ))
 
     if host == "unreal" and _is_unreal_graph_operation_planning_request(lower):
@@ -2309,6 +3340,35 @@ def classify_prompt_route(
             rejected_routes=["action_graph", "dcc_execute", "dcc_prototype", "unreal_capability"],
         ))
 
+    if _is_unreal_animation_blueprint_feature_request(lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="unreal_capability",
+            provider="unreal",
+            intent_category="dcc_unreal_capability",
+            host="unreal",
+            target_identifier="animation_blueprint.feature_request",
+            operation_mode="plan_or_execute",
+            mutation_scope="dcc_scene_mutation",
+            confidence=0.86,
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=not no_execute,
+            requires_plan=True,
+            required_context=[
+                "unreal_reflection_index",
+                "capability_graph",
+                "animation_blueprint_context",
+                "argument_validation",
+            ],
+            model_tier="local_code",
+            reasons=[
+                "Prompt references an Unreal animation blueprint/ABP workflow even without explicitly naming Unreal.",
+                "Animation blueprint feature requests should use Unreal capability planning before mutation.",
+            ],
+            alternatives=[
+                {"route": "target_discovery", "reason": "Use if the user meant local code edits rather than live Unreal asset work."},
+            ],
+        ), lower)
+
     if _is_vague_senior_improvement(lower):
         return _finalize_with_context(PromptRouteDecision(
             route="quality_audit",
@@ -2325,6 +3385,57 @@ def classify_prompt_route(
                 {"route": "target_discovery", "reason": "Use after the failing dimension and edit target are identified."},
             ],
         ))
+
+    if not host and re.search(r"\b(project details|project tree|tree refresh|tab change|prompt label|startup|ui)\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="application_code_architecture",
+            host=host,
+            confidence=0.84,
+            operation_mode="investigate",
+            mutation_scope="read_only" if no_execute else "",
+            requires_confirmation=not no_execute and bool(re.search(r"\b(fix|change|update|stop|avoid|make)\b", lower)),
+            required_context=["target_discovery", "symbol_index", "application_ui_code"],
+            model_tier="local_code",
+            reasons=["Prompt names Tech Connector UI/project behavior; do not promote generic open/refresh language to Unreal navigation."],
+            rejected_routes=["unreal_capability", "dcc_execute", "dcc_prototype"],
+        ))
+
+    if not host and re.search(r"\b(importing|imported|imports?|api)\b", lower) and re.search(r"\b(find|where|anywhere|are we|check|inspect|review|load)\b", lower):
+        return _finalize_with_context(PromptRouteDecision(
+            route="project_search",
+            provider="project_search",
+            intent_category="project_exploration",
+            host=host,
+            confidence=0.86,
+            operation_mode="query",
+            mutation_scope="read_only",
+            required_context=["project_index", "symbol_index", "import_graph"],
+            model_tier="none_deterministic",
+            reasons=["Prompt asks for project API/import/load evidence, not an Unreal capability."],
+            rejected_routes=["unreal_capability", "dcc_execute", "dcc_prototype"],
+        ))
+
+    if not host and (
+        re.search(r"\b[\w.-]+\.py\b", lower)
+        or re.search(r"\b(py_compile|unittest|pytest|focused tests?|test suite|prompt tests?)\b", lower)
+    ):
+        is_execution = bool(re.search(r"\b(run|execute|compile|test)\b", lower))
+        return _finalize_with_context(PromptRouteDecision(
+            route="function_execution" if is_execution else "project_search",
+            provider="function_execution" if is_execution else "project_search",
+            intent_category="project_tooling" if is_execution else "project_exploration",
+            host=host,
+            confidence=0.84,
+            operation_mode="execute" if is_execution else "query",
+            mutation_scope="read_only",
+            required_context=["project_files", "test_runner"],
+            model_tier="none_deterministic",
+            reasons=["Prompt names Python/project test artifacts; generic run/open language must not promote to Unreal."],
+            rejected_routes=["unreal_capability", "dcc_execute", "dcc_prototype"],
+        ))
+
     if not host and str(known_unreal_operation.get("operation_key") or "").startswith("navigation."):
         host = "unreal"
     if not known_unreal_operation and host == "unreal":
@@ -2445,7 +3556,7 @@ def classify_prompt_route(
                     "unity": UNITY_OPERATIONS,
                 }
                 op = catalogs[host][op_key]
-                params = build_dcc_operation_params(host, op_key, text)
+                params = build_dcc_operation_params(host, op_key, raw_text if op_key == "script.run" else text)
                 missing_info = [
                     arg for arg in op.required
                     if arg not in params or params.get(arg) in (None, "", [])
@@ -2608,7 +3719,7 @@ def classify_prompt_route(
                     "unity": UNITY_OPERATIONS,
                 }
                 op = catalogs[host][op_key]
-                params = build_dcc_operation_params(host, op_key, text)
+                params = build_dcc_operation_params(host, op_key, raw_text if op_key == "script.run" else text)
                 missing_info = [
                     arg for arg in op.required
                     if arg not in params or params.get(arg) in (None, "")
@@ -2657,7 +3768,7 @@ def classify_prompt_route(
             rejected_routes=["project_search", "target_discovery"],
         ))
 
-    if host and re.search(r"\b(selection|selected|current file|scene path|scene name|current scene|current level|active level|selected actors|selected assets|what is selected|what's selected)\b", lower):
+    if host and not _has_explicit_dcc_operation(lower) and re.search(r"\b(selection|selected|current file|scene path|scene name|current scene|current level|active level|selected actors|selected assets|what is selected|what's selected)\b", lower):
         target = "selection" if re.search(r"\b(selection|selected|selected actors|selected assets|what is selected|what's selected)\b", lower) else "scene"
         return _finalize_with_context(PromptRouteDecision(
             route="dcc_query",
@@ -2789,8 +3900,8 @@ def classify_prompt_route(
             reasons=["Prompt asks for a prototype or replacement without changing current code."],
         ))
 
-    if re.search(r"\b(edit|modify|change|update|refactor|improve|fix|add|implement|clean up|cleanup)\b", lower) and (
-        file_ref or symbol_ref or re.search(r"\b(file|files|function|functions|class|classes|method|methods|module|modules|tool|tools|existing|current|code)\b", lower)
+    if re.search(r"\b(edit|modify|change|update|refactor|improve|fix|fiix|add|implement|clean up|cleanup)\b", lower) and (
+        file_ref or symbol_ref or re.search(r"\b(file|files|function|functions|class|classes|method|methods|module|modules|tool|tools|existing|current|code|route|routing|routng|eval|evaluation|tests?|testss?)\b", lower)
     ):
         return _finalize_with_context(PromptRouteDecision(
             route="target_discovery",

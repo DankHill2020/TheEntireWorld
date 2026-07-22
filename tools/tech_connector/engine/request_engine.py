@@ -222,6 +222,158 @@ class RequestEngine:
         result.metadata = metadata
         return result
 
+    def _fast_simple_project_index_lookup(self, context: RequestContext) -> EngineResult | None:
+        """Answer simple project-index facts before semantic planning/model work."""
+
+        if re.search(
+            r"(?<![\w.])@[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}(?![\w.])",
+            context.text or "",
+        ) and re.search(
+            r"\b(what\s+does|how\s+does|explain|summari[sz]e|describe|how\s+(?:do|can|should|would)\s+i\s+use|how\s+to\s+use|usage|example|who\s+calls|callers?|implementation|source|body)\b",
+            context.text or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        try:
+            from tech_connector.services.prompt_intent_service import understand_prompt_request
+
+            understanding = understand_prompt_request(
+                context.text,
+                host=str((context.extras or {}).get("host_hint") or ""),
+            )
+        except Exception:
+            return None
+        if (
+            not understanding.read_only_requested
+            or understanding.mutation_requested
+            or understanding.live_host_execution_requested
+        ):
+            return None
+
+        try:
+            from tech_connector.services.project_search_service import (
+                answer_project_dependency_question,
+                answer_simple_project_index_question,
+                should_deepen_project_search,
+            )
+        except Exception:
+            return None
+
+        direct_answer = answer_simple_project_index_question(
+            context.text,
+            active_path=context.current_file_path,
+            semantic_contract={},
+        ) or answer_project_dependency_question(
+            context.text,
+            active_path=context.current_file_path,
+        )
+        if not direct_answer:
+            return None
+
+        understood = (
+            "What I understood\n"
+            "Search the local project index for a file containing a function or symbol that matches the request.\n"
+        )
+        if re.search(r"\bwhat\s+file\s+has\s+a\s+function\s+to\b|\bwhich\s+file\s+has\s+a\s+function\s+to\b", context.text, re.IGNORECASE):
+            understood = (
+                "What I understood\n"
+                "Find the source file that contains a function implementing the requested behavior.\n"
+            )
+        answer_text = f"{understood}\n{direct_answer}"
+
+        selected_file = ""
+        try:
+            from tech_connector.engine.providers import _extract_selected_file
+
+            selected_file = _extract_selected_file(answer_text, "")
+        except Exception:
+            selected_file = ""
+
+        planning_result = {
+            "interpreted_request": context.text,
+            "intent_category": "project_search",
+            "primary_route": "project_search",
+            "goal_type": "inspect",
+            "deliverable": "project_index_answer",
+            "behavior": context.text,
+            "scope": "project",
+            "target": selected_file,
+            "mutation_requested": False,
+            "execution_requested": False,
+            "steps": [],
+            "function_calls": [{
+                "action_type": "search_project",
+                "arguments": {"query": context.text, "scope": "project"},
+                "reason": "Resolve a direct indexed project fact without semantic planning.",
+            }],
+            "unknowns": [],
+            "confidence": 0.94,
+            "model_role": "deterministic_fallback",
+            "planning_mode": "simple_project_index_fast_path",
+        }
+        route_decision = {
+            "route": "project_search",
+            "provider": "project_search",
+            "execution_route": "engine.project_search",
+            "intent_category": "project_search",
+            "goal_type": "inspect",
+            "mutation_scope": "read_only",
+            "user_text": context.text,
+            "planning_result": planning_result,
+        }
+        metadata = {
+            "engine_path": "project_search",
+            "result_type": "project_index_direct",
+            "deep_search_candidate": should_deepen_project_search(context.text, answer_text),
+            "deep_search_query": context.text,
+            "original_query": context.text,
+            "selected_file": selected_file,
+            "route_decision": route_decision,
+            "prompt_execution_context": {
+                "prompt": context.text,
+                "normalized_prompt": context.text,
+                "request_understanding": {
+                    "primary_route": "project_search",
+                    "primary_intent": "project_search",
+                    "read_only_requested": True,
+                    "mutation_requested": False,
+                    "confidence": 0.94,
+                },
+                "planning_result": planning_result,
+                "understanding_validation": {
+                    "valid": True,
+                    "confidence": 0.94,
+                    "clarification_required": False,
+                    "reasons": ["Direct project-index answer was sufficient."],
+                },
+                "semantic_execution_contract": {},
+                "task_graph": {},
+            },
+            "understanding_validation": {
+                "valid": True,
+                "confidence": 0.94,
+                "clarification_required": False,
+                "reasons": ["Direct project-index answer was sufficient."],
+            },
+            "answer_review": {
+                "adequate": True,
+                "score": 1.0,
+                "failures": [],
+                "reviewer": "trusted_deterministic_result",
+            },
+            "workspace_update": {
+                "primary_file": selected_file,
+                "source": "project_search_result",
+            } if selected_file else {},
+        }
+        return EngineResult(
+            action="answer",
+            label="Project Index",
+            text=answer_text,
+            metadata=metadata,
+        )
+
     def _fast_live_unreal_request(self, context: RequestContext) -> EngineResult | None:
         """Run known read-only Unreal Python functions before semantic/model work."""
         from tech_connector.services.unreal.feature_planning_service import (
@@ -272,7 +424,11 @@ class RequestEngine:
                 progress=lambda message: self.emit("unreal_bridge", message),
             )
             status = str(plan.get("status") or "")
-            plan_ready = status in {"approval_ready", "capability_acquisition_required"}
+            plan_ready = status in {
+                "approval_ready",
+                "capability_acquisition_required",
+                "knowledge_choice_required",
+            }
             try:
                 from tech_connector.services.unreal.development_eval_service import record_unreal_development_eval
 
@@ -290,6 +446,52 @@ class RequestEngine:
                 )
             except Exception:
                 pass
+            if status == "knowledge_choice_required":
+                self.emit("approval", "Partial sight requires a knowledge choice; no code or Unreal assets were changed")
+                return EngineResult(
+                    action="clarify",
+                    label="Unreal Knowledge Choice",
+                    text=render_unreal_feature_plan(plan),
+                    metadata={
+                        "engine_path": "unreal_live_bridge_knowledge_choice",
+                        "result_type": "unreal_feature_knowledge_choice",
+                        "plan": plan,
+                        "knowledge_choice": plan.get("knowledge_choice") or {},
+                        "confirmation_request": {
+                            "operation": "unreal_knowledge_choice",
+                            "risk_level": "none",
+                            "mutation_scope": "read_only",
+                            "recommended": dict(plan.get("knowledge_choice") or {}).get("recommended"),
+                            "options": list(dict(plan.get("knowledge_choice") or {}).get("options") or []),
+                        },
+                        "pending_clarification": {
+                            "unresolved_slots": [
+                                {
+                                    "name": "knowledge_strategy",
+                                    "choices": list(dict(plan.get("knowledge_choice") or {}).get("options") or []),
+                                }
+                            ]
+                        },
+                        "ui_controls": [
+                            {
+                                "type": "choice",
+                                "name": "knowledge_strategy",
+                                "recommended_choice": dict(plan.get("knowledge_choice") or {}).get("recommended"),
+                                "choices": list(dict(plan.get("knowledge_choice") or {}).get("options") or []),
+                            }
+                        ],
+                        "route_decision": {
+                            "route": "unreal_capability",
+                            "execution_route": "unreal.knowledge_choice",
+                            "host": "unreal",
+                            "intent_category": "unreal_partial_sight",
+                            "operation_mode": "plan",
+                            "mutation_scope": "read_only",
+                            "requires_dcc_connection": True,
+                            "requires_confirmation": True,
+                        },
+                    },
+                )
             if status == "capability_acquisition_required":
                 self.emit("approval", "Capability acquisition plan is ready; no code or Unreal assets were changed")
                 return EngineResult(
@@ -454,12 +656,17 @@ class RequestEngine:
     def process(self, context: RequestContext) -> EngineResult:
         self.emit("intent", "Understanding your request...")
         self.activity(ActivityEvent("intent", "Request received", context.text, status="info"))
-        fast_windows = self._fast_desktop_window_request(context)
-        if fast_windows is not None:
-            return fast_windows
+        # Domain-specific feature requests must win over incidental nouns such
+        # as "invulnerability window" or "animation popup".
         fast_unreal = self._fast_live_unreal_request(context)
         if fast_unreal is not None:
             return fast_unreal
+        fast_windows = self._fast_desktop_window_request(context)
+        if fast_windows is not None:
+            return fast_windows
+        fast_simple_lookup = self._fast_simple_project_index_lookup(context)
+        if fast_simple_lookup is not None:
+            return fast_simple_lookup
         fast_lookup = self._fast_semantic_project_lookup(context)
         if fast_lookup is not None:
             return fast_lookup

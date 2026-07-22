@@ -295,6 +295,22 @@ def connected_application_status(settings: dict[str, Any], command_router: Any =
         dcc_status("unity", "Unity"),
         dcc_status("unreal", "Unreal Engine"),
     ]
+    try:
+        from tech_connector.services.license_entitlement_service import entitlement_status_row
+
+        rows.append(entitlement_status_row(settings))
+    except Exception as exc:
+        rows.append(
+            {
+                "id": "tech_connector_license",
+                "name": "Tech Connector License",
+                "category": "License",
+                "connected": False,
+                "mode": "verification failed",
+                "capabilities": ["login required"],
+                "reason": str(exc),
+            }
+        )
     rows.extend(connected_account_status_rows(settings))
     return rows
 

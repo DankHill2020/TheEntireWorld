@@ -646,8 +646,8 @@ class MainWindowUiMixin:
         self.workspace_tabs.setCornerWidget(self.main_fullscreen_btn, Qt.TopRightCorner)
         self.workspace_tabs.currentChanged.connect(self.on_workspace_tab_changed)
         self.workspace_tabs.tabActivated.connect(self.on_workspace_tab_activated)
-        self.workspace_tabs.tabVisibilityChanged.connect(lambda *_args: self.update_unified_prompt_context_label())
-        self.workspace_tabs.tabDetachedChanged.connect(lambda *_args: self.update_unified_prompt_context_label())
+        self.workspace_tabs.tabVisibilityChanged.connect(lambda *_args: self.schedule_unified_prompt_context_label_update())
+        self.workspace_tabs.tabDetachedChanged.connect(lambda *_args: self.schedule_unified_prompt_context_label_update())
         self.workspace_tabs.containerEmptied.connect(lambda _container: self._update_workspace_anchor_visibility())
 
         self.workspace_anchor_tabs = DetachableTabWidget(
@@ -1875,6 +1875,7 @@ class MainWindowUiMixin:
         )
         self.input.sendRequested.connect(self.send_message)
         self.input.textChangedString.connect(self.on_chat_input_text_changed)
+        self.input.installEventFilter(self)
         input_row.addWidget(self.input, 1)
         send_btn = QPushButton("Send")
         send_btn.clicked.connect(self.send_message)
@@ -2190,19 +2191,15 @@ class MainWindowUiMixin:
     def on_workspace_tab_changed(self, index):
         title = self.workspace_tabs.tabText(index)
         self._active_workspace_title = title or "Chat"
-        self.update_unified_prompt_context_label()
+        self.schedule_unified_prompt_context_label_update()
         if hasattr(self, "set_live_process"):
             self.set_live_process(f"Context changed: {title}")
-        if title == "Pipelines":
-            self.refresh_workflows_list()
 
     def on_workspace_tab_activated(self, title, widget, container):
         self._active_workspace_title = title or "Chat"
-        self.update_unified_prompt_context_label()
+        self.schedule_unified_prompt_context_label_update()
         if hasattr(self, "set_live_process"):
             self.set_live_process(f"Context changed: {self._active_workspace_title}")
-        if self._active_workspace_title == "Pipelines":
-            self.refresh_workflows_list()
 
     def active_workspace_title(self):
         active = getattr(self, "_active_workspace_title", "")
@@ -2214,6 +2211,17 @@ class MainWindowUiMixin:
             return self.workspace_tabs.tabText(self.workspace_tabs.currentIndex()) or "Chat"
         except Exception:
             return "Chat"
+
+    def schedule_unified_prompt_context_label_update(self):
+        if getattr(self, "_prompt_context_label_update_pending", False):
+            return
+        self._prompt_context_label_update_pending = True
+
+        def apply_update():
+            self._prompt_context_label_update_pending = False
+            self.update_unified_prompt_context_label()
+
+        QTimer.singleShot(0, apply_update)
 
     def update_unified_prompt_context_label(self):
         if not hasattr(self, "prompt_context_label"):

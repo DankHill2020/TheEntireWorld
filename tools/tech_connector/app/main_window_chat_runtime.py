@@ -12,7 +12,7 @@ import re
 import time
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QDesktopServices,
     QFont,
@@ -69,9 +69,6 @@ from tech_connector.services.ollama_service import (
     AI_MODELS,
     as_mcphost_model
 )
-
-from tech_connector.services.unreal.graph_patch_service import execute_patch
-
 
 PROMPT_PROGRESS_QUIET_SECONDS = 10
 PROMPT_PROGRESS_CHAT_INTERVAL_SECONDS = 15
@@ -1577,6 +1574,37 @@ class MainWindowChatRuntimeMixin:
         )
         self.store_request_metadata("main", request_metadata)
         self._mark_response_started("main")
+        chatbot_module = self.settings.get("chatbot_provider_module", "default")
+        if chatbot_module and chatbot_module != "default":
+            def run_custom_chatbot():
+                from tech_connector.services.modular_provider_utils import invoke_custom_provider
+                def append_chunk(chunk):
+                    from PySide6.QtCore import QTimer
+                    from PySide6.QtWidgets import QApplication
+                    if QApplication.instance() is not None:
+                        QTimer.singleShot(0, lambda: self.append(chunk))
+                    else:
+                        self.append(chunk)
+                try:
+                    history_list = []
+                    for msg in self.current_session:
+                        history_list.append({"role": msg.get("role"), "content": msg.get("content")})
+                    def generate_chat_response(*args, **kwargs):
+                        pass
+
+                    invoke_custom_provider(
+                        chatbot_module,
+                        generate_chat_response,
+                        text,
+                        history_list,
+                        append_chunk
+                    )
+                except Exception as e:
+                    append_chunk("\n[Custom Chatbot Error]: " + str(e) + "\n")
+            import threading
+            threading.Thread(target=run_custom_chatbot, daemon=True).start()
+            return
+
         if self.bridge.write(text):
             if self.mcphost_use_pty:
                 self.append(
@@ -3749,6 +3777,8 @@ class MainWindowChatRuntimeMixin:
         threading.Thread(target=run_worker, daemon=True).start()
 
     def send_message(self):
+        self.last_chat_activity_time = time.time()
+        self.ollama_is_idle = False
         send_started = time.perf_counter()
         self._live_work_started_at = time.time()
         self._last_live_process = ""
@@ -4520,6 +4550,12 @@ class MainWindowChatRuntimeMixin:
         return merge_candidates(*groups, query=query_str, limit=limit)
 
     def on_chat_input_text_changed(self, text: str):
+        import time
+        self.last_chat_activity_time = time.time()
+        if getattr(self, "ollama_is_idle", False):
+            self.ollama_is_idle = False
+            print("[Ollama] Chat activity detected. Waking up models...", flush=True)
+            self.keep_ollama_warm()
         cursor_pos = self.input.cursorPosition()
         before_cursor = text[:cursor_pos]
         if len(text or "") > 4000 and not any(marker in before_cursor[-120:] for marker in ("@", "!")):
@@ -4564,6 +4600,83 @@ class MainWindowChatRuntimeMixin:
             175,
             lambda s=seq, q=query_str, snap=text_snapshot, at=trigger_idx, pos=cursor_pos: self._start_autocomplete_query(s, q, snap, at, pos),
         )
+
+    def _autocomplete_popup_visible(self) -> bool:
+        popup = getattr(self, "_autocomplete_menu", None)
+        return bool(popup is not None and popup.isVisible())
+
+    def _autocomplete_current_row(self) -> int:
+        popup = getattr(self, "_autocomplete_menu", None)
+        if popup is None or not hasattr(popup, "currentRow"):
+            return -1
+        try:
+            return int(popup.currentRow())
+        except Exception:
+            return -1
+
+    def _move_autocomplete_selection(self, delta: int) -> bool:
+        popup = getattr(self, "_autocomplete_menu", None)
+        if popup is None or not popup.isVisible() or not hasattr(popup, "count"):
+            return False
+        count = int(popup.count())
+        if count <= 0:
+            return False
+        row = self._autocomplete_current_row()
+        if row < 0:
+            row = 0
+        else:
+            row = max(0, min(count - 1, row + int(delta)))
+        popup.setCurrentRow(row)
+        try:
+            popup.scrollToItem(popup.item(row))
+        except Exception:
+            pass
+        return True
+
+    def _accept_autocomplete_selection(self) -> bool:
+        popup = getattr(self, "_autocomplete_menu", None)
+        if popup is None or not popup.isVisible() or not hasattr(popup, "currentItem"):
+            return False
+        item = popup.currentItem()
+        if item is None and hasattr(popup, "count") and popup.count():
+            item = popup.item(0)
+        if item is None:
+            return False
+        token = item.data(Qt.UserRole) if hasattr(item, "data") else ""
+        if token is None:
+            token = item.text()
+        at_idx = int(getattr(self, "_autocomplete_active_at_idx", -1))
+        cursor_pos = self.input.cursorPosition() if hasattr(self, "input") else int(getattr(self, "_autocomplete_active_cursor_pos", 0))
+        self._insert_autocomplete_suggestion(str(token), at_idx, cursor_pos)
+        return True
+
+    def eventFilter(self, obj, event):
+        try:
+            if obj is getattr(self, "input", None) and event.type() == QEvent.KeyPress:
+                if self._autocomplete_popup_visible():
+                    key = event.key()
+                    if key in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter):
+                        if self._accept_autocomplete_selection():
+                            event.accept()
+                            return True
+                    if key == Qt.Key_Down:
+                        if self._move_autocomplete_selection(1):
+                            event.accept()
+                            return True
+                    if key == Qt.Key_Up:
+                        if self._move_autocomplete_selection(-1):
+                            event.accept()
+                            return True
+                    if key == Qt.Key_Escape:
+                        self._autocomplete_menu.hide()
+                        event.accept()
+                        return True
+        except Exception:
+            pass
+        try:
+            return super().eventFilter(obj, event)
+        except Exception:
+            return False
 
     def _start_autocomplete_query(self, seq: int, query_str: str, text_snapshot: str, at_idx: int, cursor_pos: int):
         if seq != int(getattr(self, "_autocomplete_query_seq", 0) or 0):
@@ -4617,48 +4730,82 @@ class MainWindowChatRuntimeMixin:
         except Exception:
             return
 
-        from PySide6.QtWidgets import QMenu
-        from PySide6.QtGui import QAction
-
         if not suggestions:
             if hasattr(self, "_autocomplete_menu") and self._autocomplete_menu:
                 self._autocomplete_menu.hide()
             return
             
         if not hasattr(self, "_autocomplete_menu") or not self._autocomplete_menu:
-            self._autocomplete_menu = QMenu(self.input)
+            self._autocomplete_menu = QListWidget(self.input.window())
+            self._autocomplete_menu.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint)
+            self._autocomplete_menu.setFocusPolicy(Qt.NoFocus)
+            self._autocomplete_menu.setMouseTracking(True)
+            self._autocomplete_menu.setUniformItemSizes(True)
+            self._autocomplete_menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self._autocomplete_menu.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self._autocomplete_menu.itemClicked.connect(lambda item: self._insert_autocomplete_suggestion(str(item.data(Qt.UserRole) or item.text()), getattr(self, "_autocomplete_active_at_idx", at_idx), self.input.cursorPosition()))
             self._autocomplete_menu.setStyleSheet("""
-                QMenu {
+                QListWidget {
                     background-color: #0b0f14;
                     color: #d7dde5;
                     border: 1px solid #1e9bff;
                     border-radius: 4px;
+                    outline: 0;
                 }
-                QMenu::item:selected {
+                QListWidget::item {
+                    padding: 4px 7px;
+                }
+                QListWidget::item:selected {
                     background-color: #1e9bff;
                     color: #ffffff;
                 }
             """)
         else:
             self._autocomplete_menu.clear()
-            
-        for item in suggestions:
-            label = item.display() if hasattr(item, "display") else str(item)
-            token = item.token if hasattr(item, "token") else str(item)
-            action = QAction(label, self._autocomplete_menu)
-            action.triggered.connect(lambda checked=False, val=token: self._insert_autocomplete_suggestion(val, at_idx, cursor_pos))
-            self._autocomplete_menu.addAction(action)
-            
-        rect = self.input.geometry()
-        pos = self.input.mapToGlobal(rect.bottomLeft())
-        pos.setY(pos.y() - rect.height() + 5)
-        pos.setX(pos.x() + max(0, cursor_pos * 6))
-        
-        self._autocomplete_menu.popup(pos)
+
+        self._autocomplete_active_at_idx = at_idx
+        self._autocomplete_active_cursor_pos = cursor_pos
+        max_rows = 8
+        max_label_chars = 150
+        for candidate in suggestions[:max_rows]:
+            label = candidate.display() if hasattr(candidate, "display") else str(candidate)
+            token = candidate.token if hasattr(candidate, "token") else str(candidate)
+            display_label = " ".join(str(label or "").split())
+            if len(display_label) > max_label_chars:
+                display_label = display_label[: max_label_chars - 1].rstrip() + "..."
+            item = QListWidgetItem(display_label)
+            item.setData(Qt.UserRole, str(token or ""))
+            item.setToolTip(str(label or ""))
+            self._autocomplete_menu.addItem(item)
+        if self._autocomplete_menu.count():
+            self._autocomplete_menu.setCurrentRow(0)
+
+        cursor_rect = self.input.cursorRect()
+        pos = self.input.mapToGlobal(cursor_rect.bottomLeft())
+        row_height = max(24, self._autocomplete_menu.sizeHintForRow(0) if self._autocomplete_menu.count() else 24)
+        visible_rows = max(1, min(max_rows, self._autocomplete_menu.count()))
+        width = min(640, max(300, min(520, self.input.width() + 180)))
+        height = min(240, visible_rows * row_height + 8)
+        screen = QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, max(260, available.width() - 24))
+            if pos.x() + width > available.right():
+                pos.setX(max(available.left() + 8, available.right() - width))
+            if pos.y() + height > available.bottom():
+                pos.setY(max(available.top() + 8, self.input.mapToGlobal(cursor_rect.topLeft()).y() - height))
+        self._autocomplete_menu.setFixedSize(width, height)
+        self._autocomplete_menu.move(pos)
+        self._autocomplete_menu.show()
+        self._autocomplete_menu.raise_()
         self.input.setFocus()
 
     def _insert_autocomplete_suggestion(self, val: str, at_idx: int, cursor_pos: int):
         text = self.input.text()
+        if at_idx < 0:
+            return
+        live_cursor_pos = self.input.cursorPosition()
+        cursor_pos = max(cursor_pos, live_cursor_pos)
         before_at = text[:at_idx]
         after_cursor = text[cursor_pos:]
         

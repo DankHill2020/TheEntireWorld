@@ -66,12 +66,6 @@ from tech_connector.models.constants import (
 
 from tech_connector.router.ai_router import AIRouter
 from tech_connector.services.application_service import ApplicationService
-from tech_connector.services.dcc.dcc_bridge_setup import (
-    blender_script_editor_snippet,
-    install_blender_startup_bridge,
-    install_substance_painter_bridge,
-    substance_painter_script_editor_snippet,
-)
 from tech_connector.services.dcc.installer_launchers import (
     pending_first_time_dcc_installers,
     run_first_time_dcc_installers,
@@ -180,6 +174,7 @@ class MainWindowCoreMixin:
             self.live_process_update.connect(self.set_live_process)
             self.response_started.connect(self._mark_response_started)
             self.dcc_statuses_ready.connect(self._apply_dcc_statuses)
+            self.vcs_status_ready.connect(self._apply_vcs_status_card)
             self.autocomplete_suggestions_ready.connect(self._apply_autocomplete_suggestions)
         except Exception:
             pass
@@ -292,8 +287,8 @@ class MainWindowCoreMixin:
         self.status.setText("Loading workspace...")
 
         QTimer.singleShot(250, self.run_after_first_paint_startup)
-        QTimer.singleShot(4500, self.ensure_required_models_on_startup)
-        QTimer.singleShot(7000, self.ensure_dcc_bridge_setup_on_startup)
+        QTimer.singleShot(12000, self.ensure_required_models_on_startup)
+        QTimer.singleShot(18000, self.ensure_dcc_bridge_setup_on_startup)
 
     def start_mobile_second_screen(self):
         try:
@@ -352,11 +347,10 @@ class MainWindowCoreMixin:
 
     def install_prompt_context_hooks(self):
         """Keep the unified prompt context label reactive as the user changes workspace state."""
-        try:
-            if hasattr(self, "workspace_tabs"):
-                self.workspace_tabs.currentChanged.connect(lambda _idx: self.update_unified_prompt_context_label())
-        except Exception:
-            pass
+        # Workspace tab changes are already routed through on_workspace_tab_changed.
+        # Avoid a second direct connection here; it doubles context refresh work on
+        # every tab switch and can make Chat activation feel frozen.
+        pass
 
     def _record_ui_heartbeat(self):
         self._ui_heartbeat_last = time.time()
@@ -404,7 +398,7 @@ class MainWindowCoreMixin:
         threading.Thread(target=watch, daemon=True).start()
         try:
             if hasattr(self, "editor_tabs"):
-                self.editor_tabs.currentChanged.connect(lambda _idx: self.update_unified_prompt_context_label())
+                self.editor_tabs.currentChanged.connect(lambda _idx: self.schedule_unified_prompt_context_label_update())
         except Exception:
             pass
         try:
@@ -419,14 +413,14 @@ class MainWindowCoreMixin:
             pass
 
     def run_after_first_paint_startup(self):
-        self._startup_defer_expensive_status = False
         self._schedule_startup_step("history", 0, self.refresh_history)
         self._schedule_startup_step("snippets", 150, self.refresh_snippets_list)
         self._schedule_startup_step("project tree", 350, self.load_project_tree_lazy)
         self._schedule_startup_step("editor restore", 700, self.restore_editor_state)
         self._schedule_startup_step("integration status", 1100, self.update_integrations_status_card)
         self._schedule_startup_step("vcs status", 1500, self.update_vcs_status_card)
-        self._schedule_startup_step("symbol cache", 2400, self.start_async_symbol_indexing)
+        QTimer.singleShot(1900, lambda: setattr(self, "_startup_defer_expensive_status", False))
+        self._schedule_startup_step("symbol cache", 9000, self.start_async_symbol_indexing)
         self.status.setText("Ready")
         if not self.settings.get("first_run_complete"):
             QTimer.singleShot(1800, self.show_first_run)
@@ -434,31 +428,29 @@ class MainWindowCoreMixin:
             self.set_card("knowledge", "warn", "Index missing")
             if hasattr(self, "index_status"):
                 self.index_status.setText("Knowledge: index missing")
-        QTimer.singleShot(5200, self.start_mcphost)
-        QTimer.singleShot(8500, self.start_unreal_daemon_on_startup)
+        QTimer.singleShot(15000, self.start_mcphost)
+        QTimer.singleShot(22000, self.start_unreal_daemon_on_startup)
+        QTimer.singleShot(26000, self.start_project_index_change_watcher_late)
 
+        import time
+        self.last_chat_activity_time = time.time()
+        self.ollama_is_idle = False
         self.keep_alive_timer = QTimer(self)
         self.keep_alive_timer.timeout.connect(self.keep_ollama_warm)
         self.keep_alive_timer.start(240000)
 
-        try:
-            from tech_connector.models.project import project_roots
-            from tech_connector.services.project_service import start_project_index_change_watcher
-
-            self._project_index_change_watcher = start_project_index_change_watcher(
-                project_roots(self.settings)
-            )
-        except Exception:
-            self._project_index_change_watcher = None
-
     def _schedule_startup_step(self, label, delay_ms, fn):
         def run_step():
             started = time.monotonic()
+            previous_stage = getattr(self, "_last_live_process", "")
+            self._last_live_process = f"Startup: {label}"
             try:
                 fn()
             finally:
+                self._last_live_process = previous_stage
                 duration_ms = int((time.monotonic() - started) * 1000)
                 if duration_ms >= 250:
+                    print(f"[Startup] {label} took {duration_ms}ms", flush=True)
                     try:
                         from tech_connector.services.diagnostic_service import log_ui_event
 
@@ -472,6 +464,18 @@ class MainWindowCoreMixin:
                         pass
 
         QTimer.singleShot(int(delay_ms), run_step)
+
+    def start_project_index_change_watcher_late(self):
+        def run():
+            try:
+                from tech_connector.models.project import project_roots
+                from tech_connector.services.project_service import start_project_index_change_watcher
+
+                self._project_index_change_watcher = start_project_index_change_watcher(project_roots(self.settings))
+            except Exception:
+                self._project_index_change_watcher = None
+
+        threading.Thread(target=run, daemon=True, name="project-index-watch-startup").start()
 
     def start_unreal_daemon_on_startup(self):
         try:
@@ -502,19 +506,41 @@ class MainWindowCoreMixin:
 
     def keep_ollama_warm(self):
         import threading
+        import time
 
         from tech_connector.services.ollama_service import warm_ollama_model
 
-        model = self.selected_mcphost_model()
-        if (
-                model
-                and provider_for_model(model) == "ollama"
-                and should_use_local_runtime(model, self.settings)
-        ):
-            t = threading.Thread(
-                target=warm_ollama_model, args=(model, "24h"), daemon=True
-            )
-            t.start()
+        # Resident planning models avoid a cold start on the first substantial
+        # feature prompt. Resource-constrained users can opt into idle unloading.
+        last_active = getattr(self, "last_chat_activity_time", 0.0)
+        unload_on_idle = bool(self.settings.get("ollama_unload_on_idle", False))
+        if unload_on_idle and time.time() - last_active > 15 * 60:
+            if not getattr(self, "ollama_is_idle", False):
+                self.ollama_is_idle = True
+                print("[Ollama] Chat session inactive for 15m. Unloading local models to free VRAM.", flush=True)
+                def unload():
+                    try:
+                        model = self.selected_mcphost_model()
+                        if model:
+                            warm_ollama_model(model, keep_alive=0)
+                        from tech_connector.services.ollama_service import CODE_MODEL_PROFILES
+                        for m in CODE_MODEL_PROFILES.values():
+                            warm_ollama_model(m, keep_alive=0)
+                    except Exception:
+                        pass
+                threading.Thread(target=unload, daemon=True).start()
+            return
+
+        models = list(self.settings.get("ollama_preload_models") or [])
+        for model in dict.fromkeys(models):
+            if (
+                    model
+                    and provider_for_model(model) == "ollama"
+                    and should_use_local_runtime(model, self.settings)
+            ):
+                threading.Thread(
+                    target=warm_ollama_model, args=(model, "24h"), daemon=True
+                ).start()
 
     def dcc_bridge_setup_ids(self):
         return {
@@ -538,62 +564,34 @@ class MainWindowCoreMixin:
             self.start_dcc_status_polling()
             return
 
-        try:
-            self.confirm_and_run_first_time_dcc_installers()
-        except Exception as exc:
-            self.append(f"\n[DCC Setup] First-time installer launch failed: {exc}\n")
-
-        setup_ids = self.dcc_bridge_setup_ids()
-        seen = set(self.settings.get("dcc_bridge_setup_seen", []))
-        pending = [bridge_id for bridge_id in setup_ids if bridge_id not in seen]
-        if not pending:
-            self.start_dcc_status_polling()
-            return
-
-        restart_messages = []
-
-        if "blender" in pending:
-            result = install_blender_startup_bridge(all_versions=True)
-            self.mark_dcc_bridge_setup_seen("blender")
-            if result.ok and result.installed_versions:
-                versions = ", ".join(result.installed_versions)
-                self.set_card("blender", "warn", "Restart Blender")
-                self.append(
-                    f"\n[Blender Setup] Installed startup bridge for Blender {versions}. Restart Blender to load it.\n"
-                )
-                restart_messages.append(
-                    f"Blender: restart Blender. Version(s): {versions}"
-                )
-            elif not result.ok:
-                self.set_card("blender", "off", "Setup available")
-                self.append(f"\n[Blender Setup] {result.message}\n")
-
-        if "substance_painter" in pending:
-            substance_result = install_substance_painter_bridge()
-            self.mark_dcc_bridge_setup_seen("substance_painter")
-            if substance_result.ok and substance_result.installed_versions:
-                self.set_card("substance_painter", "warn", "Restart Painter")
-                self.append(
-                    "\n[Substance Painter Setup] Installed startup bridge plugin. "
-                    "Restart Substance Painter and enable the plugin if prompted.\n"
-                )
-                restart_messages.append(
-                    "Substance Painter: restart Painter. If needed, enable the plugin from its Python/plugins menu."
-                )
-            elif not substance_result.ok:
-                self.set_card("substance_painter", "off", "Setup available")
-                self.append(f"\n[Substance Painter Setup] {substance_result.message}\n")
-
-        if restart_messages:
-            QMessageBox.information(
-                self,
-                "DCC Bridge Setup Updated",
-                "Tech Connector installed or updated bridge startup files.\n\n"
-                + "\n".join(restart_messages),
-            )
-
-        # Check running statuses and start dynamic polling
+        self.start_first_time_dcc_installer_check_async()
         self.start_dcc_status_polling()
+
+    def start_first_time_dcc_installer_check_async(self):
+        if getattr(self, "_first_time_dcc_installer_check_running", False):
+            return
+        self._first_time_dcc_installer_check_running = True
+        settings_snapshot = dict(getattr(self, "settings", {}) or {})
+
+        def run():
+            try:
+                pending = pending_first_time_dcc_installers(settings_snapshot)
+            except Exception as exc:
+                pending = []
+                try:
+                    self.thread_log_message.emit(f"\n[DCC Setup] First-time installer scan failed: {exc}\n")
+                except Exception:
+                    pass
+            self._first_time_dcc_installer_check_running = False
+            if pending:
+                try:
+                    self.thread_log_message.emit(
+                        "\n[DCC Setup] First-time installer setup is available from Tools > Connected Applications.\n"
+                    )
+                except Exception:
+                    pass
+
+        threading.Thread(target=run, daemon=True, name="dcc-installer-discovery").start()
 
     def start_dcc_status_polling(self):
         if getattr(self, "_dcc_status_polling_started", False):
@@ -659,8 +657,12 @@ class MainWindowCoreMixin:
             bridge = None
             try:
                 router = getattr(self, "command_router", None)
-                bridge = getattr(router, host, None) if router is not None else None
-                if bridge is None and hasattr(router, "_host_bridge_for_operation"):
+                # Do not wake LazyCommandRouter during passive status polling.
+                # Constructing the full router imports every DCC bridge and can
+                # briefly starve the UI thread even from this worker.
+                if router is not None and getattr(router, "_router", router) is not None:
+                    bridge = getattr(router, host, None)
+                if bridge is None and router is not None and getattr(router, "_router", router) is not None and hasattr(router, "_host_bridge_for_operation"):
                     bridge = router._host_bridge_for_operation(host)
             except Exception:
                 bridge = None
@@ -947,6 +949,8 @@ class MainWindowCoreMixin:
             self.append(f"[Unreal Reflection] Indexing skipped or failed: {error}\n")
 
     def install_blender_bridge_from_menu(self):
+        from tech_connector.services.dcc.dcc_bridge_setup import install_blender_startup_bridge
+
         result = install_blender_startup_bridge(all_versions=True)
         self.mark_dcc_bridge_setup_seen("blender")
         if result.ok and result.installed_versions:
@@ -976,6 +980,8 @@ class MainWindowCoreMixin:
         self.append(f"\n[Blender Setup] {result.message}\n")
 
     def copy_blender_script_editor_setup(self):
+        from tech_connector.services.dcc.dcc_bridge_setup import blender_script_editor_snippet
+
         snippet = blender_script_editor_snippet()
         QGuiApplication.clipboard().setText(snippet)
         self.append(
@@ -989,6 +995,8 @@ class MainWindowCoreMixin:
         )
 
     def install_substance_painter_bridge_from_menu(self):
+        from tech_connector.services.dcc.dcc_bridge_setup import install_substance_painter_bridge
+
         result = install_substance_painter_bridge()
         self.mark_dcc_bridge_setup_seen("substance_painter")
         if result.ok and result.installed_versions:
@@ -1018,6 +1026,8 @@ class MainWindowCoreMixin:
         self.append(f"\n[Substance Painter Setup] {result.message}\n")
 
     def copy_substance_painter_script_editor_setup(self):
+        from tech_connector.services.dcc.dcc_bridge_setup import substance_painter_script_editor_snippet
+
         snippet = substance_painter_script_editor_snippet()
         QGuiApplication.clipboard().setText(snippet)
         self.append("\n[Substance Painter Setup] Copied setup snippet to clipboard.\n")
@@ -1234,6 +1244,13 @@ class MainWindowCoreMixin:
         card = getattr(self, "status_cards", {}).get(key)
         if not card:
             return
+        if not hasattr(self, "_status_card_states"):
+            self._status_card_states = {}
+        self._status_card_states[str(key)] = {
+            "id": str(key),
+            "status": str(state or "unknown"),
+            "detail": str(detail or ""),
+        }
         text, stylesheet = format_status_card(key, state, detail)
         try:
             card.setTextFormat(Qt.RichText)

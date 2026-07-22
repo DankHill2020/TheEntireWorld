@@ -5,6 +5,69 @@ from __future__ import annotations
 import json
 
 
+def object_path(asset_path):
+    """Return an Unreal object path for either a package or object path input."""
+
+    value = str(asset_path or "").strip()
+    leaf = value.rsplit("/", 1)[-1]
+    if not value or "." in leaf:
+        return value
+    return f"{value}.{leaf}"
+
+
+def load_asset(unreal, asset_path):
+    """Load an asset even when EditorAssetLibrary rejects a package-only path."""
+
+    value = str(asset_path or "").strip()
+    if not value:
+        return None
+    try:
+        asset = unreal.EditorAssetLibrary.load_asset(value)
+        if asset:
+            return asset
+    except Exception:
+        pass
+    try:
+        return unreal.load_object(None, object_path(value))
+    except Exception:
+        return None
+
+
+def load_blueprint_class(unreal, asset_path):
+    """Resolve a generated class from package, object, or generated-class paths."""
+
+    value = str(asset_path or "").strip()
+    if not value:
+        return None
+    try:
+        resolved = unreal.EditorAssetLibrary.load_blueprint_class(value)
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+
+    generated_path = object_path(value)
+    if not generated_path.endswith("_C"):
+        generated_path += "_C"
+    try:
+        resolved = unreal.load_class(None, generated_path)
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+
+    asset = load_asset(unreal, value)
+    if not asset:
+        return None
+    try:
+        return asset.generated_class()
+    except Exception:
+        try:
+            return asset.get_editor_property("generated_class")
+        except Exception:
+            return None
+
+
 def get_dependencies(asset_path, recursive=True):
     import unreal
 
@@ -92,26 +155,16 @@ def find_asset_path_by_name(file_name, expected_class="", directory="/Game", all
             continue
         if expected_class and expected_class.lower() not in class_name.lower():
             continue
-        haystack = f"{asset_name} {package_name} {class_name}".lower()
+        haystack = f"{asset_name} {package_name}".lower()
         score = 0
         if needle == asset_name.lower():
             score += 100
         if needle == package_name.lower():
             score += 90
         if needle in haystack:
-            score += 40
+            score += 25
         if needle.replace("_", "") in haystack.replace("_", ""):
-            score += 30
-
-        # Tokenized word matching for fuzzy/unclear queries (e.g. "metahuman retargeter")
-        query_words = [w for w in needle.replace("_", " ").replace("-", " ").split() if len(w) > 1]
-        if query_words:
-            matched_words = sum(1 for w in query_words if w in haystack)
-            if matched_words == len(query_words):
-                score += 50
-            elif matched_words > 0:
-                score += matched_words * 15
-
+            score += 10
         if score > best_score:
             best_score = score
             best = package_name

@@ -64,6 +64,22 @@ def extract_target_entities(prompt: str) -> list[TargetEntity]:
         kind = "filename" if re.search(r"\.[A-Za-z0-9]{1,8}$", value) else "symbol"
         add(value, kind, 0.96, quoted=True)
 
+    # Chat mentions that look like Python qualified names are strong explicit
+    # code targets, not fuzzy search terms.
+    for match in re.finditer(
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,})(?![\w.])",
+        text,
+    ):
+        add(match.group(1), "symbol", 0.995, mention=True, qualified=True)
+
+    # Module-level mentions such as @custom_qt.custom_widgets are explicit
+    # scope targets. They are not social handles or fuzzy search terms.
+    for match in re.finditer(
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)(?![\w.])",
+        text,
+    ):
+        add(match.group(1), "module", 0.985, mention=True, qualified=True)
+
     # Python-like function/class references, including foo() and Class.method.
     for match in re.finditer(r"(?<![\w])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\(\s*\)", text):
         add(match.group(1), "symbol", 0.97, callable=True)
@@ -115,6 +131,8 @@ _MEMBER_TYPES = {
     "classes": "class",
     "helper": "helper",
     "helpers": "helper",
+    "widget": "class",
+    "widgets": "class",
     "symbol": "symbol",
     "symbols": "symbol",
 }
@@ -170,6 +188,21 @@ _SCOPED_MEMBER_EXISTENCE_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+_SCOPED_MEMBER_GUIDANCE_RE = re.compile(
+    rf"""
+    \b(?:what\s+would\s+i\s+do\s+if\s+i\s+needed|what\s+would\s+we\s+do\s+if\s+we\s+needed|
+       how\s+would\s+i\s+(?:make|create|build|add)|how\s+would\s+we\s+(?:make|create|build|add))\s+
+    (?:a\s+|an\s+|the\s+)?(?P<member_type>functions?|methods?|classes?|helpers?|symbols?|widgets?)\s+
+    (?:to|that|which|for)\s+
+    (?P<behavior_verb>{'|'.join(_BEHAVIOR_VERBS)})\b
+    (?P<behavior_object>.*?)\s+
+    (?:in|inside|within|from)\s+
+    (?P<container>@?[A-Za-z_][A-Za-z0-9_.]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*|[A-Za-z0-9_.-]+\.[A-Za-z0-9_]{{1,8}})
+    [?.!]*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _DEICTIC_FILE_RE = re.compile(
     r"\b(that|this|the previous|the last|the file you just found|the file just found)\s+file\b",
     re.IGNORECASE,
@@ -194,11 +227,27 @@ class ScopedMemberQuery:
 
 def parse_scoped_member_query(text: str) -> ScopedMemberQuery | None:
     source = re.sub(r"\s+", " ", str(text or "")).strip()
-    match = _SCOPED_MEMBER_RE.search(source) or _SCOPED_MEMBER_EXISTENCE_RE.search(source)
+    match = (
+        _SCOPED_MEMBER_RE.search(source)
+        or _SCOPED_MEMBER_EXISTENCE_RE.search(source)
+        or _SCOPED_MEMBER_GUIDANCE_RE.search(source)
+    )
+    if not match:
+        guidance_match = re.search(
+            r"\bwhat\s+would\s+i\s+do\s+if\s+i\s+needed\s+"
+            r"(?:a\s+|an\s+|the\s+)?(?P<member_type>class|function|method|helper|widget)\s+"
+            r"(?:to|that|which|for)\s+(?P<behavior_verb>make|create|build|generate|use)\b"
+            r"(?P<behavior_object>.*?)\s+(?:in|inside|within|from)\s+"
+            r"(?P<container>@?[A-Za-z_][A-Za-z0-9_.]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)[?.!]*$",
+            source,
+            flags=re.IGNORECASE,
+        )
+        if guidance_match:
+            match = guidance_match
     if not match:
         return None
 
-    raw_container = match.group("container").strip(" ,")
+    raw_container = match.group("container").strip(" ,").lstrip("@")
     behavior_verb = match.group("behavior_verb").strip().lower()
     behavior_object = match.group("behavior_object").strip(" ,.?")
     member_type = _MEMBER_TYPES.get(

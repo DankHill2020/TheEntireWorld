@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from tech_connector.router.command_router import CommandRouter
 from tech_connector.router.prompt_router import PromptRouter
 from tech_connector.services.mcphost_service import (
     MCPHostManager,
@@ -24,6 +23,23 @@ from tech_connector.models.constants import set_active_project_root
 from tech_connector.models.project import all_roots, project_roots, recent_projects, set_active_project
 from tech_connector.services.source_policy import apply_source_policy, live_sources_enabled
 from tech_connector.services.application_command_service import ApplicationCommandService
+
+
+class LazyCommandRouter:
+    """Create the heavy DCC command router only when a bridge is actually used."""
+
+    def __init__(self) -> None:
+        self._router = None
+
+    def _load(self):
+        if self._router is None:
+            from tech_connector.router.command_router import CommandRouter
+
+            self._router = CommandRouter()
+        return self._router
+
+    def __getattr__(self, name: str):
+        return getattr(self._load(), name)
 
 
 class ApplicationService:
@@ -68,7 +84,7 @@ class ApplicationService:
                 self.bridge = None
 
         self.mcphost_manager = MCPHostManager(self.settings)
-        self.command_router = command_router if command_router is not None else CommandRouter()
+        self.command_router = command_router if command_router is not None else LazyCommandRouter()
         self.prompt_router = prompt_router if prompt_router is not None else PromptRouter()
         self.output_cleaner = output_cleaner if output_cleaner is not None else MCPHostOutputCleaner()
         self.command_service = ApplicationCommandService(self)
