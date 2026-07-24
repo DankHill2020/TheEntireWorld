@@ -1581,7 +1581,17 @@ class MainWindowDccMixin:
             self.append(
                 "[Blender Direct] No Blender bridge found. Run Install_Blender_AI_Studio_Bridge.bat once, then restart Blender.\n"
             )
-            self._prompt_launch_missing_dcc_bridge("blender", "Blender bridge was not found.", lambda: self.direct_blender_execute(code, label, timeout), label)
+            retry_callback = {
+                "Blender Selection": self.direct_blender_selection,
+                "Blender File": self.direct_blender_file,
+                "Blender Scene Objects": self.direct_blender_scene_objects,
+            }.get(label, self.direct_blender_scene_objects)
+            self._prompt_launch_missing_dcc_bridge(
+                "blender",
+                "Blender bridge was not found.",
+                retry_callback,
+                label,
+            )
             return
         code = {
             "Blender Selection": self.command_router.blender.get_selection_code(),
@@ -2388,7 +2398,11 @@ class MainWindowDccMixin:
     def _ensure_unreal_project_ready(self):
         from PySide6.QtWidgets import QMessageBox
         from tech_connector.models.constants import TOOLS_ROOT
-        from unreal_tools.unreal_project_data import add_unreal_startup_script
+        from unreal_tools.unreal_project_data import (
+            add_unreal_startup_script,
+            build_ai_studio_bridge_plugin,
+            install_ai_studio_bridge_plugin,
+        )
 
         uproject = self._selected_unreal_uproject()
         if not uproject:
@@ -2396,22 +2410,116 @@ class MainWindowDccMixin:
 
         script_path = TOOLS_ROOT / "unreal_tools" / "http_server.py"
         try:
+            plugin_setup = install_ai_studio_bridge_plugin(
+                str(uproject),
+                str(TOOLS_ROOT / "plugins" / "AIStudioBridge"),
+            )
             add_unreal_startup_script(str(uproject), str(script_path))
+            if plugin_setup.get("build_required"):
+                answer = QMessageBox.question(
+                    self,
+                    "Build Unreal Plugin",
+                    "AIStudioBridge source is installed, but its Unreal Editor binary "
+                    "is missing or stale.\n\nBuild and install it now? Unreal must be "
+                    "closed for the final install, and the build may take a minute.",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if answer != QMessageBox.Yes:
+                    return None
+                if self.command_router.unreal.find_port():
+                    QMessageBox.warning(
+                        self,
+                        "Close Unreal First",
+                        "Close the selected Unreal project, then retry this action so "
+                        "Tech Connector can install the newly built plugin binary safely.",
+                    )
+                    return None
+
+                from PySide6.QtWidgets import QApplication, QProgressDialog
+
+                progress = QProgressDialog(
+                    "Building AIStudioBridge...",
+                    "",
+                    0,
+                    100,
+                    self,
+                )
+                progress.setWindowTitle("Unreal Plugin Setup")
+                progress.setCancelButton(None)
+                progress.setMinimumDuration(0)
+                progress.setValue(40)
+
+                def report_build_phase(event):
+                    progress.setValue(int(event.get("percent") or 0))
+                    progress.setLabelText(
+                        f"{event.get('label') or 'Build plugin'}\n"
+                        f"{event.get('message') or ''}"
+                    )
+                    if hasattr(self, "append"):
+                        self.append(
+                            f"[Unreal Setup] {event.get('percent', 0):>3}% "
+                            f"{event.get('label')}: {event.get('message')}\n"
+                        )
+                    QApplication.processEvents()
+
+                build_result = build_ai_studio_bridge_plugin(
+                    str(uproject),
+                    str(TOOLS_ROOT / "plugins" / "AIStudioBridge"),
+                    progress_callback=report_build_phase,
+                )
+                progress.close()
+                if not build_result.get("ok"):
+                    QMessageBox.warning(
+                        self,
+                        "Unreal Plugin Build Failed",
+                        "AIStudioBridge was not enabled because the build did not "
+                        "produce a current editor binary.\n\n"
+                        + "\n".join(build_result.get("output_tail") or [])[-4000:],
+                    )
+                    return None
+                plugin_setup = {
+                    **plugin_setup,
+                    **build_result,
+                    "build_required": False,
+                    "enabled": True,
+                }
             setup_key = str(uproject)
             if (
                 hasattr(self, "append")
                 and getattr(self, "_last_unreal_setup_announced_path", "") != setup_key
             ):
                 self._last_unreal_setup_announced_path = setup_key
+                phase_lines = "\n".join(
+                    f"[Unreal Setup] {phase.get('percent', 0):>3}% "
+                    f"{phase.get('label')}: {phase.get('status')} - {phase.get('message')}"
+                    for phase in plugin_setup.get("progress_phases") or []
+                )
                 self.append(
                     "\n[Unreal Setup] HTTP server startup script is configured.\n"
                     f"[Unreal Setup] Project: {uproject}\n"
                     f"[Unreal Setup] Script: {script_path}\n"
                     "[Unreal Setup] PythonScriptPlugin is enabled in the .uproject if it was missing.\n"
-                    "[Unreal Setup] How to apply it: close Unreal if this project is already open, "
-                    "then reopen this .uproject so Unreal runs the startup script and starts the HTTP bridge.\n"
+                    f"[Unreal Setup] AIStudioBridge: {plugin_setup['installed_plugin']}\n"
+                    + (
+                        "[Unreal Setup] AIStudioBridge is enabled in the .uproject.\n"
+                        if plugin_setup.get("enabled")
+                        else "[Unreal Setup] AIStudioBridge remains disabled until a current binary is built.\n"
+                    )
+                    + (
+                        "[Unreal Setup] The plugin has no current project binary; build must complete before enablement.\n"
+                        if plugin_setup.get("build_required")
+                        else "[Unreal Setup] A current project plugin binary is present.\n"
+                    )
+                    +
+                    (phase_lines + "\n" if phase_lines else "")
+                    + (
+                        "[Unreal Setup] Build AIStudioBridge before launching this project.\n"
+                        if plugin_setup.get("build_required")
+                        else "[Unreal Setup] Reopen this .uproject if needed so Unreal loads the plugin and starts the HTTP bridge.\n"
+                    )
                 )
-            return uproject
+            return None if plugin_setup.get("build_required") else uproject
         except Exception as exc:
             QMessageBox.warning(
                 self,
@@ -2421,6 +2529,7 @@ class MainWindowDccMixin:
                 f"- Project: {uproject}\n"
                 f"- Script: {script_path}\n"
                 "- Project plugin: PythonScriptPlugin enabled\n"
+                "- Project plugin: AIStudioBridge installed and enabled\n"
                 "- Target config: Config/DefaultEngine.ini\n\n"
                 f"{exc}",
             )

@@ -48,6 +48,10 @@ from tech_connector.ui.pipeline_utility_nodes import (
     remove_last_dynamic_port,
     utility_node_menu_items,
 )
+from tech_connector.services.tool_search_ranking_service import (
+    tool_query_rank,
+    tool_search_tokens,
+)
 ACTION_GROUP_KEYWORDS = (
     ("Rigging", ("rig", "joint", "skin", "constraint", "ik", "fk", "control", "retarget", "skeleton", "bone")),
     ("Animation", ("anim", "key", "pose", "timeline", "motion", "take", "sequence", "clip")),
@@ -93,7 +97,7 @@ class _ToolPickerListWidget(QListWidget):
 
 
 def _search_tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", (text or "").lower().replace("_", " "))
+    return tool_search_tokens(text)
 
 
 def _contains_ordered_terms(tokens: list[str], terms: list[str]) -> bool:
@@ -110,33 +114,7 @@ def _contains_ordered_terms(tokens: list[str], terms: list[str]) -> bool:
 
 def pipeline_tool_query_rank(row: dict[str, Any], terms: list[str]) -> tuple[int, int, str, str]:
     """Rank tool-search rows by closest name match before broader context matches."""
-    label = str(row.get("label_lower") or "")
-    name = str(row.get("name") or "")
-    path_lower = str(row.get("path_lower") or "")
-    priority = int(row.get("priority") or 0)
-    if not terms:
-        return (4, priority, label, path_lower)
-
-    query_text = " ".join(terms)
-    query_snake = "_".join(terms)
-    name_tokens = _search_tokens(name)
-    label_tokens = _search_tokens(label)
-
-    if name == query_snake or name == query_text or name_tokens == terms:
-        score = 0
-    elif name.startswith(query_snake) or name.startswith(query_text):
-        score = 1
-    elif all(term in name_tokens for term in terms) and _contains_ordered_terms(name_tokens, terms):
-        score = 2
-    elif all(term in name_tokens for term in terms):
-        score = 3
-    elif query_snake in name or query_text in label:
-        score = 4
-    elif all(term in label_tokens for term in terms) and _contains_ordered_terms(label_tokens, terms):
-        score = 5
-    else:
-        score = 6
-    return (score, priority, label, path_lower)
+    return tool_query_rank(row, terms)
 
 PROVIDER_TAXONOMIES = {
     "maya": {
@@ -896,7 +874,12 @@ class PipelineNodeItem(QGraphicsRectItem):
 
     def _literal_label_text(self, name: str, annotation: str = "") -> str:
         literal = self.view.literal_value(self.graph_node.step_data, name)
-        return f"{name}: {literal if literal not in {'', None} else (annotation or 'Any')}"[:40]
+        display_value = (
+            literal
+            if literal is not None and literal != ""
+            else (annotation or "Any")
+        )
+        return f"{name}: {display_value}"[:40]
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemSelectedHasChanged:
@@ -1913,7 +1896,7 @@ class PipelineNodeView(QGraphicsView):
             if not text:
                 result_list.clear()
                 return
-            matches = self._filtered_tool_symbols_for_context_menu(text, require_query=True, limit=10)
+            matches = self._filtered_tool_symbols_for_context_menu(text, require_query=True, limit=5)
             if self._tool_symbol_search_cache_dirty and not matches:
                 result_list.clear()
                 item = QListWidgetItem("Preparing function search...")
@@ -1925,7 +1908,7 @@ class PipelineNodeView(QGraphicsView):
             self._populate_context_tool_list(
                 result_list,
                 matches,
-                max_rows=10,
+                max_rows=5,
                 show_more_message=False,
             )
 

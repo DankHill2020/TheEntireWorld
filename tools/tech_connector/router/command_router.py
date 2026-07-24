@@ -339,6 +339,86 @@ class CommandRouter:
             )
         return label, ok, result
 
+    def execute_registered_dcc_operation(
+        self,
+        host: str,
+        operation_key: str,
+        params: dict | None = None,
+        *,
+        approved: bool = True,
+        timeout_seconds: float = 60.0,
+    ) -> tuple[str, bool, str]:
+        """Execute a registered Maya/Blender operation through the canonical DCC adapter stack."""
+        normalized_host = (host or "").strip().lower()
+        if normalized_host not in {"maya", "blender"}:
+            return "DCC Operation", False, f"Registered DCC operation execution is not wired for host: {host}"
+
+        try:
+            from tech_connector.engine.request_context import RequestContext
+            from tech_connector.services.dcc.dcc_execution_service import (
+                DccExecutionRequest,
+                default_dcc_execution_adapters,
+            )
+        except Exception as exc:
+            return "DCC Operation", False, f"DCC execution service unavailable: {exc}"
+
+        adapters = default_dcc_execution_adapters()
+        adapter = adapters.get(normalized_host)
+        if not adapter:
+            return "DCC Operation", False, f"No registered DCC execution adapter for host: {normalized_host}"
+
+        operation_params = dict(params or {})
+        try:
+            from tech_connector.services.dcc.dcc_operation_service import registered_dcc_operation
+
+            operation = registered_dcc_operation(normalized_host, operation_key)
+        except Exception:
+            operation = None
+        if operation is None:
+            return (
+                f"{normalized_host.title()} Registered Operation",
+                False,
+                f"Unknown registered {normalized_host} operation: {operation_key}",
+            )
+        missing_slots = [
+            name
+            for name in tuple(getattr(operation, "required", ()) or ())
+            if operation_params.get(name) in (None, "")
+        ]
+        request = DccExecutionRequest(
+            execution_environment=normalized_host,
+            operation_mode="execute",
+            target_type="registered_dcc_operation",
+            target_identifier=operation_key,
+            callable_name=str(getattr(operation, "function", "") or ""),
+            keyword_args=operation_params,
+            missing_slots=missing_slots,
+            approved=bool(approved),
+            timeout_seconds=float(timeout_seconds or 60.0),
+            original_prompt=f"Execute {normalized_host} operation {operation_key}",
+        )
+
+        class _Window:
+            command_router = self
+
+        context = RequestContext(
+            text=request.original_prompt,
+            extras={"window": _Window()},
+        )
+        check = adapter.check_capabilities(request, context)
+        if not check.ok:
+            return (
+                f"{normalized_host.title()} Registered Operation",
+                False,
+                json.dumps({"status": "capability_failure", "failures": check.to_dict().get("failures", [])}, indent=2, default=str),
+            )
+        result = adapter.execute(request, context)
+        return (
+            f"{normalized_host.title()} Registered Operation",
+            result.status == "completed",
+            json.dumps(result.to_dict(), indent=2, default=str),
+        )
+
     def detect_dcc_hosts(self, text: str, route_task_role: str = "") -> list[str]:
         q = (text or "").lower()
         hosts = []
@@ -990,6 +1070,40 @@ class CommandRouter:
         except Exception:
             pass
         try:
+            canonical_plugin_operations = {
+                "niagara.list_module_inputs",
+                "niagara.set_user_parameter",
+                "niagara.set_renderer_property",
+                "niagara.set_module_input",
+                "niagara.delete_emitter",
+                "niagara.set_emitter_property",
+                "physics.list_bodies",
+                "physics.list_constraints",
+                "physics.set_body_property",
+                "physics.set_constraint_property",
+                "physics.set_profile_property",
+                "physics.list_profiles",
+                "physics.add_profile",
+                "physics.remove_profile",
+            }
+            if operation_key in canonical_plugin_operations:
+                payload = unreal_operation_payload(operation_key, params)
+                ok, result = self.unreal.call(
+                    payload["function"],
+                    args=payload["args"],
+                    kwargs=payload["kwargs"],
+                    retry_safe=not bool(payload.get("mutates_project")),
+                    operation=operation_key,
+                )
+                if ok and isinstance(result, str):
+                    try:
+                        structured_result = json.loads(result)
+                    except Exception:
+                        structured_result = None
+                    if isinstance(structured_result, dict) and structured_result.get("ok") is False:
+                        ok = False
+                return payload["label"], ok, result
+
             if operation_key == "blueprint.dynamic_inspect":
                 asset_name = params.get("asset_name") or params.get("asset_path") or ""
                 code = self._unreal_blueprint_dynamic_inspect_code(
@@ -1112,81 +1226,670 @@ print(json.dumps(out))
                     json.dumps(response, indent=2, default=str),
                 )
 
-            if operation_key == "niagara.list_module_inputs":
-                asset_path = params.get("asset_path") or ""
-                emitter_name = params.get("emitter_name") or ""
+            if operation_key == "niagara.attach_editable_character_fx":
+                blueprint_path = params.get("blueprint_path") or "BP_ThirdPersonCharacter"
+                source_system_path = params.get("source_system_path") or "/Game/Variant_Platforming/VFX/NS_Jump_Trail"
+                system_path = params.get("system_path") or "/Game/AIStudio/Prototypes/Niagara/NS_AIStudio_CharacterAura"
+                component_name = params.get("component_name") or "AIStudio_AuraFX"
+                socket_name = params.get("socket_name") or "spine_03"
+                tunables = dict(params.get("parameters") or {})
+                extra_components = list(params.get("extra_components") or [])
+                save = bool(params.get("save", True))
                 code = f"""
 import json
 import unreal
 
-asset_path = {asset_path!r}
-emitter_name = {emitter_name!r}
+blueprint_path = {blueprint_path!r}
+source_system_path = {source_system_path!r}
+system_path = {system_path!r}
+component_name = {component_name!r}
+socket_name = {socket_name!r}
+tunables = json.loads({json.dumps(tunables, default=str)!r})
+extra_components = json.loads({json.dumps(extra_components, default=str)!r})
+save = {save!r}
 out = {{
     "ok": False,
-    "operation": "niagara.list_module_inputs",
-    "asset_path": asset_path,
-    "emitter_name": emitter_name,
-    "modules": [],
+    "operation": "niagara.attach_editable_character_fx",
+    "blueprint_path": blueprint_path,
+    "resolved_blueprint_path": "",
+    "source_system_path": source_system_path,
+    "system_path": system_path,
+    "component_name": component_name,
+    "socket_name": socket_name,
+    "system_created": False,
+    "system_reused": False,
     "warnings": [],
     "errors": [],
+    "actions": [],
+    "validation": {{"blueprint_loaded": False, "system_exists": False}},
+    "systems": [],
 }}
 
+def resolve_asset_path(value, wanted_class=""):
+    text = str(value or "").strip().strip("'\\\"")
+    if not text:
+        return ""
+    if text.startswith("/"):
+        direct = text.split(".", 1)[0]
+        if unreal.EditorAssetLibrary.does_asset_exist(direct):
+            return direct
+        text = direct.rsplit("/", 1)[-1]
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    try:
+        for data in registry.get_assets_by_path("/Game", recursive=True) or []:
+            name = str(data.asset_name)
+            path = str(data.package_name)
+            try:
+                cls = str(data.asset_class_path.asset_name)
+            except Exception:
+                cls = str(getattr(data, "asset_class", ""))
+            if name.lower() == text.lower() or path.lower().endswith("/" + text.lower()):
+                if not wanted_class or wanted_class.lower() in cls.lower() or "blueprint" in cls.lower():
+                    return path
+    except Exception as exc:
+        out["warnings"].append("asset registry resolve failed: " + str(exc))
+    return "/Game/" + text.lstrip("/")
+
 try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    if not asset:
-        out["errors"].append("Niagara asset could not be loaded")
+    out["resolved_blueprint_path"] = resolve_asset_path(blueprint_path, wanted_class="Blueprint")
+    bp = unreal.EditorAssetLibrary.load_asset(out["resolved_blueprint_path"])
+    out["validation"]["blueprint_loaded"] = bool(bp)
+    if not bp:
+        out["errors"].append("Blueprint could not be loaded: " + out["resolved_blueprint_path"])
     else:
-        handles = []
-        for attr in ("emitter_handles", "emitters", "scripts"):
+        system_specs = [
+            {{"component_name": component_name, "source_system_path": source_system_path, "system_path": system_path, "socket_name": socket_name}}
+        ] + list(extra_components or [])
+        for spec in system_specs:
+            spec_system_path = str(spec.get("system_path") or system_path)
+            spec_source_path = str(spec.get("source_system_path") or source_system_path)
+            row = {{"component_name": spec.get("component_name"), "system_path": spec_system_path, "source_system_path": spec_source_path, "created": False, "reused": False, "exists": False, "warnings": []}}
+            if unreal.EditorAssetLibrary.does_asset_exist(spec_system_path):
+                row["reused"] = True
+                out["actions"].append("reuse_existing_system:" + spec_system_path)
+            else:
+                source = unreal.EditorAssetLibrary.load_asset(spec_source_path)
+                if source:
+                    duplicated = unreal.EditorAssetLibrary.duplicate_asset(spec_source_path, spec_system_path)
+                    row["created"] = bool(duplicated)
+                    out["actions"].append("duplicate_source_system:" + spec_system_path)
+                else:
+                    factory_cls = getattr(unreal, "NiagaraSystemFactoryNew", None)
+                    system_cls = getattr(unreal, "NiagaraSystem", None)
+                    if factory_cls and system_cls:
+                        package_path, asset_name = spec_system_path.rsplit("/", 1)
+                        duplicated = unreal.AssetToolsHelpers.get_asset_tools().create_asset(asset_name, package_path, system_cls, factory_cls())
+                        row["created"] = bool(duplicated)
+                        out["actions"].append("create_empty_system:" + spec_system_path)
+                    else:
+                        row["warnings"].append("No source system and NiagaraSystemFactoryNew unavailable")
+            row["exists"] = unreal.EditorAssetLibrary.does_asset_exist(spec_system_path)
+            if spec_system_path == system_path:
+                out["system_created"] = bool(row["created"])
+                out["system_reused"] = bool(row["reused"])
             try:
-                handles = asset.get_editor_property(attr)
-                if handles:
-                    break
-            except Exception:
-                pass
-        for handle in handles or []:
-            name = ""
-            try:
-                name = str(handle.get_name())
-            except Exception:
-                name = str(handle)
-            if emitter_name and emitter_name.lower() not in name.lower():
-                continue
-            module_info = {"emitter": name, "inputs": []}
-            inst = None
-            try:
-                inst = handle.get_editor_property("instance")
-            except Exception:
-                pass
-            target = inst or handle
-            for attr in ("scripts", "script_props", "module_scripts"):
-                try:
-                    scripts = target.get_editor_property(attr)
-                    if scripts:
-                        for script in scripts:
-                            script_name = None
-                            try:
-                                script_name = str(script.get_name())
-                            except Exception:
-                                script_name = str(script)
-                            module_info["inputs"].append(script_name)
-                        break
-                except Exception:
-                    pass
-            out["modules"].append(module_info)
-        out["ok"] = True
+                asset = unreal.EditorAssetLibrary.load_asset(spec_system_path)
+                if asset:
+                    unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
+            except Exception as exc:
+                row["warnings"].append("system save warning: " + str(exc))
+            out["systems"].append(row)
+        out["validation"]["system_exists"] = unreal.EditorAssetLibrary.does_asset_exist(system_path)
+        if not all(row.get("exists") for row in out["systems"]):
+            out["errors"].append("One or more requested Niagara systems could not be created or loaded")
 except Exception as exc:
     out["errors"].append(str(exc))
 
 print(json.dumps(out))
 """
                 response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 20), reset_globals=True
+                    code, timeout=params.get("timeout", 45), reset_globals=True
                 )
+                structured = response.get("data") if isinstance(response, dict) else {}
+                if not isinstance(structured, dict):
+                    structured = {}
+                result = {
+                    "creation": structured,
+                    "creation_response": response,
+                    "component": None,
+                    "extra_components": [],
+                    "variables": [],
+                    "scan": None,
+                    "niagara_stack_synthesis": None,
+                    "params": params,
+                }
+                ok = bool(response.get("ok")) and bool(structured.get("validation", {}).get("system_exists"))
+                if ok:
+                    resolved_blueprint_path = (
+                        structured.get("resolved_blueprint_path")
+                        or blueprint_path
+                    )
+                    component_specs = [
+                        {
+                            "component_name": component_name,
+                            "system_path": system_path,
+                            "socket_name": socket_name,
+                        }
+                    ] + [
+                        {
+                            "component_name": str(item.get("component_name") or "AIStudio_ExtraFX"),
+                            "system_path": str(item.get("system_path") or system_path),
+                            "socket_name": str(item.get("socket_name") or socket_name),
+                        }
+                        for item in extra_components
+                    ]
+                    for index, spec in enumerate(component_specs):
+                        component_params = {
+                            "blueprint_path": resolved_blueprint_path,
+                            "component_class": "NiagaraComponent",
+                            "component_name": spec["component_name"],
+                            "asset_path": spec["system_path"],
+                            "attach_bone": spec["socket_name"],
+                            "socket_name": spec["socket_name"],
+                            "user_parameters": tunables,
+                            "save": False,
+                        }
+                        label, comp_ok, comp_result = self.execute_unreal_operation(
+                            "blueprint.add_component", component_params
+                        )
+                        component_row = {
+                            "label": label,
+                            "ok": comp_ok,
+                            "params": component_params,
+                            "result": comp_result,
+                        }
+                        if index == 0:
+                            result["component"] = component_row
+                        else:
+                            result["extra_components"].append(component_row)
+                        ok = ok and comp_ok
+                    def infer_fx_variable_type(value):
+                        if isinstance(value, bool):
+                            return "boolean"
+                        if isinstance(value, (int, float)):
+                            return "real"
+                        if isinstance(value, (list, tuple)):
+                            if len(value) == 4:
+                                return "linearcolor"
+                            if len(value) == 3:
+                                return "vector"
+                        return ""
+
+                    variable_specs = [
+                        ("FX_Color", "linearcolor", tunables.get("FX_Color", [0.2, 0.85, 1.0])),
+                        ("FX_SecondaryColor", "linearcolor", tunables.get("FX_SecondaryColor", [0.75, 0.15, 1.0])),
+                        ("FX_Intensity", "real", tunables.get("FX_Intensity", 6.0)),
+                        ("FX_SpawnRate", "real", tunables.get("FX_SpawnRate", 160.0)),
+                        ("FX_Radius", "real", tunables.get("FX_Radius", 72.0)),
+                        ("FX_Lifetime", "real", tunables.get("FX_Lifetime", 1.25)),
+                        ("FX_PulseSpeed", "real", tunables.get("FX_PulseSpeed", 2.5)),
+                        ("FX_TrailLength", "real", tunables.get("FX_TrailLength", 450.0)),
+                        ("FX_RingSpeed", "real", tunables.get("FX_RingSpeed", 3.5)),
+                        ("FX_NoiseAmount", "real", tunables.get("FX_NoiseAmount", 0.65)),
+                        ("FX_GroundSparks", "real", tunables.get("FX_GroundSparks", 1.0)),
+                        ("FX_AccelerationBoost", "real", tunables.get("FX_AccelerationBoost", 2.0)),
+                        ("FX_AutoActivate", "boolean", tunables.get("FX_AutoActivate", True)),
+                        ("FX_AttachSocket", "name", tunables.get("FX_AttachSocket", socket_name)),
+                        ("FX_AttachOffset", "vector", tunables.get("FX_AttachOffset", [0.0, 0.0, 45.0])),
+                    ]
+                    seen_variable_names = {name for name, _type_name, _value in variable_specs}
+                    for tunable_name, tunable_value in sorted(tunables.items()):
+                        if tunable_name in seen_variable_names or not str(tunable_name).startswith("FX_"):
+                            continue
+                        inferred_type = infer_fx_variable_type(tunable_value)
+                        if inferred_type:
+                            variable_specs.append((str(tunable_name), inferred_type, tunable_value))
+                            seen_variable_names.add(str(tunable_name))
+                    for variable_name, variable_type, default_value in variable_specs:
+                        label, var_ok, var_result = self.execute_unreal_operation(
+                            "blueprint.create_variable",
+                            {
+                                "blueprint_path": resolved_blueprint_path,
+                                "variable_name": variable_name,
+                                "variable_type": variable_type,
+                                "default_value": default_value,
+                                "save": False,
+                            },
+                        )
+                        result["variables"].append(
+                            {
+                                "label": label,
+                                "ok": var_ok,
+                                "variable_name": variable_name,
+                                "variable_type": variable_type,
+                                "default_value": default_value,
+                                "result": var_result,
+                            }
+                        )
+                    binding_specs = [
+                        {
+                            "variable_name": variable_name,
+                            "variable_type": variable_type,
+                            "parameter_name": "User." + variable_name,
+                        }
+                        for variable_name, variable_type, _default_value in variable_specs
+                        if variable_type in {"real", "bool", "boolean", "linearcolor"}
+                    ]
+                    binding_component_specs = [
+                        {
+                            "component_name": component_name,
+                            "system_path": system_path,
+                            "socket_name": socket_name,
+                        }
+                    ] + [
+                        {
+                            "component_name": str(item.get("component_name") or "AIStudio_ExtraFX"),
+                            "system_path": str(item.get("system_path") or system_path),
+                            "socket_name": str(item.get("socket_name") or socket_name),
+                        }
+                        for item in extra_components
+                    ]
+                    binding_code = f"""
+import json
+import re
+import unreal
+
+bp_path = {resolved_blueprint_path!r}
+component_specs = json.loads({json.dumps(binding_component_specs, default=str)!r})
+binding_specs = json.loads({json.dumps(binding_specs, default=str)!r})
+save = {save!r}
+out = {{
+    "ok": False,
+    "operation": "blueprint.bind_niagara_user_parameters",
+    "bp_path": bp_path,
+    "components": [],
+    "bindings_created": [],
+    "bindings_skipped": [],
+    "warnings": [],
+    "errors": [],
+    "validation": {{"beginplay_found": False, "sequence_inserted": False, "compiled": False, "saved": False}},
+}}
+
+def sanitized(value):
+    return "".join(ch for ch in str(value or "") if ch.isalnum())
+
+def pin(node, wanted):
+    if not node:
+        return None
+    target = str(wanted or "").replace(" ", "").lower()
+    for item in unreal.BlueprintEditorLibrary.list_all_pins(node) or []:
+        name = str(unreal.BlueprintGraphPinLibrary.get_pin_name(item))
+        if name.replace(" ", "").lower() == target:
+            return item
+    return None
+
+def output_pin(node):
+    if not node:
+        return None
+    try:
+        result = unreal.BlueprintEditorLibrary.find_result_pin(node)
+        if result:
+            return result
+    except Exception:
+        pass
+    ignored = {"execute", "then", "outputdelegate"}
+    try:
+        for item in unreal.BlueprintEditorLibrary.list_all_pins(node) or []:
+            name = str(unreal.BlueprintGraphPinLibrary.get_pin_name(item)).replace(" ", "").lower()
+            if name and name not in ignored:
+                return item
+    except Exception:
+        pass
+    return None
+
+def connect(src, dst, label):
+    if not src or not dst:
+        out["warnings"].append("Missing pin for " + label)
+        return False
+    try:
+        ok = bool(unreal.BlueprintGraphPinLibrary.try_create_connection(src, dst))
+        if not ok:
+            src.make_link_to(dst)
+            ok = True
+        return ok
+    except Exception as exc:
+        out["warnings"].append("Connection failed " + label + ": " + str(exc))
+        return False
+
+def set_pin_text(pin_obj, value, label):
+    if not pin_obj:
+        out["warnings"].append("Missing value pin " + label)
+        return False
+    try:
+        ok = bool(unreal.BlueprintGraphPinLibrary.set_pin_value(pin_obj, str(value)))
+        try:
+            pin_obj.default_value = str(value)
+        except Exception:
+            pass
+        return ok
+    except Exception:
+        try:
+            pin_obj.default_value = str(value)
+            return True
+        except Exception as exc:
+            out["warnings"].append("Set pin value failed " + label + ": " + str(exc))
+            return False
+
+def action_for_type(type_name):
+    t = str(type_name or "").lower()
+    if t in {"real", "float", "double"}:
+        return "Niagara|SetNiagaraVariable(Float)"
+    if t in {"bool", "boolean"}:
+        return "Niagara|SetNiagaraVariable(Bool)"
+    if t in {"linearcolor", "linear_color", "color"}:
+        return "Niagara|SetNiagaraVariable(LinearColor)"
+    return ""
+
+try:
+    bp = unreal.EditorAssetLibrary.load_asset(bp_path)
+    if not bp:
+        out["errors"].append("Blueprint could not be loaded")
+    else:
+        graph = unreal.BlueprintGraphEditor.get_graph_editor_by_name(bp, "EventGraph")
+        if not graph:
+            out["errors"].append("EventGraph could not be loaded")
+        else:
+            existing_marker_nodes = [
+                node
+                for node in graph.list_all_nodes() or []
+                if str(node.get_name()).startswith("AIStudio_FXBind_")
+            ]
+            existing_sequence = None
+            existing_setters = []
+            existing_complete = True
+            for marker_node in existing_marker_nodes:
+                title = str(unreal.BlueprintEditorLibrary.get_node_title(marker_node))
+                if title == "Sequence":
+                    existing_sequence = marker_node
+                    continue
+                if "Set Niagara Variable" in title:
+                    existing_setters.append(marker_node)
+                    for required_pin in ("self", "InValue"):
+                        required = pin(marker_node, required_pin)
+                        if not required or len(list(unreal.BlueprintGraphPinLibrary.list_connected_pins(required) or [])) == 0:
+                            existing_complete = False
+                    name_pin = pin(marker_node, "InVariableName")
+                    try:
+                        if not name_pin or not str(name_pin.default_value):
+                            existing_complete = False
+                    except Exception:
+                        existing_complete = False
+            if existing_marker_nodes and existing_setters and existing_complete:
+                out["bindings_skipped"].append("Existing AIStudio_FXBind graph already has connected setter nodes.")
+                out["ok"] = True
+            else:
+                if existing_setters:
+                    try:
+                        graph.remove_nodes(existing_setters)
+                        out["bindings_skipped"].append("Removed incomplete AIStudio_FXBind setter nodes before regeneration.")
+                    except Exception as exc:
+                        out["warnings"].append("Could not remove incomplete generated setters: " + str(exc))
+                nodes = list(graph.list_all_nodes() or [])
+                begin = None
+                for node in nodes:
+                    title = str(unreal.BlueprintEditorLibrary.get_node_title(node))
+                    if title == "Event BeginPlay":
+                        begin = node
+                        break
+                if begin is None:
+                    begin = graph.create_node_from_name("AddEvent|EventBeginPlay", unreal.Vector2D(0.0, -120.0), [], None)
+                out["validation"]["beginplay_found"] = bool(begin)
+                begin_then = pin(begin, "then")
+                old_links = list(unreal.BlueprintGraphPinLibrary.list_connected_pins(begin_then) or []) if begin_then else []
+                sequence = existing_sequence or graph.create_node_from_name("Utilities|FlowControl|Sequence", unreal.Vector2D(280.0, -60.0), [], None)
+                if sequence:
+                    try:
+                        sequence.rename("AIStudio_FXBind_Sequence")
+                    except Exception:
+                        pass
+                if existing_sequence:
+                    try:
+                        unreal.BlueprintGraphPinLibrary.break_pin_links(pin(sequence, "then_1"))
+                    except Exception:
+                        pass
+                    out["validation"]["sequence_inserted"] = True
+                elif begin_then and sequence:
+                    try:
+                        unreal.BlueprintGraphPinLibrary.break_pin_links(begin_then)
+                    except Exception:
+                        pass
+                    connect(begin_then, pin(sequence, "execute"), "BeginPlay to FX binding sequence")
+                    for old in old_links:
+                        connect(pin(sequence, "then_0"), old, "Preserve previous BeginPlay chain")
+                    out["validation"]["sequence_inserted"] = True
+                chain_exec = pin(sequence, "then_1") if sequence else begin_then
+                y = 140.0
+                for comp_index, comp in enumerate(component_specs):
+                    comp_name = str(comp.get("component_name") or "")
+                    comp_action = "Variables|Default|Get" + sanitized(comp_name)
+                    comp_get = graph.create_node_from_name(comp_action, unreal.Vector2D(520.0 + comp_index * 40.0, y), [], None)
+                    comp_pin = output_pin(comp_get)
+                    comp_row = {{"component_name": comp_name, "getter_created": bool(comp_get), "bindings": []}}
+                    for bind_index, spec in enumerate(binding_specs):
+                        setter_action = action_for_type(spec.get("variable_type"))
+                        var_name = str(spec.get("variable_name") or "")
+                        if not setter_action or not var_name:
+                            continue
+                        var_action = "Variables|Default|Get" + sanitized(var_name)
+                        var_get = graph.create_node_from_name(var_action, unreal.Vector2D(840.0 + bind_index * 18.0, y + bind_index * 96.0), [], None)
+                        setter = graph.create_node_from_name(setter_action, unreal.Vector2D(1180.0 + bind_index * 18.0, y + bind_index * 96.0), [comp_pin] if comp_pin else [], None)
+                        row = {{
+                            "component_name": comp_name,
+                            "variable_name": var_name,
+                            "parameter_name": spec.get("parameter_name"),
+                            "setter_action": setter_action,
+                            "getter_created": bool(var_get),
+                            "setter_created": bool(setter),
+                            "exec_connected": False,
+                            "self_connected": False,
+                            "value_connected": False,
+                            "name_set": False,
+                        }}
+                        if setter:
+                            try:
+                                setter.rename("AIStudio_FXBind_" + sanitized(comp_name) + "_" + sanitized(var_name))
+                            except Exception:
+                                pass
+                            row["exec_connected"] = connect(chain_exec, pin(setter, "execute"), "exec " + comp_name + " " + var_name)
+                            row["self_connected"] = connect(comp_pin, pin(setter, "self"), "self " + comp_name + " " + var_name)
+                            row["name_set"] = set_pin_text(pin(setter, "InVariableName"), spec.get("parameter_name"), "name " + var_name)
+                            row["value_connected"] = connect(output_pin(var_get), pin(setter, "InValue"), "value " + var_name)
+                            chain_exec = pin(setter, "then") or chain_exec
+                        comp_row["bindings"].append(row)
+                        out["bindings_created"].append(row)
+                    out["components"].append(comp_row)
+                    y += max(1, len(binding_specs)) * 120.0 + 160.0
+                try:
+                    out["validation"]["compiled"] = bool(unreal.BlueprintEditorLibrary.compile_blueprint(bp))
+                except Exception as exc:
+                    out["warnings"].append("compile warning: " + str(exc))
+                if save:
+                    try:
+                        out["validation"]["saved"] = bool(unreal.EditorAssetLibrary.save_loaded_asset(bp, False))
+                    except Exception as exc:
+                        out["warnings"].append("save warning: " + str(exc))
+                out["ok"] = bool(out["bindings_created"]) and all(
+                    item.get("setter_created") and item.get("self_connected") and item.get("name_set")
+                    for item in out["bindings_created"]
+                )
+except Exception as exc:
+    out["errors"].append(str(exc))
+
+print(json.dumps(out))
+"""
+                    if bool(params.get("enable_python_graph_binding", False)):
+                        result["parameter_binding"] = self.unreal.execute_python(
+                            binding_code, timeout=params.get("timeout", 90), reset_globals=True
+                        )
+                        binding_data = (result["parameter_binding"] or {}).get("data") or {}
+                        ok = ok and bool(binding_data.get("ok"))
+                    elif not bool(params.get("disable_native_graph_binding", False)):
+                        native_binding_chunk_size = max(1, int(params.get("native_binding_chunk_size", 2) or 2))
+                        native_binding_code = f"""
+import json
+import unreal
+
+bp_path = {resolved_blueprint_path!r}
+component_names = {[item.get("component_name") for item in binding_component_specs]!r}
+bindings = json.loads({json.dumps(binding_specs, default=str)!r})
+chunk_size = {native_binding_chunk_size!r}
+out = {{
+    "ok": False,
+    "operation": "AIStudioBridgeLibrary.bind_niagara_user_parameters_on_begin_play",
+    "bp_path": bp_path,
+    "component_names": component_names,
+    "requested_binding_count": len(component_names) * len(bindings),
+    "binding_count": 0,
+    "chunk_size": chunk_size,
+    "chunks": [],
+    "status": "",
+    "errors": [],
+    "warnings": [],
+}}
+try:
+    bp = unreal.EditorAssetLibrary.load_asset(bp_path)
+    bridge = getattr(unreal, "AIStudioBridgeLibrary", None)
+    if not bp:
+        out["status"] = "blueprint_not_loaded"
+        out["errors"].append("Blueprint could not be loaded")
+    elif not bridge or not hasattr(bridge, "bind_niagara_user_parameters_on_begin_play"):
+        out["status"] = "native_cpp_binding_unavailable"
+        out["errors"].append("AIStudioBridge plugin must be rebuilt/reloaded to expose bind_niagara_user_parameters_on_begin_play")
+    else:
+        all_ok = True
+        for component_name in component_names:
+            for start in range(0, len(bindings), chunk_size):
+                chunk = bindings[start:start + chunk_size]
+                raw = bridge.bind_niagara_user_parameters_on_begin_play(
+                    bp,
+                    [unreal.Name(str(component_name))],
+                    json.dumps(chunk),
+                )
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = {{"ok": False, "raw": raw}}
+                chunk_ok = bool(parsed.get("ok"))
+                all_ok = all_ok and chunk_ok
+                out["binding_count"] += int(parsed.get("binding_count") or 0)
+                out["chunks"].append({{
+                    "component_name": component_name,
+                    "start": start,
+                    "requested": len(chunk),
+                    "ok": chunk_ok,
+                    "binding_count": parsed.get("binding_count"),
+                    "sample": (parsed.get("bindings_created") or [])[:3],
+                    "error": parsed.get("error", ""),
+                }})
+                if not chunk_ok:
+                    out["errors"].append("Native binding chunk failed for " + str(component_name) + " at " + str(start))
+                    break
+            if not all_ok:
+                break
+        out["ok"] = bool(all_ok and out["binding_count"] > 0)
+        out["status"] = "native_cpp_binding_chunks_executed" if out["ok"] else "native_cpp_binding_chunks_failed"
+except Exception as exc:
+    out["status"] = "native_cpp_binding_exception"
+    out["errors"].append(str(exc))
+print(json.dumps(out))
+"""
+                        result["parameter_binding"] = self.unreal.execute_python(
+                            native_binding_code, timeout=params.get("timeout", 90), reset_globals=True
+                        )
+                        binding_data = (result["parameter_binding"] or {}).get("data") or {}
+                        ok = ok and bool(binding_data.get("ok"))
+                    else:
+                        result["parameter_binding"] = {
+                            "ok": False,
+                            "status": "native_graph_binding_disabled_by_request",
+                            "reason": (
+                                "Native graph binding was disabled by parameter. The normal path uses chunked native "
+                                "binding unless disable_native_graph_binding is true."
+                            ),
+                            "binding_count": len(binding_component_specs) * len(binding_specs),
+                            "components": [item.get("component_name") for item in binding_component_specs],
+                            "parameters": [item.get("parameter_name") for item in binding_specs],
+                        }
+                    source_mode = str(
+                        tunables.get("FX_SourceMode")
+                        or tunables.get("FX_SourceStrategy")
+                        or ""
+                    )
+                    source_modes_requiring_stack_synthesis = {
+                        "camera_facing_character_outline",
+                        "skeletal_mesh_surface",
+                        "custom_emitter_source",
+                    }
+                    if source_mode in source_modes_requiring_stack_synthesis:
+                        result["niagara_stack_synthesis"] = {
+                            "ok": False,
+                            "complete": False,
+                            "status": "requires_niagara_source_strategy_stack_synthesis",
+                            "source_mode": source_mode,
+                            "system_path": system_path,
+                            "component_name": component_name,
+                            "completed_layers": [
+                                "niagara_system_asset_created_or_reused",
+                                "blueprint_niagara_component_created",
+                                "editable_blueprint_variables_created",
+                                "blueprint_variables_bound_to_niagara_user_parameters",
+                            ],
+                            "remaining_layers": [
+                                "author Niagara emitter stack/modules for the requested source strategy",
+                                "validate emitted particles originate from the requested source",
+                                "read back Niagara module/renderer evidence after compile",
+                            ],
+                            "reason": (
+                                "The current safe implementation wires the Blueprint control surface and User parameters. "
+                                "True mesh/custom/camera-outline emitter source behavior requires Niagara stack/module synthesis."
+                            ),
+                        }
+                    save_code = f"""
+import json
+import unreal
+
+bp_path = {resolved_blueprint_path!r}
+save = {save!r}
+out = {{"ok": False, "bp_path": bp_path, "compiled": False, "saved": False, "warnings": [], "errors": []}}
+
+try:
+    bp = unreal.EditorAssetLibrary.load_asset(bp_path)
+    if not bp:
+        out["errors"].append("Blueprint could not be loaded")
+    else:
+        try:
+            unreal.BlueprintEditorLibrary.compile_blueprint(bp)
+            out["compiled"] = True
+        except Exception as exc:
+            out["warnings"].append("BlueprintEditorLibrary.compile_blueprint failed: " + str(exc))
+        if save:
+            try:
+                out["saved"] = bool(unreal.EditorAssetLibrary.save_loaded_asset(bp, False))
+            except Exception as exc:
+                out["warnings"].append("save_loaded_asset failed: " + str(exc))
+        out["ok"] = bool(out["compiled"] or out["saved"] or not out["errors"])
+except Exception as exc:
+    out["errors"].append(str(exc))
+
+print(json.dumps(out))
+"""
+                    result["finalize"] = self.unreal.execute_python(
+                        save_code, timeout=params.get("timeout", 45), reset_globals=True
+                    )
+                    scan_label, scan_ok, scan_result = self.execute_unreal_operation(
+                        "blueprint.scan",
+                        {
+                            "asset_path": resolved_blueprint_path,
+                            "include_graphs": False,
+                            "include_defaults": True,
+                        },
+                    )
+                    result["scan"] = {"label": scan_label, "ok": scan_ok, "result": scan_result}
+                    ok = ok and all(item.get("ok") for item in result["variables"]) and scan_ok
                 return (
-                    "Unreal List Niagara Module Inputs",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
+                    "Unreal Attach Editable Character Niagara FX",
+                    bool(ok),
+                    json.dumps(result, indent=2, default=str),
                 )
 
             if operation_key == "niagara.create_emitter":
@@ -1392,6 +2095,7 @@ print(json.dumps(out))
                 component_name = params.get("component_name") or "AIStudioComponent"
                 component_asset_path = params.get("asset_path") or ""
                 attach_bone = params.get("attach_bone") or params.get("socket_name") or ""
+                user_parameters = dict(params.get("user_parameters") or {})
                 save = bool(params.get("save", True))
                 code = f"""
 import json
@@ -1402,6 +2106,7 @@ component_class = {component_class!r}
 component_name = {component_name!r}
 component_asset_path = {component_asset_path!r}
 attach_bone = {attach_bone!r}
+user_parameters = json.loads({json.dumps(user_parameters, default=str)!r})
 save = {save!r}
 out = {{
     "ok": False,
@@ -1415,7 +2120,18 @@ out = {{
     "actions": [],
     "warnings": [],
     "errors": [],
-    "validation": {{"blueprint_loaded": False, "component_created": False, "asset_assigned": False}},
+    "validation": {{
+        "blueprint_loaded": False,
+        "component_created": False,
+        "asset_assigned": False,
+        "attachment_parent": "",
+        "requested_socket": attach_bone,
+        "resolved_socket": "",
+        "socket_valid": False,
+        "attached_to_mesh": False,
+        "user_parameters_applied": [],
+        "user_parameters_failed": [],
+    }},
 }}
 
 def resolve_asset_path(value, wanted_class=""):
@@ -1463,6 +2179,80 @@ def component_class_object(name):
     except Exception:
         return None
 
+def find_component_handle(bp, wanted_name="", class_fragment=""):
+    subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+    library = unreal.SubobjectDataBlueprintFunctionLibrary
+    handles = list(subsystem.k2_gather_subobject_data_for_blueprint(bp) or [])
+    wanted = str(wanted_name or "")
+    fragment = str(class_fragment or "").lower()
+    for handle in handles:
+        data = library.get_data(handle)
+        if not library.is_component(data):
+            continue
+        obj = None
+        try:
+            obj = library.get_object(data)
+        except Exception:
+            obj = None
+        name = str(library.get_variable_name(data))
+        class_name = obj.get_class().get_name() if obj else ""
+        if wanted and name == wanted:
+            return handle, data, obj
+        if fragment and fragment in class_name.lower():
+            return handle, data, obj
+    return None, None, None
+
+def validate_socket(mesh_template, requested):
+    if not mesh_template or not requested:
+        return "", False
+    candidate = str(requested)
+    try:
+        if int(mesh_template.get_bone_index(unreal.Name(candidate))) >= 0:
+            return candidate, True
+    except Exception:
+        pass
+    try:
+        if bool(mesh_template.does_socket_exist(unreal.Name(candidate))):
+            return candidate, True
+    except Exception:
+        pass
+    return "", False
+
+def apply_niagara_user_parameters(template, values):
+    if not template or not values:
+        return
+    for key, value in dict(values or {{}}).items():
+        name = str(key)
+        if not name.startswith("User."):
+            name = "User." + name
+        try:
+            if isinstance(value, bool):
+                template.set_niagara_variable_bool(name, bool(value))
+                out["validation"]["user_parameters_applied"].append(name)
+            elif isinstance(value, (int, float)):
+                template.set_niagara_variable_float(name, float(value))
+                out["validation"]["user_parameters_applied"].append(name)
+            elif isinstance(value, (list, tuple)) and len(value) >= 4 and "color" in key.lower():
+                template.set_niagara_variable_linear_color(
+                    name,
+                    unreal.LinearColor(float(value[0]), float(value[1]), float(value[2]), float(value[3])),
+                )
+                out["validation"]["user_parameters_applied"].append(name)
+            elif isinstance(value, (list, tuple)) and len(value) >= 3 and "color" in key.lower():
+                template.set_niagara_variable_linear_color(
+                    name,
+                    unreal.LinearColor(float(value[0]), float(value[1]), float(value[2]), 1.0),
+                )
+                out["validation"]["user_parameters_applied"].append(name)
+            elif isinstance(value, (list, tuple)) and len(value) >= 3:
+                template.set_niagara_variable_vec3(
+                    name,
+                    unreal.Vector(float(value[0]), float(value[1]), float(value[2])),
+                )
+                out["validation"]["user_parameters_applied"].append(name)
+        except Exception as exc:
+            out["validation"]["user_parameters_failed"].append({{"name": name, "error": str(exc)}})
+
 try:
     resolved_bp_path = resolve_asset_path(blueprint_path, wanted_class="Blueprint")
     out["resolved_blueprint_path"] = resolved_bp_path
@@ -1477,6 +2267,21 @@ try:
         else:
             template = None
             node = None
+            mesh_handle, mesh_data, mesh_template = find_component_handle(bp, "Mesh", "skeletalmeshcomponent")
+            if mesh_template:
+                out["validation"]["attachment_parent"] = str(unreal.SubobjectDataBlueprintFunctionLibrary.get_variable_name(mesh_data))
+            resolved_socket, socket_valid = validate_socket(mesh_template, attach_bone)
+            out["validation"]["resolved_socket"] = resolved_socket
+            out["validation"]["socket_valid"] = bool(socket_valid)
+            if attach_bone and not socket_valid:
+                fallback_socket, fallback_valid = validate_socket(mesh_template, "spine_03")
+                if fallback_valid:
+                    resolved_socket = fallback_socket
+                    out["validation"]["resolved_socket"] = resolved_socket
+                    out["validation"]["socket_valid"] = True
+                    out["warnings"].append("Requested socket/bone was invalid for Mesh; fell back to spine_03: " + str(attach_bone))
+                else:
+                    out["warnings"].append("Requested socket/bone was invalid and no fallback socket was available: " + str(attach_bone))
             try:
                 scs = bp.get_editor_property("simple_construction_script")
             except Exception:
@@ -1501,6 +2306,48 @@ try:
                 except Exception as exc:
                     out["warnings"].append("SimpleConstructionScript create_node failed: " + str(exc))
             if not out["validation"]["component_created"]:
+                try:
+                    subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+                    library = unreal.SubobjectDataBlueprintFunctionLibrary
+                    handles = list(subsystem.k2_gather_subobject_data_for_blueprint(bp) or [])
+                    existing = []
+                    for handle in handles:
+                        data = library.get_data(handle)
+                        if not library.is_component(data):
+                            continue
+                        existing_name = str(library.get_variable_name(data))
+                        existing.append(existing_name)
+                        if existing_name == str(component_name):
+                            out["validation"]["component_created"] = True
+                            out["actions"].append("SubobjectDataSubsystem.reuse_existing_component")
+                            try:
+                                template = library.get_object(data)
+                            except Exception:
+                                template = None
+                            break
+                    if not out["validation"]["component_created"] and handles:
+                        params_obj = unreal.AddNewSubobjectParams()
+                        params_obj.set_editor_property("parent_handle", mesh_handle or handles[0])
+                        params_obj.set_editor_property("new_class", cls)
+                        params_obj.set_editor_property("blueprint_context", bp)
+                        handle, fail_reason = subsystem.add_new_subobject(params_obj)
+                        if library.is_handle_valid(handle):
+                            try:
+                                subsystem.rename_subobject(handle, str(component_name))
+                            except Exception as exc:
+                                out["warnings"].append("rename_subobject failed: " + str(exc))
+                            data = library.get_data(handle)
+                            try:
+                                template = library.get_object(data)
+                            except Exception:
+                                template = None
+                            out["validation"]["component_created"] = True
+                            out["actions"].append("SubobjectDataSubsystem.add_new_subobject")
+                        else:
+                            out["warnings"].append("SubobjectDataSubsystem add failed: " + str(fail_reason))
+                except Exception as exc:
+                    out["warnings"].append("SubobjectDataSubsystem fallback failed: " + str(exc))
+            if not out["validation"]["component_created"]:
                 out["errors"].append("No exposed Blueprint component creation API succeeded for this Unreal runtime.")
             if template:
                 asset = unreal.EditorAssetLibrary.load_asset(component_asset_path) if component_asset_path else None
@@ -1521,21 +2368,54 @@ try:
                     except Exception as exc:
                         out["warnings"].append("set_asset failed: " + str(exc))
                 if attach_bone:
-                    for prop in ("attach_socket_name", "socket_name", "parent_socket", "bone_name"):
+                    for prop in ("auto_attach_socket_name", "attach_socket_name", "socket_name", "parent_socket", "bone_name"):
                         try:
-                            template.set_editor_property(prop, unreal.Name(str(attach_bone)))
+                            template.set_editor_property(prop, unreal.Name(str(resolved_socket or attach_bone)))
                             out["actions"].append("set attach socket property: " + prop)
                             break
                         except Exception:
                             pass
+                    if mesh_template and resolved_socket:
+                        try:
+                            subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+                            library = unreal.SubobjectDataBlueprintFunctionLibrary
+                            child_handle, child_data, _child_obj = find_component_handle(bp, component_name, "")
+                            if mesh_handle and child_handle and subsystem.attach_subobject(mesh_handle, child_handle):
+                                out["validation"]["attached_to_mesh"] = True
+                                out["actions"].append("SubobjectDataSubsystem.attach_subobject:Mesh")
+                        except Exception as exc:
+                            out["warnings"].append("attach_subobject failed: " + str(exc))
+                        try:
+                            template.set_auto_attachment_parameters(mesh_template, unreal.Name(str(resolved_socket)), unreal.AttachmentRule.SNAP_TO_TARGET, unreal.AttachmentRule.SNAP_TO_TARGET, unreal.AttachmentRule.KEEP_RELATIVE)
+                            template.set_use_auto_manage_attachment(True)
+                            out["actions"].append("NiagaraComponent.set_auto_attachment_parameters")
+                        except Exception as exc:
+                            out["warnings"].append("set_auto_attachment_parameters failed: " + str(exc))
+                apply_niagara_user_parameters(template, user_parameters)
+                try:
+                    out["validation"]["readback_socket"] = str(template.get_attach_socket_name())
+                except Exception:
+                    pass
+                try:
+                    parent = template.get_attach_parent()
+                    out["validation"]["readback_parent"] = parent.get_name() if parent else ""
+                except Exception:
+                    pass
             if out["validation"]["component_created"]:
                 try:
-                    unreal.BlueprintEditorLibrary.mark_blueprint_as_structurally_modified(bp)
-                    out["actions"].append("mark_blueprint_as_structurally_modified")
+                    if hasattr(unreal.BlueprintEditorLibrary, "mark_blueprint_as_structurally_modified"):
+                        unreal.BlueprintEditorLibrary.mark_blueprint_as_structurally_modified(bp)
+                        out["actions"].append("mark_blueprint_as_structurally_modified")
+                    elif hasattr(bp, "mark_package_dirty"):
+                        bp.mark_package_dirty()
+                        out["actions"].append("mark_package_dirty")
                 except Exception as exc:
                     out["warnings"].append("mark modified failed: " + str(exc))
                 try:
-                    unreal.KismetEditorUtilities.compile_blueprint(bp)
+                    if hasattr(unreal, "KismetEditorUtilities"):
+                        unreal.KismetEditorUtilities.compile_blueprint(bp)
+                    else:
+                        unreal.BlueprintEditorLibrary.compile_blueprint(bp)
                     out["actions"].append("compile_blueprint")
                 except Exception as exc:
                     out["warnings"].append("compile failed: " + str(exc))
@@ -1556,186 +2436,6 @@ print(json.dumps(out))
                 )
                 return (
                     "Unreal Add Blueprint Component",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "niagara.set_user_parameter":
-                asset_path = params.get("asset_path") or ""
-                parameter_name = params.get("parameter_name") or ""
-                normalized_parameter_name = self._normalize_unreal_property_name(
-                    parameter_name
-                )
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-parameter_name = {parameter_name!r}
-normalized_parameter_name = {normalized_parameter_name!r}
-value = {json.dumps(coerced_value)!r}
-value_type = {value_type!r}
-out = {{
-    "ok": False,
-    "operation": "niagara.set_user_parameter",
-    "asset_path": asset_path,
-    "parameter_name": parameter_name,
-    "normalized_parameter_name": normalized_parameter_name,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "parameter_attempted": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Niagara asset could not be loaded")
-    else:
-        stores = []
-        for attr in ("exposed_parameters", "user_parameters"):
-            try:
-                store = asset.get_editor_property(attr)
-                if store:
-                    stores.append((attr, store))
-            except Exception:
-                pass
-        if not stores:
-            out["warnings"].append("No editable Niagara parameter store was found through Python reflection")
-        for attr, store in stores:
-            out["validation"]["parameter_attempted"] = True
-            try:
-                if hasattr(store, "set_parameter_data"):
-                    try:
-                        store.set_parameter_data(parameter_name, value)
-                    except Exception:
-                        store.set_parameter_data(normalized_parameter_name, value)
-                    out["ok"] = True
-                    break
-            except Exception as exc:
-                out["warnings"].append(attr + ": set_parameter_data failed: " + str(exc))
-        try:
-            unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-        except Exception as save_exc:
-            out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Niagara User Parameter",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "niagara.set_renderer_property":
-                asset_path = params.get("asset_path") or ""
-                property_name = params.get("property_name") or ""
-                normalized_property_name = self._normalize_unreal_property_name(
-                    property_name
-                )
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                emitter_name = params.get("emitter_name") or ""
-                renderer_index = int(params.get("renderer_index", 0) or 0)
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-property_name = {property_name!r}
-normalized_property_name = {normalized_property_name!r}
-value = {json.dumps(coerced_value)!r}
-emitter_name = {emitter_name!r}
-renderer_index = {renderer_index!r}
-out = {{
-    "ok": False,
-    "operation": "niagara.set_renderer_property",
-    "asset_path": asset_path,
-    "property_name": property_name,
-    "normalized_property_name": normalized_property_name,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "renderer_found": False, "property_applied": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Niagara asset could not be loaded")
-    else:
-        handles = []
-        for attr in ("emitter_handles", "emitters"):
-            try:
-                handles = asset.get_editor_property(attr)
-                if handles:
-                    break
-            except Exception:
-                pass
-        chosen_renderer = None
-        for handle in handles or []:
-            try:
-                name = str(handle.get_name()) if hasattr(handle, "get_name") else str(handle)
-            except Exception:
-                name = str(handle)
-            if emitter_name and emitter_name not in name:
-                continue
-            try:
-                inst = handle.get_editor_property("instance") if hasattr(handle, "get_editor_property") else None
-            except Exception:
-                inst = None
-            renderers = []
-            if inst:
-                for prop in ("renderer_properties", "renderers"):
-                    try:
-                        renderers = inst.get_editor_property(prop)
-                        if renderers:
-                            break
-                    except Exception:
-                        pass
-            if renderers and renderer_index < len(renderers):
-                chosen_renderer = renderers[renderer_index]
-                break
-        if chosen_renderer is None:
-            out["errors"].append("Niagara renderer was not found")
-        else:
-            out["validation"]["renderer_found"] = True
-            try:
-                try:
-                    chosen_renderer.set_editor_property(property_name, value)
-                except Exception:
-                    chosen_renderer.set_editor_property(normalized_property_name, value)
-                out["ok"] = True
-                out["validation"]["property_applied"] = True
-            except Exception as exc:
-                out["errors"].append("set_editor_property failed: " + str(exc))
-        try:
-            unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-        except Exception as save_exc:
-            out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Niagara Renderer Property",
                     bool(response.get("ok")),
                     json.dumps(response, indent=2, default=str),
                 )
@@ -1805,496 +2505,6 @@ print(json.dumps(out))
                 )
                 return (
                     "Unreal Add Niagara To Level",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "physics.list_bodies":
-                asset_path = params.get("asset_path") or ""
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-out = {{
-    "ok": False,
-    "operation": "physics.list_bodies",
-    "asset_path": asset_path,
-    "bodies": [],
-    "warnings": [],
-    "errors": [],
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    if not asset:
-        out["errors"].append("Physics asset could not be loaded")
-    else:
-        bodies = None
-        for attr in ("skeletal_body_setups", "body_setups"):
-            try:
-                bodies = asset.get_editor_property(attr)
-                if bodies:
-                    break
-            except Exception:
-                pass
-        for body in bodies or []:
-            entry = {"name": None, "bone_name": None, "editable_properties": ["mass_in_kg_override", "linear_damping", "angular_damping"]}
-            try:
-                entry["name"] = str(body.get_name())
-            except Exception:
-                entry["name"] = str(body)
-            try:
-                entry["bone_name"] = str(body.get_editor_property("bone_name"))
-            except Exception:
-                pass
-            out["bodies"].append(entry)
-        out["ok"] = True
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 20), reset_globals=True
-                )
-                return (
-                    "Unreal List Physics Bodies",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "physics.list_constraints":
-                asset_path = params.get("asset_path") or ""
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-out = {{
-    "ok": False,
-    "operation": "physics.list_constraints",
-    "asset_path": asset_path,
-    "constraints": [],
-    "warnings": [],
-    "errors": [],
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    if not asset:
-        out["errors"].append("Physics asset could not be loaded")
-    else:
-        constraints = None
-        for attr in ("constraint_setup", "constraint_setups"):
-            try:
-                constraints = asset.get_editor_property(attr)
-                if constraints:
-                    break
-            except Exception:
-                pass
-        for constraint in constraints or []:
-            entry = {"name": None, "editable_properties": ["disable_collision", "angular_swing1_motion", "angular_swing2_motion", "angular_twist_motion"]}
-            try:
-                entry["name"] = str(constraint.get_name())
-            except Exception:
-                entry["name"] = str(constraint)
-            out["constraints"].append(entry)
-        out["ok"] = True
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 20), reset_globals=True
-                )
-                return (
-                    "Unreal List Physics Constraints",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "physics.set_body_property":
-                asset_path = params.get("asset_path") or ""
-                body_name = params.get("body_name") or ""
-                property_name = params.get("property_name") or ""
-                normalized_property_name = self._normalize_unreal_property_name(
-                    property_name
-                )
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                save = bool(params.get("save", True))
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-body_name = {body_name!r}
-property_name = {property_name!r}
-normalized_property_name = {normalized_property_name!r}
-value = {json.dumps(coerced_value)!r}
-save = {save!r}
-out = {{
-    "ok": False,
-    "operation": "physics.set_body_property",
-    "asset_path": asset_path,
-    "body_name": body_name,
-    "property_name": property_name,
-    "normalized_property_name": normalized_property_name,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "body_found": False, "property_applied": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Physics asset could not be loaded")
-    else:
-        bodies = None
-        for attr in ("skeletal_body_setups", "body_setups"):
-            try:
-                bodies = asset.get_editor_property(attr)
-                if bodies:
-                    break
-            except Exception:
-                pass
-        for body in bodies or []:
-            candidate_names = []
-            try:
-                candidate_names.append(str(body.get_name()))
-            except Exception:
-                pass
-            try:
-                candidate_names.append(str(body.get_editor_property("bone_name")))
-            except Exception:
-                pass
-            if body_name in candidate_names:
-                out["validation"]["body_found"] = True
-                target = body
-                if property_name in ("mass", "linear_damping", "angular_damping") or normalized_property_name in ("mass_in_kg_override", "linear_damping", "angular_damping"):
-                    try:
-                        inst = body.get_editor_property("default_instance")
-                        target = inst or body
-                    except Exception:
-                        pass
-                try:
-                    try:
-                        target.set_editor_property(property_name, value)
-                    except Exception:
-                        target.set_editor_property(normalized_property_name, value)
-                    out["ok"] = True
-                    out["validation"]["property_applied"] = True
-                except Exception as exc:
-                    out["errors"].append("set_editor_property failed: " + str(exc))
-                break
-        if not out["validation"]["body_found"]:
-            out["errors"].append("Physics body was not found")
-        if save and asset:
-            try:
-                unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-            except Exception as save_exc:
-                out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Physics Body Property",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "physics.set_constraint_property":
-                asset_path = params.get("asset_path") or ""
-                constraint_name = params.get("constraint_name") or ""
-                property_name = params.get("property_name") or ""
-                normalized_property_name = self._normalize_unreal_property_name(
-                    property_name
-                )
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                save = bool(params.get("save", True))
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-constraint_name = {constraint_name!r}
-property_name = {property_name!r}
-normalized_property_name = {normalized_property_name!r}
-value = {json.dumps(coerced_value)!r}
-save = {save!r}
-out = {{
-    "ok": False,
-    "operation": "physics.set_constraint_property",
-    "asset_path": asset_path,
-    "constraint_name": constraint_name,
-    "property_name": property_name,
-    "normalized_property_name": normalized_property_name,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "constraint_found": False, "property_applied": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Physics asset could not be loaded")
-    else:
-        constraints = None
-        for attr in ("constraint_setup", "constraint_setups"):
-            try:
-                constraints = asset.get_editor_property(attr)
-                if constraints:
-                    break
-            except Exception:
-                pass
-        for constraint in constraints or []:
-            candidate_name = ""
-            try:
-                candidate_name = str(constraint.get_name())
-            except Exception:
-                candidate_name = str(constraint)
-            if constraint_name == candidate_name:
-                out["validation"]["constraint_found"] = True
-                target = constraint
-                try:
-                    inst = constraint.get_editor_property("default_instance")
-                    target = inst or constraint
-                except Exception:
-                    pass
-                try:
-                    try:
-                        target.set_editor_property(property_name, value)
-                    except Exception:
-                        target.set_editor_property(normalized_property_name, value)
-                    out["ok"] = True
-                    out["validation"]["property_applied"] = True
-                except Exception as exc:
-                    out["errors"].append("set_editor_property failed: " + str(exc))
-                break
-        if not out["validation"]["constraint_found"]:
-            out["errors"].append("Physics constraint was not found")
-        if save and asset:
-            try:
-                unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-            except Exception as save_exc:
-                out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Physics Constraint Property",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "physics.set_profile_property":
-                asset_path = params.get("asset_path") or ""
-                profile_name = params.get("profile_name") or ""
-                property_name = params.get("property_name") or ""
-                normalized_property_name = self._normalize_unreal_property_name(
-                    property_name
-                )
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                save = bool(params.get("save", True))
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-profile_name = {profile_name!r}
-property_name = {property_name!r}
-normalized_property_name = {normalized_property_name!r}
-value = {json.dumps(coerced_value)!r}
-save = {save!r}
-out = {{
-    "ok": False,
-    "operation": "physics.set_profile_property",
-    "asset_path": asset_path,
-    "profile_name": profile_name,
-    "property_name": property_name,
-    "normalized_property_name": normalized_property_name,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "profile_found": False, "property_applied": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Physics asset could not be loaded")
-    else:
-        profiles = []
-        for attr in ("constraint_profiles", "physical_animation_profiles", "profiles"):
-            try:
-                candidate = asset.get_editor_property(attr)
-                if candidate:
-                    profiles = list(candidate)
-                    break
-            except Exception:
-                pass
-        for profile in profiles or []:
-            candidate_name = ""
-            try:
-                candidate_name = str(profile.get_name())
-            except Exception:
-                try:
-                    candidate_name = str(profile.get_editor_property("name"))
-                except Exception:
-                    candidate_name = str(profile)
-            if candidate_name == profile_name:
-                out["validation"]["profile_found"] = True
-                try:
-                    try:
-                        profile.set_editor_property(property_name, value)
-                    except Exception:
-                        profile.set_editor_property(normalized_property_name, value)
-                    out["ok"] = True
-                    out["validation"]["property_applied"] = True
-                except Exception as exc:
-                    out["errors"].append("set_editor_property failed: " + str(exc))
-                break
-        if not out["validation"]["profile_found"]:
-            out["errors"].append("Physics profile was not found")
-        if save and asset:
-            try:
-                unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-            except Exception as save_exc:
-                out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Physics Profile Property",
-                    bool(response.get("ok")),
-                    json.dumps(response, indent=2, default=str),
-                )
-
-            if operation_key == "niagara.set_module_input":
-                asset_path = params.get("asset_path") or ""
-                module_name = params.get("module_name") or ""
-                input_name = params.get("input_name") or ""
-                emitter_name = params.get("emitter_name") or ""
-                script_usage = params.get("script_usage") or ""
-                normalized_input_name = self._normalize_unreal_property_name(input_name)
-                value_type = params.get("value_type") or "auto"
-                coerced_value = self._coerce_unreal_value(
-                    params.get("value"), value_type
-                )
-                code = f"""
-import json
-import unreal
-
-asset_path = {asset_path!r}
-module_name = {module_name!r}
-input_name = {input_name!r}
-normalized_input_name = {normalized_input_name!r}
-emitter_name = {emitter_name!r}
-script_usage = {script_usage!r}
-value = {json.dumps(coerced_value)!r}
-out = {{
-    "ok": False,
-    "operation": "niagara.set_module_input",
-    "asset_path": asset_path,
-    "module_name": module_name,
-    "input_name": input_name,
-    "normalized_input_name": normalized_input_name,
-    "emitter_name": emitter_name,
-    "script_usage": script_usage,
-    "value": value,
-    "warnings": [],
-    "errors": [],
-    "validation": {{"asset_exists": False, "module_found": False, "input_applied": False}},
-}}
-
-try:
-    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-    out["validation"]["asset_exists"] = bool(asset)
-    if not asset:
-        out["errors"].append("Niagara asset could not be loaded")
-    else:
-        script_objects = []
-        for attr in ("emitter_handles", "emitters", "scripts"):
-            try:
-                items = asset.get_editor_property(attr)
-                if items:
-                    script_objects.extend(list(items))
-            except Exception:
-                pass
-        matched_module = None
-        for item in script_objects:
-            candidate_name = ""
-            try:
-                candidate_name = str(item.get_name())
-            except Exception:
-                candidate_name = str(item)
-            if emitter_name and emitter_name.lower() not in candidate_name.lower():
-                continue
-            lower_name = candidate_name.lower()
-            if module_name.lower() in lower_name or (script_usage and script_usage.lower() in lower_name):
-                matched_module = item
-                break
-        if matched_module is None:
-            out["errors"].append("Niagara module/script was not found through reflection")
-        else:
-            out["validation"]["module_found"] = True
-            target = matched_module
-            try:
-                if hasattr(target, "set_editor_property"):
-                    try:
-                        target.set_editor_property(input_name, value)
-                    except Exception:
-                        target.set_editor_property(normalized_input_name, value)
-                    out["ok"] = True
-                    out["validation"]["input_applied"] = True
-                else:
-                    out["warnings"].append("Matched module does not expose set_editor_property through Python reflection")
-            except Exception as exc:
-                out["errors"].append("set_editor_property failed: " + str(exc))
-        try:
-            unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
-        except Exception as save_exc:
-            out["warnings"].append("save warning: " + str(save_exc))
-except Exception as exc:
-    out["errors"].append(str(exc))
-
-print(json.dumps(out))
-"""
-                response = self.unreal.execute_python(
-                    code, timeout=params.get("timeout", 45), reset_globals=True
-                )
-                return (
-                    "Unreal Set Niagara Module Input",
                     bool(response.get("ok")),
                     json.dumps(response, indent=2, default=str),
                 )

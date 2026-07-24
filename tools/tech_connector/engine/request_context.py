@@ -13,6 +13,28 @@ import re
 from typing import Any
 
 
+_SENSITIVE_CONTEXT_KEY = re.compile(
+    r"(?:^|_)(?:api_?key|access_?key|secret|token|password|credential|"
+    r"authorization|cookie|private_?key)(?:$|_)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_prompt_context(value: Any) -> Any:
+    """Copy prompt context while removing credentials at the UI boundary."""
+    if isinstance(value, dict):
+        return {
+            str(key): sanitize_prompt_context(item)
+            for key, item in value.items()
+            if not _SENSITIVE_CONTEXT_KEY.search(str(key))
+        }
+    if isinstance(value, list):
+        return [sanitize_prompt_context(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(sanitize_prompt_context(item) for item in value)
+    return value
+
+
 @dataclass(frozen=True)
 class RequestContext:
     text: str
@@ -191,7 +213,7 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
     try:
         settings = getattr(window, "settings", None)
         if isinstance(settings, dict):
-            extras["settings"] = dict(settings)
+            extras["settings"] = sanitize_prompt_context(settings)
     except Exception:
         pass
     try:
@@ -235,5 +257,5 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
         attached_images=tuple(images),
         model=model,
         index_state=index_state,
-        extras=extras,
+        extras=sanitize_prompt_context(extras),
     )

@@ -1,0 +1,793 @@
+{
+  "prompt": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+  "plan_elapsed_seconds": 13.17,
+  "total_seconds": 172.845,
+  "updates": [
+    {
+      "seconds": 0.023,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.086,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 0.854,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 5.86,
+      "message": "Contract worker: model is still producing the architecture; 1107 response characters received"
+    },
+    {
+      "seconds": 6.097,
+      "message": "Mapping incremental file ownership; ollama:qwen2.5-coder:7b; 14.0s planning budget remains"
+    },
+    {
+      "seconds": 6.514,
+      "message": "File-map worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 11.525,
+      "message": "File-map worker: model is still producing the architecture; 1212 response characters received"
+    },
+    {
+      "seconds": 13.169,
+      "message": "Prepared reviewable disposable-artifact architecture with file, API, dependency, algorithm, and test ownership"
+    },
+    {
+      "seconds": 13.17,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 13.189,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 13.192,
+      "message": "Using approved artifact architecture: 6 dependency-ordered file workers"
+    },
+    {
+      "seconds": 13.192,
+      "message": "Generating call_drainer.py (1/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 18.587,
+      "message": "File worker call_drainer.py: model active for 5.0s; 1513 response characters received"
+    },
+    {
+      "seconds": 18.91,
+      "message": "File worker call_drainer.py: model active for 5.3s; 1616 response characters received"
+    },
+    {
+      "seconds": 18.912,
+      "message": "Integration architect accepted call_drainer.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 18.913,
+      "message": "Checkpointed call_drainer.py; call_drainer.py: CallDrainer(module_path); CallDrainer.drain_in_flight_calls(); CallDrainer.register_in_flight_call(call_id); CallDrainer.unregister_in_flight_call(call_id)"
+    },
+    {
+      "seconds": 18.913,
+      "message": "Generating dependency_validator.py (2/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 24.275,
+      "message": "File worker dependency_validator.py: model active for 5.0s; 1626 response characters received"
+    },
+    {
+      "seconds": 29.289,
+      "message": "File worker dependency_validator.py: model active for 10.0s; 3182 response characters received"
+    },
+    {
+      "seconds": 30.738,
+      "message": "File worker dependency_validator.py: model active for 11.5s; 3627 response characters received"
+    },
+    {
+      "seconds": 30.742,
+      "message": "Rejected dependency_validator.py; integration notes returned to its file worker: Generated file did not parse and compile (dependency_validator.py): 'await' outside async function (dependency_validator.py, line 56)"
+    },
+    {
+      "seconds": 30.742,
+      "message": "Generating dependency_validator.py (2/6; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 42.797,
+      "message": "File worker dependency_validator.py: model active for 5.0s; 1542 response characters received"
+    },
+    {
+      "seconds": 47.812,
+      "message": "File worker dependency_validator.py: model active for 10.0s; 3031 response characters received"
+    },
+    {
+      "seconds": 49.788,
+      "message": "File worker dependency_validator.py: model active for 12.0s; 3633 response characters received"
+    },
+    {
+      "seconds": 49.794,
+      "message": "Integration architect accepted dependency_validator.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 49.795,
+      "message": "Checkpointed dependency_validator.py; dependency_validator.py: DependencyValidator(module_path); DependencyValidator.validate_dependency_dag(); DependencyValidator.isolate_import_failures(module_path); DependencyValidator.drain_in_flight_calls(module_path); DependencyValidator.atomic_swap(old_module, new_module); DependencyValidator.rollback_failed_reload(module_path)"
+    },
+    {
+      "seconds": 49.796,
+      "message": "Generating import_isolator.py (3/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 62.304,
+      "message": "File worker import_isolator.py: model active for 5.0s; 1525 response characters received"
+    },
+    {
+      "seconds": 66.619,
+      "message": "File worker import_isolator.py: model active for 9.3s; 2879 response characters received"
+    },
+    {
+      "seconds": 66.623,
+      "message": "Integration architect accepted import_isolator.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 66.624,
+      "message": "Checkpointed import_isolator.py; import_isolator.py: ImportIsolator(module_path); ImportIsolator.isolate_import_failures(); ImportIsolator.drain_in_flight_calls(); ImportIsolator.atomic_swap(old_module, new_module); ImportIsolator.rollback_failed_reload(); ImportIsolator.get_failed_imports()"
+    },
+    {
+      "seconds": 66.625,
+      "message": "Generating swap_manager.py (4/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 72.78,
+      "message": "File worker swap_manager.py: model active for 5.0s; 1538 response characters received"
+    },
+    {
+      "seconds": 76.224,
+      "message": "File worker swap_manager.py: model active for 8.5s; 2571 response characters received"
+    },
+    {
+      "seconds": 76.229,
+      "message": "Integration architect accepted swap_manager.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 76.23,
+      "message": "Checkpointed swap_manager.py; swap_manager.py: SwapManager(module_path); SwapManager.validate_dependency_dag(); SwapManager.isolate_import_failures(); SwapManager.drain_in_flight_calls(); SwapManager.atomic_swap(old_module, new_module); SwapManager.rollback_failed_reload(); SwapManager.get_failed_imports()"
+    },
+    {
+      "seconds": 76.23,
+      "message": "Generating hot_reloader.py (5/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 82.423,
+      "message": "File worker hot_reloader.py: model active for 5.0s; 1558 response characters received"
+    },
+    {
+      "seconds": 86.202,
+      "message": "File worker hot_reloader.py: model active for 8.8s; 2735 response characters received"
+    },
+    {
+      "seconds": 86.207,
+      "message": "Integration architect accepted hot_reloader.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 86.207,
+      "message": "Checkpointed hot_reloader.py; hot_reloader.py: HotReloader(module_path); HotReloader.validate_dependency_dag(); HotReloader.isolate_import_failures(); HotReloader.drain_in_flight_calls(); HotReloader.atomic_swap(old_module, new_module); HotReloader.rollback_failed_reload(); HotReloader.get_failed_imports()"
+    },
+    {
+      "seconds": 86.208,
+      "message": "Generating test_generated_artifact.py (6/6; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 92.319,
+      "message": "File worker test_generated_artifact.py: model active for 5.0s; 1517 response characters received"
+    },
+    {
+      "seconds": 97.322,
+      "message": "File worker test_generated_artifact.py: model active for 10.0s; 3011 response characters received"
+    },
+    {
+      "seconds": 99.946,
+      "message": "File worker test_generated_artifact.py: model active for 12.6s; 3815 response characters received"
+    },
+    {
+      "seconds": 99.956,
+      "message": "Rejected test_generated_artifact.py; integration notes returned to its file worker: Generated test file defines no test_* methods: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py"
+    },
+    {
+      "seconds": 99.957,
+      "message": "Generating test_generated_artifact.py (6/6; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 110.846,
+      "message": "File worker test_generated_artifact.py: model active for 5.0s; 1523 response characters received"
+    },
+    {
+      "seconds": 115.857,
+      "message": "File worker test_generated_artifact.py: model active for 10.0s; 2975 response characters received"
+    },
+    {
+      "seconds": 120.874,
+      "message": "File worker test_generated_artifact.py: model active for 15.0s; 4432 response characters received"
+    },
+    {
+      "seconds": 122.979,
+      "message": "File worker test_generated_artifact.py: model active for 17.1s; 5021 response characters received"
+    },
+    {
+      "seconds": 122.995,
+      "message": "Integration architect accepted test_generated_artifact.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 122.996,
+      "message": "Checkpointed test_generated_artifact.py; test_generated_artifact.py: DependencyValidator(module_path); DependencyValidator.validate_dependency_dag(); ImportIsolator(module_path); ImportIsolator.isolate_import_failures(); ImportIsolator.drain_in_flight_calls(); ImportIsolator.atomic_swap(old_module, new_module); ImportIsolator.rollback_failed_reload(); ImportIsolator.get_failed_imports(); SwapManager(module_path); SwapManager.validate_dependency_dag(); SwapManager.isolate_import_failures(); SwapManager.drain_in_flight_calls(); SwapManager.atomic_swap(old_module, new_module); SwapManager.rollback_failed_reload(); SwapManager.get_failed_imports(); HotReloader(module_path); HotReloader.validate_dependency_dag(); HotReloader.isolate_import_failures(); HotReloader.drain_in_flight_calls(); HotReloader.atomic_swap(old_module, new_module); HotReloader.rollback_failed_reload(); HotReloader.get_failed_imports(); TestHotReloader(); TestHotReloader.test_validate_dependency_dag_success(); TestHotReloader.test_isolate_import_failures_success(); TestHotReloader.test_drain_in_flight_calls_success(); TestHotReloader.test_atomic_swap_success(); TestHotReloader.test_rollback_failed_reload_success(); TestHotReloader.test_get_failed_imports_success()"
+    },
+    {
+      "seconds": 123.015,
+      "message": "Wired uniquely owned generated symbols: dependency_validator.py:drain_in_flight_calls -> tech_connector.call_drainer.CallDrainer; import_isolator.py:drain_in_flight_calls -> tech_connector.call_drainer.CallDrainer"
+    },
+    {
+      "seconds": 123.041,
+      "message": "Removed generated unused imports: test_generated_artifact.py: removed unused import"
+    },
+    {
+      "seconds": 123.067,
+      "message": "Normalized generated Python: call_drainer.py: normalized generated Python formatting; dependency_validator.py: normalized generated Python formatting; import_isolator.py: normalized generated Python formatting; test_generated_artifact.py: normalized generated Python formatting"
+    },
+    {
+      "seconds": 126.952,
+      "message": "Diagnosing TestHotReloader.test_atomic_swap_success; qwen2.5:3b; attempt 1/3; deriving root cause, algorithm, and postconditions before coding"
+    },
+    {
+      "seconds": 135.341,
+      "message": "Repair diagnosis TestHotReloader.test_atomic_swap_success: model active for 2.1s; 773 response characters received"
+    },
+    {
+      "seconds": 135.342,
+      "message": "Rejected repair diagnosis for TestHotReloader.test_atomic_swap_success: Function repair plan still depends on proven-invalid name unittest."
+    },
+    {
+      "seconds": 135.343,
+      "message": "Diagnosing TestHotReloader.test_atomic_swap_success; qwen2.5-coder:7b; attempt 2/3; deriving root cause, algorithm, and postconditions before coding"
+    },
+    {
+      "seconds": 142.46,
+      "message": "Repair diagnosis TestHotReloader.test_atomic_swap_success: model active for 1.8s; 391 response characters received"
+    },
+    {
+      "seconds": 142.461,
+      "message": "Rejected repair diagnosis for TestHotReloader.test_atomic_swap_success: Function repair plan still depends on proven-invalid name unittest."
+    },
+    {
+      "seconds": 142.461,
+      "message": "Diagnosing TestHotReloader.test_atomic_swap_success; qwen3:8b; attempt 3/3; deriving root cause, algorithm, and postconditions before coding"
+    },
+    {
+      "seconds": 153.321,
+      "message": "Repair diagnosis TestHotReloader.test_atomic_swap_success: model active for 3.1s; 794 response characters received"
+    },
+    {
+      "seconds": 153.321,
+      "message": "Rejected repair diagnosis for TestHotReloader.test_atomic_swap_success: Function repair plan still depends on proven-invalid name Mock.; Function repair plan still depends on proven-invalid name unittest."
+    },
+    {
+      "seconds": 153.322,
+      "message": "Function contract isolated TestHotReloader.test_atomic_swap_success; qwen2.5-coder:7b; attempt 1/2; preserving exact signature, 5 sibling callables, and 5 other files"
+    },
+    {
+      "seconds": 159.154,
+      "message": "Callable repair TestHotReloader.test_atomic_swap_success: model active for 0.7s; 203 response characters received"
+    },
+    {
+      "seconds": 159.169,
+      "message": "Rejected precise repair for TestHotReloader.test_atomic_swap_success: Repaired owner module introduces undefined names: new_module, old_module"
+    },
+    {
+      "seconds": 159.96,
+      "message": "Precise repair validation (1/8): Generated callables reference undefined names in : DependencyValidator, ImportIsolator; Generated callables reference undefined names in : SwapManager; Generated callables reference undefined names in TestHotReloader.test_atomic_swap_success: Mock"
+    },
+    {
+      "seconds": 159.96,
+      "message": "Returning unchanged or structural failures to the architecture worker; revising module ownership before further code repair"
+    },
+    {
+      "seconds": 159.961,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 165.472,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 169.286,
+      "message": "Repairing only the rejected shared contract: Integration contract lacks an exact callable signature."
+    },
+    {
+      "seconds": 169.792,
+      "message": "Contract repair worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 172.845,
+      "message": "Stopping precise repair because validation failures did not change and the architecture replan was exhausted"
+    },
+    {
+      "seconds": 172.845,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: DependencyValidator\n- canonical_owners: ImportIsolator\n- canonical_owners: CallDrainer\n- canonical_owners: SwapManager\n- canonical_owners: RollbackHandler\n- signatures: validate_dependency_dag(self, module_path: str) -> bool\n- signatures: isolate_import_failures(self, module_path: str) -> None\n- signatures: drain_in_flight_calls(self, module_path: str) -> None\n- signatures: atomic_swap(self, old_module: object, new_module: object) -> None\n- signatures: rollback_failed_reload(self, module_path: str) -> None\n- shared_invariants: module_path must be a valid Python file path\n- shared_invariants: old_module and new_module must be instances of the same class\n- data_layout: DependencyValidator stores a DAG representation of dependencies\n- data_layout: ImportIsolator maintains a list of failed imports\n- data_layout: CallDrainer tracks in-flight calls for each module\n- data_layout: SwapManager manages the swapping of modules\n- data_layout: RollbackHandler handles rollback logic\n- errors: ModuleNotFoundError: raised when an import fails\n- errors: RuntimeError: raised when a swap or rollback fails\n\n- `tech_connector/call_drainer.py`: Drains in-flight calls for a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: CallDrainer\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/dependency_validator.py`: Validates the dependency DAG of a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: DependencyValidator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/import_isolator.py`: Isolates import failures in a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: ImportIsolator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/swap_manager.py`: Manages the swapping of modules.\n  - role: production\n  - requirement IDs: R1\n  - public API: SwapManager\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/hot_reloader.py`: Production code for the hot-reloader plugin.\n  - role: production\n  - requirement IDs: R1\n  - public API: HotReloader\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/call_drainer.py, tech_connector/swap_manager.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/hot_reloader.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/call_drainer.py, tech_connector/swap_manager.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/call_drainer.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py, tech_connector/hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+    "plan": "Implementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: DependencyValidator\n- canonical_owners: ImportIsolator\n- canonical_owners: CallDrainer\n- canonical_owners: SwapManager\n- canonical_owners: RollbackHandler\n- signatures: validate_dependency_dag(self, module_path: str) -> bool\n- signatures: isolate_import_failures(self, module_path: str) -> None\n- signatures: drain_in_flight_calls(self, module_path: str) -> None\n- signatures: atomic_swap(self, old_module: object, new_module: object) -> None\n- signatures: rollback_failed_reload(self, module_path: str) -> None\n- shared_invariants: module_path must be a valid Python file path\n- shared_invariants: old_module and new_module must be instances of the same class\n- data_layout: DependencyValidator stores a DAG representation of dependencies\n- data_layout: ImportIsolator maintains a list of failed imports\n- data_layout: CallDrainer tracks in-flight calls for each module\n- data_layout: SwapManager manages the swapping of modules\n- data_layout: RollbackHandler handles rollback logic\n- errors: ModuleNotFoundError: raised when an import fails\n- errors: RuntimeError: raised when a swap or rollback fails\n\n- `tech_connector/call_drainer.py`: Drains in-flight calls for a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: CallDrainer\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/dependency_validator.py`: Validates the dependency DAG of a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: DependencyValidator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/import_isolator.py`: Isolates import failures in a module.\n  - role: production\n  - requirement IDs: R1\n  - public API: ImportIsolator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/swap_manager.py`: Manages the swapping of modules.\n  - role: production\n  - requirement IDs: R1\n  - public API: SwapManager\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/hot_reloader.py`: Production code for the hot-reloader plugin.\n  - role: production\n  - requirement IDs: R1\n  - public API: HotReloader\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/call_drainer.py, tech_connector/swap_manager.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/hot_reloader.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/call_drainer.py, tech_connector/swap_manager.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/call_drainer.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py, tech_connector/hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad",
+    "artifact_manifest": [
+      {
+        "path": "tech_connector/call_drainer.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\call_drainer.py",
+        "purpose": "Drains in-flight calls for a module.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "CallDrainer"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/dependency_validator.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+        "purpose": "Validates the dependency DAG of a module.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "DependencyValidator"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/import_isolator.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\import_isolator.py",
+        "purpose": "Isolates import failures in a module.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "ImportIsolator"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/swap_manager.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\swap_manager.py",
+        "purpose": "Manages the swapping of modules.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "SwapManager"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/hot_reloader.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\hot_reloader.py",
+        "purpose": "Production code for the hot-reloader plugin.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "HotReloader"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py"
+        ],
+        "depends_on": [
+          "tech_connector/dependency_validator.py",
+          "tech_connector/import_isolator.py",
+          "tech_connector/call_drainer.py",
+          "tech_connector/swap_manager.py"
+        ],
+        "is_test": false
+      },
+      {
+        "path": "examples/tech_connector/tests/test_generated_artifact.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py",
+        "purpose": "Behavioral proof for every generated artifact requirement.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Run focused disposable behavioral tests for owned requirement IDs."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(self, module_path: str) -> bool",
+          "signatures: isolate_import_failures(self, module_path: str) -> None",
+          "signatures: drain_in_flight_calls(self, module_path: str) -> None",
+          "signatures: atomic_swap(self, old_module: object, new_module: object) -> None",
+          "signatures: rollback_failed_reload(self, module_path: str) -> None",
+          "shared_invariants: module_path must be a valid Python file path",
+          "shared_invariants: old_module and new_module must be instances of the same class",
+          "data_layout: DependencyValidator stores a DAG representation of dependencies",
+          "data_layout: ImportIsolator maintains a list of failed imports",
+          "data_layout: CallDrainer tracks in-flight calls for each module",
+          "data_layout: SwapManager manages the swapping of modules",
+          "data_layout: RollbackHandler handles rollback logic",
+          "errors: ModuleNotFoundError: raised when an import fails",
+          "errors: RuntimeError: raised when a swap or rollback fails"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [
+          "tech_connector/hot_reloader.py",
+          "tech_connector/dependency_validator.py",
+          "tech_connector/import_isolator.py",
+          "tech_connector/call_drainer.py",
+          "tech_connector/swap_manager.py"
+        ],
+        "is_test": true
+      }
+    ],
+    "requirement_ledger": [
+      {
+        "id": "R1",
+        "text": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+        "scope": "artifact"
+      },
+      {
+        "id": "R2",
+        "text": "Do not edit live project files",
+        "scope": "workflow"
+      },
+      {
+        "id": "R3",
+        "text": "generate and validate only in a disposable workspace",
+        "scope": "workflow"
+      }
+    ],
+    "reasoning_gaps": [],
+    "planning_trace": [
+      {
+        "stage": "artifact_integration_contract",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 6.01,
+        "response_characters": 1163,
+        "response": "{\n  \"integration_contracts\": {\n    \"canonical_owners\": [\n      \"DependencyValidator\",\n      \"ImportIsolator\",\n      \"CallDrainer\",\n      \"SwapManager\",\n      \"RollbackHandler\"\n    ],\n    \"signatures\": [\n      \"validate_dependency_dag(self, module_path: str) -> bool\",\n      \"isolate_import_failures(self, module_path: str) -> None\",\n      \"drain_in_flight_calls(self, module_path: str) -> None\",\n      \"atomic_swap(self, old_module: object, new_module: object) -> None\",\n      \"rollback_failed_reload(self, module_path: str) -> None\"\n    ],\n    \"shared_invariants\": [\n      \"module_path must be a valid Python file path\",\n      \"old_module and new_module must be instances of the same class\"\n    ],\n    \"data_layout\": [\n      \"DependencyValidator stores a DAG representation of dependencies\",\n      \"ImportIsolator maintains a list of failed imports\",\n      \"CallDrainer tracks in-flight calls for each module\",\n      \"SwapManager manages the swapping of modules\",\n      \"RollbackHandler handles rollback logic\"\n    ],\n    \"errors\": [\n      \"ModuleNotFoundError: raised when an import fails\",\n      \"RuntimeError: raised when a swap or rollback fails\"\n    ]\n  }\n}"
+      },
+      {
+        "stage": "artifact_file_map",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 7.073,
+        "response_characters": 1597,
+        "response": "{\n  \"files\": [\n    {\n      \"path\": \"src/tech_connector/hot_reloader.py\",\n      \"purpose\": \"Production code for the hot-reloader plugin.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"HotReloader\"\n      ],\n      \"depends_on\": [\n        \"src/tech_connector/dependency_validator.py\",\n        \"src/tech_connector/import_isolator.py\",\n        \"src/tech_connector/call_drainer.py\",\n        \"src/tech_connector/swap_manager.py\",\n        \"src/tech_connector/rollback_handler.py\"\n      ],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/dependency_validator.py\",\n      \"purpose\": \"Validates the dependency DAG of a module.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"DependencyValidator\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/import_isolator.py\",\n      \"purpose\": \"Isolates import failures in a module.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"ImportIsolator\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/call_drainer.py\",\n      \"purpose\": \"Drains in-flight calls for a module.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"CallDrainer\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/swap_manager.py\",\n      \"purpose\": \"Manages the swapping of modules.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"SwapManager\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    }\n  ]\n}"
+      }
+    ]
+  },
+  "result": {
+    "text": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Generated callables reference undefined names in : DependencyValidator, ImportIsolator\n- Generated callables reference undefined names in : SwapManager\n- Generated callables reference undefined names in TestHotReloader.test_atomic_swap_success: Mock\n- Disposable generated-patch validation failed: E\n======================================================================\nERROR: test_generated_artifact (unittest.loader._FailedTest.test_generated_artifact)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_generated_artifact\nTraceback (most recent call last):\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n    ~~~~~~~~~~^^^^^^\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_uqja3m9o\\examples\\tech_connector\\tests\\test_generated_artifact.py\", line 104, in <module>\n    class TestHotReloader(unittest.TestCase):\n                          ^^^^^^^^\nNameError: name 'unittest' is not defined. Did you forget to import 'unittest'?\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n\nRequirement coverage:\n- R1 [blocked]: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages | production=tech_connector/call_drainer.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py, tech_connector/hot_reloader.py | tests=examples/tech_connector/tests/test_generated_artifact.py\n- R2 [blocked]: Do not edit live project files | workflow=project_edit_flow\n- R3 [blocked]: generate and validate only in a disposable workspace | workflow=project_edit_flow",
+    "payload": {
+      "type": "project_changes_rejected",
+      "changes": [
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\tech_connector\\call_drainer.py",
+          "original_content": "",
+          "new_content": "class CallDrainer:\n    \"\"\"\n    Drains in-flight calls for a module.\n\n    :param module_path: The path to the module to drain calls for.\n    \"\"\"\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.in_flight_calls = {}\n\n    async def drain_in_flight_calls(self) -> None:\n        \"\"\"\n        Drains in-flight calls for the specified module.\n\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If draining fails.\n        \"\"\"\n        if self.module_path not in self.in_flight_calls:\n            raise ModuleNotFoundError(f'Module {self.module_path} not found.')\n        print(f'Draining in-flight calls for {self.module_path}')\n        self.in_flight_calls[self.module_path] = []\n\n    def register_in_flight_call(self, call_id: str) -> None:\n        \"\"\"\n        Registers an in-flight call for the specified module.\n\n        :param call_id: The ID of the in-flight call.\n        \"\"\"\n        if self.module_path not in self.in_flight_calls:\n            self.in_flight_calls[self.module_path] = []\n        self.in_flight_calls[self.module_path].append(call_id)\n\n    def unregister_in_flight_call(self, call_id: str) -> None:\n        \"\"\"\n        Unregisters an in-flight call for the specified module.\n\n        :param call_id: The ID of the in-flight call.\n        \"\"\"\n        if self.module_path not in self.in_flight_calls:\n            return\n        if call_id in self.in_flight_calls[self.module_path]:\n            self.in_flight_calls[self.module_path].remove(call_id)\n"
+        },
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "original_content": "",
+          "new_content": "class DependencyValidator:\n    \"\"\"\n    Validates the dependency DAG of a module.\n\n    :param module_path: The path to the module to validate.\n    \"\"\"\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.dependency_dag = {}\n\n    async def validate_dependency_dag(self) -> bool:\n        \"\"\"\n        Validates the dependency DAG for the specified module.\n\n        :return: True if the dependency DAG is valid, False otherwise.\n        :raises ModuleNotFoundError: If a required module cannot be found.\n        :raises RuntimeError: If validation fails.\n        \"\"\"\n        try:\n            print(f'Validating dependency DAG for {self.module_path}')\n            self.dependency_dag[self.module_path] = []\n            return True\n        except ModuleNotFoundError as e:\n            raise ModuleNotFoundError(f'Module not found: {e}')\n        except Exception as e:\n            raise RuntimeError(f'Validation failed: {e}')\n\n    def isolate_import_failures(self, module_path: str) -> None:\n        \"\"\"\n        Isolates import failures for the specified module.\n\n        :param module_path: The path to the module with import failures.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If isolation fails.\n        \"\"\"\n        try:\n            print(f'Isolating import failures for {module_path}')\n            if module_path not in self.dependency_dag:\n                raise ModuleNotFoundError(f'Module {module_path} not found.')\n        except Exception as e:\n            raise RuntimeError(f'Isolation failed: {e}')\n\n    async def drain_in_flight_calls(self, module_path: str) -> None:\n        \"\"\"\n        Drains in-flight calls for the specified module.\n\n        :param module_path: The path to the module to drain calls for.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If draining fails.\n        \"\"\"\n        from tech_connector.call_drainer import CallDrainer\n        call_drainer = CallDrainer(module_path)\n        try:\n            await call_drainer.drain_in_flight_calls()\n        except Exception as e:\n            raise RuntimeError(f'Draining in-flight calls failed: {e}')\n\n    def atomic_swap(self, old_module: object, new_module: object) -> None:\n        \"\"\"\n        Atomically swaps the specified modules.\n\n        :param old_module: The old module to be swapped out.\n        :param new_module: The new module to be swapped in.\n        :raises RuntimeError: If swapping fails.\n        \"\"\"\n        try:\n            print(f'Swapping {old_module} with {new_module}')\n            if not isinstance(old_module, type(new_module)):\n                raise RuntimeError('Modules are not instances of the same class.')\n        except Exception as e:\n            raise RuntimeError(f'Atomic swap failed: {e}')\n\n    def rollback_failed_reload(self, module_path: str) -> None:\n        \"\"\"\n        Rolls back a failed reload for the specified module.\n\n        :param module_path: The path to the module that failed to reload.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If rollback fails.\n        \"\"\"\n        try:\n            print(f'Rolling back failed reload for {module_path}')\n            if module_path not in self.dependency_dag:\n                raise ModuleNotFoundError(f'Module {module_path} not found.')\n        except Exception as e:\n            raise RuntimeError(f'Rollback failed: {e}')\n"
+        },
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\tech_connector\\import_isolator.py",
+          "original_content": "",
+          "new_content": "class ImportIsolator:\n    \"\"\"\n    Isolates import failures in a module.\n\n    :param module_path: The path to the module to isolate.\n    \"\"\"\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.failed_imports = []\n\n    async def isolate_import_failures(self) -> None:\n        \"\"\"\n        Isolates import failures for the specified module.\n\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If isolation fails.\n        \"\"\"\n        try:\n            print(f'Isolating import failures for {self.module_path}')\n            if self.module_path not in globals():\n                raise ModuleNotFoundError(f'Module {self.module_path} not found.')\n            self.failed_imports.append(self.module_path)\n        except Exception as e:\n            raise RuntimeError(f'Isolation failed: {e}')\n\n    async def drain_in_flight_calls(self) -> None:\n        \"\"\"\n        Drains in-flight calls for the specified module.\n\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If draining fails.\n        \"\"\"\n        from tech_connector.call_drainer import CallDrainer\n        call_drainer = CallDrainer(self.module_path)\n        try:\n            await call_drainer.drain_in_flight_calls()\n        except Exception as e:\n            raise RuntimeError(f'Draining in-flight calls failed: {e}')\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        \"\"\"\n        Atomically swaps the specified modules.\n\n        :param old_module: The old module to be swapped out.\n        :param new_module: The new module to be swapped in.\n        :raises RuntimeError: If swapping fails.\n        \"\"\"\n        try:\n            print(f'Swapping {old_module} with {new_module}')\n            if not isinstance(old_module, type(new_module)):\n                raise RuntimeError('Modules are not instances of the same class.')\n        except Exception as e:\n            raise RuntimeError(f'Atomic swap failed: {e}')\n\n    async def rollback_failed_reload(self) -> None:\n        \"\"\"\n        Rolls back a failed reload for the specified module.\n\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If rollback fails.\n        \"\"\"\n        try:\n            print(f'Rolling back failed reload for {self.module_path}')\n            if self.module_path in globals():\n                del globals()[self.module_path]\n        except Exception as e:\n            raise RuntimeError(f'Rollback failed: {e}')\n\n    def get_failed_imports(self) -> list:\n        \"\"\"\n        Returns a list of modules that have import failures.\n\n        :return: A list of module paths with import failures.\n        \"\"\"\n        return self.failed_imports\n"
+        },
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\tech_connector\\swap_manager.py",
+          "original_content": "",
+          "new_content": "class SwapManager:\n    \"\"\"\n    Manages the swapping of modules.\n\n    :param module_path: The path to the module to manage.\n    \"\"\"\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.dependency_validator = DependencyValidator(module_path)\n        self.import_isolator = ImportIsolator(module_path)\n\n    async def validate_dependency_dag(self) -> bool:\n        \"\"\"\n        Validates the dependency DAG for the specified module.\n\n        :return: True if the dependency DAG is valid, False otherwise.\n        :raises ModuleNotFoundError: If a required module cannot be found.\n        :raises RuntimeError: If validation fails.\n        \"\"\"\n        return await self.dependency_validator.validate_dependency_dag()\n\n    async def isolate_import_failures(self) -> None:\n        \"\"\"\n        Isolates import failures for the specified module.\n\n        :param module_path: The path to the module with import failures.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If isolation fails.\n        \"\"\"\n        await self.import_isolator.isolate_import_failures()\n\n    async def drain_in_flight_calls(self) -> None:\n        \"\"\"\n        Drains in-flight calls for the specified module.\n\n        :param module_path: The path to the module to drain calls for.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If draining fails.\n        \"\"\"\n        await self.import_isolator.drain_in_flight_calls()\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        \"\"\"\n        Atomically swaps the specified modules.\n\n        :param old_module: The old module to be swapped out.\n        :param new_module: The new module to be swapped in.\n        :raises RuntimeError: If swapping fails.\n        \"\"\"\n        await self.import_isolator.atomic_swap(old_module, new_module)\n\n    async def rollback_failed_reload(self) -> None:\n        \"\"\"\n        Rolls back a failed reload for the specified module.\n\n        :param module_path: The path to the module that failed to reload.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If rollback fails.\n        \"\"\"\n        await self.import_isolator.rollback_failed_reload()\n\n    def get_failed_imports(self) -> list:\n        \"\"\"\n        Returns a list of modules that have import failures.\n\n        :return: A list of module paths with import failures.\n        \"\"\"\n        return self.import_isolator.get_failed_imports()\n"
+        },
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\tech_connector\\hot_reloader.py",
+          "original_content": "",
+          "new_content": "class HotReloader:\n    \"\"\"\n    A compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures,\n    drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has\n    deterministic unittest coverage without third-party packages.\n\n    :param module_path: The path to the module to manage.\n    \"\"\"\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.swap_manager = SwapManager(module_path)\n\n    async def validate_dependency_dag(self) -> bool:\n        \"\"\"\n        Validates the dependency DAG for the specified module.\n\n        :return: True if the dependency DAG is valid, False otherwise.\n        :raises ModuleNotFoundError: If a required module cannot be found.\n        :raises RuntimeError: If validation fails.\n        \"\"\"\n        return await self.swap_manager.validate_dependency_dag()\n\n    async def isolate_import_failures(self) -> None:\n        \"\"\"\n        Isolates import failures for the specified module.\n\n        :param module_path: The path to the module with import failures.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If isolation fails.\n        \"\"\"\n        await self.swap_manager.isolate_import_failures()\n\n    async def drain_in_flight_calls(self) -> None:\n        \"\"\"\n        Drains in-flight calls for the specified module.\n\n        :param module_path: The path to the module to drain calls for.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If draining fails.\n        \"\"\"\n        await self.swap_manager.drain_in_flight_calls()\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        \"\"\"\n        Atomically swaps the specified modules.\n\n        :param old_module: The old module to be swapped out.\n        :param new_module: The new module to be swapped in.\n        :raises RuntimeError: If swapping fails.\n        \"\"\"\n        await self.swap_manager.atomic_swap(old_module, new_module)\n\n    async def rollback_failed_reload(self) -> None:\n        \"\"\"\n        Rolls back a failed reload for the specified module.\n\n        :param module_path: The path to the module that failed to reload.\n        :raises ModuleNotFoundError: If the module cannot be found.\n        :raises RuntimeError: If rollback fails.\n        \"\"\"\n        await self.swap_manager.rollback_failed_reload()\n\n    def get_failed_imports(self) -> list:\n        \"\"\"\n        Returns a list of modules that have import failures.\n\n        :return: A list of module paths with import failures.\n        \"\"\"\n        return self.swap_manager.get_failed_imports()\n"
+        },
+        {
+          "action": "create",
+          "path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py",
+          "original_content": "",
+          "new_content": "class DependencyValidator:\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.dag = {}\n\n    async def validate_dependency_dag(self) -> bool:\n        try:\n            print(f'Validating dependency DAG for {self.module_path}')\n            return True\n        except Exception as e:\n            raise RuntimeError(f'Validation failed: {e}')\n\n\nclass ImportIsolator:\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.failed_imports = []\n\n    async def isolate_import_failures(self) -> None:\n        try:\n            print(f'Isolating import failures for {self.module_path}')\n        except Exception as e:\n            raise RuntimeError(f'Isolation failed: {e}')\n\n    async def drain_in_flight_calls(self) -> None:\n        try:\n            print(f'Draining in-flight calls for {self.module_path}')\n        except Exception as e:\n            raise RuntimeError(f'Draining failed: {e}')\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        if not isinstance(old_module, type(new_module)):\n            raise RuntimeError('Modules are not instances of the same class.')\n        try:\n            print(f'Atomic swapping {old_module} with {new_module}')\n        except Exception as e:\n            raise RuntimeError(f'Atomic swap failed: {e}')\n\n    async def rollback_failed_reload(self) -> None:\n        try:\n            print(f'Rolling back failed reload for {self.module_path}')\n            if self.module_path in globals():\n                del globals()[self.module_path]\n        except Exception as e:\n            raise RuntimeError(f'Rollback failed: {e}')\n\n    def get_failed_imports(self) -> list:\n        return self.failed_imports\n\n\nclass SwapManager:\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.dependency_validator = DependencyValidator(module_path)\n        self.import_isolator = ImportIsolator(module_path)\n\n    async def validate_dependency_dag(self) -> bool:\n        return await self.dependency_validator.validate_dependency_dag()\n\n    async def isolate_import_failures(self) -> None:\n        await self.import_isolator.isolate_import_failures()\n\n    async def drain_in_flight_calls(self) -> None:\n        await self.import_isolator.drain_in_flight_calls()\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        await self.import_isolator.atomic_swap(old_module, new_module)\n\n    async def rollback_failed_reload(self) -> None:\n        await self.import_isolator.rollback_failed_reload()\n\n    def get_failed_imports(self) -> list:\n        return self.import_isolator.get_failed_imports()\n\n\nclass HotReloader:\n\n    def __init__(self, module_path: str):\n        self.module_path = module_path\n        self.swap_manager = SwapManager(module_path)\n\n    async def validate_dependency_dag(self) -> bool:\n        return await self.swap_manager.validate_dependency_dag()\n\n    async def isolate_import_failures(self) -> None:\n        await self.swap_manager.isolate_import_failures()\n\n    async def drain_in_flight_calls(self) -> None:\n        await self.swap_manager.drain_in_flight_calls()\n\n    async def atomic_swap(self, old_module: object, new_module: object) -> None:\n        await self.swap_manager.atomic_swap(old_module, new_module)\n\n    async def rollback_failed_reload(self) -> None:\n        await self.swap_manager.rollback_failed_reload()\n\n    def get_failed_imports(self) -> list:\n        return self.swap_manager.get_failed_imports()\n\n\nclass TestHotReloader(unittest.TestCase):\n\n    async def test_validate_dependency_dag_success(self):\n        reloader = HotReloader('test_module.py')\n        result = await reloader.validate_dependency_dag()\n        self.assertTrue(result)\n\n    async def test_isolate_import_failures_success(self):\n        reloader = HotReloader('test_module.py')\n        await reloader.isolate_import_failures()\n\n    async def test_drain_in_flight_calls_success(self):\n        reloader = HotReloader('test_module.py')\n        await reloader.drain_in_flight_calls()\n\n    async def test_atomic_swap_success(self):\n        old_module = Mock()\n        new_module = Mock()\n        reloader = HotReloader('test_module.py')\n        await reloader.atomic_swap(old_module, new_module)\n\n    async def test_rollback_failed_reload_success(self):\n        reloader = HotReloader('test_module.py')\n        await reloader.rollback_failed_reload()\n\n    async def test_get_failed_imports_success(self):\n        reloader = HotReloader('test_module.py')\n        failed_imports = reloader.get_failed_imports()\n        self.assertEqual(failed_imports, [])\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+        }
+      ],
+      "validation_errors": [
+        "Generated callables reference undefined names in : DependencyValidator, ImportIsolator",
+        "Generated callables reference undefined names in : SwapManager",
+        "Generated callables reference undefined names in TestHotReloader.test_atomic_swap_success: Mock",
+        "Disposable generated-patch validation failed: E\n======================================================================\nERROR: test_generated_artifact (unittest.loader._FailedTest.test_generated_artifact)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_generated_artifact\nTraceback (most recent call last):\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n    ~~~~~~~~~~^^^^^^\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_uqja3m9o\\examples\\tech_connector\\tests\\test_generated_artifact.py\", line 104, in <module>\n    class TestHotReloader(unittest.TestCase):\n                          ^^^^^^^^\nNameError: name 'unittest' is not defined. Did you forget to import 'unittest'?\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)"
+      ],
+      "requirement_coverage": [
+        {
+          "id": "R1",
+          "requirement": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "scope": "artifact",
+          "system_owners": [],
+          "production_owners": [
+            "tech_connector/call_drainer.py",
+            "tech_connector/dependency_validator.py",
+            "tech_connector/import_isolator.py",
+            "tech_connector/swap_manager.py",
+            "tech_connector/hot_reloader.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_generated_artifact.py"
+          ],
+          "validation": [
+            "Import the completed file and read back its declared public interface.",
+            "Run focused disposable behavioral tests for owned requirement IDs."
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R2",
+          "requirement": "Do not edit live project files",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R3",
+          "requirement": "generate and validate only in a disposable workspace",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        }
+      ],
+      "reasoning_gaps": [
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 3627,
+          "validator_errors": [
+            "Generated file did not parse and compile (dependency_validator.py): 'await' outside async function (dependency_validator.py, line 56)"
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 3815,
+          "validator_errors": [
+            "Generated test file defines no test_* methods: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py"
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        }
+      ]
+    }
+  }
+}

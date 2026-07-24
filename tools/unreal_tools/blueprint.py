@@ -143,6 +143,25 @@ def compile_blueprint(asset_path):
     return json.dumps({"asset_path": asset_path, "compiled": True}, indent=2)
 
 
+
+def compile_and_save_blueprint(asset_path):
+    """Compile a Blueprint and save it to disk if compilation succeeds."""
+    import unreal
+
+    bp = _load_blueprint(unreal, asset_path)
+    unreal.BlueprintEditorLibrary.compile_blueprint(bp)
+    errors = unreal.BlueprintEditorLibrary.get_compiler_results(bp) if hasattr(
+        unreal.BlueprintEditorLibrary, 'get_compiler_results'
+    ) else []
+    if errors:
+        return __import__('json').dumps(
+            {'asset_path': asset_path, 'compiled': False, 'errors': list(errors)}, indent=2
+        )
+    unreal.EditorAssetLibrary.save_asset(asset_path, only_if_is_dirty=False)
+    return __import__('json').dumps(
+        {'asset_path': asset_path, 'compiled': True, 'saved': True}, indent=2
+    )
+
 def _graph_editor(unreal, blueprint, graph_name):
     editor = unreal.BlueprintGraphEditor.get_graph_editor_by_name(blueprint, str(graph_name))
     if editor is None:

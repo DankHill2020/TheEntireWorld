@@ -6,7 +6,7 @@ from typing import Any
 
 from tech_connector.services.adaptive.stage_scheduler import AdaptiveStageScheduler
 from tech_connector.services.adaptive.stages import default_shadow_stages
-from tech_connector.services.request_prediction_service import build_shadow_execution_state
+from tech_connector.services.reasoning.request_prediction_service import build_shadow_execution_state
 
 
 def analyze_request_shadow(

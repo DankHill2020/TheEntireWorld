@@ -244,7 +244,7 @@ class PromptAssistantDialog(QDialog):
             QMessageBox.information(self, "Prompt needed", "Add a prompt before building staged context.")
             return
         try:
-            from tech_connector.services.prompt_dispatch_service import PromptStagingService
+            from tech_connector.services.prompt.prompt_dispatch_service import PromptStagingService
 
             service = PromptStagingService()
             draft = service.build_draft(

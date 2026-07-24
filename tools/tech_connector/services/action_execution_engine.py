@@ -1272,6 +1272,8 @@ def default_action_handler_registry() -> ActionHandlerRegistry:
     registry.register(ActionHandler("execute_dcc_capability", "tech_connector.services.project_intelligence_service/unreal capability services", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_dcc_capability(a, c)))
     registry.register(ActionHandler("execute_unreal_python", "tech_connector.bridges.unreal.unreal_bridge.execute_python", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_unreal_python(a, c)))
     registry.register(ActionHandler("execute_workflow", "generated workflow callable", mutability="dcc_mutation", execute_fn=lambda a, c: {"ok": False, "error": "execute_workflow requires a registered workflow runner adapter"}))
+    registry.register(ActionHandler("asset_source_search", "tech_connector.services.external_asset_acquisition_service", execute_fn=lambda a, c: _handle_asset_source_search(a, c)))
+    registry.register(ActionHandler("download_or_ingest_asset", "tech_connector.services.external_asset_acquisition_service", mutability="external_mutation", execute_fn=lambda a, c: _handle_download_or_ingest_asset(a, c)))
     return registry
 
 
@@ -1774,3 +1776,39 @@ def _handle_execute_unreal_python(action: dict[str, Any], context: ExecutionCont
             return {"ok": bool(ok), "output": output}
         return {"ok": bool(response), "output": response}
     return {"ok": False, "error": "No Unreal bridge adapter is available."}
+
+
+def _handle_asset_source_search(action: dict[str, Any], context: ExecutionContext) -> dict[str, Any]:
+    from tech_connector.services.external_asset_acquisition_service import search_asset_candidates
+    args = _action_args(action)
+    candidates = search_asset_candidates(
+        query=args.get("query", ""),
+        asset_type=args.get("asset_type", ""),
+        target_host=args.get("target_host", ""),
+        providers=args.get("providers"),
+        limit=args.get("limit", 8),
+        settings=args.get("settings"),
+        active_only=bool(args.get("active_only", True)),
+    )
+    return {"ok": True, "candidate_assets": candidates}
+
+
+def _handle_download_or_ingest_asset(action: dict[str, Any], context: ExecutionContext) -> dict[str, Any]:
+    from tech_connector.services.external_asset_acquisition_service import download_asset_candidate
+    args = _action_args(action)
+    candidates = args.get("candidate_assets") or []
+    idx = args.get("selected_index", 0)
+    if not candidates or idx >= len(candidates):
+        return {"ok": False, "error": "No candidate selected or empty candidate list."}
+    candidate = candidates[idx]
+    cache_root = args.get("cache_root") or ".ai_studio/cache"
+    approved = bool(args.get("approved") or context.approved)
+    target_host = args.get("target_host") or ""
+    destination = args.get("destination") or ""
+    return download_asset_candidate(
+        candidate,
+        cache_root=cache_root,
+        approved=approved,
+        target_host=target_host,
+        destination=destination,
+    )

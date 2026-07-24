@@ -51,9 +51,9 @@ def live_sources_enabled(settings: Optional[dict]) -> bool:
 def get_ingested_tools_summary(settings: dict) -> str:
     from pathlib import Path
     import json
-    from tech_connector.models.constants import TOOLS_ROOT
+    from tech_connector.models.constants import EXTERNAL_TOOLS_DIR
     
-    ext_tools_dir = settings.get("external_tools_dir", "") or str(TOOLS_ROOT / "external_tools")
+    ext_tools_dir = settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
     ext_tools_path = Path(ext_tools_dir)
     
     if not ext_tools_path.exists() or not ext_tools_path.is_dir():

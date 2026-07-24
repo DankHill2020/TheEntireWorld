@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import re
 import sqlite3
 import ast
 from pathlib import Path
 
 
-def _connect_index_readonly(db_path: Path, timeout: int | float = 5) -> sqlite3.Connection:
+@contextmanager
+def _connect_index_readonly(db_path: Path, timeout: int | float = 5):
     uri = db_path.resolve().as_uri() + "?mode=ro&immutable=1"
     conn = sqlite3.connect(uri, timeout=timeout, uri=True)
-    conn.execute("PRAGMA query_only = ON")
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        conn.row_factory = sqlite3.Row
+        yield conn
+    finally:
+        conn.close()
 
 
 def _active_project_roots(active_path: str | None = None) -> list[str]:
@@ -1488,7 +1493,7 @@ def _answer_file_symbol_question(question: str, active_path: str | None = None) 
 
 def _parse_scoped_member_request(question: str):
     try:
-        from tech_connector.services.target_entity_service import (
+        from tech_connector.services.reasoning.target_entity_service import (
             parse_scoped_member_query,
         )
         return parse_scoped_member_query(question)
@@ -2194,7 +2199,7 @@ def answer_project_research_question(
 
 def _semantic_contract_for_question(question: str) -> dict:
     try:
-        from tech_connector.services.semantic_execution_contract_service import (
+        from tech_connector.services.reasoning.semantic_execution_contract_service import (
             build_semantic_execution_contract,
         )
         return build_semantic_execution_contract(question).to_dict()

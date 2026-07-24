@@ -7,6 +7,7 @@ best matching path/content metadata columns it can find.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,15 +28,19 @@ class FileIndexService:
     def __init__(self, db_path: Path | str | None = None):
         self.db_path = Path(db_path) if db_path is not None else project_index_db_path()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         if not self.db_path.exists():
             raise FileNotFoundError(f"Project index not found: {self.db_path}")
         database_uri = self.db_path.resolve().as_uri() + "?mode=ro&immutable=1"
         conn = sqlite3.connect(database_uri, timeout=30, uri=True)
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA query_only = ON")
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA query_only = ON")
+            conn.row_factory = sqlite3.Row
+            yield conn
+        finally:
+            conn.close()
 
     def _tables(self, conn: sqlite3.Connection) -> List[str]:
         rows = conn.execute(
@@ -320,6 +325,31 @@ class FileIndexService:
         except Exception as exc:
             print(f"Error getting indexed file snapshot: {exc}")
             return None
+
+    def find_indexed_paths_by_name(self, filename: str, *, limit: int = 20) -> List[str]:
+        """Return exact basename matches from the maintained project index."""
+
+        name = Path(str(filename or "")).name
+        if not name:
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT path
+                    FROM files
+                    WHERE path = ? COLLATE NOCASE
+                       OR path LIKE ? COLLATE NOCASE
+                       OR path LIKE ? COLLATE NOCASE
+                    ORDER BY path
+                    LIMIT ?
+                    """,
+                    (name, f"%\\{name}", f"%/{name}", max(1, min(int(limit), 100))),
+                ).fetchall()
+            return [str(row["path"]) for row in rows]
+        except Exception as exc:
+            print(f"Error finding indexed paths by name: {exc}")
+            return []
 
     def list_all_indexed_files(self, limit: int = 100) -> List[str]:
         """List indexed paths."""

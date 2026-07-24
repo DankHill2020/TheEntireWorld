@@ -416,7 +416,6 @@ def resolve_reference(
     plural = bool(re.search(r"\b(those|these|files|assets|actors|changes)\b", lower))
     other = bool(re.search(r"\bother\b", lower))
     previous = bool(re.search(r"\b(previous|last)\b", lower))
-    ordinal = _ordinal_from_text(lower)
 
     if "change" in lower or "edit" in lower:
         if current.recent_edits:
@@ -426,6 +425,8 @@ def resolve_reference(
         return ReferenceResolution("unresolved", "recent edits", "edit", [], "recent_edits", 0.0, "No recent edits in workspace.")
 
     ids = list(current.selected_entity_sets.get(wanted_kind, []))
+    selected_count = len(ids)
+    ordinal = _ordinal_from_text(lower, len(ids))
     primary = current.primary_entities.get(wanted_kind, "")
     if other and primary:
         ids = [entity_id for entity_id in ids if entity_id != primary]
@@ -436,6 +437,16 @@ def resolve_reference(
             ids = [primary]
         elif ids:
             ids = ids[:1]
+    if ordinal is not None and selected_count and not ids:
+        return ReferenceResolution(
+            "unresolved",
+            text,
+            wanted_kind,
+            [],
+            "conversation_workspace",
+            0.0,
+            "The requested ordinal is outside the ranked result set.",
+        )
     if ids:
         return ReferenceResolution("resolved", text, wanted_kind, ids, "conversation_workspace", 0.98)
 
@@ -448,7 +459,21 @@ def resolve_reference(
             if other and primary:
                 frame_ids = [entity_id for entity_id in frame_ids if entity_id != primary]
             elif not plural:
-                frame_ids = frame_ids[:1]
+                frame_ordinal = _ordinal_from_text(lower, len(frame_ids))
+                if frame_ordinal is not None:
+                    frame_ids = frame_ids[frame_ordinal : frame_ordinal + 1]
+                else:
+                    frame_ids = frame_ids[:1]
+            if not frame_ids:
+                return ReferenceResolution(
+                    "unresolved",
+                    text,
+                    wanted_kind,
+                    [],
+                    "result_frame",
+                    0.0,
+                    "The requested ordinal is outside the ranked result set.",
+                )
             return ReferenceResolution("resolved", text, wanted_kind, frame_ids, "result_frame", 0.9)
     return ReferenceResolution("unresolved", text, wanted_kind, [], "conversation_workspace", 0.0, "No matching workspace entity.")
 
@@ -570,6 +595,17 @@ def workspace_update_from_change_session(session: Any, session_path: str = "") -
 
 def _entity_payloads_from_update(update: dict[str, Any]) -> list[dict[str, Any]]:
     payloads = [item for item in update.get("entities") or [] if isinstance(item, dict)]
+    for value in _as_list(
+        update.get("primary_file")
+        or update.get("selected_file")
+        or update.get("resolved_target_file")
+    ):
+        payloads.append(
+            file_entity_payload(
+                str(value),
+                source=str(update.get("source") or "workspace_update"),
+            )
+        )
     for key, kind in (
         ("files", "file"),
         ("selected_files", "file"),
@@ -699,13 +735,31 @@ def _kind_from_text(text: str, fallback: str = "") -> str:
     return "file"
 
 
-def _ordinal_from_text(text: str) -> int | None:
-    for word, index in (("first", 0), ("second", 1), ("third", 2), ("fourth", 3)):
+def _ordinal_from_text(text: str, count: int = 0) -> int | None:
+    for word, index in (
+        ("top", 0),
+        ("first", 0),
+        ("second", 1),
+        ("third", 2),
+        ("fourth", 3),
+        ("fifth", 4),
+        ("sixth", 5),
+        ("seventh", 6),
+        ("eighth", 7),
+        ("ninth", 8),
+        ("tenth", 9),
+    ):
         if re.search(rf"\b{word}\b", text):
             return index
+    numeric = re.search(r"\b(\d+)(?:st|nd|rd|th)\b", text)
+    if numeric:
+        return max(0, int(numeric.group(1)) - 1)
+    if count and re.search(r"\b(?:bottom|last|final)\b", text):
+        return count - 1
+    if count and re.search(r"\b(?:middle|center|centre)\b", text):
+        return (count - 1) // 2
     return None
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-

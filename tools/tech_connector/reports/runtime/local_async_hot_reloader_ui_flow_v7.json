@@ -1,0 +1,797 @@
+{
+  "prompt": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+  "plan_elapsed_seconds": 18.405,
+  "total_seconds": 162.576,
+  "updates": [
+    {
+      "seconds": 0.027,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.104,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 6.126,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 10.926,
+      "message": "Mapping incremental file ownership; ollama:qwen2.5-coder:7b; 9.2s planning budget remains"
+    },
+    {
+      "seconds": 11.6,
+      "message": "File-map worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 16.612,
+      "message": "File-map worker: model is still producing the architecture; 1156 response characters received"
+    },
+    {
+      "seconds": 18.405,
+      "message": "Prepared reviewable disposable-artifact architecture with file, API, dependency, algorithm, and test ownership"
+    },
+    {
+      "seconds": 18.406,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 18.429,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 18.433,
+      "message": "Using approved artifact architecture: 5 dependency-ordered file workers"
+    },
+    {
+      "seconds": 18.434,
+      "message": "Generating dependency_validator.py (1/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 24.169,
+      "message": "File worker dependency_validator.py: model active for 5.0s; 1633 response characters received"
+    },
+    {
+      "seconds": 27.168,
+      "message": "File worker dependency_validator.py: model active for 8.0s; 2522 response characters received"
+    },
+    {
+      "seconds": 27.175,
+      "message": "Repairing only DependencyValidator.atomic_swap in dependency_validator.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 37.949,
+      "message": "Function repair DependencyValidator.atomic_swap: model active for 3.6s; 968 response characters received"
+    },
+    {
+      "seconds": 37.965,
+      "message": "Repairing only DependencyValidator.drain_in_flight_calls in dependency_validator.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 39.975,
+      "message": "Function repair DependencyValidator.drain_in_flight_calls: model active for 1.3s; 336 response characters received"
+    },
+    {
+      "seconds": 39.976,
+      "message": "Repairing only DependencyValidator.drain_in_flight_calls in dependency_validator.py; callable attempt 2/2"
+    },
+    {
+      "seconds": 48.846,
+      "message": "Function repair DependencyValidator.drain_in_flight_calls: model active for 1.3s; 336 response characters received"
+    },
+    {
+      "seconds": 48.847,
+      "message": "Rejected dependency_validator.py; integration notes returned to its file worker: Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+    },
+    {
+      "seconds": 48.848,
+      "message": "Generating dependency_validator.py (1/5; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 61.151,
+      "message": "File worker dependency_validator.py: model active for 5.0s; 1590 response characters received"
+    },
+    {
+      "seconds": 64.374,
+      "message": "File worker dependency_validator.py: model active for 8.2s; 2522 response characters received"
+    },
+    {
+      "seconds": 64.38,
+      "message": "Repairing only DependencyValidator.atomic_swap in dependency_validator.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 74.084,
+      "message": "Function repair DependencyValidator.atomic_swap: model active for 3.6s; 968 response characters received"
+    },
+    {
+      "seconds": 74.111,
+      "message": "Repairing only DependencyValidator.drain_in_flight_calls in dependency_validator.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 76.036,
+      "message": "Function repair DependencyValidator.drain_in_flight_calls: model active for 1.3s; 336 response characters received"
+    },
+    {
+      "seconds": 76.037,
+      "message": "Repairing only DependencyValidator.drain_in_flight_calls in dependency_validator.py; callable attempt 2/2"
+    },
+    {
+      "seconds": 84.714,
+      "message": "Function repair DependencyValidator.drain_in_flight_calls: model active for 1.3s; 336 response characters received"
+    },
+    {
+      "seconds": 84.715,
+      "message": "Rejected dependency_validator.py; integration notes returned to its file worker: Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+    },
+    {
+      "seconds": 84.715,
+      "message": "Stopping identical full-file retries for dependency_validator.py; escalating the unchanged contract failure"
+    },
+    {
+      "seconds": 84.715,
+      "message": "Returning unchanged or structural failures to the architecture worker; revising module ownership before further code repair"
+    },
+    {
+      "seconds": 84.716,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 85.67,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 90.327,
+      "message": "Mapping incremental file ownership; ollama:qwen2.5-coder:7b; 14.4s planning budget remains"
+    },
+    {
+      "seconds": 91.196,
+      "message": "File-map worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 94.388,
+      "message": "Using approved artifact architecture: 2 dependency-ordered file workers"
+    },
+    {
+      "seconds": 94.389,
+      "message": "Generating hot_reloader.py (1/2; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 100.08,
+      "message": "File worker hot_reloader.py: model active for 5.0s; 1529 response characters received"
+    },
+    {
+      "seconds": 105.086,
+      "message": "File worker hot_reloader.py: model active for 10.0s; 2913 response characters received"
+    },
+    {
+      "seconds": 105.886,
+      "message": "File worker hot_reloader.py: model active for 10.8s; 3123 response characters received"
+    },
+    {
+      "seconds": 105.901,
+      "message": "Implementing only missing public symbol DependencyValidator in hot_reloader.py"
+    },
+    {
+      "seconds": 107.585,
+      "message": "Missing symbol DependencyValidator: model active for 0.9s; 278 response characters received"
+    },
+    {
+      "seconds": 107.599,
+      "message": "Repairing only CallDrainer.drain_in_flight_calls in hot_reloader.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 116.492,
+      "message": "Function repair CallDrainer.drain_in_flight_calls: model active for 1.6s; 414 response characters received"
+    },
+    {
+      "seconds": 116.495,
+      "message": "Repairing only CallDrainer.drain_in_flight_calls in hot_reloader.py; callable attempt 2/2"
+    },
+    {
+      "seconds": 122.59,
+      "message": "Function repair CallDrainer.drain_in_flight_calls: model active for 0.5s; 131 response characters received"
+    },
+    {
+      "seconds": 122.59,
+      "message": "Rejected hot_reloader.py; integration notes returned to its file worker: Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+    },
+    {
+      "seconds": 122.591,
+      "message": "Generating hot_reloader.py (1/2; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 134.254,
+      "message": "File worker hot_reloader.py: model active for 5.0s; 1518 response characters received"
+    },
+    {
+      "seconds": 139.263,
+      "message": "File worker hot_reloader.py: model active for 10.0s; 2889 response characters received"
+    },
+    {
+      "seconds": 140.209,
+      "message": "File worker hot_reloader.py: model active for 11.0s; 3123 response characters received"
+    },
+    {
+      "seconds": 140.214,
+      "message": "Implementing only missing public symbol DependencyValidator in hot_reloader.py"
+    },
+    {
+      "seconds": 148.138,
+      "message": "Missing symbol DependencyValidator: model active for 0.9s; 278 response characters received"
+    },
+    {
+      "seconds": 148.157,
+      "message": "Repairing only CallDrainer.drain_in_flight_calls in hot_reloader.py; callable attempt 1/2"
+    },
+    {
+      "seconds": 155.662,
+      "message": "Function repair CallDrainer.drain_in_flight_calls: model active for 1.6s; 414 response characters received"
+    },
+    {
+      "seconds": 155.665,
+      "message": "Repairing only CallDrainer.drain_in_flight_calls in hot_reloader.py; callable attempt 2/2"
+    },
+    {
+      "seconds": 162.572,
+      "message": "Function repair CallDrainer.drain_in_flight_calls: model active for 0.5s; 131 response characters received"
+    },
+    {
+      "seconds": 162.573,
+      "message": "Rejected hot_reloader.py; integration notes returned to its file worker: Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+    },
+    {
+      "seconds": 162.573,
+      "message": "Stopping identical full-file retries for hot_reloader.py; escalating the unchanged contract failure"
+    },
+    {
+      "seconds": 162.573,
+      "message": "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+    },
+    {
+      "seconds": 162.576,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: DependencyValidator\n- canonical_owners: ImportIsolator\n- canonical_owners: CallDrainer\n- canonical_owners: SwapManager\n- canonical_owners: RollbackHandler\n- signatures: validate_dependency_dag(dependency_graph)\n- signatures: isolate_imports(module_path)\n- signatures: drain_in_flight_calls(module_path)\n- signatures: atomic_swap(old_module, new_module)\n- signatures: rollback_swap(failed_module)\n- shared_invariants: module_path must be a valid Python module path\n- shared_invariants: dependency_graph must be a dictionary representing the module dependency graph\n- data_layout: DependencyGraph: {module_name: [dependent_modules]}\n- data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}\n- errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules\n- errors: ImportFailureError: Failed to isolate module imports\n- errors: CallDrainError: Failed to drain in-flight calls\n- errors: SwapFailedError: Atomic swap of modules failed\n- errors: RollbackFailedError: Rollback of failed swap failed\n\n- `tech_connector/dependency_validator.py`: Validation of the dependency DAG.\n  - role: production\n  - requirement IDs: R1\n  - public API: DependencyValidator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/import_isolator.py`: Isolation of module imports.\n  - role: production\n  - requirement IDs: R1\n  - public API: ImportIsolator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/swap_manager.py`: Atomic swap of modules.; Draining in-flight calls.\n  - role: production\n  - requirement IDs: R1\n  - public API: SwapManager; CallDrainer\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependency repairs for review: Combined bounded owner tech_connector/call_drainer.py into tech_connector/swap_manager.py.\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/hot_reloader.py`: Production code for the hot-reloader plugin.\n  - role: production\n  - requirement IDs: R1\n  - public API: HotReloader\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/hot_reloader.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py, tech_connector/hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+    "plan": "Implementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: DependencyValidator\n- canonical_owners: ImportIsolator\n- canonical_owners: CallDrainer\n- canonical_owners: SwapManager\n- canonical_owners: RollbackHandler\n- signatures: validate_dependency_dag(dependency_graph)\n- signatures: isolate_imports(module_path)\n- signatures: drain_in_flight_calls(module_path)\n- signatures: atomic_swap(old_module, new_module)\n- signatures: rollback_swap(failed_module)\n- shared_invariants: module_path must be a valid Python module path\n- shared_invariants: dependency_graph must be a dictionary representing the module dependency graph\n- data_layout: DependencyGraph: {module_name: [dependent_modules]}\n- data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}\n- errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules\n- errors: ImportFailureError: Failed to isolate module imports\n- errors: CallDrainError: Failed to drain in-flight calls\n- errors: SwapFailedError: Atomic swap of modules failed\n- errors: RollbackFailedError: Rollback of failed swap failed\n\n- `tech_connector/dependency_validator.py`: Validation of the dependency DAG.\n  - role: production\n  - requirement IDs: R1\n  - public API: DependencyValidator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/import_isolator.py`: Isolation of module imports.\n  - role: production\n  - requirement IDs: R1\n  - public API: ImportIsolator\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/swap_manager.py`: Atomic swap of modules.; Draining in-flight calls.\n  - role: production\n  - requirement IDs: R1\n  - public API: SwapManager; CallDrainer\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependency repairs for review: Combined bounded owner tech_connector/call_drainer.py into tech_connector/swap_manager.py.\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/hot_reloader.py`: Production code for the hot-reloader plugin.\n  - role: production\n  - requirement IDs: R1\n  - public API: HotReloader\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/hot_reloader.py, tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/dependency_validator.py, tech_connector/import_isolator.py, tech_connector/swap_manager.py, tech_connector/hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad",
+    "artifact_manifest": [
+      {
+        "path": "tech_connector/dependency_validator.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+        "purpose": "Validation of the dependency DAG.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "DependencyValidator"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(dependency_graph)",
+          "signatures: isolate_imports(module_path)",
+          "signatures: drain_in_flight_calls(module_path)",
+          "signatures: atomic_swap(old_module, new_module)",
+          "signatures: rollback_swap(failed_module)",
+          "shared_invariants: module_path must be a valid Python module path",
+          "shared_invariants: dependency_graph must be a dictionary representing the module dependency graph",
+          "data_layout: DependencyGraph: {module_name: [dependent_modules]}",
+          "data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}",
+          "errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules",
+          "errors: ImportFailureError: Failed to isolate module imports",
+          "errors: CallDrainError: Failed to drain in-flight calls",
+          "errors: SwapFailedError: Atomic swap of modules failed",
+          "errors: RollbackFailedError: Rollback of failed swap failed"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/import_isolator.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\import_isolator.py",
+        "purpose": "Isolation of module imports.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "ImportIsolator"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(dependency_graph)",
+          "signatures: isolate_imports(module_path)",
+          "signatures: drain_in_flight_calls(module_path)",
+          "signatures: atomic_swap(old_module, new_module)",
+          "signatures: rollback_swap(failed_module)",
+          "shared_invariants: module_path must be a valid Python module path",
+          "shared_invariants: dependency_graph must be a dictionary representing the module dependency graph",
+          "data_layout: DependencyGraph: {module_name: [dependent_modules]}",
+          "data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}",
+          "errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules",
+          "errors: ImportFailureError: Failed to isolate module imports",
+          "errors: CallDrainError: Failed to drain in-flight calls",
+          "errors: SwapFailedError: Atomic swap of modules failed",
+          "errors: RollbackFailedError: Rollback of failed swap failed"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/swap_manager.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\swap_manager.py",
+        "purpose": "Atomic swap of modules.; Draining in-flight calls.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "SwapManager",
+          "CallDrainer"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(dependency_graph)",
+          "signatures: isolate_imports(module_path)",
+          "signatures: drain_in_flight_calls(module_path)",
+          "signatures: atomic_swap(old_module, new_module)",
+          "signatures: rollback_swap(failed_module)",
+          "shared_invariants: module_path must be a valid Python module path",
+          "shared_invariants: dependency_graph must be a dictionary representing the module dependency graph",
+          "data_layout: DependencyGraph: {module_name: [dependent_modules]}",
+          "data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}",
+          "errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules",
+          "errors: ImportFailureError: Failed to isolate module imports",
+          "errors: CallDrainError: Failed to drain in-flight calls",
+          "errors: SwapFailedError: Atomic swap of modules failed",
+          "errors: RollbackFailedError: Rollback of failed swap failed"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Combined bounded owner tech_connector/call_drainer.py into tech_connector/swap_manager.py."
+        ],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/hot_reloader.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\hot_reloader.py",
+        "purpose": "Production code for the hot-reloader plugin.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "HotReloader"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(dependency_graph)",
+          "signatures: isolate_imports(module_path)",
+          "signatures: drain_in_flight_calls(module_path)",
+          "signatures: atomic_swap(old_module, new_module)",
+          "signatures: rollback_swap(failed_module)",
+          "shared_invariants: module_path must be a valid Python module path",
+          "shared_invariants: dependency_graph must be a dictionary representing the module dependency graph",
+          "data_layout: DependencyGraph: {module_name: [dependent_modules]}",
+          "data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}",
+          "errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules",
+          "errors: ImportFailureError: Failed to isolate module imports",
+          "errors: CallDrainError: Failed to drain in-flight calls",
+          "errors: SwapFailedError: Atomic swap of modules failed",
+          "errors: RollbackFailedError: Rollback of failed swap failed"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Collapsed absent manifest dependency into this file's owned implementation: src/tech_connector/rollback_handler.py"
+        ],
+        "depends_on": [
+          "tech_connector/dependency_validator.py",
+          "tech_connector/import_isolator.py",
+          "tech_connector/swap_manager.py"
+        ],
+        "is_test": false
+      },
+      {
+        "path": "examples/tech_connector/tests/test_generated_artifact.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py",
+        "purpose": "Behavioral proof for every generated artifact requirement.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Run focused disposable behavioral tests for owned requirement IDs."
+        ],
+        "integration_contracts": [
+          "canonical_owners: DependencyValidator",
+          "canonical_owners: ImportIsolator",
+          "canonical_owners: CallDrainer",
+          "canonical_owners: SwapManager",
+          "canonical_owners: RollbackHandler",
+          "signatures: validate_dependency_dag(dependency_graph)",
+          "signatures: isolate_imports(module_path)",
+          "signatures: drain_in_flight_calls(module_path)",
+          "signatures: atomic_swap(old_module, new_module)",
+          "signatures: rollback_swap(failed_module)",
+          "shared_invariants: module_path must be a valid Python module path",
+          "shared_invariants: dependency_graph must be a dictionary representing the module dependency graph",
+          "data_layout: DependencyGraph: {module_name: [dependent_modules]}",
+          "data_layout: ModuleState: {'imported': bool, 'in_flight_calls': int}",
+          "errors: InvalidDependencyError: Dependency DAG contains circular references or invalid modules",
+          "errors: ImportFailureError: Failed to isolate module imports",
+          "errors: CallDrainError: Failed to drain in-flight calls",
+          "errors: SwapFailedError: Atomic swap of modules failed",
+          "errors: RollbackFailedError: Rollback of failed swap failed"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [
+          "tech_connector/hot_reloader.py",
+          "tech_connector/dependency_validator.py",
+          "tech_connector/import_isolator.py",
+          "tech_connector/swap_manager.py"
+        ],
+        "is_test": true
+      }
+    ],
+    "requirement_ledger": [
+      {
+        "id": "R1",
+        "text": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+        "scope": "artifact"
+      },
+      {
+        "id": "R2",
+        "text": "Do not edit live project files",
+        "scope": "workflow"
+      },
+      {
+        "id": "R3",
+        "text": "generate and validate only in a disposable workspace",
+        "scope": "workflow"
+      }
+    ],
+    "reasoning_gaps": [],
+    "planning_trace": [
+      {
+        "stage": "artifact_integration_contract",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 10.821,
+        "response_characters": 1113,
+        "response": "{\n  \"integration_contracts\": {\n    \"canonical_owners\": [\n      \"DependencyValidator\",\n      \"ImportIsolator\",\n      \"CallDrainer\",\n      \"SwapManager\",\n      \"RollbackHandler\"\n    ],\n    \"signatures\": [\n      \"validate_dependency_dag(dependency_graph)\",\n      \"isolate_imports(module_path)\",\n      \"drain_in_flight_calls(module_path)\",\n      \"atomic_swap(old_module, new_module)\",\n      \"rollback_swap(failed_module)\"\n    ],\n    \"shared_invariants\": [\n      \"module_path must be a valid Python module path\",\n      \"dependency_graph must be a dictionary representing the module dependency graph\"\n    ],\n    \"data_layout\": [\n      \"DependencyGraph: {module_name: [dependent_modules]}\",\n      \"ModuleState: {'imported': bool, 'in_flight_calls': int}\"\n    ],\n    \"errors\": [\n      \"InvalidDependencyError: Dependency DAG contains circular references or invalid modules\",\n      \"ImportFailureError: Failed to isolate module imports\",\n      \"CallDrainError: Failed to drain in-flight calls\",\n      \"SwapFailedError: Atomic swap of modules failed\",\n      \"RollbackFailedError: Rollback of failed swap failed\"\n    ]\n  }\n}"
+      },
+      {
+        "stage": "artifact_file_map",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 7.478,
+        "response_characters": 1560,
+        "response": "{\n  \"files\": [\n    {\n      \"path\": \"src/tech_connector/hot_reloader.py\",\n      \"purpose\": \"Production code for the hot-reloader plugin.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"HotReloader\"\n      ],\n      \"depends_on\": [\n        \"src/tech_connector/dependency_validator.py\",\n        \"src/tech_connector/import_isolator.py\",\n        \"src/tech_connector/call_drainer.py\",\n        \"src/tech_connector/swap_manager.py\",\n        \"src/tech_connector/rollback_handler.py\"\n      ],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/dependency_validator.py\",\n      \"purpose\": \"Validation of the dependency DAG.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"DependencyValidator\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/import_isolator.py\",\n      \"purpose\": \"Isolation of module imports.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"ImportIsolator\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/call_drainer.py\",\n      \"purpose\": \"Draining in-flight calls.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"CallDrainer\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"src/tech_connector/swap_manager.py\",\n      \"purpose\": \"Atomic swap of modules.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\n        \"SwapManager\"\n      ],\n      \"depends_on\": [],\n      \"is_test\": false\n    }\n  ]\n}"
+      }
+    ]
+  },
+  "result": {
+    "text": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed.\n\nRequirement coverage:\n- R1 [blocked]: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages | production=tech_connector/services/generated/hot_reloader.py | tests=examples/tech_connector/tests/test_hot_reloader.py\n- R2 [blocked]: Do not edit live project files | workflow=project_edit_flow\n- R3 [blocked]: generate and validate only in a disposable workspace | workflow=project_edit_flow",
+    "payload": {
+      "type": "project_changes_rejected",
+      "changes": [],
+      "validation_errors": [
+        "Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed."
+      ],
+      "requirement_coverage": [
+        {
+          "id": "R1",
+          "requirement": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "scope": "artifact",
+          "system_owners": [],
+          "production_owners": [
+            "tech_connector/services/generated/hot_reloader.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_hot_reloader.py"
+          ],
+          "validation": [
+            "Import the completed file and read back its declared public interface.",
+            "Run focused disposable behavioral tests for owned requirement IDs."
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R2",
+          "requirement": "Do not edit live project files",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R3",
+          "requirement": "generate and validate only in a disposable workspace",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        }
+      ],
+      "reasoning_gaps": [
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.atomic_swap",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 968,
+          "validator_errors": [],
+          "fallback_action": "splice repaired callable and revalidate file"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.drain_in_flight_calls",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 336,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.drain_in_flight_calls",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 336,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 2522,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.atomic_swap",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 968,
+          "validator_errors": [],
+          "fallback_action": "splice repaired callable and revalidate file"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.drain_in_flight_calls",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 336,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "symbol": "DependencyValidator.drain_in_flight_calls",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 336,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\dependency_validator.py",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 2522,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_missing_symbol",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "DependencyValidator",
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 278,
+          "validator_errors": [],
+          "fallback_action": "insert declaration and revalidate file"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "CallDrainer.drain_in_flight_calls",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 414,
+          "validator_errors": [
+            "Repair changed async form for CallDrainer.drain_in_flight_calls."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "CallDrainer.drain_in_flight_calls",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 131,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 3123,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_missing_symbol",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "DependencyValidator",
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 278,
+          "validator_errors": [],
+          "fallback_action": "insert declaration and revalidate file"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "CallDrainer.drain_in_flight_calls",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 414,
+          "validator_errors": [
+            "Repair changed async form for CallDrainer.drain_in_flight_calls."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_symbol_repair",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "symbol": "CallDrainer.drain_in_flight_calls",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 131,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry only the rejected callable"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\hot_reloader.py",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 3123,
+          "validator_errors": [
+            "Repaired symbol drain_in_flight_calls contains a placeholder pass body."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        }
+      ]
+    }
+  }
+}

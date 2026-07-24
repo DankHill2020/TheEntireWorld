@@ -200,6 +200,7 @@ def load_settings() -> dict:
         "asset_optimizer_provider_module": "default",
         "use_websocket_bridge": False,
         "chatbot_provider_module": "default",
+        "skip_splash_video": False,
     }
     if SETTINGS_PATH.exists():
         try:

@@ -1,0 +1,1324 @@
+{
+  "prompt": "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks. Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32. The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering. Support optional zlib-compressed payloads with strict decompressed-size limits, per-stream sequence gap reporting, configurable maximum frame and buffer sizes, backpressure-friendly incremental feed/drain APIs, immutable typed events, and counters for every rejection reason. Never deserialize executable objects. Include an encoder used for round-trip tests, deterministic fuzz/property-style tests without third-party packages, adversarial one-byte chunk tests, multiple interleaved streams, wraparound sequence numbers, cancellation, and proof that retained memory remains bounded during megabytes of hostile input. Generate focused modules using only the standard library. Do not modify live project files; build and execute solely in a disposable workspace. Return all generated code, exact planning decisions, test and repair logs, per-stage timings, and a requirement coverage matrix.",
+  "plan_elapsed_seconds": 105.779,
+  "total_seconds": 240.777,
+  "updates": [
+    {
+      "seconds": 0.014,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.081,
+      "message": "Designing generated file contract; qwen2.5:1.5b; attempt 1/4; validating architecture, APIs, requirements, and dependency ownership"
+    },
+    {
+      "seconds": 0.681,
+      "message": "Architecture worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 5.683,
+      "message": "Architecture worker: model is still producing the architecture; 2140 response characters received"
+    },
+    {
+      "seconds": 10.687,
+      "message": "Architecture worker: model is still producing the architecture; 4761 response characters received"
+    },
+    {
+      "seconds": 14.03,
+      "message": "Rejected artifact architecture attempt 1/4: Artifact manifest has an unsafe or non-Python path: README.md"
+    },
+    {
+      "seconds": 14.03,
+      "message": "Designing generated file contract; qwen2.5:3b; attempt 2/4; validating architecture, APIs, requirements, and dependency ownership"
+    },
+    {
+      "seconds": 27.798,
+      "message": "Architecture worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 32.801,
+      "message": "Architecture worker: model is still producing the architecture; 1840 response characters received"
+    },
+    {
+      "seconds": 37.804,
+      "message": "Architecture worker: model is still producing the architecture; 3891 response characters received"
+    },
+    {
+      "seconds": 42.807,
+      "message": "Architecture worker: model is still producing the architecture; 6462 response characters received"
+    },
+    {
+      "seconds": 47.816,
+      "message": "Architecture worker: model is still producing the architecture; 8338 response characters received"
+    },
+    {
+      "seconds": 52.819,
+      "message": "Architecture worker: model is still producing the architecture; 10526 response characters received"
+    },
+    {
+      "seconds": 57.391,
+      "message": "Rejected artifact architecture attempt 2/4: Artifact manifest dependency is not another manifest path (src/telemetry_decoder.py): src/telemetry_encoder.py"
+    },
+    {
+      "seconds": 57.394,
+      "message": "Designing generated file contract; qwen2.5-coder:7b; attempt 3/4; validating architecture, APIs, requirements, and dependency ownership"
+    },
+    {
+      "seconds": 67.751,
+      "message": "Architecture worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 72.765,
+      "message": "Architecture worker: model is still producing the architecture; 1241 response characters received"
+    },
+    {
+      "seconds": 77.777,
+      "message": "Architecture worker: model is still producing the architecture; 2622 response characters received"
+    },
+    {
+      "seconds": 82.788,
+      "message": "Architecture worker: model is still producing the architecture; 3974 response characters received"
+    },
+    {
+      "seconds": 87.788,
+      "message": "Architecture worker: model is still producing the architecture; 5367 response characters received"
+    },
+    {
+      "seconds": 92.796,
+      "message": "Architecture worker: model is still producing the architecture; 6937 response characters received"
+    },
+    {
+      "seconds": 97.812,
+      "message": "Architecture worker: model is still producing the architecture; 8462 response characters received"
+    },
+    {
+      "seconds": 102.821,
+      "message": "Architecture worker: model is still producing the architecture; 9963 response characters received"
+    },
+    {
+      "seconds": 105.777,
+      "message": "Prepared reviewable disposable-artifact architecture with file, API, dependency, algorithm, and test ownership"
+    },
+    {
+      "seconds": 105.779,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 105.818,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 105.823,
+      "message": "Using approved artifact architecture: 9 dependency-ordered file workers"
+    },
+    {
+      "seconds": 105.824,
+      "message": "Generating decoder.py (1/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 116.479,
+      "message": "File worker decoder.py: model active for 5.0s; 1471 response characters received"
+    },
+    {
+      "seconds": 121.489,
+      "message": "File worker decoder.py: model active for 10.0s; 3074 response characters received"
+    },
+    {
+      "seconds": 125.515,
+      "message": "File worker decoder.py: model active for 14.0s; 3891 response characters received"
+    },
+    {
+      "seconds": 125.526,
+      "message": "Integration architect accepted decoder.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 125.527,
+      "message": "Generating encoder.py (2/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 131.349,
+      "message": "File worker encoder.py: model active for 5.0s; 1296 response characters received"
+    },
+    {
+      "seconds": 131.354,
+      "message": "Integration architect accepted encoder.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 131.355,
+      "message": "Generating test_cancelation.py (3/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 136.119,
+      "message": "File worker test_cancelation.py: model active for 3.8s; 919 response characters received"
+    },
+    {
+      "seconds": 136.128,
+      "message": "Integration architect accepted test_cancelation.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 136.129,
+      "message": "Generating test_coverage_matrix.py (4/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 142.146,
+      "message": "File worker test_coverage_matrix.py: model active for 5.0s; 1032 response characters received"
+    },
+    {
+      "seconds": 147.158,
+      "message": "File worker test_coverage_matrix.py: model active for 10.0s; 2000 response characters received"
+    },
+    {
+      "seconds": 152.16,
+      "message": "File worker test_coverage_matrix.py: model active for 15.0s; 3188 response characters received"
+    },
+    {
+      "seconds": 152.162,
+      "message": "Rejected test_coverage_matrix.py; integration notes returned to its file worker: Generated file omitted manifest-declared public symbols (test_coverage_matrix.py): generate_coverage_matrix"
+    },
+    {
+      "seconds": 152.163,
+      "message": "Generating test_coverage_matrix.py (4/9; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 163.215,
+      "message": "File worker test_coverage_matrix.py: model active for 5.0s; 1550 response characters received"
+    },
+    {
+      "seconds": 166.038,
+      "message": "File worker test_coverage_matrix.py: model active for 7.8s; 2413 response characters received"
+    },
+    {
+      "seconds": 166.039,
+      "message": "Rejected test_coverage_matrix.py; integration notes returned to its file worker: Generated test file defines no test_* methods: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_coverage_matrix.py"
+    },
+    {
+      "seconds": 166.04,
+      "message": "Generating test_coverage_matrix.py (4/9; attempt 3/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 171.573,
+      "message": "File worker test_coverage_matrix.py: model active for 5.0s; 1548 response characters received"
+    },
+    {
+      "seconds": 174.389,
+      "message": "File worker test_coverage_matrix.py: model active for 7.8s; 2411 response characters received"
+    },
+    {
+      "seconds": 174.39,
+      "message": "Rejected test_coverage_matrix.py; integration notes returned to its file worker: Generated test file defines no test_* methods: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_coverage_matrix.py"
+    },
+    {
+      "seconds": 174.39,
+      "message": "Returning unchanged or structural failures to the architecture worker; revising module ownership before further code repair"
+    },
+    {
+      "seconds": 174.39,
+      "message": "Designing generated file contract; qwen2.5:1.5b; attempt 1/4; validating architecture, APIs, requirements, and dependency ownership"
+    },
+    {
+      "seconds": 177.109,
+      "message": "Architecture worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 182.115,
+      "message": "Architecture worker: model is still producing the architecture; 3142 response characters received"
+    },
+    {
+      "seconds": 187.118,
+      "message": "Architecture worker: model is still producing the architecture; 6692 response characters received"
+    },
+    {
+      "seconds": 192.121,
+      "message": "Architecture worker: model is still producing the architecture; 10237 response characters received"
+    },
+    {
+      "seconds": 194.143,
+      "message": "Using approved artifact architecture: 9 dependency-ordered file workers"
+    },
+    {
+      "seconds": 194.144,
+      "message": "Generating decoder.py (1/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 209.375,
+      "message": "File worker decoder.py: model active for 5.0s; 1540 response characters received"
+    },
+    {
+      "seconds": 214.383,
+      "message": "File worker decoder.py: model active for 10.0s; 3047 response characters received"
+    },
+    {
+      "seconds": 215.236,
+      "message": "File worker decoder.py: model active for 10.9s; 3312 response characters received"
+    },
+    {
+      "seconds": 215.242,
+      "message": "Integration architect accepted decoder.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 215.242,
+      "message": "Generating encoder.py (2/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 220.936,
+      "message": "File worker encoder.py: model active for 5.0s; 1441 response characters received"
+    },
+    {
+      "seconds": 223.929,
+      "message": "File worker encoder.py: model active for 8.0s; 2271 response characters received"
+    },
+    {
+      "seconds": 223.939,
+      "message": "Integration architect accepted encoder.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 223.94,
+      "message": "Generating test_cancelation.py (3/9; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 228.248,
+      "message": "File worker test_cancelation.py: model active for 3.4s; 967 response characters received"
+    },
+    {
+      "seconds": 228.249,
+      "message": "Rejected test_cancelation.py; integration notes returned to its file worker: Generated test file contains only placeholder tests: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_cancelation.py"
+    },
+    {
+      "seconds": 228.25,
+      "message": "Generating test_cancelation.py (3/9; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 237.023,
+      "message": "File worker test_cancelation.py: model active for 3.4s; 967 response characters received"
+    },
+    {
+      "seconds": 237.024,
+      "message": "Rejected test_cancelation.py; integration notes returned to its file worker: Generated test file contains only placeholder tests: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_cancelation.py"
+    },
+    {
+      "seconds": 237.025,
+      "message": "Generating test_cancelation.py (3/9; attempt 3/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 240.773,
+      "message": "File worker test_cancelation.py: model active for 3.4s; 967 response characters received"
+    },
+    {
+      "seconds": 240.775,
+      "message": "Rejected test_cancelation.py; integration notes returned to its file worker: Generated test file contains only placeholder tests: C:\\depot\\tools\\examples\\tech_connector\\tests\\test_cancelation.py"
+    },
+    {
+      "seconds": 240.775,
+      "message": "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+    },
+    {
+      "seconds": 240.777,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks. Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32. The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering. Support optional zlib-compressed payloads with strict decompressed-size limits, per-stream sequence gap reporting, configurable maximum frame and buffer sizes, backpressure-friendly incremental feed/drain APIs, immutable typed events, and counters for every rejection reason. Never deserialize executable objects. Include an encoder used for round-trip tests, deterministic fuzz/property-style tests without third-party packages, adversarial one-byte chunk tests, multiple interleaved streams, wraparound sequence numbers, cancellation, and proof that retained memory remains bounded during megabytes of hostile input. Generate focused modules using only the standard library. Do not modify live project files; build and execute solely in a disposable workspace. Return all generated code, exact planning decisions, test and repair logs, per-stage timings, and a requirement coverage matrix.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\n- `examples/tech_connector/decoder.py`: Decode untrusted framed binary telemetry streams.\n  - role: production\n  - requirement IDs: R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R18, R20, R24\n  - public API: decode_stream; Decoder\n  - contracts: Inputs: bytes (untrusted telemetry stream), int (max_frame_size), int (max_buffer_size); Outputs: list of events, dict of counters; Errors: ValueError on invalid input, MemoryError if memory usage exceeds limits; State Transitions: None; Invariants: Decoder maintains internal state for resynchronization and error handling\n  - algorithm: Initialize decoder with max_frame_size and max_buffer_size -> Iterate through input bytes in chunks -> Detect sync marker to identify frame boundaries -> Parse frame header (version, flags, stream id, sequence number, payload length) -> Verify CRC32 for data integrity -> Decompress payload if zlib-compressed -> Validate decompressed size against limits -> Store valid frames in buffer -> Recover from errors by resynchronizing and discarding invalid frames\n  - validation: Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded\n  - inferred ownership for review: R18 (deterministic semantic ownership fallback); R20 (deterministic semantic ownership fallback); R24 (missing production owner inferred deterministically)\n- `examples/tech_connector/encoder.py`: Encode telemetry events into a framed binary stream.\n  - role: production\n  - requirement IDs: R11, R19, R21, R22, R23, R12, R13, R14, R15, R16, R17, R25\n  - public API: encode_event\n  - contracts: Inputs: event (immutable typed event); Outputs: bytes (encoded telemetry frame); Errors: ValueError on invalid input; State Transitions: None; Invariants: Encoder maintains no internal state\n  - algorithm: Serialize event into a binary format -> Calculate CRC32 for data integrity -> Construct frame with sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32\n  - dependencies: examples/tech_connector/decoder.py\n  - validation: Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling\n  - inferred ownership for review: R19 (deterministic semantic ownership fallback); R21 (deterministic semantic ownership fallback); R22 (deterministic semantic ownership fallback); R23 (deterministic semantic ownership fallback); R12 (missing production owner inferred deterministically); R13 (missing production owner inferred deterministically); R14 (missing production owner inferred deterministically); R15 (missing production owner inferred deterministically); R16 (missing production owner inferred deterministically); R17 (missing production owner inferred deterministically); R25 (missing production owner inferred deterministically)\n- `examples/tech_connector/tests/test_cancelation.py`: Test cancelation behavior of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R16\n  - public API: test_decoder_cancelation; test_encoder_cancelation\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate cancelation behavior under various conditions\n  - algorithm: Set up tests with large input sizes and multiple streams -> Call decode_stream and encode_event with cancelation signals and verify behavior matches expected results -> Verify that decoder and encoder can handle cancelation signals without errors\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of cancelation scenarios to ensure complete coverage; Verify that decoder and encoder can recover from cancelation signals and continue processing valid frames/events\n- `examples/tech_connector/tests/test_coverage_matrix.py`: Generate a requirement coverage matrix for the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R25\n  - public API: generate_coverage_matrix\n  - contracts: Inputs: None; Outputs: dict (requirement coverage matrix); Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests generate a requirement coverage matrix for the decoder and encoder\n  - algorithm: Retrieve all requirements from the requirement ledger -> Identify which requirements are owned by each production file -> Generate a requirement coverage matrix that shows which files cover each requirement\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on the generated coverage matrix to ensure complete coverage; Verify that the coverage matrix accurately reflects the ownership of each requirement\n- `examples/tech_connector/tests/test_decoder.py`: Test the decoder implementation.\n  - role: behavioral tests\n  - requirement IDs: R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R18, R20\n  - public API: test_decode_stream; test_decoder_resynchronization\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate decoder behavior under various conditions\n  - algorithm: Set up test cases with known good and bad telemetry streams -> Call decode_stream with test cases and verify output events and counters match expected results -> Simulate errors (CRC failures, invalid payloads) and verify error handling\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames\n  - inferred ownership for review: R18 (deterministic semantic ownership fallback); R20 (deterministic semantic ownership fallback)\n- `examples/tech_connector/tests/test_encoder.py`: Test the encoder implementation.\n  - role: behavioral tests\n  - requirement IDs: R11, R23\n  - public API: test_encode_event\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate encoder behavior under various conditions\n  - algorithm: Set up test cases with known good events -> Call encode_event with test cases and verify output frames match expected format -> Simulate invalid input and verify error handling\n  - dependencies: examples/tech_connector/encoder.py, examples/tech_connector/decoder.py\n  - validation: Run tests on a variety of event types to ensure complete coverage; Verify that encoder produces valid telemetry frames for all supported event types\n  - inferred ownership for review: R23 (deterministic semantic ownership fallback)\n- `examples/tech_connector/tests/test_fuzzing.py`: Perform deterministic fuzz testing on the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R12, R13, R14, R15, R16\n  - public API: test_adversarial_chunks; test_multiple_streams; test_wraparound_sequence_numbers\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate decoder and encoder robustness under adversarial conditions\n  - algorithm: Generate adversarial input chunks with one-byte variations -> Call decode_stream and encode_event with adversarial inputs and verify behavior matches expected results -> Simulate multiple interleaved streams and wraparound sequence numbers -> Verify that decoder and encoder handle these scenarios without errors\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events\n- `examples/tech_connector/tests/test_memory_usage.py`: Verify memory usage of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R17\n  - public API: test_decoder_memory_usage; test_encoder_memory_usage\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests verify memory usage remains bounded during megabytes of hostile input\n  - algorithm: Set up tests with large input sizes and multiple streams -> Call decode_stream and encode_event with large inputs and measure memory usage -> Verify that decoder and encoder maintain consistent memory usage without quadratic scanning or unbounded buffering\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run memory usage tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain bounded memory usage during megabytes of hostile input\n- `examples/tech_connector/tests/test_performance.py`: Measure performance of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R24, R19, R21, R22\n  - public API: test_decoder_performance; test_encoder_performance\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests measure performance under various conditions\n  - algorithm: Set up benchmark tests with large input sizes and multiple streams -> Call decode_stream and encode_event with benchmark inputs and measure execution time -> Verify that decoder and encoder can handle large inputs efficiently without quadratic scanning or unbounded buffering\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions\n  - inferred ownership for review: R19 (deterministic semantic ownership fallback); R21 (deterministic semantic ownership fallback); R22 (deterministic semantic ownership fallback)\n\nRequirement ownership matrix:\n\n- R1: Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R2: Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32 -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R3: The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R4: Support optional zlib-compressed payloads with strict decompressed-size limits -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R5: Support per-stream sequence gap reporting -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R6: Support configurable maximum frame and buffer sizes -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R7: Support backpressure-friendly incremental feed/drain APIs -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R8: Support immutable typed events -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R9: Support and counters for every rejection reason -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R10: Never deserialize executable objects -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R11: Include an encoder used for round-trip tests -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_encoder.py\n- R12: Include deterministic fuzz/property-style tests without third-party packages -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R13: Include adversarial one-byte chunk tests -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R14: Include multiple interleaved streams -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R15: Include wraparound sequence numbers -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R16: Include cancellation -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_cancelation.py, examples/tech_connector/tests/test_fuzzing.py\n- R17: Include and proof that retained memory remains bounded during megabytes of hostile input -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_memory_usage.py\n- R18: Generate focused modules using only the standard library -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R19: Do not modify live project files -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R20: build and execute solely in a disposable workspace -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R21: Return all generated code -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R22: Return exact planning decisions -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R23: Return test and repair logs -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_encoder.py\n- R24: Return per-stage timings -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_performance.py\n- R25: Return and a requirement coverage matrix -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_coverage_matrix.py\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks. Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32. The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering. Support optional zlib-compressed payloads with strict decompressed-size limits, per-stream sequence gap reporting, configurable maximum frame and buffer sizes, backpressure-friendly incremental feed/drain APIs, immutable typed events, and counters for every rejection reason. Never deserialize executable objects. Include an encoder used for round-trip tests, deterministic fuzz/property-style tests without third-party packages, adversarial one-byte chunk tests, multiple interleaved streams, wraparound sequence numbers, cancellation, and proof that retained memory remains bounded during megabytes of hostile input. Generate focused modules using only the standard library. Do not modify live project files; build and execute solely in a disposable workspace. Return all generated code, exact planning decisions, test and repair logs, per-stage timings, and a requirement coverage matrix.",
+    "plan": "Implementation Plan\nObjective: Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks. Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32. The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering. Support optional zlib-compressed payloads with strict decompressed-size limits, per-stream sequence gap reporting, configurable maximum frame and buffer sizes, backpressure-friendly incremental feed/drain APIs, immutable typed events, and counters for every rejection reason. Never deserialize executable objects. Include an encoder used for round-trip tests, deterministic fuzz/property-style tests without third-party packages, adversarial one-byte chunk tests, multiple interleaved streams, wraparound sequence numbers, cancellation, and proof that retained memory remains bounded during megabytes of hostile input. Generate focused modules using only the standard library. Do not modify live project files; build and execute solely in a disposable workspace. Return all generated code, exact planning decisions, test and repair logs, per-stage timings, and a requirement coverage matrix.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\n- `examples/tech_connector/decoder.py`: Decode untrusted framed binary telemetry streams.\n  - role: production\n  - requirement IDs: R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R18, R20, R24\n  - public API: decode_stream; Decoder\n  - contracts: Inputs: bytes (untrusted telemetry stream), int (max_frame_size), int (max_buffer_size); Outputs: list of events, dict of counters; Errors: ValueError on invalid input, MemoryError if memory usage exceeds limits; State Transitions: None; Invariants: Decoder maintains internal state for resynchronization and error handling\n  - algorithm: Initialize decoder with max_frame_size and max_buffer_size -> Iterate through input bytes in chunks -> Detect sync marker to identify frame boundaries -> Parse frame header (version, flags, stream id, sequence number, payload length) -> Verify CRC32 for data integrity -> Decompress payload if zlib-compressed -> Validate decompressed size against limits -> Store valid frames in buffer -> Recover from errors by resynchronizing and discarding invalid frames\n  - validation: Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded\n  - inferred ownership for review: R18 (deterministic semantic ownership fallback); R20 (deterministic semantic ownership fallback); R24 (missing production owner inferred deterministically)\n- `examples/tech_connector/encoder.py`: Encode telemetry events into a framed binary stream.\n  - role: production\n  - requirement IDs: R11, R19, R21, R22, R23, R12, R13, R14, R15, R16, R17, R25\n  - public API: encode_event\n  - contracts: Inputs: event (immutable typed event); Outputs: bytes (encoded telemetry frame); Errors: ValueError on invalid input; State Transitions: None; Invariants: Encoder maintains no internal state\n  - algorithm: Serialize event into a binary format -> Calculate CRC32 for data integrity -> Construct frame with sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32\n  - dependencies: examples/tech_connector/decoder.py\n  - validation: Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling\n  - inferred ownership for review: R19 (deterministic semantic ownership fallback); R21 (deterministic semantic ownership fallback); R22 (deterministic semantic ownership fallback); R23 (deterministic semantic ownership fallback); R12 (missing production owner inferred deterministically); R13 (missing production owner inferred deterministically); R14 (missing production owner inferred deterministically); R15 (missing production owner inferred deterministically); R16 (missing production owner inferred deterministically); R17 (missing production owner inferred deterministically); R25 (missing production owner inferred deterministically)\n- `examples/tech_connector/tests/test_cancelation.py`: Test cancelation behavior of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R16\n  - public API: test_decoder_cancelation; test_encoder_cancelation\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate cancelation behavior under various conditions\n  - algorithm: Set up tests with large input sizes and multiple streams -> Call decode_stream and encode_event with cancelation signals and verify behavior matches expected results -> Verify that decoder and encoder can handle cancelation signals without errors\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of cancelation scenarios to ensure complete coverage; Verify that decoder and encoder can recover from cancelation signals and continue processing valid frames/events\n- `examples/tech_connector/tests/test_coverage_matrix.py`: Generate a requirement coverage matrix for the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R25\n  - public API: generate_coverage_matrix\n  - contracts: Inputs: None; Outputs: dict (requirement coverage matrix); Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests generate a requirement coverage matrix for the decoder and encoder\n  - algorithm: Retrieve all requirements from the requirement ledger -> Identify which requirements are owned by each production file -> Generate a requirement coverage matrix that shows which files cover each requirement\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on the generated coverage matrix to ensure complete coverage; Verify that the coverage matrix accurately reflects the ownership of each requirement\n- `examples/tech_connector/tests/test_decoder.py`: Test the decoder implementation.\n  - role: behavioral tests\n  - requirement IDs: R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R18, R20\n  - public API: test_decode_stream; test_decoder_resynchronization\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate decoder behavior under various conditions\n  - algorithm: Set up test cases with known good and bad telemetry streams -> Call decode_stream with test cases and verify output events and counters match expected results -> Simulate errors (CRC failures, invalid payloads) and verify error handling\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames\n  - inferred ownership for review: R18 (deterministic semantic ownership fallback); R20 (deterministic semantic ownership fallback)\n- `examples/tech_connector/tests/test_encoder.py`: Test the encoder implementation.\n  - role: behavioral tests\n  - requirement IDs: R11, R23\n  - public API: test_encode_event\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate encoder behavior under various conditions\n  - algorithm: Set up test cases with known good events -> Call encode_event with test cases and verify output frames match expected format -> Simulate invalid input and verify error handling\n  - dependencies: examples/tech_connector/encoder.py, examples/tech_connector/decoder.py\n  - validation: Run tests on a variety of event types to ensure complete coverage; Verify that encoder produces valid telemetry frames for all supported event types\n  - inferred ownership for review: R23 (deterministic semantic ownership fallback)\n- `examples/tech_connector/tests/test_fuzzing.py`: Perform deterministic fuzz testing on the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R12, R13, R14, R15, R16\n  - public API: test_adversarial_chunks; test_multiple_streams; test_wraparound_sequence_numbers\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests validate decoder and encoder robustness under adversarial conditions\n  - algorithm: Generate adversarial input chunks with one-byte variations -> Call decode_stream and encode_event with adversarial inputs and verify behavior matches expected results -> Simulate multiple interleaved streams and wraparound sequence numbers -> Verify that decoder and encoder handle these scenarios without errors\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events\n- `examples/tech_connector/tests/test_memory_usage.py`: Verify memory usage of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R17\n  - public API: test_decoder_memory_usage; test_encoder_memory_usage\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests verify memory usage remains bounded during megabytes of hostile input\n  - algorithm: Set up tests with large input sizes and multiple streams -> Call decode_stream and encode_event with large inputs and measure memory usage -> Verify that decoder and encoder maintain consistent memory usage without quadratic scanning or unbounded buffering\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run memory usage tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain bounded memory usage during megabytes of hostile input\n- `examples/tech_connector/tests/test_performance.py`: Measure performance of the decoder and encoder.\n  - role: behavioral tests\n  - requirement IDs: R24, R19, R21, R22\n  - public API: test_decoder_performance; test_encoder_performance\n  - contracts: Inputs: None; Outputs: None; Errors: AssertionError on test failure; State Transitions: None; Invariants: Tests measure performance under various conditions\n  - algorithm: Set up benchmark tests with large input sizes and multiple streams -> Call decode_stream and encode_event with benchmark inputs and measure execution time -> Verify that decoder and encoder can handle large inputs efficiently without quadratic scanning or unbounded buffering\n  - dependencies: examples/tech_connector/decoder.py, examples/tech_connector/encoder.py\n  - validation: Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions\n  - inferred ownership for review: R19 (deterministic semantic ownership fallback); R21 (deterministic semantic ownership fallback); R22 (deterministic semantic ownership fallback)\n\nRequirement ownership matrix:\n\n- R1: Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R2: Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32 -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R3: The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R4: Support optional zlib-compressed payloads with strict decompressed-size limits -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R5: Support per-stream sequence gap reporting -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R6: Support configurable maximum frame and buffer sizes -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R7: Support backpressure-friendly incremental feed/drain APIs -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R8: Support immutable typed events -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R9: Support and counters for every rejection reason -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R10: Never deserialize executable objects -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R11: Include an encoder used for round-trip tests -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_encoder.py\n- R12: Include deterministic fuzz/property-style tests without third-party packages -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R13: Include adversarial one-byte chunk tests -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R14: Include multiple interleaved streams -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R15: Include wraparound sequence numbers -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_fuzzing.py\n- R16: Include cancellation -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_cancelation.py, examples/tech_connector/tests/test_fuzzing.py\n- R17: Include and proof that retained memory remains bounded during megabytes of hostile input -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_memory_usage.py\n- R18: Generate focused modules using only the standard library -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R19: Do not modify live project files -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R20: build and execute solely in a disposable workspace -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_decoder.py\n- R21: Return all generated code -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R22: Return exact planning decisions -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_performance.py\n- R23: Return test and repair logs -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_encoder.py\n- R24: Return per-stage timings -> examples/tech_connector/decoder.py, examples/tech_connector/tests/test_performance.py\n- R25: Return and a requirement coverage matrix -> examples/tech_connector/encoder.py, examples/tech_connector/tests/test_coverage_matrix.py",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad",
+    "artifact_manifest": [
+      {
+        "path": "examples/tech_connector/decoder.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\decoder.py",
+        "purpose": "Decode untrusted framed binary telemetry streams.",
+        "requirements": [
+          "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks",
+          "Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32",
+          "The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering",
+          "Support optional zlib-compressed payloads with strict decompressed-size limits",
+          "Support per-stream sequence gap reporting",
+          "Support configurable maximum frame and buffer sizes",
+          "Support backpressure-friendly incremental feed/drain APIs",
+          "Support immutable typed events",
+          "Support and counters for every rejection reason",
+          "Never deserialize executable objects",
+          "Generate focused modules using only the standard library",
+          "build and execute solely in a disposable workspace",
+          "Return per-stage timings"
+        ],
+        "requirement_ids": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9",
+          "R10",
+          "R18",
+          "R20",
+          "R24"
+        ],
+        "public_symbols": [
+          "decode_stream",
+          "Decoder"
+        ],
+        "contracts": [
+          "Inputs: bytes (untrusted telemetry stream), int (max_frame_size), int (max_buffer_size)",
+          "Outputs: list of events, dict of counters",
+          "Errors: ValueError on invalid input, MemoryError if memory usage exceeds limits",
+          "State Transitions: None",
+          "Invariants: Decoder maintains internal state for resynchronization and error handling"
+        ],
+        "algorithm_steps": [
+          "Initialize decoder with max_frame_size and max_buffer_size",
+          "Iterate through input bytes in chunks",
+          "Detect sync marker to identify frame boundaries",
+          "Parse frame header (version, flags, stream id, sequence number, payload length)",
+          "Verify CRC32 for data integrity",
+          "Decompress payload if zlib-compressed",
+          "Validate decompressed size against limits",
+          "Store valid frames in buffer",
+          "Recover from errors by resynchronizing and discarding invalid frames"
+        ],
+        "validation_steps": [
+          "Parse a known good telemetry stream and verify output events and counters",
+          "Simulate CRC failure and verify error handling",
+          "Test with large input to ensure memory usage remains bounded"
+        ],
+        "ownership_attributions": [
+          {
+            "requirement_id": "R18",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R20",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R24",
+            "reason": "missing production owner inferred deterministically"
+          }
+        ],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "examples/tech_connector/encoder.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\encoder.py",
+        "purpose": "Encode telemetry events into a framed binary stream.",
+        "requirements": [
+          "Include an encoder used for round-trip tests",
+          "Do not modify live project files",
+          "Return all generated code",
+          "Return exact planning decisions",
+          "Return test and repair logs",
+          "Include deterministic fuzz/property-style tests without third-party packages",
+          "Include adversarial one-byte chunk tests",
+          "Include multiple interleaved streams",
+          "Include wraparound sequence numbers",
+          "Include cancellation",
+          "Include and proof that retained memory remains bounded during megabytes of hostile input",
+          "Return and a requirement coverage matrix"
+        ],
+        "requirement_ids": [
+          "R11",
+          "R19",
+          "R21",
+          "R22",
+          "R23",
+          "R12",
+          "R13",
+          "R14",
+          "R15",
+          "R16",
+          "R17",
+          "R25"
+        ],
+        "public_symbols": [
+          "encode_event"
+        ],
+        "contracts": [
+          "Inputs: event (immutable typed event)",
+          "Outputs: bytes (encoded telemetry frame)",
+          "Errors: ValueError on invalid input",
+          "State Transitions: None",
+          "Invariants: Encoder maintains no internal state"
+        ],
+        "algorithm_steps": [
+          "Serialize event into a binary format",
+          "Calculate CRC32 for data integrity",
+          "Construct frame with sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32"
+        ],
+        "validation_steps": [
+          "Encode known good events and verify output frames match expected format",
+          "Simulate invalid input and verify error handling"
+        ],
+        "ownership_attributions": [
+          {
+            "requirement_id": "R19",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R21",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R22",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R23",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R12",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R13",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R14",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R15",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R16",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R17",
+            "reason": "missing production owner inferred deterministically"
+          },
+          {
+            "requirement_id": "R25",
+            "reason": "missing production owner inferred deterministically"
+          }
+        ],
+        "depends_on": [
+          "examples/tech_connector/decoder.py"
+        ],
+        "is_test": false
+      },
+      {
+        "path": "examples/tech_connector/tests/test_cancelation.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_cancelation.py",
+        "purpose": "Test cancelation behavior of the decoder and encoder.",
+        "requirements": [
+          "Include cancellation"
+        ],
+        "requirement_ids": [
+          "R16"
+        ],
+        "public_symbols": [
+          "test_decoder_cancelation",
+          "test_encoder_cancelation"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests validate cancelation behavior under various conditions"
+        ],
+        "algorithm_steps": [
+          "Set up tests with large input sizes and multiple streams",
+          "Call decode_stream and encode_event with cancelation signals and verify behavior matches expected results",
+          "Verify that decoder and encoder can handle cancelation signals without errors"
+        ],
+        "validation_steps": [
+          "Run tests on a variety of cancelation scenarios to ensure complete coverage",
+          "Verify that decoder and encoder can recover from cancelation signals and continue processing valid frames/events"
+        ],
+        "ownership_attributions": [],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_coverage_matrix.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_coverage_matrix.py",
+        "purpose": "Generate a requirement coverage matrix for the decoder and encoder.",
+        "requirements": [
+          "Return and a requirement coverage matrix"
+        ],
+        "requirement_ids": [
+          "R25"
+        ],
+        "public_symbols": [
+          "generate_coverage_matrix"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: dict (requirement coverage matrix)",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests generate a requirement coverage matrix for the decoder and encoder"
+        ],
+        "algorithm_steps": [
+          "Retrieve all requirements from the requirement ledger",
+          "Identify which requirements are owned by each production file",
+          "Generate a requirement coverage matrix that shows which files cover each requirement"
+        ],
+        "validation_steps": [
+          "Run tests on the generated coverage matrix to ensure complete coverage",
+          "Verify that the coverage matrix accurately reflects the ownership of each requirement"
+        ],
+        "ownership_attributions": [],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_decoder.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_decoder.py",
+        "purpose": "Test the decoder implementation.",
+        "requirements": [
+          "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks",
+          "Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32",
+          "The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering",
+          "Support optional zlib-compressed payloads with strict decompressed-size limits",
+          "Support per-stream sequence gap reporting",
+          "Support configurable maximum frame and buffer sizes",
+          "Support backpressure-friendly incremental feed/drain APIs",
+          "Support immutable typed events",
+          "Support and counters for every rejection reason",
+          "Never deserialize executable objects",
+          "Generate focused modules using only the standard library",
+          "build and execute solely in a disposable workspace"
+        ],
+        "requirement_ids": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9",
+          "R10",
+          "R18",
+          "R20"
+        ],
+        "public_symbols": [
+          "test_decode_stream",
+          "test_decoder_resynchronization"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests validate decoder behavior under various conditions"
+        ],
+        "algorithm_steps": [
+          "Set up test cases with known good and bad telemetry streams",
+          "Call decode_stream with test cases and verify output events and counters match expected results",
+          "Simulate errors (CRC failures, invalid payloads) and verify error handling"
+        ],
+        "validation_steps": [
+          "Run tests on a variety of input scenarios to ensure complete coverage",
+          "Verify that decoder can recover from errors and continue processing valid frames"
+        ],
+        "ownership_attributions": [
+          {
+            "requirement_id": "R18",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R20",
+            "reason": "deterministic semantic ownership fallback"
+          }
+        ],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_encoder.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_encoder.py",
+        "purpose": "Test the encoder implementation.",
+        "requirements": [
+          "Include an encoder used for round-trip tests",
+          "Return test and repair logs"
+        ],
+        "requirement_ids": [
+          "R11",
+          "R23"
+        ],
+        "public_symbols": [
+          "test_encode_event"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests validate encoder behavior under various conditions"
+        ],
+        "algorithm_steps": [
+          "Set up test cases with known good events",
+          "Call encode_event with test cases and verify output frames match expected format",
+          "Simulate invalid input and verify error handling"
+        ],
+        "validation_steps": [
+          "Run tests on a variety of event types to ensure complete coverage",
+          "Verify that encoder produces valid telemetry frames for all supported event types"
+        ],
+        "ownership_attributions": [
+          {
+            "requirement_id": "R23",
+            "reason": "deterministic semantic ownership fallback"
+          }
+        ],
+        "depends_on": [
+          "examples/tech_connector/encoder.py",
+          "examples/tech_connector/decoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_fuzzing.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_fuzzing.py",
+        "purpose": "Perform deterministic fuzz testing on the decoder and encoder.",
+        "requirements": [
+          "Include deterministic fuzz/property-style tests without third-party packages",
+          "Include adversarial one-byte chunk tests",
+          "Include multiple interleaved streams",
+          "Include wraparound sequence numbers",
+          "Include cancellation"
+        ],
+        "requirement_ids": [
+          "R12",
+          "R13",
+          "R14",
+          "R15",
+          "R16"
+        ],
+        "public_symbols": [
+          "test_adversarial_chunks",
+          "test_multiple_streams",
+          "test_wraparound_sequence_numbers"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests validate decoder and encoder robustness under adversarial conditions"
+        ],
+        "algorithm_steps": [
+          "Generate adversarial input chunks with one-byte variations",
+          "Call decode_stream and encode_event with adversarial inputs and verify behavior matches expected results",
+          "Simulate multiple interleaved streams and wraparound sequence numbers",
+          "Verify that decoder and encoder handle these scenarios without errors"
+        ],
+        "validation_steps": [
+          "Run tests on a variety of adversarial input types to ensure complete coverage",
+          "Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+        ],
+        "ownership_attributions": [],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_memory_usage.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_memory_usage.py",
+        "purpose": "Verify memory usage of the decoder and encoder.",
+        "requirements": [
+          "Include and proof that retained memory remains bounded during megabytes of hostile input"
+        ],
+        "requirement_ids": [
+          "R17"
+        ],
+        "public_symbols": [
+          "test_decoder_memory_usage",
+          "test_encoder_memory_usage"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests verify memory usage remains bounded during megabytes of hostile input"
+        ],
+        "algorithm_steps": [
+          "Set up tests with large input sizes and multiple streams",
+          "Call decode_stream and encode_event with large inputs and measure memory usage",
+          "Verify that decoder and encoder maintain consistent memory usage without quadratic scanning or unbounded buffering"
+        ],
+        "validation_steps": [
+          "Run memory usage tests on a variety of input sizes to ensure complete coverage",
+          "Verify that decoder and encoder maintain bounded memory usage during megabytes of hostile input"
+        ],
+        "ownership_attributions": [],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      },
+      {
+        "path": "examples/tech_connector/tests/test_performance.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_performance.py",
+        "purpose": "Measure performance of the decoder and encoder.",
+        "requirements": [
+          "Return per-stage timings",
+          "Do not modify live project files",
+          "Return all generated code",
+          "Return exact planning decisions"
+        ],
+        "requirement_ids": [
+          "R24",
+          "R19",
+          "R21",
+          "R22"
+        ],
+        "public_symbols": [
+          "test_decoder_performance",
+          "test_encoder_performance"
+        ],
+        "contracts": [
+          "Inputs: None",
+          "Outputs: None",
+          "Errors: AssertionError on test failure",
+          "State Transitions: None",
+          "Invariants: Tests measure performance under various conditions"
+        ],
+        "algorithm_steps": [
+          "Set up benchmark tests with large input sizes and multiple streams",
+          "Call decode_stream and encode_event with benchmark inputs and measure execution time",
+          "Verify that decoder and encoder can handle large inputs efficiently without quadratic scanning or unbounded buffering"
+        ],
+        "validation_steps": [
+          "Run performance tests on a variety of input sizes to ensure complete coverage",
+          "Verify that decoder and encoder maintain consistent performance under various conditions"
+        ],
+        "ownership_attributions": [
+          {
+            "requirement_id": "R19",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R21",
+            "reason": "deterministic semantic ownership fallback"
+          },
+          {
+            "requirement_id": "R22",
+            "reason": "deterministic semantic ownership fallback"
+          }
+        ],
+        "depends_on": [
+          "examples/tech_connector/decoder.py",
+          "examples/tech_connector/encoder.py"
+        ],
+        "is_test": true
+      }
+    ],
+    "requirement_ledger": [
+      {
+        "id": "R1",
+        "text": "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks"
+      },
+      {
+        "id": "R2",
+        "text": "Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32"
+      },
+      {
+        "id": "R3",
+        "text": "The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering"
+      },
+      {
+        "id": "R4",
+        "text": "Support optional zlib-compressed payloads with strict decompressed-size limits"
+      },
+      {
+        "id": "R5",
+        "text": "Support per-stream sequence gap reporting"
+      },
+      {
+        "id": "R6",
+        "text": "Support configurable maximum frame and buffer sizes"
+      },
+      {
+        "id": "R7",
+        "text": "Support backpressure-friendly incremental feed/drain APIs"
+      },
+      {
+        "id": "R8",
+        "text": "Support immutable typed events"
+      },
+      {
+        "id": "R9",
+        "text": "Support and counters for every rejection reason"
+      },
+      {
+        "id": "R10",
+        "text": "Never deserialize executable objects"
+      },
+      {
+        "id": "R11",
+        "text": "Include an encoder used for round-trip tests"
+      },
+      {
+        "id": "R12",
+        "text": "Include deterministic fuzz/property-style tests without third-party packages"
+      },
+      {
+        "id": "R13",
+        "text": "Include adversarial one-byte chunk tests"
+      },
+      {
+        "id": "R14",
+        "text": "Include multiple interleaved streams"
+      },
+      {
+        "id": "R15",
+        "text": "Include wraparound sequence numbers"
+      },
+      {
+        "id": "R16",
+        "text": "Include cancellation"
+      },
+      {
+        "id": "R17",
+        "text": "Include and proof that retained memory remains bounded during megabytes of hostile input"
+      },
+      {
+        "id": "R18",
+        "text": "Generate focused modules using only the standard library"
+      },
+      {
+        "id": "R19",
+        "text": "Do not modify live project files"
+      },
+      {
+        "id": "R20",
+        "text": "build and execute solely in a disposable workspace"
+      },
+      {
+        "id": "R21",
+        "text": "Return all generated code"
+      },
+      {
+        "id": "R22",
+        "text": "Return exact planning decisions"
+      },
+      {
+        "id": "R23",
+        "text": "Return test and repair logs"
+      },
+      {
+        "id": "R24",
+        "text": "Return per-stage timings"
+      },
+      {
+        "id": "R25",
+        "text": "Return and a requirement coverage matrix"
+      }
+    ]
+  },
+  "result": {
+    "text": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed.\n\nRequirement coverage:\n- R1 [blocked]: Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R2 [blocked]: Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32 | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R3 [blocked]: The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R4 [blocked]: Support optional zlib-compressed payloads with strict decompressed-size limits | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R5 [blocked]: Support per-stream sequence gap reporting | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R6 [blocked]: Support configurable maximum frame and buffer sizes | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R7 [blocked]: Support backpressure-friendly incremental feed/drain APIs | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R8 [blocked]: Support immutable typed events | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R9 [blocked]: Support and counters for every rejection reason | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R10 [blocked]: Never deserialize executable objects | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R11 [blocked]: Include an encoder used for round-trip tests | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_encoder.py\n- R12 [blocked]: Include deterministic fuzz/property-style tests without third-party packages | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_fuzzing.py\n- R13 [blocked]: Include adversarial one-byte chunk tests | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_fuzzing.py\n- R14 [blocked]: Include multiple interleaved streams | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_fuzzing.py\n- R15 [blocked]: Include wraparound sequence numbers | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_fuzzing.py\n- R16 [blocked]: Include cancellation | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_cancelation.py, examples/tech_connector/tests/test_fuzzing.py\n- R17 [blocked]: Include and proof that retained memory remains bounded during megabytes of hostile input | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_memory_usage.py\n- R18 [blocked]: Generate focused modules using only the standard library | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R19 [blocked]: Do not modify live project files | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_performance.py\n- R20 [blocked]: build and execute solely in a disposable workspace | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_decoder.py\n- R21 [blocked]: Return all generated code | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_performance.py\n- R22 [blocked]: Return exact planning decisions | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_performance.py\n- R23 [blocked]: Return test and repair logs | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_encoder.py\n- R24 [blocked]: Return per-stage timings | production=examples/tech_connector/decoder.py | tests=examples/tech_connector/tests/test_performance.py\n- R25 [blocked]: Return and a requirement coverage matrix | production=examples/tech_connector/encoder.py | tests=examples/tech_connector/tests/test_coverage_matrix.py",
+    "payload": {
+      "type": "project_changes_rejected",
+      "changes": [],
+      "validation_errors": [
+        "Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed."
+      ],
+      "requirement_coverage": [
+        {
+          "id": "R1",
+          "requirement": "Build a complete multi-file Python library for decoding an untrusted framed binary telemetry stream arriving in arbitrarily sized chunks",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R2",
+          "requirement": "Frames have a two-byte sync marker, version, flags, stream id, sequence number, payload length, payload, and CRC32",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R3",
+          "requirement": "The decoder must resynchronize after noise, corrupted lengths, CRC failures, unknown versions, duplicate frames, and truncated input without quadratic scanning or unbounded buffering",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R4",
+          "requirement": "Support optional zlib-compressed payloads with strict decompressed-size limits",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R5",
+          "requirement": "Support per-stream sequence gap reporting",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R6",
+          "requirement": "Support configurable maximum frame and buffer sizes",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R7",
+          "requirement": "Support backpressure-friendly incremental feed/drain APIs",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R8",
+          "requirement": "Support immutable typed events",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R9",
+          "requirement": "Support and counters for every rejection reason",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R10",
+          "requirement": "Never deserialize executable objects",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R11",
+          "requirement": "Include an encoder used for round-trip tests",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_encoder.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of event types to ensure complete coverage; Verify that encoder produces valid telemetry frames for all supported event types"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R12",
+          "requirement": "Include deterministic fuzz/property-style tests without third-party packages",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_fuzzing.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R13",
+          "requirement": "Include adversarial one-byte chunk tests",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_fuzzing.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R14",
+          "requirement": "Include multiple interleaved streams",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_fuzzing.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R15",
+          "requirement": "Include wraparound sequence numbers",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_fuzzing.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R16",
+          "requirement": "Include cancellation",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_cancelation.py",
+            "examples/tech_connector/tests/test_fuzzing.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of cancelation scenarios to ensure complete coverage; Verify that decoder and encoder can recover from cancelation signals and continue processing valid frames/events",
+            "Run tests on a variety of adversarial input types to ensure complete coverage; Verify that decoder and encoder can recover from adversarial inputs and continue processing valid frames/events"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R17",
+          "requirement": "Include and proof that retained memory remains bounded during megabytes of hostile input",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_memory_usage.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run memory usage tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain bounded memory usage during megabytes of hostile input"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R18",
+          "requirement": "Generate focused modules using only the standard library",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R19",
+          "requirement": "Do not modify live project files",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_performance.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R20",
+          "requirement": "build and execute solely in a disposable workspace",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_decoder.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run tests on a variety of input scenarios to ensure complete coverage; Verify that decoder can recover from errors and continue processing valid frames"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R21",
+          "requirement": "Return all generated code",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_performance.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R22",
+          "requirement": "Return exact planning decisions",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_performance.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R23",
+          "requirement": "Return test and repair logs",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_encoder.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on a variety of event types to ensure complete coverage; Verify that encoder produces valid telemetry frames for all supported event types"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R24",
+          "requirement": "Return per-stage timings",
+          "production_owners": [
+            "examples/tech_connector/decoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_performance.py"
+          ],
+          "validation": [
+            "Parse a known good telemetry stream and verify output events and counters; Simulate CRC failure and verify error handling; Test with large input to ensure memory usage remains bounded",
+            "Run performance tests on a variety of input sizes to ensure complete coverage; Verify that decoder and encoder maintain consistent performance under various conditions"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R25",
+          "requirement": "Return and a requirement coverage matrix",
+          "production_owners": [
+            "examples/tech_connector/encoder.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_coverage_matrix.py"
+          ],
+          "validation": [
+            "Encode known good events and verify output frames match expected format; Simulate invalid input and verify error handling",
+            "Run tests on the generated coverage matrix to ensure complete coverage; Verify that the coverage matrix accurately reflects the ownership of each requirement"
+          ],
+          "status": "blocked"
+        }
+      ]
+    }
+  }
+}

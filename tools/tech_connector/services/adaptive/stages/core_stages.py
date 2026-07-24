@@ -67,7 +67,7 @@ class IntentStage(ServiceAdapterStage):
         return True, "Phrase-level intent can disambiguate overloaded routing terms."
 
     def run_existing_service(self, state: AdaptiveExecutionState) -> Any:
-        from tech_connector.services.prompt_intent_service import classify_prompt_intent
+        from tech_connector.services.prompt.prompt_intent_service import classify_prompt_intent
 
         result = classify_prompt_intent(state.original_prompt, host=state.host).to_dict()
         confidence = float(result.get("confidence") or 0.0)
@@ -144,7 +144,7 @@ class GoalGapStage(ServiceAdapterStage):
         return True, "Missing prerequisites or multi-step execution need an explicit capability path."
 
     def run_existing_service(self, state: AdaptiveExecutionState) -> Any:
-        from tech_connector.services.goal_gap_planning_service import build_goal_gap_plan, compact_goal_gap_plan
+        from tech_connector.services.reasoning.goal_gap_planning_service import build_goal_gap_plan, compact_goal_gap_plan
 
         decision = dict(state.artifacts.get("route_decision") or {})
         decision.update({"host": state.host, "route": state.route, "mutation_scope": state.mutation_scope})

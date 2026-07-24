@@ -270,9 +270,10 @@ class AcquisitionEngine:
 
     def __init__(self, registry, project_root: Path) -> None:
         from tech_connector.services.capability_registry import CapabilityRegistry
+        from tech_connector.models.constants import EXTERNAL_TOOLS_DIR
         self._registry = registry
         self._project_root = Path(project_root)
-        self._external_tools_dir = self._project_root / "external_tools"
+        self._external_tools_dir = EXTERNAL_TOOLS_DIR
 
     # ------------------------------------------------------------------
     # Strategy discovery

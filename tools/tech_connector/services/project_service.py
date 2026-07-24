@@ -887,8 +887,8 @@ TARGET_SUBSYSTEM_HINTS = (
         ),
         "paths": (
             "app/main_window_chat_runtime.py",
-            "services/prompt_dispatch_service.py",
-            "services/prompt_progress_service.py",
+            "services/prompt/prompt_dispatch_service.py",
+            "services/prompt/prompt_progress_service.py",
             "tests/test_long_prompt_responsiveness.py",
         ),
     },
@@ -1064,7 +1064,7 @@ TARGET_SUBSYSTEM_HINTS = (
         "paths": (
             "services/chat_report_service.py",
             "ui/chat_renderer.py",
-            "services/prompt_progress_service.py",
+            "services/prompt/prompt_progress_service.py",
             "tests/test_chat_report_quality.py",
         ),
     },
@@ -1094,9 +1094,11 @@ def _target_discovery_text(text: str) -> str:
     """
     semantic_parts: list[str] = []
     try:
-        from tech_connector.services.prompt_intent_service import understand_prompt_request
+        from tech_connector.services.prompt.prompt_intent_service import (
+            understand_prompt_request_deterministic,
+        )
 
-        understanding = understand_prompt_request(text, allow_model=False)
+        understanding = understand_prompt_request_deterministic(text)
         semantic_parts.extend([
             understanding.target_file,
             understanding.target_symbol,
@@ -1110,10 +1112,11 @@ def _target_discovery_text(text: str) -> str:
         line = raw_line.strip()
         if not line:
             continue
-        lower = line.lower()
-        if any(re.search(pattern, lower) for pattern in TARGET_CONSTRAINT_PATTERNS):
-            continue
-        lines.append(line)
+        for pattern in TARGET_CONSTRAINT_PATTERNS:
+            line = re.sub(pattern, " ", line, flags=re.I)
+        line = re.sub(r"\s+", " ", line).strip(" ;,.")
+        if line:
+            lines.append(line)
     compact = " ".join(part for part in semantic_parts + lines if part)
     # Keep exact file and symbol phrases intact, but strip common request framing.
     compact = re.sub(
@@ -1143,10 +1146,30 @@ def _terms(text: str, limit: int = 24) -> list[str]:
 
 def _target_subsystem_hints(text: str) -> list[dict[str, Any]]:
     lower = (text or "").lower()
-    return [
-        hint for hint in TARGET_SUBSYSTEM_HINTS
-        if any(_target_trigger_matches(lower, str(trigger)) for trigger in hint["triggers"])
-    ]
+    weak_singletons = {
+        "index",
+        "knowledge",
+        "ready",
+        "status",
+        "progress",
+        "mobile",
+        "jobs",
+        "colors",
+        "documentation",
+    }
+    matched_hints: list[dict[str, Any]] = []
+    for hint in TARGET_SUBSYSTEM_HINTS:
+        matched = [
+            str(trigger).lower().strip()
+            for trigger in hint["triggers"]
+            if _target_trigger_matches(lower, str(trigger))
+        ]
+        if not matched:
+            continue
+        if matched and all(item in weak_singletons for item in matched):
+            continue
+        matched_hints.append(hint)
+    return matched_hints
 
 
 def _target_trigger_matches(lower: str, trigger: str) -> bool:
@@ -1417,7 +1440,11 @@ def discover_edit_targets(
     }
 
 
-def format_edit_target_context(discovery: dict[str, Any], max_source_lines: int = 45) -> str:
+def format_edit_target_context(
+    discovery: dict[str, Any],
+    max_source_lines: int = 45,
+    max_candidates: int = 8,
+) -> str:
     roots = discovery.get("project_roots") or []
     best = discovery.get("best_target") or {}
     lines = [
@@ -1433,7 +1460,7 @@ def format_edit_target_context(discovery: dict[str, Any], max_source_lines: int 
     candidates = [
         item for item in (discovery.get("candidates") or [])
         if _is_project_edit_candidate_path(str(item.get("path") or ""))
-    ]
+    ][:max(1, int(max_candidates))]
     if not candidates:
         lines.append("No strong target files were found in the index. The model should ask for confirmation before creating a new file.")
         return "\n".join(lines)
@@ -1505,11 +1532,30 @@ def build_project_understanding_contract(
 """
 
 
-def build_project_edit_target_prompt(question: str, discovery_context: str, active_path: str | None = None) -> str:
+def build_project_edit_target_prompt(
+    question: str,
+    discovery_context: str,
+    active_path: str | None = None,
+    *,
+    generated_artifact: bool = False,
+    live_tree_mutation_allowed: bool = True,
+) -> str:
     understanding_contract = build_project_understanding_contract(
         question=question,
         discovery_context=discovery_context,
         active_path=active_path,
+    )
+    target_instruction = (
+        "- The selected path is the allowed project scope, not an existing file to overwrite.\n"
+        "- Choose concrete new module/test paths from the request and evidenced project conventions.\n"
+        "- Emit complete create-file/modify-file patches and materialize them only in a disposable workspace for validation.\n"
+        "- Do not ask for approval to create disposable validation files; do not apply anything to the live project."
+        if generated_artifact and not live_tree_mutation_allowed
+        else (
+            "- First decide whether the top ranked target file is a safe place to edit.\n"
+            "- If confidence is high or medium, propose edits against that existing file.\n"
+            "- If confidence is low or the requested file/function/class does not exist, provide a creation plan and implementation plan first; ask for approval before creating a new file or new symbol."
+        )
     )
     return f"""You are assisting inside The Entire World Tech Connector with a project-wide edit request.
 
@@ -1525,9 +1571,7 @@ Target-discovery evidence:
 {understanding_contract}
 
 Instructions:
-- First decide whether the top ranked target file is a safe place to edit.
-- If confidence is high or medium, propose edits against that existing file.
-- If confidence is low or the requested file/function/class does not exist, provide a creation plan and implementation plan first; ask for approval before creating a new file or new symbol.
+{target_instruction}
 - Preserve imports and public API unless the request requires changing them.
 - If adding a new function/class, include any imports needed.
 - If modifying behavior, identify affected call sites or explain that the indexed evidence did not show any.

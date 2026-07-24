@@ -84,6 +84,7 @@ class ApplicationService:
                 self.bridge = None
 
         self.mcphost_manager = MCPHostManager(self.settings)
+        self.local_models_used = set()
         self.command_router = command_router if command_router is not None else LazyCommandRouter()
         self.prompt_router = prompt_router if prompt_router is not None else PromptRouter()
         self.output_cleaner = output_cleaner if output_cleaner is not None else MCPHostOutputCleaner()
@@ -186,12 +187,28 @@ class ApplicationService:
         if ok:
             self.mcphost_use_pty = use_pty
             self.mcphost_ready = False
+            try:
+                from tech_connector.services.model_provider_service import provider_for_model
+                from tech_connector.services.ollama_service import normalize_ollama_model_name
+
+                if provider_for_model(model) == "ollama":
+                    self.local_models_used.add(normalize_ollama_model_name(model))
+            except Exception:
+                pass
         return ok, cmd_display, error
 
     def stop_mcphost(self) -> None:
         if self.bridge is not None:
             self.bridge.stop()
         self.mcphost_ready = False
+
+    def release_local_models(self):
+        try:
+            from tech_connector.services.ollama_service import unload_ollama_models
+
+            return unload_ollama_models(sorted(self.local_models_used))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "models": []}
 
     def interrupt_mcphost(self) -> None:
         if self.bridge is not None:

@@ -1,0 +1,16 @@
+{
+  "target": "compute_diff",
+  "contract_errors": [],
+  "repair_plan_response": "{\n  \"root_cause\": \"Undefined variable 'directory_path' in compute_diff function\",\n  \"algorithm_steps\": [\n    \"Add a parameter to the compute_diff function signature: directory_path: str\",\n    \"Modify the compute_diff function body to use the provided directory_path for file operations:\",\n    \"For example, replace all occurrences of os.path.join(directory, filename) with os.path.join(directory_path, filename)\",\n    \"Ensure that any calls to open() or similar file handling functions are made using the updated path format\"\n  ],\n  \"preserve\": [\n    \"The function should still return a Tuple[Set[str], Set[str], Set[str], Dict[str, str]] as per the current signature and assertions\",\n    \"The added, removed, modified, and renames sets should accurately reflect changes between snapshots without any file path issues\"\n  ],\n  \"postconditions\": [\n    \"test_tech_connector.py:test_compute_diff:added, removed, modified, renames should still be {'dir1/new_file.txt', 'dir1/subdir/file3.txt', ..., 'file1_new.txt': ('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')}\",\n    \"test_unittests.py:test_compute_diff:added, removed, modified, renames should still be {'dir1/new_file.txt', 'dir1/subdir/file3.txt', ..., 'file1_new.txt': ('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495",
+  "repair_plan": {},
+  "repair_plan_errors": [
+    "Function repair plan JSON did not parse: Unterminated string starting at: line 15 column 5 (char 1155)"
+  ],
+  "coder_response": "```python\ndef compute_diff(old_snapshot: Dict[str, str], new_snapshot: Dict[str, str]) -> Tuple[Set[str], Set[str], Set[str], Dict[str, str]]:\n    \"\"\"Compute the diff between two snapshots.\"\"\"\n    old_files = set(old_snapshot.keys())\n    new_files = set(new_snapshot.keys())\n    added = new_files - old_files\n    removed = old_files - new_files\n    common_files = old_files & new_files\n    modified = {file: (old_snapshot[file], new_snapshot[file]) for file in common_files if old_snapshot[file] != new_snapshot[file]}\n    renames = {}\n    for old_file, new_file in zip(sorted(old_files), sorted(new_files)):\n        if old_file == new_file:\n            continue\n        if hash_file(os.path.join(directory_path, old_file)) == hash_file(os.path.join(directory_path, new_file)):\n            renames[old_file] = new_file\n    return (added, removed, modified, renames)\n```",
+  "repair_errors": [
+    "Repaired symbol compute_diff retained proven-invalid names: directory_path"
+  ],
+  "elapsed_seconds": 26.996,
+  "preview_ok": false,
+  "preview_errors": []
+}

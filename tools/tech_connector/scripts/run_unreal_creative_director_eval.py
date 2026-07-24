@@ -15,8 +15,8 @@ from typing import Any
 
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
-from tech_connector.services.goal_gap_planning_service import build_goal_gap_plan
-from tech_connector.services.prompt_progress_service import build_prompt_progress_plan
+from tech_connector.services.reasoning.goal_gap_planning_service import build_goal_gap_plan
+from tech_connector.services.prompt.prompt_progress_service import build_prompt_progress_plan
 from tech_connector.services.unreal.development_eval_service import record_unreal_development_eval
 
 

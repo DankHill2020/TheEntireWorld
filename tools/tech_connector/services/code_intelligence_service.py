@@ -557,7 +557,7 @@ def _build_code_intelligence_packet_impl(
         detect_search_scope,
         gather_project_search_context,
     )
-    from tech_connector.services.rag_sufficiency_service import evaluate_project_rag_sufficiency
+    from tech_connector.services.reasoning.rag_sufficiency_service import evaluate_project_rag_sufficiency
     from tech_connector.services.validation_planner_service import plan_validation_for_paths
 
     text = objective or ""

@@ -7,6 +7,8 @@ change before any Unreal-side apply step runs.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 GRAPH_MUTATION_HINTS = (
@@ -68,7 +70,37 @@ print(json.dumps(out))
             return str(data.get("match"))
     except Exception:
         pass
+    known = _resolve_known_asset_candidate(candidate)
+    if known:
+        return known
     return candidate
+
+
+def _resolve_known_asset_candidate(candidate: str) -> str:
+    """Resolve bare asset names from checked-in project knowledge when Unreal is offline."""
+    name = str(candidate or "").strip().split(".", 1)[0].rsplit("/", 1)[-1].casefold()
+    if not name:
+        return ""
+    knowledge_root = Path(__file__).resolve().parents[2] / "knowledge" / "reference"
+    for path in (knowledge_root / "unreal_blueprint_atomic_actions.json",):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        candidates = [
+            str((payload.get("engine_evidence") or {}).get("target_blueprint") or ""),
+            *[
+                str(value)
+                for row in payload.get("records") or []
+                for value in (row.get("target_blueprint"), row.get("target_asset"), row.get("asset_path"))
+                if value
+            ],
+        ]
+        for value in candidates:
+            leaf = value.split(".", 1)[0].rsplit("/", 1)[-1].casefold()
+            if value.startswith("/Game/") and leaf == name:
+                return value.split(".", 1)[0]
+    return ""
 
 
 def _extract_quoted_or_said_message(text: str) -> str:

@@ -8,7 +8,10 @@ mcp = FastMCP("KnowledgeMCP")
 
 
 def _detect_tools_root() -> Path:
-    configured = os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    configured = (
+        os.environ.get("TOOLSROOT", "").strip()
+        or os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    )
     if configured:
         return Path(configured).expanduser().resolve()
     source = Path(__file__).resolve()
@@ -50,6 +53,22 @@ def connect():
     if not project_index_db_path().exists():
         raise FileNotFoundError(f"Knowledge index v2 not found: {project_index_db_path()}. Run build_knowledge_index_v2.py first.")
     return sqlite3.connect(project_index_db_path())
+
+
+def fetch_all(sql: str, params=()):
+    conn = connect()
+    try:
+        return conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+
+def fetch_one(sql: str, params=()):
+    conn = connect()
+    try:
+        return conn.execute(sql, params).fetchone()
+    finally:
+        conn.close()
 
 
 def domain_filters(domain: str) -> list[str]:
@@ -137,12 +156,10 @@ def format_symbol(row, include_source=False):
 def index_stats() -> str:
     """Show v2 index stats."""
     try:
-        conn = connect()
-        cur = conn.cursor()
         rows = [f"Index: {project_index_db_path()}"]
         for table in ["files", "chunks", "symbols", "symbol_calls", "imports"]:
-            cur.execute(f"SELECT COUNT(*) FROM {table}")
-            rows.append(f"{table}: {cur.fetchone()[0]}")
+            row = fetch_one(f"SELECT COUNT(*) FROM {table}")
+            rows.append(f"{table}: {row[0]}")
         return "\n".join(rows)
     except Exception as e:
         return str(e)
@@ -154,11 +171,6 @@ def symbol_search(query: str, domain: str = "all", max_results: int = 20, includ
     Search Python functions/classes/methods using the AST-based v2 index.
     Returns signatures, paths, line numbers, calls/imports, and optionally source.
     """
-    try:
-        conn = connect()
-    except Exception as e:
-        return str(e)
-
     where, params_extra = domain_where(domain, "files")
     params = [query] + params_extra + [max_results]
 
@@ -190,7 +202,7 @@ def symbol_search(query: str, domain: str = "all", max_results: int = 20, includ
     """
 
     try:
-        rows = conn.execute(sql, params).fetchall()
+        rows = fetch_all(sql, params)
     except Exception:
         like = f"%{query}%"
         params = [like, like, like] + params_extra + [max_results]
@@ -218,7 +230,10 @@ def symbol_search(query: str, domain: str = "all", max_results: int = 20, includ
         {where}
         LIMIT ?
         """
-        rows = conn.execute(sql, params).fetchall()
+        try:
+            rows = fetch_all(sql, params)
+        except Exception as e:
+            return str(e)
 
     if not rows:
         return f"No symbol results for {query!r} in domain {domain!r}."
@@ -229,11 +244,6 @@ def symbol_search(query: str, domain: str = "all", max_results: int = 20, includ
 @mcp.tool()
 def read_symbol_source(name: str, domain: str = "all", max_results: int = 8) -> str:
     """Read exact function/class source by symbol name or qualname."""
-    try:
-        conn = connect()
-    except Exception as e:
-        return str(e)
-
     where, params_extra = domain_where(domain, "files")
     like = f"%{name}%"
     params = [name, name, like] + params_extra + [max_results]
@@ -264,7 +274,10 @@ def read_symbol_source(name: str, domain: str = "all", max_results: int = 8) -> 
     LIMIT ?
     """
 
-    rows = conn.execute(sql, params).fetchall()
+    try:
+        rows = fetch_all(sql, params)
+    except Exception as e:
+        return str(e)
     if not rows:
         return f"No source found for symbol {name!r} in domain {domain!r}."
 
@@ -274,11 +287,6 @@ def read_symbol_source(name: str, domain: str = "all", max_results: int = 8) -> 
 @mcp.tool()
 def find_callers(call_name: str, domain: str = "all", max_results: int = 20) -> str:
     """Find indexed functions/methods that call a given function/API, such as cmds.parentConstraint."""
-    try:
-        conn = connect()
-    except Exception as e:
-        return str(e)
-
     where, params_extra = domain_where(domain, "files")
     like = f"%{call_name}%"
     params = [call_name, like] + params_extra + [max_results]
@@ -309,7 +317,10 @@ def find_callers(call_name: str, domain: str = "all", max_results: int = 20) -> 
     LIMIT ?
     """
 
-    rows = conn.execute(sql, params).fetchall()
+    try:
+        rows = fetch_all(sql, params)
+    except Exception as e:
+        return str(e)
     if not rows:
         return f"No callers found for {call_name!r} in domain {domain!r}."
 
@@ -321,11 +332,6 @@ def find_maya_cmd_usage(cmd_name: str, domain: str = "maya", max_results: int = 
     """Find functions using a Maya command, e.g. parentConstraint, skinCluster, ls, xform."""
     query1 = f"cmds.{cmd_name}"
     query2 = f"maya.cmds.{cmd_name}"
-    try:
-        conn = connect()
-    except Exception as e:
-        return str(e)
-
     where, params_extra = domain_where(domain, "files")
     params = [f"%{query1}%", f"%{query2}%"] + params_extra + [max_results]
 
@@ -354,7 +360,10 @@ def find_maya_cmd_usage(cmd_name: str, domain: str = "maya", max_results: int = 
     LIMIT ?
     """
 
-    rows = conn.execute(sql, params).fetchall()
+    try:
+        rows = fetch_all(sql, params)
+    except Exception as e:
+        return str(e)
     if not rows:
         return f"No Maya command usage found for {cmd_name!r} in domain {domain!r}."
 
@@ -364,11 +373,6 @@ def find_maya_cmd_usage(cmd_name: str, domain: str = "maya", max_results: int = 
 @mcp.tool()
 def knowledge_search(query: str, domain: str = "all", max_results: int = 8) -> str:
     """Search indexed text chunks from files/docs/examples."""
-    try:
-        conn = connect()
-    except Exception as e:
-        return str(e)
-
     where, params_extra = domain_where(domain, "files")
     params = [query] + params_extra + [max_results]
 
@@ -384,7 +388,7 @@ def knowledge_search(query: str, domain: str = "all", max_results: int = 8) -> s
     """
 
     try:
-        rows = conn.execute(sql, params).fetchall()
+        rows = fetch_all(sql, params)
     except Exception:
         like = f"%{query}%"
         params = [like] + params_extra + [max_results]
@@ -396,7 +400,10 @@ def knowledge_search(query: str, domain: str = "all", max_results: int = 8) -> s
         {where}
         LIMIT ?
         """
-        rows = conn.execute(sql, params).fetchall()
+        try:
+            rows = fetch_all(sql, params)
+        except Exception as e:
+            return str(e)
 
     if not rows:
         return f"No indexed text results for {query!r} in domain {domain!r}."

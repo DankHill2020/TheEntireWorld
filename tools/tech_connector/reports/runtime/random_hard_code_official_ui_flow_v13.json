@@ -1,0 +1,154 @@
+{
+  "prompt": "Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.",
+  "plan_elapsed_seconds": 0.064,
+  "total_seconds": 208.203,
+  "updates": [
+    {
+      "seconds": 0.012,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.064,
+      "message": "Prepared deterministic disposable-artifact plan; deferring file-contract synthesis until approval"
+    },
+    {
+      "seconds": 0.065,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.104,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 0.104,
+      "message": "Designing generated file contract; qwen2.5:1.5b; attempt 1/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 6.253,
+      "message": "Rejected artifact manifest attempt 1/3: Artifact manifest uses unknown requirement IDs (tech_connector/subsystem.py): 1, 2, 3, 4, 5, 6, 7, 8; Artifact manifest file lacks purpose or owned requirements: tech_connector/subsystem.py; Artifact manifest uses unknown requirement IDs (examples/tech_connector/tests/test_subsystem.py): 13"
+    },
+    {
+      "seconds": 6.253,
+      "message": "Designing generated file contract; qwen2.5:3b; attempt 2/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 96.318,
+      "message": "Rejected artifact manifest attempt 2/3: Artifact manifest JSON did not parse: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "seconds": 96.318,
+      "message": "Designing generated file contract; qwen2.5-coder:7b; attempt 3/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 121.254,
+      "message": "Artifact contract accepted: 6 dependency-ordered files"
+    },
+    {
+      "seconds": 121.255,
+      "message": "Generating __init__.py (1/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 129.307,
+      "message": "Generating dag.py (2/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 145.727,
+      "message": "Generating journal.py (3/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 152.773,
+      "message": "Generating observer.py (4/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 158.031,
+      "message": "Generating worker.py (5/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 167.667,
+      "message": "Generating test_dag.py (6/6; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 184.645,
+      "message": "Resolved generated standard-library symbols: journal.py: added import time; test_dag.py: added import json"
+    },
+    {
+      "seconds": 184.66,
+      "message": "Removed generated unused imports: __init__.py: removed unused import; __init__.py: removed unused import; __init__.py: removed unused import; __init__.py: removed unused import; __init__.py: removed unused import; __init__.py: removed unused import; dag.py: removed unused import; worker.py: removed unused import; worker.py: removed unused import; test_dag.py: removed unused import; test_dag.py: removed unused import"
+    },
+    {
+      "seconds": 184.688,
+      "message": "Normalized generated Python: __init__.py: normalized generated Python formatting; dag.py: normalized generated Python formatting; journal.py: normalized generated Python formatting; observer.py: normalized generated Python formatting; worker.py: normalized generated Python formatting; test_dag.py: normalized generated Python formatting"
+    },
+    {
+      "seconds": 189.105,
+      "message": "Repairing test_dag.py from disposable validation; qwen2.5-coder:3b; preserving 5 passing file(s)"
+    },
+    {
+      "seconds": 208.202,
+      "message": "Precise repair validation (1/8): Generated callables reference undefined names in : CycleError; Project-local import does not expose 'Task': C:\\depot\\tools\\tech_connector\\dag.py.; Disposable generated-patch validation failed: E\n======================================================================\nERROR: test_dag (unittest.loader._FailedTest.test_dag)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_dag\nTraceback (most recent call last):\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_fiivmm88\\examples\\tech_connector\\tests\\test_dag.py\", line 3, in <module>\n    from tech_connector.dag import DAG, Task\nImportError: cannot import name 'Task' from 'tech_connector.dag' (C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_fiivmm88\\tech_connector\\dag.py)\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)"
+    },
+    {
+      "seconds": 208.202,
+      "message": "Stopping precise repair because validation failures did not change"
+    },
+    {
+      "seconds": 208.203,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.",
+    "plan": "Implementation Plan\nObjective: Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad"
+  },
+  "result": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Generated callables reference undefined names in : CycleError\n- Project-local import does not expose 'Task': C:\\depot\\tools\\tech_connector\\dag.py.\n- Disposable generated-patch validation failed: E\n======================================================================\nERROR: test_dag (unittest.loader._FailedTest.test_dag)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_dag\nTraceback (most recent call last):\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_qzjd7xpc\\examples\\tech_connector\\tests\\test_dag.py\", line 3, in <module>\n    from tech_connector.dag import DAG, Task\nImportError: cannot import name 'Task' from 'tech_connector.dag' (C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_qzjd7xpc\\tech_connector\\dag.py)\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)",
+  "payload": {
+    "type": "project_changes_rejected",
+    "changes": [
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\tech_connector\\__init__.py",
+        "original_content": "",
+        "new_content": ""
+      },
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\tech_connector\\dag.py",
+        "original_content": "",
+        "new_content": "from typing import Any, Dict, List, Optional, Set, Tuple\nimport collections\nimport json\nimport time\n\n\nclass DAG:\n    \"\"\"\n    A Directed Acyclic Graph (DAG) for managing tasks with dependencies.\n    \n    :param tasks: A dictionary of task names to Task objects.\n    :param journal_path: Path to the JSONL journal file.\n    \"\"\"\n\n    def __init__(self, tasks: Dict[str, 'Task'], journal_path: str):\n        self.tasks = tasks\n        self.journal_path = journal_path\n        self.graph = collections.defaultdict(list)\n        self.in_degree = {task.name: 0 for task in tasks.values()}\n        self._build_graph()\n        self._validate_dag()\n\n    def _build_graph(self) -> None:\n        \"\"\"\n        Build the graph and calculate in-degrees.\n        \"\"\"\n        for task_name, task in self.tasks.items():\n            for dependency in task.dependencies:\n                if dependency not in self.tasks:\n                    raise ValueError(f\"Dependency '{dependency}' not found for task '{task_name}'\")\n                self.graph[dependency].append(task_name)\n                self.in_degree[task_name] += 1\n\n    def _validate_dag(self) -> None:\n        \"\"\"\n        Validate the DAG for cycles.\n        \"\"\"\n        queue = collections.deque([node for node, degree in self.in_degree.items() if degree == 0])\n        visited = set()\n        while queue:\n            node = queue.popleft()\n            visited.add(node)\n            for neighbor in self.graph[node]:\n                self.in_degree[neighbor] -= 1\n                if self.in_degree[neighbor] == 0:\n                    queue.append(neighbor)\n        if len(visited) != len(self.tasks):\n            raise CycleError('Cycle detected in the DAG')\n\n    def schedule(self, max_concurrency: int=4) -> None:\n        \"\"\"\n        Schedule tasks with bounded concurrency.\n        \n        :param max_concurrency: Maximum number of concurrent tasks.\n        \"\"\"\n        queue = collections.deque([node for node, degree in self.in_degree.items() if degree == 0])\n        running_tasks = set()\n        completed_tasks = set()\n        while queue or running_tasks:\n            while len(running_tasks) < max_concurrency and queue:\n                task_name = queue.popleft()\n                running_tasks.add(task_name)\n                self._run_task(task_name, completed_tasks)\n            time.sleep(0.1)\n\n    def _run_task(self, task_name: str, completed_tasks: Set[str]) -> None:\n        \"\"\"\n        Run a single task and handle dependencies.\n        \n        :param task_name: Name of the task to run.\n        :param completed_tasks: Set of already completed tasks.\n        \"\"\"\n        if task_name in completed_tasks:\n            return\n        task = self.tasks[task_name]\n        for dependency in task.dependencies:\n            if dependency not in completed_tasks:\n                raise ValueError(f\"Dependency '{dependency}' not completed for task '{task_name}'\")\n        try:\n            result = task.execute()\n            completed_tasks.add(task_name)\n            self._log_task_result(task_name, result)\n        except Exception as e:\n            self._handle_task_failure(task_name, e)\n\n    def _log_task_result(self, task_name: str, result: Any) -> None:\n        \"\"\"\n        Log the result of a task to the journal.\n        \n        :param task_name: Name of the task.\n        :param result: Result of the task execution.\n        \"\"\"\n        with open(self.journal_path, 'a') as f:\n            f.write(json.dumps({'task': task_name, 'result': result}) + '\\n')\n\n    def _handle_task_failure(self, task_name: str, e: Exception) -> None:\n        \"\"\"\n        Handle a failed task by logging the error and retrying with exponential backoff.\n        \n        :param task_name: Name of the task.\n        :param e: Exception raised during task execution.\n        \"\"\"\n        with open(self.journal_path, 'a') as f:\n            f.write(json.dumps({'task': task_name, 'error': str(e)}) + '\\n')\n        time.sleep(2)\n        self._run_task(task_name, set())\n\n    def invalidate_downstream_tasks(self, task_name: str) -> None:\n        \"\"\"\n        Invalidate tasks that depend on the given task.\n        \n        :param task_name: Name of the task to invalidate dependencies for.\n        \"\"\"\n        queue = collections.deque([task_name])\n        while queue:\n            current_task = queue.popleft()\n            for dependent in self.graph[current_task]:\n                self.in_degree[dependent] -= 1\n                if self.in_degree[dependent] == 0:\n                    queue.append(dependent)\n"
+      },
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\tech_connector\\journal.py",
+        "original_content": "",
+        "new_content": "from typing import Any, Dict, List, Optional\nimport json\nimport time\n\n\nclass Journal:\n    \"\"\"\n    A class for managing an append-only JSONL journal.\n    \n    :param path: Path to the JSONL journal file.\n    \"\"\"\n\n    def __init__(self, path: str):\n        self.path = path\n\n    def append(self, entry: Dict[str, Any]) -> None:\n        \"\"\"\n        Append a new entry to the journal.\n        \n        :param entry: Dictionary representing the entry to append.\n        \"\"\"\n        with open(self.path, 'a') as f:\n            f.write(json.dumps(entry) + '\\n')\n\n    def read_all(self) -> List[Dict[str, Any]]:\n        \"\"\"\n        Read all entries from the journal.\n        \n        :return: List of dictionaries representing the journal entries.\n        \"\"\"\n        with open(self.path, 'r') as f:\n            return [json.loads(line.strip()) for line in f]\n\n    def recover_from_checkpoint(self, checkpoint: Dict[str, Any]) -> None:\n        \"\"\"\n        Recover from a checkpoint by replaying the journal up to the checkpoint.\n        \n        :param checkpoint: Dictionary representing the checkpoint.\n        \"\"\"\n        entries = self.read_all()\n        for entry in entries:\n            if entry['timestamp'] <= checkpoint['timestamp']:\n                continue\n            self._process_entry(entry)\n\n    def _process_entry(self, entry: Dict[str, Any]) -> None:\n        \"\"\"\n        Process a single journal entry.\n        \n        :param entry: Dictionary representing the journal entry.\n        \"\"\"\n        task_name = entry['task']\n        if 'result' in entry:\n            pass\n        elif 'error' in entry:\n            time.sleep(2)\n            self._process_entry(entry)\n"
+      },
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\tech_connector\\observer.py",
+        "original_content": "",
+        "new_content": "from typing import Any, Dict, List, Optional\nimport json\n\n\nclass Observer:\n    \"\"\"\n    An observer for reporting progress and managing task state.\n    \n    :param dag: The DAG being observed.\n    :param journal_path: Path to the JSONL journal file.\n    \"\"\"\n\n    def __init__(self, dag: 'DAG', journal_path: str):\n        self.dag = dag\n        self.journal_path = journal_path\n\n    def observe(self) -> None:\n        \"\"\"\n        Observe and report progress on the DAG.\n        \"\"\"\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        completed_tasks = {entry['task'] for entry in entries if 'result' in entry}\n        failed_tasks = {entry['task'] for entry in entries if 'error' in entry}\n        print(f'Completed Tasks: {completed_tasks}')\n        print(f'Failed Tasks: {failed_tasks}')\n\n    def resume_from_checkpoint(self, checkpoint: Dict[str, Any]) -> None:\n        \"\"\"\n        Resume the DAG from a given checkpoint.\n        \n        :param checkpoint: Dictionary representing the checkpoint.\n        \"\"\"\n        self.dag.schedule(max_concurrency=4)\n"
+      },
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\tech_connector\\worker.py",
+        "original_content": "",
+        "new_content": "from concurrent.futures import ThreadPoolExecutor, Future\nfrom typing import Any, Dict, List, Optional\nfrom tech_connector.dag import DAG\nfrom tech_connector.journal import Journal\nfrom tech_connector.observer import Observer\n\n\nclass Worker:\n    \"\"\"\n    A worker that performs work separately from an observer that reports progress.\n    \n    :param dag: The DAG to be executed.\n    :param journal_path: Path to the JSONL journal file.\n    :param max_concurrency: Maximum number of concurrent tasks.\n    \"\"\"\n\n    def __init__(self, dag: DAG, journal_path: str, max_concurrency: int=4):\n        self.dag = dag\n        self.journal = Journal(journal_path)\n        self.observer = Observer(dag, journal_path)\n        self.max_concurrency = max_concurrency\n        self.executor = ThreadPoolExecutor(max_workers=max_concurrency)\n\n    def run(self) -> None:\n        \"\"\"\n        Run the worker to perform work and report progress.\n        \"\"\"\n        self.dag.schedule(max_concurrency=self.max_concurrency)\n        self.observer.observe()\n\n    def pause_and_merge_context(self, user_context: Dict[str, Any]) -> None:\n        \"\"\"\n        Pause the current task and merge added user context.\n        \n        :param user_context: Dictionary representing the user context to merge.\n        \"\"\"\n        pass\n\n    def invalidate_downstream_tasks(self, task_name: str) -> None:\n        \"\"\"\n        Invalidate tasks that depend on the given task.\n        \n        :param task_name: Name of the task to invalidate dependencies for.\n        \"\"\"\n        self.dag.invalidate_downstream_tasks(task_name)\n\n    def resume_from_checkpoint(self, checkpoint: Dict[str, Any]) -> None:\n        \"\"\"\n        Resume the DAG from a given checkpoint.\n        \n        :param checkpoint: Dictionary representing the checkpoint.\n        \"\"\"\n        self.journal.recover_from_checkpoint(checkpoint)\n        self.observer.resume_from_checkpoint(checkpoint)\n\n    def cancel_task(self, task_name: str) -> None:\n        \"\"\"\n        Cancel a running task.\n        \n        :param task_name: Name of the task to cancel.\n        \"\"\"\n        pass\n\n    def compensate_rollback(self, task_name: str) -> None:\n        \"\"\"\n        Perform compensation rollback for a failed task.\n        \n        :param task_name: Name of the task that failed.\n        \"\"\"\n        pass\n"
+      },
+      {
+        "action": "create",
+        "path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_dag.py",
+        "original_content": "",
+        "new_content": "import json\nimport unittest\nfrom tech_connector.dag import DAG, Task\nfrom tech_connector.observer import Observer\nfrom tech_connector.worker import Worker\n\n\nclass TestDAG(unittest.TestCase):\n\n    def setUp(self):\n        self.journal_path = 'test_journal.jsonl'\n        self.dag = DAG(journal_path=self.journal_path)\n        self.worker = Worker(dag=self.dag, journal_path=self.journal_path)\n        self.observer = Observer(dag=self.dag, journal_path=self.journal_path)\n\n    def tearDown(self):\n        try:\n            with open(self.journal_path, 'w') as f:\n                pass\n        except FileNotFoundError:\n            pass\n\n    def test_cycle_detection(self):\n        task1 = Task(name='task1', dependencies=[])\n        task2 = Task(name='task2', dependencies=['task1'])\n        self.dag.add_task(task1)\n        self.dag.add_task(task2)\n        with self.assertRaises(ValueError):\n            self.dag.schedule(max_concurrency=4)\n\n    def test_deterministic_topological_scheduling(self):\n        task1 = Task(name='task1', dependencies=[])\n        task2 = Task(name='task2', dependencies=['task1'])\n        task3 = Task(name='task3', dependencies=['task2'])\n        self.dag.add_task(task1)\n        self.dag.add_task(task2)\n        self.dag.add_task(task3)\n        self.dag.schedule(max_concurrency=4)\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        task_order = [entry['task'] for entry in entries if 'result' in entry]\n        expected_order = ['task1', 'task2', 'task3']\n        self.assertEqual(task_order, expected_order)\n\n    def test_bounded_concurrency(self):\n        tasks = [Task(name=f'task{i}', dependencies=[]) for i in range(10)]\n        for task in tasks:\n            self.dag.add_task(task)\n        self.worker.run()\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        completed_tasks = {entry['task'] for entry in entries if 'result' in entry}\n        self.assertEqual(len(completed_tasks), 10)\n\n    def test_invalidate_downstream_tasks(self):\n        task1 = Task(name='task1', dependencies=[])\n        task2 = Task(name='task2', dependencies=['task1'])\n        task3 = Task(name='task3', dependencies=['task2'])\n        self.dag.add_task(task1)\n        self.dag.add_task(task2)\n        self.dag.add_task(task3)\n        self.dag.schedule(max_concurrency=4)\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        task_order = [entry['task'] for entry in entries if 'result' in entry]\n        expected_order = ['task1', 'task2', 'task3']\n        self.assertEqual(task_order, expected_order)\n        self.dag.invalidate_downstream_tasks('task1')\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        completed_tasks = {entry['task'] for entry in entries if 'result' in entry}\n        self.assertEqual(len(completed_tasks), 3)\n\n    def test_resume_from_checkpoint(self):\n        task1 = Task(name='task1', dependencies=[])\n        task2 = Task(name='task2', dependencies=['task1'])\n        task3 = Task(name='task3', dependencies=['task2'])\n        self.dag.add_task(task1)\n        self.dag.add_task(task2)\n        self.dag.add_task(task3)\n        self.dag.schedule(max_concurrency=4)\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        checkpoint = {'timestamp': entries[-1]['timestamp']}\n        self.worker.resume_from_checkpoint(checkpoint)\n        with open(self.journal_path, 'r') as f:\n            entries = [json.loads(line.strip()) for line in f]\n        completed_tasks = {entry['task'] for entry in entries if 'result' in entry}\n        self.assertEqual(len(completed_tasks), 3)\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+      }
+    ],
+    "validation_errors": [
+      "Generated callables reference undefined names in : CycleError",
+      "Project-local import does not expose 'Task': C:\\depot\\tools\\tech_connector\\dag.py.",
+      "Disposable generated-patch validation failed: E\n======================================================================\nERROR: test_dag (unittest.loader._FailedTest.test_dag)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_dag\nTraceback (most recent call last):\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Aaron\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\unittest\\loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n  File \"C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_qzjd7xpc\\examples\\tech_connector\\tests\\test_dag.py\", line 3, in <module>\n    from tech_connector.dag import DAG, Task\nImportError: cannot import name 'Task' from 'tech_connector.dag' (C:\\Users\\Aaron\\AppData\\Local\\Temp\\tech_connector_patch_validation_qzjd7xpc\\tech_connector\\dag.py)\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)"
+    ]
+  }
+}

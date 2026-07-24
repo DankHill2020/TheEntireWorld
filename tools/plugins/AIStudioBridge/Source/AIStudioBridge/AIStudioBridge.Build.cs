@@ -11,7 +11,8 @@ public class AIStudioBridge : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "InputCore"
+            "InputCore",
+            "Niagara"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
@@ -20,7 +21,13 @@ public class AIStudioBridge : ModuleRules
             "BlueprintGraph",
             "AnimGraph",
             "AnimGraphRuntime",
+            "AssetTools",
             "Json",
+            "JsonUtilities",
+            "NiagaraEditor",
+            "PhysicsUtilities",
+            "PoseSearch",
+            "PoseSearchEditor",
             "Slate",
             "SlateCore"
         });

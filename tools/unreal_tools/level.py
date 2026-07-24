@@ -241,3 +241,114 @@ def select_actors_by_query(query):
     else:
         unreal.EditorLevelLibrary.set_selected_level_actors(selected)
     return json.dumps({"ok": True, "selected_count": len(selected), "selected_actors": resolved}, indent=2, default=str)
+
+
+def get_selected_actors():
+    import unreal
+
+    try:
+        subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+        actors = list(subsystem.get_selected_level_actors() or []) if subsystem else []
+    except Exception:
+        actors = list(unreal.EditorLevelLibrary.get_selected_level_actors() or [])
+    return json.dumps({
+        "ok": True,
+        "selected_actors": [_actor_summary(unreal, actor) for actor in actors],
+        "count": len(actors),
+    }, indent=2, default=str)
+
+
+def create_validation_map(map_path="/Game/Developers/AI_Validation/Disposable_TestMap", spawn_actors=None, test_steps=None, save=True):
+    """Create/open a disposable validation map and return editor readback evidence."""
+    import unreal
+
+    spawn_actors = list(spawn_actors or [])
+    test_steps = list(test_steps or [])
+    normalized = str(map_path or "/Game/Developers/AI_Validation/Disposable_TestMap").split(".", 1)[0]
+    warnings = []
+    created_or_loaded = False
+    try:
+        if unreal.EditorAssetLibrary.does_asset_exist(normalized):
+            loaded = unreal.EditorLevelLibrary.load_level(normalized)
+            created_or_loaded = bool(loaded)
+        elif hasattr(unreal.EditorLevelLibrary, "new_level"):
+            created_or_loaded = bool(unreal.EditorLevelLibrary.new_level(normalized))
+        else:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "level_creation_api_unavailable",
+                    "map_path": normalized,
+                    "required_api": "EditorLevelLibrary.new_level",
+                },
+                indent=2,
+            )
+    except Exception as exc:
+        return json.dumps({"ok": False, "status": "map_create_or_load_failed", "map_path": normalized, "error": str(exc)}, indent=2)
+
+    spawned = []
+    for actor_spec in spawn_actors:
+        if isinstance(actor_spec, str):
+            actor_spec = {"class_path": actor_spec}
+        class_path = str(actor_spec.get("class_path") or actor_spec.get("class") or "")
+        location = actor_spec.get("location") or [0.0, 0.0, 0.0]
+        if not class_path:
+            continue
+        try:
+            cls = unreal.load_class(None, class_path)
+            if not cls:
+                warnings.append(f"actor class not found: {class_path}")
+                continue
+            actor = unreal.EditorLevelLibrary.spawn_actor_from_class(
+                cls,
+                unreal.Vector(float(location[0]), float(location[1]), float(location[2])),
+            )
+            if actor:
+                spawned.append(actor.get_path_name())
+        except Exception as exc:
+            warnings.append(f"spawn failed for {class_path}: {exc}")
+    saved = False
+    if save:
+        try:
+            saved = bool(unreal.EditorLoadingAndSavingUtils.save_current_level())
+        except Exception as exc:
+            warnings.append(f"save_current_level warning: {exc}")
+    return json.dumps(
+        {
+            "ok": bool(created_or_loaded),
+            "status": "validation_map_ready" if created_or_loaded else "validation_map_not_ready",
+            "map_path": normalized,
+            "spawned_actors": spawned,
+            "test_steps": test_steps,
+            "saved": saved,
+            "warnings": warnings,
+        },
+        indent=2,
+        default=str,
+    )
+
+
+def delete_actor(actor_query, dry_run=False):
+    import unreal
+
+    data = json.loads(resolve_actor(actor_query))
+    if not data.get("matches"):
+        return json.dumps({"ok": False, "actor_query": actor_query, "error": "actor_not_found"}, indent=2)
+    target_path = data["matches"][0].get("path")
+    actor = next((item for item in _all_level_actors(unreal) if item.get_path_name() == target_path), None)
+    if not actor:
+        return json.dumps({"ok": False, "actor_query": actor_query, "error": "actor_object_not_resolved", "match": data["matches"][0]}, indent=2)
+    deleted = False
+    if not dry_run:
+        try:
+            subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            deleted = bool(subsystem.destroy_actor(actor)) if subsystem else bool(unreal.EditorLevelLibrary.destroy_actor(actor))
+        except Exception as exc:
+            return json.dumps({"ok": False, "actor_query": actor_query, "error": str(exc), "match": data["matches"][0]}, indent=2)
+    return json.dumps({
+        "ok": bool(dry_run or deleted),
+        "actor_query": actor_query,
+        "actor_path": target_path,
+        "deleted": deleted,
+        "dry_run": bool(dry_run),
+    }, indent=2, default=str)

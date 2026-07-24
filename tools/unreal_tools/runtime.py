@@ -236,3 +236,72 @@ def pie_validate(target_assets=None, expected=None, start_pie=False):
         },
         indent=2,
     )
+
+
+def multiplayer_pie_validate(
+    target_assets=None,
+    expected=None,
+    client_count=2,
+    start_pie=True,
+):
+    """Configure a multi-client PIE session and return structured launch/readback proof."""
+    import unreal
+
+    expected = dict(expected or {})
+    requested_clients = max(2, int(client_count or 2))
+    settings_class = getattr(unreal, "LevelEditorPlaySettings", None)
+    settings = unreal.get_default_object(settings_class) if settings_class else None
+    configured = False
+    settings_error = ""
+    if settings:
+        try:
+            settings.set_editor_property("play_number_of_clients", requested_clients)
+            configured = int(settings.get_editor_property("play_number_of_clients")) == requested_clients
+            settings.save_config()
+        except Exception as exc:
+            settings_error = str(exc)
+
+    subsystem = _level_editor(unreal)
+    was_active = bool(subsystem.is_in_play_in_editor())
+    if start_pie and not was_active:
+        subsystem.editor_request_begin_play()
+    active = bool(subsystem.is_in_play_in_editor())
+    try:
+        worlds = [
+            str(world.get_path_name())
+            for world in unreal.EditorLevelLibrary.get_pie_worlds(False) or []
+        ]
+    except Exception:
+        worlds = []
+    assets = {
+        str(path): bool(unreal.EditorAssetLibrary.does_asset_exist(str(path)))
+        for path in target_assets or []
+    }
+    assertions = {
+        "two_or_more_clients_configured": configured,
+        "pie_start_requested_or_active": bool(active or (start_pie and not was_active)),
+        "target_assets_exist": all(assets.values()) if assets else True,
+    }
+    if expected.get("minimum_pie_worlds") is not None:
+        assertions["minimum_pie_worlds_observed"] = len(worlds) >= int(
+            expected["minimum_pie_worlds"]
+        )
+    ok = all(assertions.values())
+    return json.dumps(
+        {
+            "ok": ok,
+            "operation": "runtime.multiplayer_pie_validate",
+            "requested_clients": requested_clients,
+            "configured": configured,
+            "pie_active": active,
+            "pie_worlds": worlds,
+            "assets": assets,
+            "expected": expected,
+            "assertions": assertions,
+            "errors": [
+                *([settings_error] if settings_error else []),
+                *[name for name, passed in assertions.items() if not passed],
+            ],
+        },
+        indent=2,
+    )

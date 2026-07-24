@@ -101,6 +101,9 @@ JOB_STATES = {
     "connecting",
     "executing",
     "validating",
+    "pausing",
+    "paused",
+    "resuming",
     "completed",
     "cancelled",
     "failed",
@@ -124,6 +127,7 @@ class RemoteJob:
     reports: list[dict[str, Any]] = field(default_factory=list)
     rollback: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
+    context_addenda: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -160,6 +164,7 @@ class RemoteJob:
             "reports": list(self.reports),
             "rollback": dict(self.rollback or {}),
             "result": dict(self.result or {}),
+            "context_addenda": list(self.context_addenda),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -190,4 +195,34 @@ class RemoteJobStore:
         if not job or job.status in {"completed", "failed", "cancelled"}:
             return False
         job.update(status="cancelled", current_step="Cancelled", progress=job.progress)
+        return True
+
+    def pause(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        if not job or job.status in FINISHED_JOB_STATES or job.status == "paused":
+            return False
+        job.update(status="pausing", current_step="Pausing after the current safe step")
+        return True
+
+    def mark_paused(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        if not job or job.status in FINISHED_JOB_STATES:
+            return False
+        job.update(status="paused", current_step="Paused at a safe checkpoint")
+        return True
+
+    def add_context(self, job_id: str, text: str) -> bool:
+        job = self.get(job_id)
+        addendum = str(text or "").strip()
+        if not job or not addendum or job.status in FINISHED_JOB_STATES:
+            return False
+        job.context_addenda.append(addendum)
+        job.updated_at = utc_now_iso()
+        return True
+
+    def resume(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        if not job or job.status != "paused":
+            return False
+        job.update(status="resuming", current_step="Resuming from the last safe checkpoint")
         return True

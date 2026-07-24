@@ -44,9 +44,10 @@ def plan_validation_for_paths(
             )
         test_candidates = _matching_test_files(py_files, project_root=project_root)
         for test_path in test_candidates[:6]:
+            test_file = Path(test_path)
             steps.append(
                 ValidationStep(
-                    command=f"python -m unittest {Path(test_path).stem}",
+                    command=f"python -m unittest discover -s {test_file.parent} -p {test_file.name}",
                     reason="A nearby focused test exists for the changed code.",
                     paths=(test_path,),
                     required=False,
@@ -101,14 +102,15 @@ def _matching_test_files(py_files: list[str], *, project_root: str | None = None
         if key in seen_roots or not root.exists():
             continue
         seen_roots.add(key)
-        tests_dir = root / "tests"
-        if not tests_dir.exists():
-            continue
+        test_dirs = [root / "tests", root / "examples" / "tech_connector" / "tests"]
         names = {Path(path).stem for path in py_files}
-        for test_file in tests_dir.glob("test_*.py"):
-            stem = test_file.stem.lower()
-            if any(name.lower() in stem or stem in f"test_{name.lower()}" for name in names):
-                out.append(str(test_file.resolve()))
+        for tests_dir in test_dirs:
+            if not tests_dir.exists():
+                continue
+            for test_file in tests_dir.glob("test_*.py"):
+                stem = test_file.stem.lower()
+                if any(name.lower() in stem or stem in f"test_{name.lower()}" for name in names):
+                    out.append(str(test_file.resolve()))
     return sorted(set(out))
 
 

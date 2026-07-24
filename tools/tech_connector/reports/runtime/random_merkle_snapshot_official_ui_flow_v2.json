@@ -1,0 +1,79 @@
+{
+  "prompt": "Create a complete multi-file Python artifact for Tech Connector that incrementally snapshots very large directory trees and computes deterministic Merkle-style diffs between snapshots. It must stream file hashing with bounded parallelism, preserve stable ordering across platforms, detect renamed files by content identity, honor gitignore-style include and exclude rules, avoid symlink and junction loops, report permission and disappearing-file errors without aborting the whole scan, support cancellation and pause/resume from an atomic manifest checkpoint, and emit observer events separately from hashing work. The result must expose a typed API for added, removed, modified, and renamed paths, avoid loading all file contents into memory, and recover cleanly from a truncated journal or interrupted atomic replace. Generate focused modules plus comprehensive unittest coverage using only temporary directories and standard-library dependencies. Do not modify live project files; materialize and execute only in a disposable workspace. Return all generated code, syntax/import/test command output, per-stage timings, and proof for every requirement.",
+  "plan_elapsed_seconds": 0.072,
+  "total_seconds": 59.618,
+  "updates": [
+    {
+      "seconds": 0.012,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.072,
+      "message": "Prepared deterministic disposable-artifact plan; deferring file-contract synthesis until approval"
+    },
+    {
+      "seconds": 0.073,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.099,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 0.099,
+      "message": "Designing generated file contract; qwen2.5:1.5b; attempt 1/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 12.955,
+      "message": "Rejected artifact manifest attempt 1/3: Artifact manifest uses unknown requirement IDs (examples/tech_connector/tests/test_tech_connector.py): tech_connector.py; Artifact manifest file lacks purpose or owned requirements: examples/tech_connector/tests/test_tech_connector.py; Artifact manifest repeats a path: examples/tech_connector/tests/test_tech_connector.py"
+    },
+    {
+      "seconds": 12.955,
+      "message": "Designing generated file contract; qwen2.5:3b; attempt 2/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 20.353,
+      "message": "Artifact contract accepted: 3 dependency-ordered files"
+    },
+    {
+      "seconds": 20.353,
+      "message": "Generating tech_connector.py (1/3; attempt 1/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 44.13,
+      "message": "Rejected tech_connector.py: Generated file did not parse and compile (tech_connector.py): invalid syntax (tech_connector.py, line 66)"
+    },
+    {
+      "seconds": 44.131,
+      "message": "Generating tech_connector.py (1/3; attempt 2/2; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 59.616,
+      "message": "Rejected tech_connector.py: Generated file omitted manifest-declared public symbols (tech_connector.py): additions, modifications, removals, renames"
+    },
+    {
+      "seconds": 59.616,
+      "message": "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+    },
+    {
+      "seconds": 59.618,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Create a complete multi-file Python artifact for Tech Connector that incrementally snapshots very large directory trees and computes deterministic Merkle-style diffs between snapshots. It must stream file hashing with bounded parallelism, preserve stable ordering across platforms, detect renamed files by content identity, honor gitignore-style include and exclude rules, avoid symlink and junction loops, report permission and disappearing-file errors without aborting the whole scan, support cancellation and pause/resume from an atomic manifest checkpoint, and emit observer events separately from hashing work. The result must expose a typed API for added, removed, modified, and renamed paths, avoid loading all file contents into memory, and recover cleanly from a truncated journal or interrupted atomic replace. Generate focused modules plus comprehensive unittest coverage using only temporary directories and standard-library dependencies. Do not modify live project files; materialize and execute only in a disposable workspace. Return all generated code, syntax/import/test command output, per-stage timings, and proof for every requirement.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Create a complete multi-file Python artifact for Tech Connector that incrementally snapshots very large directory trees and computes deterministic Merkle-style diffs between snapshots. It must stream file hashing with bounded parallelism, preserve stable ordering across platforms, detect renamed files by content identity, honor gitignore-style include and exclude rules, avoid symlink and junction loops, report permission and disappearing-file errors without aborting the whole scan, support cancellation and pause/resume from an atomic manifest checkpoint, and emit observer events separately from hashing work. The result must expose a typed API for added, removed, modified, and renamed paths, avoid loading all file contents into memory, and recover cleanly from a truncated journal or interrupted atomic replace. Generate focused modules plus comprehensive unittest coverage using only temporary directories and standard-library dependencies. Do not modify live project files; materialize and execute only in a disposable workspace. Return all generated code, syntax/import/test command output, per-stage timings, and proof for every requirement.",
+    "plan": "Implementation Plan\nObjective: Create a complete multi-file Python artifact for Tech Connector that incrementally snapshots very large directory trees and computes deterministic Merkle-style diffs between snapshots. It must stream file hashing with bounded parallelism, preserve stable ordering across platforms, detect renamed files by content identity, honor gitignore-style include and exclude rules, avoid symlink and junction loops, report permission and disappearing-file errors without aborting the whole scan, support cancellation and pause/resume from an atomic manifest checkpoint, and emit observer events separately from hashing work. The result must expose a typed API for added, removed, modified, and renamed paths, avoid loading all file contents into memory, and recover cleanly from a truncated journal or interrupted atomic replace. Generate focused modules plus comprehensive unittest coverage using only temporary directories and standard-library dependencies. Do not modify live project files; materialize and execute only in a disposable workspace. Return all generated code, syntax/import/test command output, per-stage timings, and proof for every requirement.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad"
+  },
+  "result": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed.",
+  "payload": {
+    "type": "project_changes_rejected",
+    "changes": [],
+    "validation_errors": [
+      "Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed."
+    ]
+  }
+}

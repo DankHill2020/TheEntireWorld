@@ -1,0 +1,180 @@
+[
+  {
+    "preview_ready": true,
+    "change_count": 4,
+    "changed_files": [
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\stresspkg\\task_report.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\stresspkg\\task_store.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\stresspkg\\task_tracker_tool.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\tests\\test_task_tracker_tool.py"
+    ],
+    "edit_locations": [],
+    "stage_audit": {
+      "summary": {
+        "intent_stage_count": 1,
+        "generation_stage_count": 4,
+        "validation_stage_count": 1,
+        "retry_stage_count": 5,
+        "target_first_pass_ok": 0,
+        "target_first_pass_total": 4,
+        "semantic_retry_count": 0,
+        "retry_targets": [],
+        "runtime_unittest_ok": true,
+        "quality_gate_ok": true,
+        "intent_confidence_score": 100,
+        "status": "recovered"
+      },
+      "steps": []
+    },
+    "change_lines": [],
+    "blocked": false,
+    "has_pass_placeholder": false,
+    "has_hardcoded_user_path": false,
+    "uses_pyside2_or_pyqt5": false,
+    "has_docstring_params": true,
+    "has_return_doc": true,
+    "flow_timings": {},
+    "response_excerpt": "## Generating patchable code changes\n\n{\"changes\": [{\"action\": \"modify\", \"path\": \"C:\\\\depot\\\\tools\\\\tech_connector\\\\reports\\\\runtime\\\\project_edit_ui_stress\\\\stresspkg\\\\task_report.py\", \"target_symbol\": \"\", \"original_content\": \"# coding=utf-8\\nfrom stresspkg.task_store import load_tasks\\n\\n\\ndef summarize_tasks(records):\\n    total_count = 0\\n    done_count = 0\\n    todo_count = 0\\n    high_priority_names = []\\n    for r in records:\\n        total_count += 1\\n        if r.get(\\\"status\\\") == \\\"done\\\":\\n            done_count += 1\\n        else:\\n            todo_count += 1\\n        if int(r.get(\\\"priority\\\", 0)) >= 5:\\n            high_priority_names.append(r.get(\\\"name\\\"))\\n    return {\\n        \\\"total\\\": total_count,\\n        \\\"done\\\": done_count,\\n        \\\"todo\\\": todo_count,\\n        \\\"high_priority\\\": high_priority_names,\\n    }\\n\", \"new_content\": \"# coding=utf-8\\n\\n\\ndef summarize_tasks(records):\\n    \\\"\\\"\\\"\\n    Summarize the tasks based on their status and priority.\\n\\n    :param records: List of task records, each containing 'name', 'status', and 'priority'.\\n    :return: A dictionary with counts of total, done, todo tasks, and high-priority task names.\\n    \\\"\\\"\\\"\\n    to",
+    "case": "task_tracker_tool_request",
+    "elapsed_seconds": 53.4,
+    "response_log": "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\project_edit_ui_stress_response_task_tracker_tool_request.txt",
+    "code_outputs": [
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\code_outputs\\task_tracker_tool_request\\01_task_report.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\code_outputs\\task_tracker_tool_request\\02_task_store.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\code_outputs\\task_tracker_tool_request\\03_task_tracker_tool.py",
+      "C:\\depot\\tools\\tech_connector\\reports\\runtime\\project_edit_ui_stress\\code_outputs\\task_tracker_tool_request\\04_test_task_tracker_tool.py"
+    ],
+    "runtime_verification": {
+      "ran": true,
+      "ok": true,
+      "ran_tests": 5,
+      "seconds": 0.192,
+      "modules": [
+        "tests.test_task_tracker_tool"
+      ],
+      "stdout": "",
+      "stderr": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.018s\n\nOK\n"
+    },
+    "status_count": 21,
+    "last_statuses": [
+      {
+        "at_seconds": 34.12,
+        "message": "Normalized generated Python: task_report.py: normalized generated Python formatting; task_store.py: normalized generated Python formatting; task_tracker_tool.py: normalized generated Python formatting; test_task_tracker_tool.py: normalized generated Python formatting"
+      },
+      {
+        "at_seconds": 34.904,
+        "message": "Precisely isolated generated test fixture: test_task_tracker_tool.py:TestTaskTrackerTool.setUp"
+      },
+      {
+        "at_seconds": 35.229,
+        "message": "Precise repair validation (1/8): Generated test methods need stronger behavioral proof: TestTaskTrackerTool.test_add_task_with_summary"
+      },
+      {
+        "at_seconds": 35.232,
+        "message": "Precisely repairing TestTaskTrackerTool.test_add_task_with_summary; qwen2.5-coder:3b; attempt 1; preserving 3 files and all unrelated symbols"
+      },
+      {
+        "at_seconds": 43.475,
+        "message": "Precise repair validation (2/8): Disposable generated-patch validation failed: ..E..\n======================================================================\nERROR: test_add_task_with_summary (test_task_tracker_tool.TestTaskTrackerTool.test_add_task_with_summary)\n----------------------------------------------------------------------\nTypeError: TestTaskTrackerTool.test_add_task_with_summary() missing 1 required positional argument: 'mock_path'\n\n----------------------------------------------------------------------\nRan 5 tests in 0.013s\n\nFAILED (errors=1)"
+      },
+      {
+        "at_seconds": 43.48,
+        "message": "Precisely repairing TestTaskTrackerTool.test_add_task_with_summary; qwen2.5-coder:7b; attempt 2; preserving 3 files and all unrelated symbols"
+      },
+      {
+        "at_seconds": 53.402,
+        "message": "Precise repair validation (3/8): passed"
+      },
+      {
+        "at_seconds": 53.402,
+        "message": "Generating patchable code changes completed"
+      }
+    ],
+    "status_timeline": [
+      {
+        "at_seconds": 0.067,
+        "message": "Querying indexed target files and reusable project systems"
+      },
+      {
+        "at_seconds": 0.107,
+        "message": "Using explicit indexed multi-file boundaries; generating dependency files, integration file, then focused tests"
+      },
+      {
+        "at_seconds": 0.11,
+        "message": "Generating task_report.py (1/4; attempt 1/2; qwen2.5-coder:3b)"
+      },
+      {
+        "at_seconds": 8.167,
+        "message": "Generating task_store.py (2/4; attempt 1/2; qwen2.5-coder:3b)"
+      },
+      {
+        "at_seconds": 11.815,
+        "message": "Generating task_tracker_tool.py (3/4; attempt 1/2; qwen2.5-coder:3b)"
+      },
+      {
+        "at_seconds": 18.541,
+        "message": "Generating test_task_tracker_tool.py (4/4; attempt 1/2; qwen2.5-coder:7b)"
+      },
+      {
+        "at_seconds": 34.078,
+        "message": "Stabilized generated project-local import cycles: task_report.py: moved cyclic import from stresspkg.task_store into 0 callable use site(s); task_store.py: moved cyclic import from stresspkg.task_report into 1 callable use site(s)"
+      },
+      {
+        "at_seconds": 34.086,
+        "message": "Wired uniquely owned generated symbols: task_tracker_tool.py:add_task -> stresspkg.task_report.summarize_tasks; task_tracker_tool.py:complete_task -> stresspkg.task_report.summarize_tasks; test_task_tracker_tool.py:test_load_tasks_with_invalid_json -> stresspkg.task_store.load_tasks"
+      },
+      {
+        "at_seconds": 34.089,
+        "message": "Completed requested public docstrings: task_tracker_tool.py:TaskTrackerTool"
+      },
+      {
+        "at_seconds": 34.105,
+        "message": "Applied explicit scoped cleanup: task_report.py: renamed r to task_record; task_store.py: removed statement using tmp_debug_payload; task_store.py: removed statement using tmp_debug_payload; task_tracker_tool.py: removed statement using debug_cache_unused; task_tracker_tool.py: renamed r to task_record; task_tracker_tool.py: removed unrequested public get_all_tasks; task_tracker_tool.py: removed unrequested public get_task_priority; task_tracker_tool.py: removed unrequested public get_task_status"
+      },
+      {
+        "at_seconds": 34.108,
+        "message": "Resolved generated standard-library symbols: test_task_tracker_tool.py: added import os"
+      },
+      {
+        "at_seconds": 34.112,
+        "message": "Removed generated unused imports: task_report.py: removed unused import; task_store.py: removed unused import"
+      },
+      {
+        "at_seconds": 34.113,
+        "message": "Materialized explicit generated-test contracts: test_task_tracker_tool.py: materialized TestTaskTrackerTool.test_load_tasks_with_invalid_json test contract; test_task_tracker_tool.py: materialized TestTaskTrackerTool.test_add_task_with_dynamic_default_path test contract"
+      },
+      {
+        "at_seconds": 34.12,
+        "message": "Normalized generated Python: task_report.py: normalized generated Python formatting; task_store.py: normalized generated Python formatting; task_tracker_tool.py: normalized generated Python formatting; test_task_tracker_tool.py: normalized generated Python formatting"
+      },
+      {
+        "at_seconds": 34.904,
+        "message": "Precisely isolated generated test fixture: test_task_tracker_tool.py:TestTaskTrackerTool.setUp"
+      },
+      {
+        "at_seconds": 35.229,
+        "message": "Precise repair validation (1/8): Generated test methods need stronger behavioral proof: TestTaskTrackerTool.test_add_task_with_summary"
+      },
+      {
+        "at_seconds": 35.232,
+        "message": "Precisely repairing TestTaskTrackerTool.test_add_task_with_summary; qwen2.5-coder:3b; attempt 1; preserving 3 files and all unrelated symbols"
+      },
+      {
+        "at_seconds": 43.475,
+        "message": "Precise repair validation (2/8): Disposable generated-patch validation failed: ..E..\n======================================================================\nERROR: test_add_task_with_summary (test_task_tracker_tool.TestTaskTrackerTool.test_add_task_with_summary)\n----------------------------------------------------------------------\nTypeError: TestTaskTrackerTool.test_add_task_with_summary() missing 1 required positional argument: 'mock_path'\n\n----------------------------------------------------------------------\nRan 5 tests in 0.013s\n\nFAILED (errors=1)"
+      },
+      {
+        "at_seconds": 43.48,
+        "message": "Precisely repairing TestTaskTrackerTool.test_add_task_with_summary; qwen2.5-coder:7b; attempt 2; preserving 3 files and all unrelated symbols"
+      },
+      {
+        "at_seconds": 53.402,
+        "message": "Precise repair validation (3/8): passed"
+      },
+      {
+        "at_seconds": 53.402,
+        "message": "Generating patchable code changes completed"
+      }
+    ]
+  }
+]

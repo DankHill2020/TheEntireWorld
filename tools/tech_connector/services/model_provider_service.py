@@ -36,7 +36,12 @@ PROVIDERS = {
         id="openai",
         display_name="OpenAI",
         env_vars=("OPENAI_API_KEY",),
-        example_models=("openai:gpt-4o-mini",),
+        example_models=(
+            "openai:gpt-5.6-sol",
+            "openai:gpt-5.6-terra",
+            "openai:gpt-5.6-luna",
+            "openai:gpt-5.3-codex",
+        ),
         setup_url="https://platform.openai.com/api-keys",
         setup_kind="official_console_api_key",
         credential_hint="Open the official OpenAI API keys page, create a key, then set OPENAI_API_KEY.",
@@ -45,7 +50,10 @@ PROVIDERS = {
         id="google",
         display_name="Google Gemini",
         env_vars=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-        example_models=("google:gemini-1.5-pro",),
+        example_models=(
+            "google:gemini-2.5-flash",
+            "google:gemini-2.5-pro",
+        ),
         setup_url="https://aistudio.google.com/apikey",
         setup_kind="official_console_api_key_or_oauth",
         credential_hint="Open Google AI Studio to create a Gemini key. Google also supports OAuth flows for some Google APIs.",
@@ -54,7 +62,10 @@ PROVIDERS = {
         id="anthropic",
         display_name="Anthropic",
         env_vars=("ANTHROPIC_API_KEY",),
-        example_models=("anthropic:claude-3-5-sonnet-latest",),
+        example_models=(
+            "anthropic:claude-sonnet-5",
+            "anthropic:claude-haiku-4-5",
+        ),
         setup_url="https://console.anthropic.com/settings/keys",
         setup_kind="official_console_api_key",
         credential_hint="Open the official Anthropic Console keys page, create a key, then set ANTHROPIC_API_KEY.",
@@ -176,7 +187,7 @@ def normalize_model_policy(settings: Optional[dict]) -> str:
 
 def should_force_local(settings: Optional[dict]) -> bool:
     settings = settings or {}
-    return normalize_model_policy(settings) == LOCAL_ONLY or bool(settings.get("cloud_model_unavailable", False))
+    return normalize_model_policy(settings) == LOCAL_ONLY
 
 
 def should_use_local_runtime(model: str, settings: Optional[dict]) -> bool:
@@ -212,3 +223,28 @@ def is_credit_or_quota_failure(text: str) -> bool:
         "resource exhausted",
     )
     return any(marker in text for marker in markers)
+
+
+def cloud_provider_failure_notice(text: str, model: str = "") -> str:
+    """Return a user-facing cloud failure without implying an automatic fallback."""
+    lowered = str(text or "").lower()
+    selected = f"`{model}`" if model else "the selected cloud model"
+    if any(marker in lowered for marker in ("credit balance", "insufficient_quota", "billing", "payment required")):
+        reason = "The provider reports that API credits are unavailable or exhausted."
+        recovery = "Add API credits, select another funded cloud provider, or explicitly switch Source Mode to **Always local**."
+    elif any(marker in lowered for marker in ("quota exceeded", "resource exhausted", "rate limit", "too many requests", "429")):
+        reason = "The provider quota or rate limit is currently exhausted."
+        recovery = "Wait for the quota window to reset, select another cloud provider, or explicitly switch Source Mode to **Always local**."
+    elif any(marker in lowered for marker in ("unauthorized", "forbidden", "invalid api key", "authentication", "401", "403")):
+        reason = "The provider rejected the configured credentials."
+        recovery = "Verify the API key in Settings or select another configured provider."
+    else:
+        reason = "The provider could not complete the request."
+        recovery = "Check the provider status and configuration, then retry or explicitly select another model."
+    return (
+        "## Cloud Model Unavailable\n\n"
+        f"Selected model: {selected}\n\n"
+        f"{reason}\n\n"
+        "This request stopped on the selected cloud provider; no local fallback was used.\n\n"
+        f"{recovery}"
+    )

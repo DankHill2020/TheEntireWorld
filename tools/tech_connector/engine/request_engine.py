@@ -14,6 +14,56 @@ ProgressCallback = Callable[[ProgressEvent], None]
 ActivityCallback = Callable[[ActivityEvent], None]
 
 
+def _is_explicit_plan_only_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:plan|design|outline)\s+only\b|"
+            r"\b(?:do\s+not|don't|dont)\s+(?:edit|modify|change|execute|run|apply)\b",
+            str(text or ""),
+            re.IGNORECASE,
+        )
+    )
+
+
+def _render_verified_plan(planning_result: dict) -> str:
+    lines = [
+        "Verified plan",
+        "",
+        str(
+            planning_result.get("interpreted_request")
+            or planning_result.get("behavior")
+            or "Plan the requested work."
+        ),
+        "",
+        "Steps",
+    ]
+    for index, row in enumerate(planning_result.get("steps") or [], start=1):
+        step = dict(row or {})
+        objective = str(step.get("objective") or step.get("title") or step.get("action") or "Complete step")
+        success = str(step.get("success_condition") or "").strip()
+        lines.append(f"{index}. {objective}")
+        if success:
+            lines.append(f"   Proof: {success}")
+    references = dict(planning_result.get("resolved_references") or {})
+    if references:
+        lines.extend(["", "Resolved context"])
+        for name, value in references.items():
+            resolved = value.get("value") if isinstance(value, dict) else value
+            lines.append(f"- {name}: {resolved}")
+    verification = dict(planning_result.get("request_plan_verification") or {})
+    lines.extend(
+        [
+            "",
+            (
+                "Verification: request coverage passed."
+                if verification.get("matches_request")
+                else "Verification: request coverage still has unresolved items."
+            ),
+        ]
+    )
+    return "\n".join(lines)
+
+
 class RequestEngine:
     """Route a request through deterministic, non-UI-thread preparation."""
 
@@ -29,6 +79,33 @@ class RequestEngine:
 
     def emit(self, stage: str, message: str, current: int = 0, total: int = 0, detail: str = "") -> None:
         self.progress(ProgressEvent(stage=stage, message=message, current=current, total=total, detail=detail))
+
+    def _dispatch_preclassified(
+        self,
+        route_decision: dict,
+        context: RequestContext,
+    ) -> EngineResult:
+        """Dispatch a caller-supplied route without repeating semantic/model work."""
+        from tech_connector.services.prompt.prompt_dispatch_service import PromptDispatchService
+
+        self.emit(
+            "route",
+            f"Routing through {route_decision.get('execution_route') or route_decision.get('route')}",
+        )
+        result = PromptDispatchService().dispatch(
+            route_decision,
+            context,
+            self.progress,
+            self.activity,
+        )
+        result.metadata = {
+            **dict(result.metadata or {}),
+            "route_decision": dict(
+                (result.metadata or {}).get("route_decision") or route_decision
+            ),
+            "preclassified_route": True,
+        }
+        return result
 
     def _clarification_result(
         self,
@@ -93,7 +170,7 @@ class RequestEngine:
         ):
             return None
         try:
-            from tech_connector.services.prompt_intent_service import understand_prompt_request
+            from tech_connector.services.prompt.prompt_intent_service import understand_prompt_request
 
             understanding = understand_prompt_request(
                 context.text,
@@ -119,7 +196,7 @@ class RequestEngine:
         )
         if not semantic_contract:
             try:
-                from tech_connector.services.semantic_execution_contract_service import (
+                from tech_connector.services.reasoning.semantic_execution_contract_service import (
                     build_semantic_execution_contract,
                 )
 
@@ -222,8 +299,238 @@ class RequestEngine:
         result.metadata = metadata
         return result
 
+    def _fast_explicit_symbol_inspection(
+        self,
+        context: RequestContext,
+    ) -> EngineResult | None:
+        """Resolve an explicit @qualified.symbol without semantic/model routing."""
+        if not re.search(
+            r"(?<![\w.])@[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}(?![\w.])",
+            context.text or "",
+        ):
+            return None
+        from tech_connector.services.project_search_service import (
+            answer_explicit_symbol_inspection_question,
+        )
+
+    def _fast_unreal_animation_continuation(
+        self,
+        context: RequestContext,
+    ) -> EngineResult | None:
+        """Resume bound animation research/download/retarget choices without rerouting."""
+        extras = dict(context.extras or {})
+        prior = dict(extras.get("prior_result_metadata") or {})
+        binding = dict(extras.get("clarification_binding") or {})
+        settings = dict(extras.get("settings") or {})
+        result_type = str(prior.get("result_type") or "")
+        if result_type == "unreal_animation_knowledge_continuation":
+            from tech_connector.services.unreal.animation_knowledge_continuation_service import (
+                resolve_animation_knowledge_next_action,
+            )
+            from tech_connector.services.unreal.open_animation_source_service import (
+                render_open_animation_candidate_research,
+                search_open_animation_candidates,
+            )
+
+            action = resolve_animation_knowledge_next_action(
+                context.text,
+                prior,
+                binding,
+            )
+            if not action:
+                return None
+            if action == "cancel":
+                return EngineResult(
+                    action="answer",
+                    label="Animation Research",
+                    text="Animation research was cancelled.",
+                    metadata={
+                        "result_type": "unreal_animation_research_cancelled",
+                        "completion_allowed": False,
+                    },
+                )
+            knowledge = dict(prior.get("knowledge_result") or {})
+            if action == "research_online":
+                research = search_open_animation_candidates(
+                    str(knowledge.get("request") or ""),
+                    list(knowledge.get("animation_roles") or []),
+                )
+                return EngineResult(
+                    action="clarify",
+                    label="Open Animation Research",
+                    text=render_open_animation_candidate_research(research),
+                    metadata={
+                        "result_type": "unreal_animation_candidate_research",
+                        "candidate_research": research,
+                        "knowledge_result": knowledge,
+                        "plan": dict(prior.get("plan") or {}),
+                        "completion_allowed": False,
+                        "ui_controls": [{
+                            "slot": "animation_candidate_action",
+                            "choices": [
+                                "download_recommended_open_matches",
+                                "continue_offline",
+                                "cancel",
+                            ],
+                            "recommended_choice": "download_recommended_open_matches",
+                        }],
+                    },
+                )
+            return None
+
+        if result_type == "unreal_animation_candidate_research":
+            from tech_connector.services.unreal.open_animation_source_service import (
+                discover_live_retarget_target_options,
+                download_recommended_open_animation_candidates,
+                render_open_animation_download,
+                resolve_open_animation_candidate_action,
+            )
+
+            action = resolve_open_animation_candidate_action(
+                context.text,
+                prior,
+                binding,
+            )
+            if not action:
+                return None
+            if action == "cancel":
+                return EngineResult(
+                    action="answer",
+                    label="Animation Download",
+                    text="Animation acquisition was cancelled.",
+                    metadata={
+                        "result_type": "unreal_animation_download_cancelled",
+                        "completion_allowed": False,
+                    },
+                )
+            if action != "download_recommended_open_matches":
+                return None
+            project_root = str(settings.get("active_project") or settings.get("project_root") or "")
+            if not project_root:
+                return EngineResult(
+                    action="error",
+                    label="Animation Download",
+                    text="Select an active project before downloading animation sources.",
+                    metadata={
+                        "result_type": "unreal_animation_download_blocked",
+                        "completion_allowed": False,
+                    },
+                )
+            research = dict(prior.get("candidate_research") or {})
+            download = download_recommended_open_animation_candidates(
+                research,
+                project_root,
+            )
+            knowledge = dict(prior.get("knowledge_result") or {})
+            target_options = discover_live_retarget_target_options(
+                preferred_skeleton=str(knowledge.get("target_skeleton") or ""),
+                preferred_mesh=str(knowledge.get("target_mesh") or ""),
+            )
+            recommended = str(target_options.get("default_target_skeleton") or "")
+            return EngineResult(
+                action="clarify",
+                label="Retarget Target",
+                text=render_open_animation_download(download),
+                metadata={
+                    "result_type": "unreal_animation_retarget_target_selection",
+                    "download_result": download,
+                    "target_options": target_options,
+                    "candidate_research": research,
+                    "knowledge_result": knowledge,
+                    "plan": dict(prior.get("plan") or {}),
+                    "completion_allowed": False,
+                    "ui_controls": [{
+                        "slot": "target_skeleton",
+                        "choices": [
+                            str(row.get("skeleton") or "")
+                            for row in target_options.get("options") or []
+                            if row.get("skeleton")
+                        ],
+                        "recommended_choice": recommended,
+                    }],
+                },
+            )
+
+        if result_type == "unreal_animation_retarget_target_selection":
+            from tech_connector.services.unreal.animation_asset_pipeline_service import (
+                execute_animation_retarget_import_handoff,
+                render_animation_retarget_import_handoff,
+                resolve_retarget_target_selection,
+            )
+
+            target_skeleton = resolve_retarget_target_selection(
+                context.text,
+                prior,
+                binding,
+            )
+            if not target_skeleton:
+                return None
+            project_root = str(settings.get("active_project") or settings.get("project_root") or "")
+            if not project_root:
+                return EngineResult(
+                    action="error",
+                    label="Animation Retarget",
+                    text="Select an active project before importing retargeted animation.",
+                    metadata={
+                        "result_type": "unreal_animation_retarget_blocked",
+                        "completion_allowed": False,
+                    },
+                )
+            handoff = execute_animation_retarget_import_handoff(
+                download_result=dict(prior.get("download_result") or {}),
+                target_options=dict(prior.get("target_options") or {}),
+                target_skeleton=target_skeleton,
+                project_root=project_root,
+                settings=settings,
+            )
+            return EngineResult(
+                action="answer" if handoff.get("ok") else "error",
+                label="Animation Retarget Import",
+                text=render_animation_retarget_import_handoff(handoff),
+                metadata={
+                    "result_type": (
+                        "unreal_animation_imported_pending_context"
+                        if handoff.get("ok")
+                        else "unreal_animation_retarget_failed"
+                    ),
+                    "handoff_result": handoff,
+                    "completion_allowed": False,
+                },
+            )
+        return None
+
+        answer = answer_explicit_symbol_inspection_question(
+            context.text,
+            project_roots=list(context.project_roots or []),
+            active_path=context.current_file_path,
+        )
+        if not answer:
+            return None
+        self.emit("project_search", "Exact symbol inspected", 1, 1)
+        return EngineResult(
+            action="answer",
+            label="Symbol Inspection",
+            text=answer,
+            metadata={
+                "engine_path": "project_search",
+                "result_type": "symbol_inspection_direct",
+                "deep_search_candidate": False,
+                "deep_search_query": context.text,
+                "original_query": context.text,
+                "reference_scope_locked": True,
+            },
+        )
+
     def _fast_simple_project_index_lookup(self, context: RequestContext) -> EngineResult | None:
         """Answer simple project-index facts before semantic planning/model work."""
+
+        if re.search(
+            r"\bhow\s+(?:would|do|can|should)\s+i\s+"
+            r"(?:write|build|create|make|implement|wire|integrate|author)\b",
+            context.text or "",
+            re.IGNORECASE,
+        ):
+            return None
 
         if re.search(
             r"(?<![\w.])@[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}(?![\w.])",
@@ -236,7 +543,7 @@ class RequestEngine:
             return None
 
         try:
-            from tech_connector.services.prompt_intent_service import understand_prompt_request
+            from tech_connector.services.prompt.prompt_intent_service import understand_prompt_request
 
             understanding = understand_prompt_request(
                 context.text,
@@ -283,19 +590,38 @@ class RequestEngine:
         answer_text = f"{understood}\n{direct_answer}"
 
         selected_file = ""
+        selected_symbol = ""
+        ranked_rows = []
         try:
-            from tech_connector.engine.providers import _extract_selected_file
+            from tech_connector.engine.providers import (
+                _extract_ranked_symbol_rows,
+                _extract_selected_file,
+                _extract_selected_symbol,
+            )
 
             selected_file = _extract_selected_file(answer_text, "")
+            selected_symbol = _extract_selected_symbol(answer_text)
+            ranked_rows = _extract_ranked_symbol_rows(answer_text)
         except Exception:
             selected_file = ""
+            selected_symbol = ""
+            ranked_rows = []
 
+        deliverable = (
+            "class"
+            if re.search(r"\bclass(?:es)?\b", context.text, re.IGNORECASE)
+            else "function"
+            if re.search(r"\bfunctions?\b", context.text, re.IGNORECASE)
+            else "file"
+            if re.search(r"\bfiles?\b", context.text, re.IGNORECASE)
+            else "project_index_answer"
+        )
         planning_result = {
             "interpreted_request": context.text,
             "intent_category": "project_search",
             "primary_route": "project_search",
             "goal_type": "inspect",
-            "deliverable": "project_index_answer",
+            "deliverable": deliverable,
             "behavior": context.text,
             "scope": "project",
             "target": selected_file,
@@ -329,6 +655,7 @@ class RequestEngine:
             "deep_search_query": context.text,
             "original_query": context.text,
             "selected_file": selected_file,
+            "selected_symbol": selected_symbol,
             "route_decision": route_decision,
             "prompt_execution_context": {
                 "prompt": context.text,
@@ -364,9 +691,39 @@ class RequestEngine:
             },
             "workspace_update": {
                 "primary_file": selected_file,
+                "files": [
+                    row["file"]
+                    for row in ranked_rows
+                    if row.get("file")
+                ],
+                "entities": [
+                    {
+                        "kind": "function",
+                        "host": "project_code",
+                        "ref": (
+                            f"{row.get('file')}::{row.get('symbol')}"
+                            if row.get("file")
+                            else row.get("symbol")
+                        ),
+                        "name": row.get("symbol"),
+                        "source": "project_search_result",
+                        "confidence": 0.98,
+                        "metadata": {
+                            "file": row.get("file"),
+                            "rank": index,
+                        },
+                    }
+                    for index, row in enumerate(
+                        ranked_rows
+                        or [{"file": selected_file, "symbol": selected_symbol}],
+                        start=1,
+                    )
+                    if row.get("symbol")
+                ],
                 "source": "project_search_result",
             } if selected_file else {},
         }
+        self.emit("project_search", "Project index answer ready", 1, 1)
         return EngineResult(
             action="answer",
             label="Project Index",
@@ -428,6 +785,8 @@ class RequestEngine:
                 "approval_ready",
                 "capability_acquisition_required",
                 "knowledge_choice_required",
+                "semantic_task_repair_required",
+                "implementation_spec_incomplete",
             }
             try:
                 from tech_connector.services.unreal.development_eval_service import record_unreal_development_eval
@@ -518,6 +877,56 @@ class RequestEngine:
                             "mutation_scope": "read_only",
                             "requires_dcc_connection": True,
                             "requires_confirmation": True,
+                        },
+                    },
+                )
+            if status == "semantic_task_repair_required":
+                self.emit(
+                    "validation",
+                    "Focused task verification found repair work; no Unreal assets were changed",
+                )
+                return EngineResult(
+                    action="clarify",
+                    label="Unreal Task Repair",
+                    text=render_unreal_feature_plan(plan),
+                    metadata={
+                        "engine_path": "unreal_live_bridge_task_repair",
+                        "result_type": "unreal_feature_task_repair_required",
+                        "plan": plan,
+                        "route_decision": {
+                            "route": "unreal_capability",
+                            "execution_route": "unreal.task_repair",
+                            "host": "unreal",
+                            "intent_category": "unreal_task_alignment_repair",
+                            "operation_mode": "plan",
+                            "mutation_scope": "read_only",
+                            "requires_dcc_connection": True,
+                            "requires_confirmation": False,
+                        },
+                    },
+                )
+            if status == "implementation_spec_incomplete":
+                self.emit(
+                    "planning",
+                    "Detailed task plan is ready; project-specific inputs remain unresolved",
+                )
+                return EngineResult(
+                    action="clarify",
+                    label="Unreal Detailed Plan",
+                    text=render_unreal_feature_plan(plan),
+                    metadata={
+                        "engine_path": "unreal_live_bridge_detailed_plan",
+                        "result_type": "unreal_feature_plan_resolution_required",
+                        "plan": plan,
+                        "route_decision": {
+                            "route": "unreal_capability",
+                            "execution_route": "unreal.resolve_plan_inputs",
+                            "host": "unreal",
+                            "intent_category": "unreal_feature_input_resolution",
+                            "operation_mode": "plan",
+                            "mutation_scope": "read_only",
+                            "requires_dcc_connection": True,
+                            "requires_confirmation": False,
                         },
                     },
                 )
@@ -653,9 +1062,15 @@ class RequestEngine:
             },
         )
 
+    from tech_connector.services.llm_router_service import lock_llm_provider_for_prompt
+
+    @lock_llm_provider_for_prompt
     def process(self, context: RequestContext) -> EngineResult:
         self.emit("intent", "Understanding your request...")
         self.activity(ActivityEvent("intent", "Request received", context.text, status="info"))
+        continuation = self._fast_unreal_animation_continuation(context)
+        if continuation is not None:
+            return continuation
         # Domain-specific feature requests must win over incidental nouns such
         # as "invulnerability window" or "animation popup".
         fast_unreal = self._fast_live_unreal_request(context)
@@ -664,22 +1079,82 @@ class RequestEngine:
         fast_windows = self._fast_desktop_window_request(context)
         if fast_windows is not None:
             return fast_windows
+        fast_symbol = self._fast_explicit_symbol_inspection(context)
+        if fast_symbol is not None:
+            return fast_symbol
         fast_simple_lookup = self._fast_simple_project_index_lookup(context)
         if fast_simple_lookup is not None:
             return fast_simple_lookup
         fast_lookup = self._fast_semantic_project_lookup(context)
         if fast_lookup is not None:
             return fast_lookup
+        try:
+            from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
+
+            deterministic_route = classify_prompt_route(
+                context.text,
+                project_roots=list(context.project_roots or []),
+                active_path=context.current_file_path,
+            ).to_dict()
+            if (
+                deterministic_route.get("model_tier") == "none_deterministic"
+                and deterministic_route.get("route")
+                in {
+                    "action_graph",
+                    "pipeline_graph",
+                    "dcc_execute",
+                    "dcc_query",
+                    "connection_status",
+                }
+                and not deterministic_route.get("capability_gaps")
+            ):
+                routed_context = replace(
+                    context,
+                    extras={
+                        **dict(context.extras or {}),
+                        "prompt_route_decision": deterministic_route,
+                    },
+                )
+                return self._dispatch_preclassified(
+                    deterministic_route,
+                    routed_context,
+                )
+        except Exception:
+            pass
         extras = dict(context.extras or {})
+        supplied_route = dict(extras.get("prompt_route_decision") or {})
+        if supplied_route:
+            try:
+                return self._dispatch_preclassified(supplied_route, context)
+            except Exception as exc:
+                self.activity(
+                    ActivityEvent(
+                        "error",
+                        "Preclassified route dispatch failed",
+                        str(exc),
+                        status="error",
+                    )
+                )
+                return EngineResult(
+                    action="error",
+                    label="Prompt Dispatcher",
+                    text=f"Prompt dispatch failed: {exc}",
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "error": str(exc),
+                        "result_type": "error",
+                        "route_decision": supplied_route,
+                    },
+                )
         route_decision: dict = {}
         execution_context = None
         try:
-            from tech_connector.services.prompt_execution_context_service import (
+            from tech_connector.services.prompt.prompt_execution_context_service import (
                 build_prompt_execution_context,
                 execution_context_from_dict,
                 validate_prompt_understanding,
             )
-            from tech_connector.services.prompt_route_service import classify_prompt_route
+            from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 
             supplied_context = extras.get("prompt_execution_context") or {}
             if supplied_context and extras.get("understanding_validation"):
@@ -703,6 +1178,9 @@ class RequestEngine:
                     host_hint=str(extras.get("host_hint") or ""),
                     decision_facts=decision_facts,
                 )
+            from tech_connector.services.llm_router_service import assert_llm_provider_healthy
+
+            assert_llm_provider_healthy()
 
             validation = validate_prompt_understanding(execution_context)
             execution_context.understanding_validation = validation.to_dict()
@@ -751,6 +1229,28 @@ class RequestEngine:
                         "prompt_execution_context": execution_context.to_dict(),
                     },
                 )
+            if _is_explicit_plan_only_request(context.text):
+                verification = dict(
+                    execution_context.planning_result.get("request_plan_verification") or {}
+                )
+                if verification.get("matches_request"):
+                    return EngineResult(
+                        action="answer",
+                        label="Verified Plan",
+                        text=_render_verified_plan(execution_context.planning_result),
+                        metadata={
+                            "engine_path": "verified_plan_only",
+                            "result_type": "verified_plan",
+                            "prompt_execution_context": execution_context.to_dict(),
+                            "understanding_validation": validation.to_dict(),
+                            "answer_review": {
+                                "adequate": True,
+                                "score": float(verification.get("confidence") or 1.0),
+                                "failures": [],
+                                "reviewer": "verified_plan_alignment",
+                            },
+                        },
+                    )
 
             decision = classify_prompt_route(
                 execution_context.normalized_prompt,
@@ -793,17 +1293,31 @@ class RequestEngine:
             )
             context = replace(context, extras=routed_extras)
         except Exception as exc:
+            from tech_connector.services.llm_router_service import LLMCloudProviderError
+
             self.activity(ActivityEvent("error", "Route preparation failed", str(exc), status="error"))
+            provider_failure = isinstance(exc, LLMCloudProviderError)
             return EngineResult(
                 action="error",
-                label="Request Preparation",
-                text=f"Request preparation failed: {exc}",
-                metadata={"result_type": "request_preparation_error", "error": str(exc)},
+                label="Cloud Model Unavailable" if provider_failure else "Request Preparation",
+                text=(
+                    f"The selected cloud model could not complete this request: {exc}"
+                    if provider_failure
+                    else f"Request preparation failed: {exc}"
+                ),
+                metadata={
+                    "result_type": (
+                        "model_provider_unavailable"
+                        if provider_failure
+                        else "request_preparation_error"
+                    ),
+                    "error": str(exc),
+                },
             )
         if route_decision:
             try:
-                from tech_connector.services.prompt_dispatch_service import PromptDispatchService
-                from tech_connector.services.prompt_progress_service import build_prompt_progress_plan
+                from tech_connector.services.prompt.prompt_dispatch_service import PromptDispatchService
+                from tech_connector.services.prompt.prompt_progress_service import build_prompt_progress_plan
                 from tech_connector.services.route_diagnostics_service import build_route_diagnostic_report
 
                 route_diagnostics = build_route_diagnostic_report(route_decision).to_dict()
@@ -865,7 +1379,7 @@ class RequestEngine:
                     "understanding_validation": dict(route_decision.get("understanding_validation") or {}),
                 }
                 if result.action == "answer" and execution_context is not None:
-                    from tech_connector.services.prompt_execution_context_service import (
+                    from tech_connector.services.prompt.prompt_execution_context_service import (
                         continue_answer_search,
                         review_prompt_answer,
                     )
@@ -946,12 +1460,28 @@ class RequestEngine:
                         result.metadata["answer_review_incomplete"] = True
                 return result
             except Exception as exc:
+                from tech_connector.services.llm_router_service import LLMCloudProviderError
+
                 self.activity(ActivityEvent("error", "Prompt dispatcher failed", str(exc), status="error"))
+                provider_failure = isinstance(exc, LLMCloudProviderError)
                 return EngineResult(
                     action="error",
-                    label="Prompt Dispatcher",
-                    text=f"Prompt dispatch failed: {exc}",
-                    metadata={"engine_path": "prompt_dispatch", "error": str(exc), "result_type": "error", "route_decision": route_decision},
+                    label="Cloud Model Unavailable" if provider_failure else "Prompt Dispatcher",
+                    text=(
+                        f"The selected cloud model could not complete this request: {exc}"
+                        if provider_failure
+                        else f"Prompt dispatch failed: {exc}"
+                    ),
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "error": str(exc),
+                        "result_type": (
+                            "model_provider_unavailable"
+                            if provider_failure
+                            else "error"
+                        ),
+                        "route_decision": route_decision,
+                    },
                 )
         for provider in self.providers:
             try:

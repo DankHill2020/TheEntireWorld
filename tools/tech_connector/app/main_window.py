@@ -57,10 +57,12 @@ if __name__ == "__main__":
         import threading
 
         from tech_connector.services.model_provider_service import should_use_local_runtime
+        from tech_connector.services.ollama_resource_service import ollama_keep_alive
         from tech_connector.services.ollama_service import warm_ollama_model
         from tech_connector.services.settings_service import load_settings
 
         settings = load_settings()
+        keep_alive = ollama_keep_alive(settings)
         warmed = set()
         for m in settings.get("ollama_preload_models") or ["qwen3:14b"]:
             if (
@@ -71,7 +73,7 @@ if __name__ == "__main__":
             ):
                 warmed.add(m)
                 t = threading.Thread(
-                    target=warm_ollama_model, args=(m, "24h"), daemon=True
+                    target=warm_ollama_model, args=(m, keep_alive), daemon=True
                 )
                 t.start()
         selected_for_policy = settings.get("model") or "ollama:qwen3:14b"
@@ -81,7 +83,7 @@ if __name__ == "__main__":
                 and should_use_local_runtime(selected_for_policy, settings)
         ):
             t = threading.Thread(
-                target=warm_ollama_model, args=("qwen3:14b", "24h"), daemon=True
+                target=warm_ollama_model, args=("qwen3:14b", keep_alive), daemon=True
             )
             t.start()
     except Exception:

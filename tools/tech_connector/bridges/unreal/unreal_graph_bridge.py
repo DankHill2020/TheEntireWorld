@@ -10,7 +10,7 @@ import sys
 import json
 from pathlib import Path
 
-from tech_connector.services.blueprint_snippet_generator_service import (
+from tech_connector.services.unreal.blueprint_snippet_generator_service import (
     BlueprintSnippetGeneratorService,
 )
 

@@ -3,13 +3,13 @@
 from pathlib import Path
 from typing import Optional
 
-from tech_connector.models.constants import ASSUMED_DIRS, TOOLS_ROOT
+from tech_connector.models.constants import ASSUMED_DIRS, EXTERNAL_TOOLS_DIR
 
 
 def all_roots(settings: dict) -> list[str]:
     roots = []
     active_proj = settings.get("active_project", "")
-    ext_tools = settings.get("external_tools_dir", "") or str(TOOLS_ROOT / "external_tools")
+    ext_tools = settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
     candidates = [active_proj, ext_tools]
     for r in candidates + ASSUMED_DIRS + settings.get("extra_dirs", []):
         normalized = normalize_project_path(r)

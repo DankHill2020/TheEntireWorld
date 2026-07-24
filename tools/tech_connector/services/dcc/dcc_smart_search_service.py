@@ -10,6 +10,7 @@ from typing import Any, Iterable, Sequence
 
 from tech_connector.models.constants import DCC_TOOL_PACKAGE_DIRS, project_index_db_path
 from tech_connector.services.dcc.dcc_operation_service import dcc_operation_registry
+from tech_connector.services.tool_search_ranking_service import tool_query_rank
 
 
 HOST_LABELS = {
@@ -267,12 +268,27 @@ def _package_function_candidates(
         if not full_name.lower().startswith(f"{package.lower()}."):
             full_name = f"{package}.{full_name}"
         relative_name = full_name[len(package) + 1 :]
+    for name, qualname, kind, signature, docstring, rel_path, module in rows:
+        if str(kind or "").lower() not in _FUNCTION_KINDS:
+            continue
+        if str(name or "").startswith("_") and not include_private:
+            continue
+        symbol_name = str(qualname or name or "").strip(".")
+        if "." in symbol_name and not include_private:
+            continue
+        module_name = _module_for_file(package, str(rel_path or ""), str(module or ""))
+        if not module_name or not symbol_name:
+            continue
+        full_name = symbol_name if symbol_name.startswith(f"{module_name}.") else f"{module_name}.{symbol_name}"
+        if not full_name.lower().startswith(f"{package.lower()}."):
+            full_name = f"{package}.{full_name}"
+        relative_name = full_name[len(package) + 1 :]
         searchable = " ".join(
             [str(name or ""), relative_name, str(signature or ""), str(docstring or ""), str(rel_path or "")]
         )
         if not _tool_path_matches(query, searchable):
             continue
-        token = f"{package}.{relative_name}"
+        token = f"{package}/{relative_name}"
         key = token.lower()
         candidates[key] = SmartSearchCandidate(
             token=token,
@@ -283,9 +299,23 @@ def _package_function_candidates(
             detail=f"{rel_path}{signature or ''}",
             priority=80,
         )
-        if len(candidates) >= limit:
+        if len(candidates) >= max(limit * 8, 80):
             break
-    return list(candidates.values())
+    terms = re.findall(r"[a-z0-9]+", str(query or "").lower().replace("_", " "))
+    return sorted(
+        candidates.values(),
+        key=lambda item: tool_query_rank(
+            {
+                "name": item.label.lower(),
+                "label_lower": item.token.lower(),
+                "path_lower": item.detail.lower(),
+                "detail_lower": item.detail.lower(),
+                "priority": item.priority,
+            },
+            terms,
+            priority_desc=True,
+        ),
+    )[:limit]
 
 
 def _application_candidates(
@@ -326,7 +356,62 @@ def _application_candidates(
                 limit=max(limit, 20),
             )
         )
-    return sorted(results, key=lambda item: (-item.priority, item.token.lower()))[:limit]
+    terms = re.findall(r"[a-z0-9]+", str(query or "").lower().replace("_", " "))
+    return sorted(
+        results,
+        key=lambda item: tool_query_rank(
+            {
+                "name": item.label.lower(),
+                "label_lower": item.token.lower(),
+                "path_lower": item.detail.lower(),
+                "detail_lower": item.detail.lower(),
+                "priority": item.priority,
+            },
+            terms,
+            priority_desc=True,
+        ),
+    )[:limit]
+
+
+def _global_package_function_candidates(
+    query: str,
+    *,
+    package_dirs: dict[str, Path],
+    db_path: Path,
+    limit: int,
+) -> list[SmartSearchCandidate]:
+    results: list[SmartSearchCandidate] = []
+    if not str(query or "").strip():
+        return results
+    for package in package_dirs:
+        results.extend(
+            _package_function_candidates(
+                package,
+                query,
+                db_path=db_path,
+                limit=max(limit, 12),
+            )
+        )
+    terms = re.findall(r"[a-z0-9]+", str(query or "").lower().replace("_", " "))
+    deduped: dict[str, SmartSearchCandidate] = {}
+    for item in results:
+        existing = deduped.get(item.token.lower())
+        if existing is None or item.priority > existing.priority:
+            deduped[item.token.lower()] = item
+    return sorted(
+        deduped.values(),
+        key=lambda item: tool_query_rank(
+            {
+                "name": item.label.lower(),
+                "label_lower": item.token.lower(),
+                "path_lower": item.detail.lower(),
+                "detail_lower": item.detail.lower(),
+                "priority": item.priority,
+            },
+            terms,
+            priority_desc=True,
+        ),
+    )[:limit]
 
 
 def smart_search_suggestions(
@@ -426,16 +511,41 @@ def smart_search_suggestions(
             continue
         roots.append(
             SmartSearchCandidate(
-                token=f"{package}.",
+                token=f"{package}/",
                 label=package,
                 kind="tool package",
                 value=str(path),
                 source="project intelligence",
-                detail="indexed Python modules and functions",
+                detail="indexed functions only",
                 priority=90,
             )
         )
-    return sorted(roots, key=lambda item: (-item.priority, item.token.lower()))[:limit]
+    function_matches = _global_package_function_candidates(
+        text,
+        package_dirs=packages,
+        db_path=Path(db_path),
+        limit=limit,
+    )
+    combined: dict[str, SmartSearchCandidate] = {}
+    for item in [*function_matches, *roots]:
+        existing = combined.get(item.token.lower())
+        if existing is None or item.priority > existing.priority:
+            combined[item.token.lower()] = item
+    terms = re.findall(r"[a-z0-9]+", text.lower().replace("_", " "))
+    return sorted(
+        combined.values(),
+        key=lambda item: tool_query_rank(
+            {
+                "name": item.label.lower(),
+                "label_lower": item.token.lower(),
+                "path_lower": item.detail.lower(),
+                "detail_lower": item.detail.lower(),
+                "priority": item.priority,
+            },
+            terms,
+            priority_desc=True,
+        ),
+    )[:limit]
 
 
 def active_hosts_from_context(context: str) -> tuple[str, ...]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from tech_connector.services.project_validation_intent_service import classify_validation_intent, run_validation_intent
-from tech_connector.services.target_resolution_service import apply_resolution_to_state, resolve_target_candidates
+from tech_connector.services.reasoning.target_resolution_service import apply_resolution_to_state, resolve_target_candidates
 
 
 def resolve_project_edit_target(

@@ -151,7 +151,7 @@ class MainWindowUiMixin:
         controls.addWidget(source_label)
         self.model_source_mode_box = QComboBox()
         self.model_source_mode_box.addItem(
-            "Auto cloud -> local", "auto_with_local_fallback"
+            "Cloud locked / local if unset", "auto_with_local_fallback"
         )
         self.model_source_mode_box.addItem("Always local", "local_only")
         source_mode = self.settings.get("model_source_mode", "auto_with_local_fallback")
@@ -159,8 +159,8 @@ class MainWindowUiMixin:
         if idx >= 0:
             self.model_source_mode_box.setCurrentIndex(idx)
         self.model_source_mode_box.setToolTip(
-            "Auto cloud -> local uses configured provider models when credentials exist, "
-            "then falls back to local models on missing credentials or quota/credit errors."
+            "Uses one configured cloud provider and model for the complete prompt run. "
+            "If no cloud credential is configured when the run starts, it uses local Ollama."
         )
         self.model_source_mode_box.currentIndexChanged.connect(
             self.on_model_source_mode_changed
@@ -1206,6 +1206,25 @@ class MainWindowUiMixin:
         self.wf_graph_from_prompt_btn.setToolTip("Resolve the pipeline description into indexed functions, arguments, and graph links")
         self.wf_graph_from_prompt_btn.clicked.connect(self.build_pipeline_graph_from_prompt)
         graph_actions_row.addWidget(self.wf_graph_from_prompt_btn)
+
+        self.wf_use_default_settings_checkbox = QCheckBox("Use Default Settings")
+        self.wf_use_default_settings_checkbox.setChecked(True)
+        self.wf_use_default_settings_checkbox.setToolTip(
+            "Resolve omitted values from host context. Unreal imports use the current Content Browser folder."
+        )
+        graph_actions_row.addWidget(self.wf_use_default_settings_checkbox)
+
+        self.wf_unreal_destination_edit = QLineEdit()
+        self.wf_unreal_destination_edit.setPlaceholderText("/Game/Custom/ImportFolder")
+        self.wf_unreal_destination_edit.setToolTip(
+            "Custom Unreal import folder used when Default Settings is off"
+        )
+        self.wf_unreal_destination_edit.setEnabled(False)
+        self.wf_unreal_destination_edit.setMaximumWidth(220)
+        self.wf_use_default_settings_checkbox.toggled.connect(
+            lambda checked: self.wf_unreal_destination_edit.setEnabled(not checked)
+        )
+        graph_actions_row.addWidget(self.wf_unreal_destination_edit)
 
         self.wf_graph_run_btn = QPushButton("Run")
         self.wf_graph_run_btn.setToolTip("Run the selected saved pipeline")

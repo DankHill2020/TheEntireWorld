@@ -14,5 +14,15 @@
       "Type": "Editor",
       "LoadingPhase": "Default"
     }
+  ],
+  "Plugins": [
+    {
+      "Name": "Niagara",
+      "Enabled": true
+    },
+    {
+      "Name": "PoseSearch",
+      "Enabled": true
+    }
   ]
 }

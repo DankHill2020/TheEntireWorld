@@ -1,0 +1,695 @@
+{
+  "prompt": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+  "plan_elapsed_seconds": 14.443,
+  "total_seconds": 97.561,
+  "updates": [
+    {
+      "seconds": 0.017,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.064,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 0.672,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 5.673,
+      "message": "Contract worker: model is still producing the architecture; 1322 response characters received"
+    },
+    {
+      "seconds": 6.709,
+      "message": "Mapping incremental file ownership; ollama:qwen2.5-coder:7b; 13.4s planning budget remains"
+    },
+    {
+      "seconds": 7.304,
+      "message": "File-map worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 12.31,
+      "message": "File-map worker: model is still producing the architecture; 1165 response characters received"
+    },
+    {
+      "seconds": 14.443,
+      "message": "Prepared reviewable disposable-artifact architecture with file, API, dependency, algorithm, and test ownership"
+    },
+    {
+      "seconds": 14.444,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 14.46,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 14.465,
+      "message": "Using approved artifact architecture: 5 dependency-ordered file workers"
+    },
+    {
+      "seconds": 14.466,
+      "message": "Generating drain_manager.py (1/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 20.207,
+      "message": "File worker drain_manager.py: model active for 5.0s; 1660 response characters received"
+    },
+    {
+      "seconds": 25.223,
+      "message": "File worker drain_manager.py: model active for 10.0s; 3247 response characters received"
+    },
+    {
+      "seconds": 25.866,
+      "message": "File worker drain_manager.py: model active for 10.7s; 3447 response characters received"
+    },
+    {
+      "seconds": 25.876,
+      "message": "Integration architect accepted drain_manager.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 25.877,
+      "message": "Checkpointed drain_manager.py; drain_manager.py: DrainFailedError(); DependencyValidationFailedError(); ImportIsolationFailedError(); ReloadRollbackError(); ObserverRegistrationError(); DrainManager(dependency_dag); DrainManager.drain_calls(); DrainManager.validate_dependency_dag(dag); DrainManager.register_observer(observer); DrainManager.notify_observers(event)"
+    },
+    {
+      "seconds": 25.878,
+      "message": "Generating import_isolator.py (2/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 31.843,
+      "message": "File worker import_isolator.py: model active for 4.9s; 1363 response characters received"
+    },
+    {
+      "seconds": 31.852,
+      "message": "Reused canonical dependency APIs: import_isolator.py: removed echoed ImportIsolationFailedError owned by drain_manager.py; import_isolator.py: imported ImportIsolationFailedError from tech_connector.services.generated.drain_manager"
+    },
+    {
+      "seconds": 31.859,
+      "message": "Rejected import_isolator.py; integration notes returned to its file worker: Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+    },
+    {
+      "seconds": 31.86,
+      "message": "Generating import_isolator.py (2/5; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 44.602,
+      "message": "File worker import_isolator.py: model active for 4.8s; 1363 response characters received"
+    },
+    {
+      "seconds": 44.605,
+      "message": "Reused canonical dependency APIs: import_isolator.py: removed echoed ImportIsolationFailedError owned by drain_manager.py; import_isolator.py: imported ImportIsolationFailedError from tech_connector.services.generated.drain_manager"
+    },
+    {
+      "seconds": 44.612,
+      "message": "Rejected import_isolator.py; integration notes returned to its file worker: Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+    },
+    {
+      "seconds": 44.612,
+      "message": "Stopping identical full-file retries for import_isolator.py; escalating the unchanged contract failure"
+    },
+    {
+      "seconds": 44.612,
+      "message": "Returning unchanged or structural failures to the architecture worker; revising module ownership before further code repair"
+    },
+    {
+      "seconds": 44.613,
+      "message": "Defining shared package contract; ollama:qwen2.5-coder:7b; shared 20-second planning budget; provider locked for this run"
+    },
+    {
+      "seconds": 50.376,
+      "message": "Contract worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 55.382,
+      "message": "Contract worker: model is still producing the architecture; 1369 response characters received"
+    },
+    {
+      "seconds": 55.93,
+      "message": "Mapping incremental file ownership; ollama:qwen2.5-coder:7b; 8.7s planning budget remains"
+    },
+    {
+      "seconds": 56.546,
+      "message": "File-map worker: model is still producing the architecture; 2 response characters received"
+    },
+    {
+      "seconds": 61.561,
+      "message": "File-map worker: model is still producing the architecture; 1196 response characters received"
+    },
+    {
+      "seconds": 63.1,
+      "message": "Using approved artifact architecture: 5 dependency-ordered file workers"
+    },
+    {
+      "seconds": 63.101,
+      "message": "Generating async_plugin_hot_reloader.py (1/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 68.873,
+      "message": "File worker async_plugin_hot_reloader.py: model active for 5.0s; 1692 response characters received"
+    },
+    {
+      "seconds": 70.892,
+      "message": "File worker async_plugin_hot_reloader.py: model active for 7.0s; 2357 response characters received"
+    },
+    {
+      "seconds": 70.904,
+      "message": "Integration architect accepted async_plugin_hot_reloader.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 70.905,
+      "message": "Checkpointed async_plugin_hot_reloader.py; async_plugin_hot_reloader.py: DependencyValidationFailedError(); ReloadRollbackError(); AsyncPluginHotReloader(); AsyncPluginHotReloader.validate_dependency_dag(dag); AsyncPluginHotReloader.unregister_observer(observer); AsyncPluginHotReloader.notify_observers(message)"
+    },
+    {
+      "seconds": 70.906,
+      "message": "Generating drain_manager.py (2/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 74.565,
+      "message": "File worker drain_manager.py: model active for 2.7s; 771 response characters received"
+    },
+    {
+      "seconds": 74.575,
+      "message": "Integration architect accepted drain_manager.py; declared imports and exports remain closed"
+    },
+    {
+      "seconds": 74.575,
+      "message": "Checkpointed drain_manager.py; drain_manager.py: DrainFailedError(); DrainManager(hot_reloader); DrainManager.drain_calls()"
+    },
+    {
+      "seconds": 74.576,
+      "message": "Generating import_isolator.py (3/5; attempt 1/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 80.62,
+      "message": "File worker import_isolator.py: model active for 5.0s; 1549 response characters received"
+    },
+    {
+      "seconds": 82.616,
+      "message": "File worker import_isolator.py: model active for 7.0s; 2175 response characters received"
+    },
+    {
+      "seconds": 82.65,
+      "message": "Rejected import_isolator.py; integration notes returned to its file worker: Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> async_plugin_hot_reloader.py).; Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+    },
+    {
+      "seconds": 82.65,
+      "message": "Generating import_isolator.py (3/5; attempt 2/3; qwen2.5-coder:7b)"
+    },
+    {
+      "seconds": 95.401,
+      "message": "File worker import_isolator.py: model active for 5.0s; 1515 response characters received"
+    },
+    {
+      "seconds": 97.531,
+      "message": "File worker import_isolator.py: model active for 7.1s; 2175 response characters received"
+    },
+    {
+      "seconds": 97.559,
+      "message": "Rejected import_isolator.py; integration notes returned to its file worker: Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> async_plugin_hot_reloader.py).; Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+    },
+    {
+      "seconds": 97.559,
+      "message": "Stopping identical full-file retries for import_isolator.py; escalating the unchanged contract failure"
+    },
+    {
+      "seconds": 97.559,
+      "message": "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+    },
+    {
+      "seconds": 97.561,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: async_plugin_hot_reloader\n- canonical_owners: dependency_validator\n- canonical_owners: import_isolator\n- canonical_owners: drain_manager\n- canonical_owners: observer_emitter\n- signatures: async def reload_plugins(self, plugins: List[str]) -> None\n- signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool\n- signatures: async def isolate_imports(self, module_name: str) -> None\n- signatures: async def drain_calls(self) -> None\n- signatures: async def rollback_reload(self) -> None\n- signatures: def register_observer(self, observer: Callable[[str], None]) -> None\n- shared_invariants: The reload_plugins method must be atomic and handle import failures.\n- shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.\n- shared_invariants: The isolate_imports method must prevent new imports during a reload operation.\n- shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.\n- shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.\n- shared_invariants: Observers must be notified of reload events, including failures.\n- data_layout: dependency_dag: Dict[str, List[str]]\n- data_layout: active_calls: Set[asyncio.Task]\n- data_layout: observers: List[Callable[[str], None]]\n- errors: DependencyValidationFailedError\n- errors: ImportIsolationFailedError\n- errors: DrainFailedError\n- errors: ReloadRollbackError\n- errors: ObserverRegistrationError\n\n- `tech_connector/services/generated/drain_manager.py`: Drains in-flight calls before proceeding with the reload.; Validates the dependency DAG before proceeding with reloads.\n  - role: production\n  - requirement IDs: R1\n  - public API: drain_calls; DrainFailedError; validate_dependency_dag\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; drain_calls implements exact package signature async def drain_calls(self) -> None.; validate_dependency_dag implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def drain_calls(self) -> None using the accepted package state, invariants, synchronization, and error contracts. -> Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Combined bounded owner tech_connector/services/generated/dependency_validator.py into tech_connector/services/generated/drain_manager.py.; Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/import_isolator.py`: Isolates imports during a reload operation to prevent new imports.\n  - role: production\n  - requirement IDs: R1\n  - public API: isolate_imports; ImportIsolationFailedError\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; isolate_imports implements exact package signature async def isolate_imports(self, module_name: str) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def isolate_imports(self, module_name: str) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/observer_emitter.py`: Emits observer events for reload events, including failures.\n  - role: production\n  - requirement IDs: R1\n  - public API: register_observer; emit_event\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; register_observer implements exact package signature def register_observer(self, observer: Callable[[str], None]) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement def register_observer(self, observer: Callable[[str], None]) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/async_plugin_hot_reloader.py`: Provides the main functionality of the async plugin hot-reloader.\n  - role: production\n  - requirement IDs: R1\n  - public API: AsyncPluginHotReloader; DependencyValidationFailedError; ImportIsolationFailedError; DrainFailedError; ReloadRollbackError; ObserverRegistrationError\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; AsyncPluginHotReloader implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.; AsyncPluginHotReloader implements exact package signature async def rollback_reload(self) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts. -> Implement async def rollback_reload(self) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependencies: tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/services/generated/async_plugin_hot_reloader.py, tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py, tech_connector/services/generated/async_plugin_hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.",
+    "plan": "Implementation Plan\nObjective: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages. Do not edit live project files; generate and validate only in a disposable workspace.\nMutation requested: no.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Return the evidence-backed analysis without producing a patch.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: return the evidence-backed analysis.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nArtifact architecture:\n\nPackage integration contracts:\n- canonical_owners: async_plugin_hot_reloader\n- canonical_owners: dependency_validator\n- canonical_owners: import_isolator\n- canonical_owners: drain_manager\n- canonical_owners: observer_emitter\n- signatures: async def reload_plugins(self, plugins: List[str]) -> None\n- signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool\n- signatures: async def isolate_imports(self, module_name: str) -> None\n- signatures: async def drain_calls(self) -> None\n- signatures: async def rollback_reload(self) -> None\n- signatures: def register_observer(self, observer: Callable[[str], None]) -> None\n- shared_invariants: The reload_plugins method must be atomic and handle import failures.\n- shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.\n- shared_invariants: The isolate_imports method must prevent new imports during a reload operation.\n- shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.\n- shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.\n- shared_invariants: Observers must be notified of reload events, including failures.\n- data_layout: dependency_dag: Dict[str, List[str]]\n- data_layout: active_calls: Set[asyncio.Task]\n- data_layout: observers: List[Callable[[str], None]]\n- errors: DependencyValidationFailedError\n- errors: ImportIsolationFailedError\n- errors: DrainFailedError\n- errors: ReloadRollbackError\n- errors: ObserverRegistrationError\n\n- `tech_connector/services/generated/drain_manager.py`: Drains in-flight calls before proceeding with the reload.; Validates the dependency DAG before proceeding with reloads.\n  - role: production\n  - requirement IDs: R1\n  - public API: drain_calls; DrainFailedError; validate_dependency_dag\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; drain_calls implements exact package signature async def drain_calls(self) -> None.; validate_dependency_dag implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def drain_calls(self) -> None using the accepted package state, invariants, synchronization, and error contracts. -> Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Combined bounded owner tech_connector/services/generated/dependency_validator.py into tech_connector/services/generated/drain_manager.py.; Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/import_isolator.py`: Isolates imports during a reload operation to prevent new imports.\n  - role: production\n  - requirement IDs: R1\n  - public API: isolate_imports; ImportIsolationFailedError\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; isolate_imports implements exact package signature async def isolate_imports(self, module_name: str) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def isolate_imports(self, module_name: str) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/observer_emitter.py`: Emits observer events for reload events, including failures.\n  - role: production\n  - requirement IDs: R1\n  - public API: register_observer; emit_event\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; register_observer implements exact package signature def register_observer(self, observer: Callable[[str], None]) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement def register_observer(self, observer: Callable[[str], None]) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `tech_connector/services/generated/async_plugin_hot_reloader.py`: Provides the main functionality of the async plugin hot-reloader.\n  - role: production\n  - requirement IDs: R1\n  - public API: AsyncPluginHotReloader; DependencyValidationFailedError; ImportIsolationFailedError; DrainFailedError; ReloadRollbackError; ObserverRegistrationError\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.; AsyncPluginHotReloader implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.; AsyncPluginHotReloader implements exact package signature async def rollback_reload(self) -> None.; Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError\n  - algorithm: Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts. -> Implement async def rollback_reload(self) -> None using the accepted package state, invariants, synchronization, and error contracts.\n  - dependencies: tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py\n  - dependency repairs for review: Collapsed absent manifest dependency into this file's owned implementation: shared_types.py\n  - validation: Import the completed file and read back its declared public interface.\n- `examples/tech_connector/tests/test_generated_artifact.py`: Behavioral proof for every generated artifact requirement.\n  - role: behavioral tests\n  - requirement IDs: R1\n  - contracts: Obey every accepted package integration contract and declared dependency interface.; Own only the public symbols declared in this file map.\n  - algorithm: Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages\n  - dependencies: tech_connector/services/generated/async_plugin_hot_reloader.py, tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py\n  - validation: Run focused disposable behavioral tests for owned requirement IDs.\n\nRequirement ownership matrix:\n\n- R1: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages -> tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py, tech_connector/services/generated/async_plugin_hot_reloader.py, examples/tech_connector/tests/test_generated_artifact.py\n- R2: Do not edit live project files -> project-edit controller (workflow validation)\n- R3: generate and validate only in a disposable workspace -> project-edit controller (workflow validation)",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad",
+    "artifact_manifest": [
+      {
+        "path": "tech_connector/services/generated/drain_manager.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\services\\generated\\drain_manager.py",
+        "purpose": "Drains in-flight calls before proceeding with the reload.; Validates the dependency DAG before proceeding with reloads.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "drain_calls",
+          "DrainFailedError",
+          "validate_dependency_dag"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map.",
+          "drain_calls implements exact package signature async def drain_calls(self) -> None.",
+          "validate_dependency_dag implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.",
+          "Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError"
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "Implement async def drain_calls(self) -> None using the accepted package state, invariants, synchronization, and error contracts.",
+          "Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts."
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: async_plugin_hot_reloader",
+          "canonical_owners: dependency_validator",
+          "canonical_owners: import_isolator",
+          "canonical_owners: drain_manager",
+          "canonical_owners: observer_emitter",
+          "signatures: async def reload_plugins(self, plugins: List[str]) -> None",
+          "signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool",
+          "signatures: async def isolate_imports(self, module_name: str) -> None",
+          "signatures: async def drain_calls(self) -> None",
+          "signatures: async def rollback_reload(self) -> None",
+          "signatures: def register_observer(self, observer: Callable[[str], None]) -> None",
+          "shared_invariants: The reload_plugins method must be atomic and handle import failures.",
+          "shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.",
+          "shared_invariants: The isolate_imports method must prevent new imports during a reload operation.",
+          "shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.",
+          "shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.",
+          "shared_invariants: Observers must be notified of reload events, including failures.",
+          "data_layout: dependency_dag: Dict[str, List[str]]",
+          "data_layout: active_calls: Set[asyncio.Task]",
+          "data_layout: observers: List[Callable[[str], None]]",
+          "errors: DependencyValidationFailedError",
+          "errors: ImportIsolationFailedError",
+          "errors: DrainFailedError",
+          "errors: ReloadRollbackError",
+          "errors: ObserverRegistrationError"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Combined bounded owner tech_connector/services/generated/dependency_validator.py into tech_connector/services/generated/drain_manager.py.",
+          "Collapsed absent manifest dependency into this file's owned implementation: shared_types.py"
+        ],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/services/generated/import_isolator.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\services\\generated\\import_isolator.py",
+        "purpose": "Isolates imports during a reload operation to prevent new imports.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "isolate_imports",
+          "ImportIsolationFailedError"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map.",
+          "isolate_imports implements exact package signature async def isolate_imports(self, module_name: str) -> None.",
+          "Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError"
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "Implement async def isolate_imports(self, module_name: str) -> None using the accepted package state, invariants, synchronization, and error contracts."
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: async_plugin_hot_reloader",
+          "canonical_owners: dependency_validator",
+          "canonical_owners: import_isolator",
+          "canonical_owners: drain_manager",
+          "canonical_owners: observer_emitter",
+          "signatures: async def reload_plugins(self, plugins: List[str]) -> None",
+          "signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool",
+          "signatures: async def isolate_imports(self, module_name: str) -> None",
+          "signatures: async def drain_calls(self) -> None",
+          "signatures: async def rollback_reload(self) -> None",
+          "signatures: def register_observer(self, observer: Callable[[str], None]) -> None",
+          "shared_invariants: The reload_plugins method must be atomic and handle import failures.",
+          "shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.",
+          "shared_invariants: The isolate_imports method must prevent new imports during a reload operation.",
+          "shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.",
+          "shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.",
+          "shared_invariants: Observers must be notified of reload events, including failures.",
+          "data_layout: dependency_dag: Dict[str, List[str]]",
+          "data_layout: active_calls: Set[asyncio.Task]",
+          "data_layout: observers: List[Callable[[str], None]]",
+          "errors: DependencyValidationFailedError",
+          "errors: ImportIsolationFailedError",
+          "errors: DrainFailedError",
+          "errors: ReloadRollbackError",
+          "errors: ObserverRegistrationError"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Collapsed absent manifest dependency into this file's owned implementation: shared_types.py"
+        ],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/services/generated/observer_emitter.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\services\\generated\\observer_emitter.py",
+        "purpose": "Emits observer events for reload events, including failures.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "register_observer",
+          "emit_event"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map.",
+          "register_observer implements exact package signature def register_observer(self, observer: Callable[[str], None]) -> None.",
+          "Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError"
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "Implement def register_observer(self, observer: Callable[[str], None]) -> None using the accepted package state, invariants, synchronization, and error contracts."
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: async_plugin_hot_reloader",
+          "canonical_owners: dependency_validator",
+          "canonical_owners: import_isolator",
+          "canonical_owners: drain_manager",
+          "canonical_owners: observer_emitter",
+          "signatures: async def reload_plugins(self, plugins: List[str]) -> None",
+          "signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool",
+          "signatures: async def isolate_imports(self, module_name: str) -> None",
+          "signatures: async def drain_calls(self) -> None",
+          "signatures: async def rollback_reload(self) -> None",
+          "signatures: def register_observer(self, observer: Callable[[str], None]) -> None",
+          "shared_invariants: The reload_plugins method must be atomic and handle import failures.",
+          "shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.",
+          "shared_invariants: The isolate_imports method must prevent new imports during a reload operation.",
+          "shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.",
+          "shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.",
+          "shared_invariants: Observers must be notified of reload events, including failures.",
+          "data_layout: dependency_dag: Dict[str, List[str]]",
+          "data_layout: active_calls: Set[asyncio.Task]",
+          "data_layout: observers: List[Callable[[str], None]]",
+          "errors: DependencyValidationFailedError",
+          "errors: ImportIsolationFailedError",
+          "errors: DrainFailedError",
+          "errors: ReloadRollbackError",
+          "errors: ObserverRegistrationError"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Collapsed absent manifest dependency into this file's owned implementation: shared_types.py"
+        ],
+        "depends_on": [],
+        "is_test": false
+      },
+      {
+        "path": "tech_connector/services/generated/async_plugin_hot_reloader.py",
+        "absolute_path": "C:\\depot\\tools\\tech_connector\\services\\generated\\async_plugin_hot_reloader.py",
+        "purpose": "Provides the main functionality of the async plugin hot-reloader.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [
+          "AsyncPluginHotReloader",
+          "DependencyValidationFailedError",
+          "ImportIsolationFailedError",
+          "DrainFailedError",
+          "ReloadRollbackError",
+          "ObserverRegistrationError"
+        ],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map.",
+          "AsyncPluginHotReloader implements exact package signature async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool.",
+          "AsyncPluginHotReloader implements exact package signature async def rollback_reload(self) -> None.",
+          "Relevant accepted state and failure contracts: shared_invariants: The reload_plugins method must be atomic and handle import failures. | shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads. | shared_invariants: The isolate_imports method must prevent new imports during a reload operation. | shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload. | shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt. | shared_invariants: Observers must be notified of reload events, including failures. | data_layout: dependency_dag: Dict[str, List[str]] | data_layout: active_calls: Set[asyncio.Task] | data_layout: observers: List[Callable[[str], None]] | errors: DependencyValidationFailedError | errors: ImportIsolationFailedError | errors: DrainFailedError | errors: ReloadRollbackError | errors: ObserverRegistrationError"
+        ],
+        "algorithm_steps": [
+          "Implement Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "Implement async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool using the accepted package state, invariants, synchronization, and error contracts.",
+          "Implement async def rollback_reload(self) -> None using the accepted package state, invariants, synchronization, and error contracts."
+        ],
+        "validation_steps": [
+          "Import the completed file and read back its declared public interface."
+        ],
+        "integration_contracts": [
+          "canonical_owners: async_plugin_hot_reloader",
+          "canonical_owners: dependency_validator",
+          "canonical_owners: import_isolator",
+          "canonical_owners: drain_manager",
+          "canonical_owners: observer_emitter",
+          "signatures: async def reload_plugins(self, plugins: List[str]) -> None",
+          "signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool",
+          "signatures: async def isolate_imports(self, module_name: str) -> None",
+          "signatures: async def drain_calls(self) -> None",
+          "signatures: async def rollback_reload(self) -> None",
+          "signatures: def register_observer(self, observer: Callable[[str], None]) -> None",
+          "shared_invariants: The reload_plugins method must be atomic and handle import failures.",
+          "shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.",
+          "shared_invariants: The isolate_imports method must prevent new imports during a reload operation.",
+          "shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.",
+          "shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.",
+          "shared_invariants: Observers must be notified of reload events, including failures.",
+          "data_layout: dependency_dag: Dict[str, List[str]]",
+          "data_layout: active_calls: Set[asyncio.Task]",
+          "data_layout: observers: List[Callable[[str], None]]",
+          "errors: DependencyValidationFailedError",
+          "errors: ImportIsolationFailedError",
+          "errors: DrainFailedError",
+          "errors: ReloadRollbackError",
+          "errors: ObserverRegistrationError"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [
+          "Collapsed absent manifest dependency into this file's owned implementation: shared_types.py"
+        ],
+        "depends_on": [
+          "tech_connector/services/generated/drain_manager.py",
+          "tech_connector/services/generated/import_isolator.py",
+          "tech_connector/services/generated/observer_emitter.py"
+        ],
+        "is_test": false
+      },
+      {
+        "path": "examples/tech_connector/tests/test_generated_artifact.py",
+        "absolute_path": "C:\\depot\\tools\\examples\\tech_connector\\tests\\test_generated_artifact.py",
+        "purpose": "Behavioral proof for every generated artifact requirement.",
+        "requirements": [
+          "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "requirement_ids": [
+          "R1"
+        ],
+        "public_symbols": [],
+        "contracts": [
+          "Obey every accepted package integration contract and declared dependency interface.",
+          "Own only the public symbols declared in this file map."
+        ],
+        "algorithm_steps": [
+          "Prove Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages"
+        ],
+        "validation_steps": [
+          "Run focused disposable behavioral tests for owned requirement IDs."
+        ],
+        "integration_contracts": [
+          "canonical_owners: async_plugin_hot_reloader",
+          "canonical_owners: dependency_validator",
+          "canonical_owners: import_isolator",
+          "canonical_owners: drain_manager",
+          "canonical_owners: observer_emitter",
+          "signatures: async def reload_plugins(self, plugins: List[str]) -> None",
+          "signatures: async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool",
+          "signatures: async def isolate_imports(self, module_name: str) -> None",
+          "signatures: async def drain_calls(self) -> None",
+          "signatures: async def rollback_reload(self) -> None",
+          "signatures: def register_observer(self, observer: Callable[[str], None]) -> None",
+          "shared_invariants: The reload_plugins method must be atomic and handle import failures.",
+          "shared_invariants: The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.",
+          "shared_invariants: The isolate_imports method must prevent new imports during a reload operation.",
+          "shared_invariants: The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.",
+          "shared_invariants: The rollback_reload method must revert any changes made during a failed reload attempt.",
+          "shared_invariants: Observers must be notified of reload events, including failures.",
+          "data_layout: dependency_dag: Dict[str, List[str]]",
+          "data_layout: active_calls: Set[asyncio.Task]",
+          "data_layout: observers: List[Callable[[str], None]]",
+          "errors: DependencyValidationFailedError",
+          "errors: ImportIsolationFailedError",
+          "errors: DrainFailedError",
+          "errors: ReloadRollbackError",
+          "errors: ObserverRegistrationError"
+        ],
+        "ownership_attributions": [],
+        "dependency_repairs": [],
+        "depends_on": [
+          "tech_connector/services/generated/async_plugin_hot_reloader.py",
+          "tech_connector/services/generated/drain_manager.py",
+          "tech_connector/services/generated/import_isolator.py",
+          "tech_connector/services/generated/observer_emitter.py"
+        ],
+        "is_test": true
+      }
+    ],
+    "requirement_ledger": [
+      {
+        "id": "R1",
+        "text": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+        "scope": "artifact"
+      },
+      {
+        "id": "R2",
+        "text": "Do not edit live project files",
+        "scope": "workflow"
+      },
+      {
+        "id": "R3",
+        "text": "generate and validate only in a disposable workspace",
+        "scope": "workflow"
+      }
+    ],
+    "reasoning_gaps": [],
+    "planning_trace": [
+      {
+        "stage": "artifact_integration_contract",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 6.645,
+        "response_characters": 1573,
+        "response": "{\n  \"integration_contracts\": {\n    \"canonical_owners\": [\n      \"async_plugin_hot_reloader\",\n      \"dependency_validator\",\n      \"import_isolator\",\n      \"drain_manager\",\n      \"observer_emitter\"\n    ],\n    \"signatures\": [\n      \"async def reload_plugins(self, plugins: List[str]) -> None\",\n      \"async def validate_dependency_dag(self, dag: Dict[str, List[str]]) -> bool\",\n      \"async def isolate_imports(self, module_name: str) -> None\",\n      \"async def drain_calls(self) -> None\",\n      \"async def rollback_reload(self) -> None\",\n      \"def register_observer(self, observer: Callable[[str], None]) -> None\"\n    ],\n    \"shared_invariants\": [\n      \"The reload_plugins method must be atomic and handle import failures.\",\n      \"The validate_dependency_dag method must ensure the dependency DAG is valid before proceeding with reloads.\",\n      \"The isolate_imports method must prevent new imports during a reload operation.\",\n      \"The drain_calls method must wait for all in-flight calls to complete before proceeding with the reload.\",\n      \"The rollback_reload method must revert any changes made during a failed reload attempt.\",\n      \"Observers must be notified of reload events, including failures.\"\n    ],\n    \"data_layout\": [\n      \"dependency_dag: Dict[str, List[str]]\",\n      \"active_calls: Set[asyncio.Task]\",\n      \"observers: List[Callable[[str], None]]\"\n    ],\n    \"errors\": [\n      \"DependencyValidationFailedError\",\n      \"ImportIsolationFailedError\",\n      \"DrainFailedError\",\n      \"ReloadRollbackError\",\n      \"ObserverRegistrationError\"\n    ]\n  }\n}"
+      },
+      {
+        "stage": "artifact_file_map",
+        "status": "accepted",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b",
+        "elapsed_seconds": 7.734,
+        "response_characters": 1707,
+        "response": "{\n  \"files\": [\n    {\n      \"path\": \"async_plugin_hot_reloader.py\",\n      \"purpose\": \"Provides the main functionality of the async plugin hot-reloader.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\"AsyncPluginHotReloader\", \"DependencyValidationFailedError\", \"ImportIsolationFailedError\", \"DrainFailedError\", \"ReloadRollbackError\", \"ObserverRegistrationError\"],\n      \"depends_on\": [\"dependency_validator.py\", \"import_isolator.py\", \"drain_manager.py\", \"observer_emitter.py\", \"shared_types.py\"],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"dependency_validator.py\",\n      \"purpose\": \"Validates the dependency DAG before proceeding with reloads.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\"validate_dependency_dag\"],\n      \"depends_on\": [\"shared_types.py\"],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"import_isolator.py\",\n      \"purpose\": \"Isolates imports during a reload operation to prevent new imports.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\"isolate_imports\", \"ImportIsolationFailedError\"],\n      \"depends_on\": [\"shared_types.py\"],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"drain_manager.py\",\n      \"purpose\": \"Drains in-flight calls before proceeding with the reload.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\"drain_calls\", \"DrainFailedError\"],\n      \"depends_on\": [\"shared_types.py\"],\n      \"is_test\": false\n    },\n    {\n      \"path\": \"observer_emitter.py\",\n      \"purpose\": \"Emits observer events for reload events, including failures.\",\n      \"requirement_ids\": [\"R1\"],\n      \"public_symbols\": [\"register_observer\", \"emit_event\"],\n      \"depends_on\": [\"shared_types.py\"],\n      \"is_test\": false\n    }\n  ]\n}"
+      }
+    ]
+  },
+  "result": {
+    "text": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed.\n\nRequirement coverage:\n- R1 [blocked]: Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages | production=tech_connector/services/generated/async_plugin_hot_reloader.py, tech_connector/services/generated/drain_manager.py, tech_connector/services/generated/import_isolator.py, tech_connector/services/generated/observer_emitter.py | tests=examples/tech_connector/tests/test_async_plugin_hot_reloader.py\n- R2 [blocked]: Do not edit live project files | workflow=project_edit_flow\n- R3 [blocked]: generate and validate only in a disposable workspace | workflow=project_edit_flow",
+    "payload": {
+      "type": "project_changes_rejected",
+      "changes": [],
+      "validation_errors": [
+        "Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed."
+      ],
+      "requirement_coverage": [
+        {
+          "id": "R1",
+          "requirement": "Create a compact multi-file Python async plugin hot-reloader that validates dependency DAGs, isolates import failures, drains in-flight calls before atomic generation swaps, rolls back failed reloads, emits observer events, and has deterministic unittest coverage without third-party packages",
+          "scope": "artifact",
+          "system_owners": [],
+          "production_owners": [
+            "tech_connector/services/generated/async_plugin_hot_reloader.py",
+            "tech_connector/services/generated/drain_manager.py",
+            "tech_connector/services/generated/import_isolator.py",
+            "tech_connector/services/generated/observer_emitter.py"
+          ],
+          "test_owners": [
+            "examples/tech_connector/tests/test_async_plugin_hot_reloader.py"
+          ],
+          "validation": [
+            "Import the completed file and read back its declared public interface.",
+            "Run focused disposable behavioral tests for owned requirement IDs."
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R2",
+          "requirement": "Do not edit live project files",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        },
+        {
+          "id": "R3",
+          "requirement": "generate and validate only in a disposable workspace",
+          "scope": "workflow",
+          "system_owners": [
+            "project_edit_flow"
+          ],
+          "production_owners": [],
+          "test_owners": [],
+          "validation": [
+            "project-edit controller safety, execution, and result-reporting gates"
+          ],
+          "status": "blocked"
+        }
+      ],
+      "reasoning_gaps": [
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\import_isolator.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 1363,
+          "validator_errors": [
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\import_isolator.py",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 1363,
+          "validator_errors": [
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\import_isolator.py",
+          "attempt": 1,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 2175,
+          "validator_errors": [
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> async_plugin_hot_reloader.py).",
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        },
+        {
+          "stage": "artifact_file_generation",
+          "file": "C:\\depot\\tools\\tech_connector\\services\\generated\\import_isolator.py",
+          "attempt": 2,
+          "model": "qwen2.5-coder:7b",
+          "response_characters": 2175,
+          "validator_errors": [
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> async_plugin_hot_reloader.py).",
+            "Integration architect rejected the file: Generated import is missing its manifest dependency edge (import_isolator.py -> drain_manager.py)."
+          ],
+          "fallback_action": "retry the same bounded file with deterministic integration notes"
+        }
+      ]
+    }
+  }
+}

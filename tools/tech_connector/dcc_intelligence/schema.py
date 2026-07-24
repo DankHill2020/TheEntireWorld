@@ -1,7 +1,7 @@
 """SQLite schema for the reusable DCC local intelligence layer."""
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL = [
     """
@@ -118,6 +118,43 @@ DDL = [
         UNIQUE(project_id, dcc, qualified_name),
         FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
+    """,
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS python_api_fts USING fts5(
+        qualified_name,
+        object_type,
+        signature,
+        docstring,
+        content='python_api',
+        content_rowid='id',
+        tokenize='unicode61 remove_diacritics 2'
+    )
+    """,
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS python_api_fts_vocab USING fts5vocab(
+        python_api_fts,
+        'row'
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS python_api_fts_insert AFTER INSERT ON python_api BEGIN
+        INSERT INTO python_api_fts(rowid, qualified_name, object_type, signature, docstring)
+        VALUES (new.id, new.qualified_name, new.object_type, new.signature, new.docstring);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS python_api_fts_delete AFTER DELETE ON python_api BEGIN
+        INSERT INTO python_api_fts(python_api_fts, rowid, qualified_name, object_type, signature, docstring)
+        VALUES ('delete', old.id, old.qualified_name, old.object_type, old.signature, old.docstring);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS python_api_fts_update AFTER UPDATE ON python_api BEGIN
+        INSERT INTO python_api_fts(python_api_fts, rowid, qualified_name, object_type, signature, docstring)
+        VALUES ('delete', old.id, old.qualified_name, old.object_type, old.signature, old.docstring);
+        INSERT INTO python_api_fts(rowid, qualified_name, object_type, signature, docstring)
+        VALUES (new.id, new.qualified_name, new.object_type, new.signature, new.docstring);
+    END
     """,
     """
     CREATE TABLE IF NOT EXISTS symbols (

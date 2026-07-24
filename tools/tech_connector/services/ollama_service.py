@@ -21,7 +21,8 @@ FALLBACK_GENERAL_MODEL = "qwen2.5-coder:latest"
 # The semantic pass is intentionally small and cheap. A separate planning pass
 # receives its hypothesis plus resolved context and performs the deeper reasoning.
 SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_INTENT_MODEL", "qwen2.5:1.5b")
-FALLBACK_SEMANTIC_INTENT_MODEL = "qwen2.5:1.5b"
+FALLBACK_SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_VERIFY_MODEL", "qwen2.5:3b")
+SEMANTIC_ALIGNMENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_ALIGNMENT_MODEL", "qwen3:8b")
 
 FAST_CODE_MODEL = "qwen2.5-coder:14b"
 FALLBACK_CODE_MODEL = "qwen2.5-coder:latest"
@@ -59,6 +60,7 @@ AI_MODELS = {
 
 REQUIRED_SEMANTIC_MODELS = [
     SEMANTIC_INTENT_MODEL,
+    FALLBACK_SEMANTIC_INTENT_MODEL,
 ]
 
 REQUIRED_CHAT_MODELS = [
@@ -142,6 +144,30 @@ def semantic_intent_model():
     except Exception:
         pass
     return SEMANTIC_INTENT_MODEL
+
+
+def semantic_verifier_model():
+    """Return the small general model used to verify prompt-plan alignment."""
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        if settings.get("semantic_verifier_model"):
+            return settings.get("semantic_verifier_model")
+    except Exception:
+        pass
+    return FALLBACK_SEMANTIC_INTENT_MODEL
+
+
+def semantic_alignment_model():
+    """Return the general model trusted for atomic prompt-plan comparisons."""
+    try:
+        from tech_connector.services.settings_service import load_settings
+        settings = load_settings()
+        if settings.get("semantic_alignment_model"):
+            return settings.get("semantic_alignment_model")
+    except Exception:
+        pass
+    return SEMANTIC_ALIGNMENT_MODEL
 
 
 def code_model_for_profile(profile: str) -> str:
@@ -272,7 +298,63 @@ def warm_ollama_model(model, keep_alive="2h"):
         return False
 
 
-def warm_required_models_async(keep_alive="24h"):
+def loaded_ollama_models():
+    """Return models currently resident in Ollama memory."""
+    try:
+        result = subprocess.run(
+            ["ollama", "ps"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            creationflags=_creationflags(),
+        )
+    except Exception:
+        return []
+    models = []
+    for line in result.stdout.splitlines()[1:]:
+        value = line.strip()
+        if value:
+            models.append(value.split()[0])
+    return list(dict.fromkeys(models))
+
+
+def unload_all_ollama_models():
+    """Unload every resident model while leaving the lightweight server available."""
+    models = loaded_ollama_models()
+    results = {
+        model: bool(warm_ollama_model(model, keep_alive=0))
+        for model in models
+    }
+    return {
+        "ok": all(results.values()) if results else True,
+        "models": models,
+        "results": results,
+        "unloaded_count": sum(1 for value in results.values() if value),
+    }
+
+
+def unload_ollama_models(models):
+    """Unload the requested resident models while leaving the Ollama server available."""
+    normalized_models = []
+    for model in models or []:
+        normalized = normalize_ollama_model_name(model)
+        if normalized and normalized not in normalized_models:
+            normalized_models.append(normalized)
+
+    results = {
+        model: bool(warm_ollama_model(model, keep_alive=0))
+        for model in normalized_models
+    }
+    return {
+        "ok": all(results.values()) if results else True,
+        "models": normalized_models,
+        "results": results,
+        "unloaded_count": sum(1 for value in results.values() if value),
+    }
+
+
+def warm_required_models_async(keep_alive="10m"):
     def run():
         ok, msg = ensure_ollama_server()
         if not ok:
@@ -284,8 +366,10 @@ def warm_required_models_async(keep_alive="24h"):
 
             settings = load_settings()
             configured_preloads = list(settings.get("ollama_preload_models") or [])
+            warm_alignment = bool(settings.get("warm_semantic_alignment_model", True))
         except Exception:
             configured_preloads = []
+            warm_alignment = True
 
         # Only explicitly resident models are warmed. Installed quality and
         # escalation models remain cold so they cannot evict the fast planner.
@@ -295,6 +379,8 @@ def warm_required_models_async(keep_alive="24h"):
             for model in configured_preloads
             if str(model or "").strip()
         )
+        if warm_alignment:
+            models.add(normalize_ollama_model_name(semantic_alignment_model()))
         # Warm independently so a cold quality model does not postpone the fast
         # planner becoming available during application startup.
         for model in sorted(models):

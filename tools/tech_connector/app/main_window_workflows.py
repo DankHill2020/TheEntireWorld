@@ -454,6 +454,12 @@ class MainWindowWorkflowsMixin:
     def _pipeline_function_name_from_code(self, code: str, fallback: str = "unnamed_workflow") -> str:
         import ast
         try:
+            from tech_connector.services.workflow_service import extract_python_code
+
+            code = extract_python_code(code)
+        except Exception:
+            pass
+        try:
             tree = ast.parse(code or "")
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -471,6 +477,12 @@ class MainWindowWorkflowsMixin:
             except Exception:
                 pass
         code = code or getattr(self, "_last_workflow_generated_code", "") or ""
+        try:
+            from tech_connector.services.workflow_service import extract_python_code
+
+            code = extract_python_code(code)
+        except Exception:
+            pass
         name_text = "unnamed_workflow"
         try:
             name_text = self.wf_build_name.text().strip() or name_text
@@ -703,6 +715,34 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         except Exception:
             return None
 
+    def _cross_dcc_pipeline_hosts(self) -> list[str]:
+        supported = {
+            "maya",
+            "blender",
+            "unreal",
+            "motionbuilder",
+            "houdini",
+            "substance_painter",
+            "unity",
+        }
+        hosts: list[str] = []
+        for step in getattr(self, "wf_builder_steps", []) or []:
+            symbol = dict(step.get("symbol") or {})
+            host = str(symbol.get("provider_id") or symbol.get("host") or "").strip().lower()
+            if host in supported and host not in hosts:
+                hosts.append(host)
+        if hosts:
+            return hosts
+
+        flow = dict(getattr(self, "_last_pipeline_prompt_flow", {}) or {})
+        plan = dict(flow.get("workflow_plan") or {})
+        for step in plan.get("steps") or []:
+            symbol = dict(step.get("symbol") or {})
+            host = str(symbol.get("provider_id") or symbol.get("host") or "").strip().lower()
+            if host in supported and host not in hosts:
+                hosts.append(host)
+        return hosts
+
     def _notify_pipeline_output(self, title: str, body: str, *, status: str = "", source: str = ""):
         try:
             if not (
@@ -760,6 +800,27 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         runtime_source = self._pipeline_runtime_source(code, func_name, slots, project_root)
         self._last_test_output = f"Host: {host}\nFunction: {func_name}\nSource: {label}\nProject: {project_root}\n"
         self.wf_test_log_btn.setEnabled(True)
+        if host == "cross_dcc":
+            for required_host in self._cross_dcc_pipeline_hosts():
+                if self._pipeline_bridge_port(required_host):
+                    continue
+                self.wf_test_status.setText(
+                    f"{required_host} is required by this cross-DCC pipeline. Waiting for its bridge."
+                )
+                self.wf_test_status.setStyleSheet("color: #e05252;")
+                try:
+                    if hasattr(self, "set_card"):
+                        self.set_card(required_host, "bad", "Not open")
+                    if hasattr(self, "_prompt_launch_missing_dcc_bridge"):
+                        self._prompt_launch_missing_dcc_bridge(
+                            required_host,
+                            f"This cross-DCC pipeline requires {required_host}, but its Tech Connector bridge is not connected.",
+                            self.run_selected_workflow,
+                            f"Resume cross-DCC pipeline: {func_name}",
+                        )
+                finally:
+                    self._workflow_run_in_flight = False
+                return
         if host and host not in {"local", "cross_dcc", "unknown"}:
             port = self._pipeline_bridge_port(host)
             if not port:
@@ -1261,26 +1322,113 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             pass
 
         try:
-            from tech_connector.services.prompt_route_service import classify_prompt_route
-            from tech_connector.services.action_planner_service import (
-                plan_prompt_to_action_graph,
-                workflow_plan_from_action_graph,
+            from tech_connector.services.prompt.pipeline_prompt_flow_service import (
+                resolve_pipeline_prompt_flow,
             )
             roots = self._workflow_intent_roots()
-            route_decision = classify_prompt_route(prompt, project_roots=roots)
-            self._last_prompt_route_decision = route_decision.to_dict()
-            if route_decision.route not in {"pipeline_graph", "action_graph"}:
+            flow_result = resolve_pipeline_prompt_flow(
+                prompt,
+                roots,
+                host_hint="cross_dcc",
+                decision_facts={
+                    "settings": dict(getattr(self, "settings", {}) or {}),
+                    "planning_preferences": {
+                        "use_default_settings": bool(
+                            self.wf_use_default_settings_checkbox.isChecked()
+                        ),
+                        "semantic_verification": True,
+                        "semantic_understanding": True,
+                        "custom_settings": {
+                            "unreal_destination_path": self.wf_unreal_destination_edit.text().strip(),
+                        },
+                    },
+                },
+                progress_callback=self._report_pipeline_prompt_progress,
+            )
+            route_data = dict(flow_result.get("route_decision") or {})
+            self._last_prompt_route_decision = route_data
+            self._last_pipeline_prompt_flow = flow_result
+            if route_data.get("route") not in {"pipeline_graph", "action_graph"}:
                 QMessageBox.information(
                     self,
                     "Prompt Needs Different Route",
                     "This prompt does not look like a pipeline graph request yet.\n\n"
-                    f"Route: {route_decision.route}\n"
-                    f"Mode: {route_decision.operation_mode}\n"
-                    f"Missing: {', '.join(route_decision.missing_info) or 'none'}",
+                    f"Route: {route_data.get('route')}\n"
+                    f"Mode: {route_data.get('operation_mode')}\n"
+                    f"Missing: {', '.join(route_data.get('missing_info') or []) or 'none'}",
                 )
                 return
-            action_graph = plan_prompt_to_action_graph(prompt, roots)
-            plan = workflow_plan_from_action_graph(action_graph)
+            validation = dict(flow_result.get("understanding_validation") or {})
+            if not validation.get("valid"):
+                QMessageBox.information(
+                    self,
+                    "Pipeline Prompt Needs Clarification",
+                    "\n".join(validation.get("reasons") or ["The requested pipeline is ambiguous."]),
+                )
+                return
+            action_graph = dict(flow_result.get("action_graph") or {})
+            plan = flow_result.get("workflow_plan")
+            if (
+                plan
+                and not plan.get("success")
+                and not self.wf_use_default_settings_checkbox.isChecked()
+                and plan.get("unresolved_inputs")
+            ):
+                custom_settings = {
+                    "unreal_destination_path": self.wf_unreal_destination_edit.text().strip(),
+                }
+                stage_lookup = {
+                    str(row.get("id") or ""): row
+                    for row in action_graph.get("stages") or []
+                }
+                for unresolved in plan.get("unresolved_inputs") or []:
+                    parameter = str(unresolved.get("required_output") or "").strip()
+                    question = str(
+                        unresolved.get("question")
+                        or f"What should `{parameter}` use?"
+                    )
+                    value, accepted = QInputDialog.getText(
+                        self,
+                        "Pipeline Setting Required",
+                        question,
+                    )
+                    if not accepted:
+                        return
+                    value = value.strip()
+                    if not value:
+                        QMessageBox.information(
+                            self,
+                            "Pipeline Setting Required",
+                            f"`{parameter}` cannot be empty while Default Settings is off.",
+                        )
+                        return
+                    stage = stage_lookup.get(str(unresolved.get("step") or ""), {})
+                    operation = str(stage.get("operation") or "")
+                    host = str(stage.get("host") or unresolved.get("host") or "")
+                    key = (
+                        f"{host}.{operation}.{parameter}"
+                        if host and operation
+                        else parameter
+                    )
+                    custom_settings[key] = value
+                flow_result = resolve_pipeline_prompt_flow(
+                    prompt,
+                    roots,
+                    host_hint="cross_dcc",
+                    decision_facts={
+                        "settings": dict(getattr(self, "settings", {}) or {}),
+                        "planning_preferences": {
+                            "use_default_settings": False,
+                            "semantic_verification": True,
+                            "semantic_understanding": True,
+                            "custom_settings": custom_settings,
+                        },
+                    },
+                    progress_callback=self._report_pipeline_prompt_progress,
+                )
+                action_graph = dict(flow_result.get("action_graph") or {})
+                plan = flow_result.get("workflow_plan")
+                self._last_pipeline_prompt_flow = flow_result
             if not plan:
                 validation = action_graph.get("validation") or {}
                 diagnostics = action_graph.get("diagnostics") or []
@@ -1298,10 +1446,20 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
         diagnostics = plan.get("diagnostics") or []
         if not plan.get("success"):
+            unresolved = list(plan.get("unresolved_inputs") or [])
+            questions = [
+                str(item.get("question") or "").strip()
+                for item in unresolved
+                if str(item.get("question") or "").strip()
+            ]
             QMessageBox.warning(
                 self,
                 "Could Not Build Graph",
-                "\n".join(diagnostics[-4:] or ["The prompt did not map cleanly to indexed functions."]),
+                "\n".join(
+                    questions
+                    or diagnostics[-4:]
+                    or ["The prompt did not map cleanly to indexed functions."]
+                ),
             )
             return
 
@@ -1363,6 +1521,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             )
             try:
                 self._last_action_graph = action_graph
+                self._last_pipeline_prompt_flow = flow_result
             except Exception:
                 pass
         except Exception as exc:
@@ -1575,7 +1734,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             matched_items.extend((0, display, idx) for _ratio, display, idx in scored_items[:10])
 
         matched_items.sort(key=lambda item: (item[0], item[1].lower()))
-        max_items = 80 if not query else 60
+        max_items = 80 if not query else 5
         box = getattr(self, "wf_build_func_box", None)
         if box is None:
             return
@@ -1587,7 +1746,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                     box.addItem(display, self.all_discovered_symbols[idx])
                 except Exception:
                     box.addItem(display, idx)
-            if len(matched_items) > max_items:
+            if not query and len(matched_items) > max_items:
                 box.addItem(f"Type more to narrow {len(matched_items) - max_items} more matches...", None)
         finally:
             box.blockSignals(False)
@@ -1599,7 +1758,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                 pass
 
     def get_all_available_symbols(self):
-        from tech_connector.models.constants import TOOLS_ROOT
+        from tech_connector.models.constants import EXTERNAL_TOOLS_DIR
         from tech_connector.services.tool_discovery_service import (
             list_ingested_tools,
             list_internal_functions,
@@ -1608,9 +1767,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         roots = self.all_roots() if hasattr(self, "all_roots") else []
         symbols = list_internal_functions(roots)
 
-        ext_tools = self.settings.get("external_tools_dir", "") or str(
-            TOOLS_ROOT / "external_tools"
-        )
+        ext_tools = self.settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
         if Path(ext_tools).exists():
             symbols.extend(list_ingested_tools(Path(ext_tools)))
 
@@ -2652,6 +2809,21 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             self.update_builder_code_preview(force=True)
         composed_code = self.wf_builder_code_edit.toPlainText() if hasattr(self, "wf_builder_code_edit") else getattr(self, "_last_workflow_generated_code", "")
         try:
+            from tech_connector.services.workflow_service import extract_python_code
+
+            cleaned_code = extract_python_code(composed_code)
+            if cleaned_code != composed_code:
+                composed_code = cleaned_code
+                if hasattr(self, "wf_builder_code_edit"):
+                    cursor = self.wf_builder_code_edit.textCursor()
+                    self.wf_builder_code_edit.blockSignals(True)
+                    self.wf_builder_code_edit.setPlainText(composed_code)
+                    self.wf_builder_code_edit.setTextCursor(cursor)
+                    self.wf_builder_code_edit.blockSignals(False)
+                    self._workflow_python_manually_edited = True
+        except Exception:
+            pass
+        try:
             compile(composed_code or "", "<ai_studio_pipeline>", "exec")
         except SyntaxError as exc:
             self._set_pipeline_python_warning(f"Python syntax error on line {exc.lineno}: {exc.msg}")
@@ -2805,6 +2977,34 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         except Exception:
             pass
 
+    def _report_pipeline_prompt_progress(self, event: dict):
+        data = dict(event or {})
+        status = str(data.get("status") or "running").upper()
+        label = str(data.get("label") or data.get("state") or "Pipeline planning")
+        details = dict(data.get("details") or {})
+        facts = []
+        for key in (
+            "route",
+            "host",
+            "intent",
+            "action_count",
+            "node_count",
+            "data_link_count",
+            "flow_link_count",
+            "total_ms",
+        ):
+            value = details.get(key)
+            if value is not None and value != "":
+                facts.append(f"{key.replace('_', ' ')}={value}")
+        suffix = f" ({', '.join(facts)})" if facts else ""
+        self._report_workflow_builder_event(f"[{status}] {label}{suffix}")
+        try:
+            from PySide6.QtWidgets import QApplication
+
+            QApplication.processEvents()
+        except Exception:
+            pass
+
     def _format_pipeline_data_flow_issues(self, issues, limit: int = 10) -> str:
         shown = []
         for issue in (issues or [])[:limit]:
@@ -2891,9 +3091,9 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
     def sync_workflow_graph_from_python(self):
         """Best-effort Python -> graph sync.
 
-        The graph remains the canonical editor for links and node layout. This parser
-        handles the important manual-code workflow: add/import a callable in Python,
-        then reflect that callable as a graph node when it matches indexed symbols.
+        Generated Pipeline Python can round-trip back into graph nodes, plugs,
+        literals, and links. Other Python falls back to the lightweight callable
+        scanner so hand-written helpers can still add known functions.
         """
         if getattr(self, "_updating_workflow_python_from_graph", False):
             return
@@ -2901,6 +3101,20 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         if editor is None:
             return
         code = editor.toPlainText()
+        try:
+            from tech_connector.services.workflow_service import extract_python_code
+
+            cleaned_code = extract_python_code(code)
+            if cleaned_code != code:
+                cursor = editor.textCursor()
+                editor.blockSignals(True)
+                editor.setPlainText(cleaned_code)
+                editor.setTextCursor(cursor)
+                editor.blockSignals(False)
+                code = cleaned_code
+        except Exception:
+            pass
+
         try:
             import ast
             tree = ast.parse(code or "")
@@ -2912,6 +3126,16 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
         self._syncing_workflow_python_to_graph = True
         try:
+            try:
+                from tech_connector.services.workflow_python_graph_sync_service import parse_pipeline_python_to_graph
+
+                parsed = parse_pipeline_python_to_graph(code)
+            except Exception:
+                parsed = None
+            if parsed is not None and parsed.ok and parsed.steps:
+                self._replace_pipeline_graph_from_parsed_python(parsed)
+                return
+
             if not getattr(self, "all_discovered_symbols", None):
                 self.all_discovered_symbols = getattr(self, "_cached_discovered_symbols", []) or []
                 if not self.all_discovered_symbols:
@@ -2984,6 +3208,80 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                 self._report_workflow_builder_event(f"Synced {added} Python callable(s) into the node graph.")
         finally:
             self._syncing_workflow_python_to_graph = False
+
+    def _replace_pipeline_graph_from_parsed_python(self, parsed):
+        import copy
+
+        parsed_steps = list(getattr(parsed, "steps", []) or [])
+        if not parsed_steps:
+            return
+
+        self.all_discovered_symbols = getattr(self, "all_discovered_symbols", None) or getattr(
+            self, "_cached_discovered_symbols", []
+        ) or []
+
+        def _norm_path(value):
+            return str(value or "").replace("\\", "/").lower()
+
+        def _match_symbol(parsed_symbol: dict):
+            parsed_name = parsed_symbol.get("name") or ""
+            parsed_file = _norm_path(parsed_symbol.get("file_path"))
+            parsed_path = parsed_symbol.get("function_path") or parsed_symbol.get("module") or ""
+            for sym in self.all_discovered_symbols:
+                sym_name = sym.get("name") or ""
+                sym_file = _norm_path(sym.get("file_path"))
+                sym_path = sym.get("function_path") or sym.get("module") or ""
+                if parsed_file and sym_file and parsed_file == sym_file and sym_name == parsed_name:
+                    return sym
+                if parsed_path and sym_path and sym_path == parsed_path:
+                    return sym
+                if sym_name == parsed_name and (not parsed_file or not sym_file or parsed_file.endswith(sym_file) or sym_file.endswith(parsed_file)):
+                    return sym
+            return None
+
+        self.wf_builder_steps = []
+        self._rebuild_pipeline_graph_from_steps()
+
+        previous_manual_state = getattr(self, "_workflow_python_manually_edited", False)
+        self._workflow_python_manually_edited = True
+        added_steps = []
+        try:
+            for parsed_step in parsed_steps:
+                parsed_symbol = copy.deepcopy(parsed_step.get("symbol") or {})
+                match = _match_symbol(parsed_symbol)
+                symbol = copy.deepcopy(match) if isinstance(match, dict) else parsed_symbol
+                if parsed_symbol.get("params"):
+                    symbol["params"] = parsed_symbol.get("params")
+                if parsed_symbol.get("outputs"):
+                    symbol["outputs"] = parsed_symbol.get("outputs")
+                if parsed_symbol.get("file_path"):
+                    symbol["file_path"] = parsed_symbol.get("file_path")
+                step_data = self.add_builder_step(custom_sym=symbol)
+                if not step_data:
+                    continue
+                step_data["literal_values"] = copy.deepcopy(parsed_step.get("literal_values") or {})
+                added_steps.append(step_data)
+            self._apply_workflow_intent_links(
+                added_steps,
+                {
+                    "data_links": getattr(parsed, "data_links", []) or [],
+                    "flow_links": getattr(parsed, "flow_links", []) or [],
+                },
+            )
+            view = getattr(self, "wf_node_view", None)
+            if view is not None:
+                for step in added_steps:
+                    if hasattr(view, "refresh_node_literals"):
+                        view.refresh_node_literals(step)
+            self._workflow_python_manually_edited = previous_manual_state
+            self._report_workflow_builder_event(
+                f"Synced Pipeline Python into graph: {len(added_steps)} node(s), "
+                f"{len(getattr(parsed, 'data_links', []) or [])} data link(s), "
+                f"{len(getattr(parsed, 'flow_links', []) or [])} flow link(s)."
+            )
+        except Exception:
+            self._workflow_python_manually_edited = previous_manual_state
+            raise
 
     def _sync_builder_step_to_graph(self, step_data: dict):
         view = getattr(self, "wf_node_view", None)

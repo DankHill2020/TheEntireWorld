@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,39 @@ class HostBridge(Protocol):
 
     def get_scene_objects_code(self) -> str:
         """Return app-native code that prints top-level scene/document objects."""
+
+
+def call_python_function_via_execute(
+    bridge: HostBridge,
+    function_path: str,
+    args: Optional[Sequence[Any]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
+    sys_paths: Optional[Sequence[str]] = None,
+) -> tuple[bool, str]:
+    """Call an importable Python function through a host bridge execute method."""
+    payload = {
+        "function": function_path,
+        "args": list(args or []),
+        "kwargs": dict(kwargs or {}),
+    }
+    paths_repr = repr(list(sys_paths or []))
+    code = f"""
+import sys, importlib, traceback
+for p in {paths_repr}:
+    if p not in sys.path:
+        sys.path.append(p)
+
+payload = {repr(payload)}
+try:
+    module_path, func_name = payload["function"].rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    func = getattr(module, func_name)
+    result = func(*payload.get("args", []), **payload.get("kwargs", {{}}))
+    print(result)
+except Exception:
+    traceback.print_exc()
+"""
+    return bridge.execute(code)
 
 
 # ---------------------------------------------------------------------------

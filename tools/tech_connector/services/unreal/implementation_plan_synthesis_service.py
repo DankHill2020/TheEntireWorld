@@ -28,12 +28,25 @@ def _operation_params(
     anim_bp = str(context.get("animation_blueprint") or "")
     skeleton = str(context.get("target_skeleton") or context.get("skeleton") or "")
     params: dict[str, Any] = {}
+    planned = dict((step.get("operation_arguments") or {}).get(operation) or {})
+
+    def resolve_planned_value(value: Any) -> Any:
+        if value == "$target_asset":
+            return target
+        if isinstance(value, list):
+            return [resolve_planned_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: resolve_planned_value(item) for key, item in value.items()}
+        return value
+
+    for key, value in planned.items():
+        params[key] = resolve_planned_value(value)
     animation_phase = str(step.get("domain") or "") in {"animation_system", "animation_metadata"}
     blueprint_target = anim_bp if animation_phase and anim_bp else target
     if operation in {"blueprint.scan", "blueprint.compile"}:
-        params["asset_path"] = blueprint_target
+        params.setdefault("asset_path", blueprint_target)
     elif operation == "assets.inspect":
-        params["asset_path"] = target
+        params.setdefault("asset_path", target)
     elif operation == "semantic_index.query":
         params["query"] = request
     elif operation == "animation.find_compatible":
@@ -55,8 +68,15 @@ def _operation_params(
                 "graph_name": "<resolve from live graph topology>",
             }
         )
+    elif operation == "blueprint.get_compile_errors":
+        params.setdefault("blueprint_path", blueprint_target)
+    elif operation in {"blueprint.describe_node_action", "blueprint.probe_node_action"}:
+        params.setdefault("blueprint_path", blueprint_target)
+        params.setdefault("graph_name", "EventGraph")
+        params.setdefault("palette_action", "$selected_blueprint_action")
     elif operation == "runtime.inject_key":
-        params.update({"key_name": "<resolve from prompt input contract>", "pressed": True})
+        key_name = "E" if re.search(r"\b(?:pickup|interact|use)\b", request, re.I) else "<resolve from prompt input contract>"
+        params.update({"key_name": key_name, "pressed": True})
     elif operation == "runtime.inspect_character":
         params.update(
             {
@@ -65,6 +85,17 @@ def _operation_params(
                 "property_names": ["CurrentState"],
             }
         )
+    elif operation == "semantic_index.record_runtime_observation":
+        params.update(
+            {
+                "scenario_key": "prompt_feature_runtime_validation",
+                "status": "$runtime_validation_status",
+                "assertions": "$runtime_validation_assertions",
+                "evidence": "$runtime_validation_evidence",
+            }
+        )
+    elif operation == "feature.execute_generic_plan":
+        params["plan"] = "$approved_detailed_implementation_plan"
     try:
         from tech_connector.services.unreal.unreal_operation_service import UNREAL_OPERATIONS
 
@@ -77,7 +108,11 @@ def _operation_params(
 
 
 def _unresolved_params(params: dict[str, Any]) -> list[str]:
-    return [key for key, value in params.items() if not value or str(value).startswith("<resolve")]
+    return [
+        key
+        for key, value in params.items()
+        if isinstance(value, str) and value.startswith("<resolve")
+    ]
 
 
 def _operation_realization(

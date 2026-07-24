@@ -14,7 +14,10 @@ LOGO_PATH = APP_ROOT / "assets" / "tech_connector_logo.png"
 FALLBACK_LOGO_PATH = APP_ROOT / "assets" / "the_entire_world_logo.png"
 
 def _detect_tools_root() -> Path:
-    configured = os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    configured = (
+        os.environ.get("TOOLSROOT", "").strip()
+        or os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    )
     if configured:
         return Path(configured).expanduser().resolve()
     for candidate in [APP_ROOT] + list(APP_ROOT.parents):
@@ -40,6 +43,7 @@ CODE_SNIPPETS_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 TOOLS_ROOT = _detect_tools_root()
+EXTERNAL_TOOLS_DIR = TOOLS_ROOT / "external_tools"
 KNOWLEDGE_DIR = APP_ROOT / "knowledge"
 PROJECT_ROOT_ENV = "TECH_CONNECTOR_PROJECT_ROOT"
 PROJECT_KNOWLEDGE_RELATIVE = Path("tech_connector") / "knowledge" / "index"

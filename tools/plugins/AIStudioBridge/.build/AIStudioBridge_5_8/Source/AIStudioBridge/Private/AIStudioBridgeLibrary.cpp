@@ -1,0 +1,2566 @@
+#include "AIStudioBridgeLibrary.h"
+
+#if WITH_EDITOR
+#include "Editor.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "BlueprintActionDatabase.h"
+#include "BlueprintActionFilter.h"
+#include "BlueprintNodeSpawner.h"
+#include "AnimGraphNode_Root.h"
+#include "AnimGraphNode_SequencePlayer.h"
+#include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_StateMachineBase.h"
+#include "AnimGraphNode_TransitionResult.h"
+#include "AnimStateNode.h"
+#include "AnimStateNodeBase.h"
+#include "AnimStateTransitionNode.h"
+#include "Animation/AnimationAsset.h"
+#include "AnimationGraph.h"
+#include "AnimationGraphSchema.h"
+#include "AnimationStateGraph.h"
+#include "AnimationStateMachineGraph.h"
+#include "AnimationStateMachineSchema.h"
+#include "AnimationTransitionGraph.h"
+#include "EdGraphUtilities.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_Event.h"
+#include "K2Node_ExecutionSequence.h"
+#include "K2Node_VariableGet.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/ActorComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "InputKeyEventArgs.h"
+#include "NiagaraComponent.h"
+#include "UObject/UnrealType.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "Misc/PackageName.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "ScopedTransaction.h"
+#include "UObject/SavePackage.h"
+#endif
+
+static FString AIStudioJsonString(const TSharedRef<FJsonObject>& Object)
+{
+    FString Output;
+    const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
+    FJsonSerializer::Serialize(Object, Writer);
+    return Output;
+}
+
+#if WITH_EDITOR
+static void AIStudioCollectBlueprintGraphs(UBlueprint* Blueprint, TArray<UEdGraph*>& Graphs)
+{
+    if (!Blueprint)
+    {
+        return;
+    }
+    Graphs.Append(Blueprint->UbergraphPages);
+    Graphs.Append(Blueprint->FunctionGraphs);
+    Graphs.Append(Blueprint->MacroGraphs);
+    Graphs.Append(Blueprint->DelegateSignatureGraphs);
+}
+
+static UAnimationStateMachineGraph* AIStudioFindStateMachineGraph(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    UAnimGraphNode_StateMachineBase** OutOwnerNode = nullptr)
+{
+    if (OutOwnerNode)
+    {
+        *OutOwnerNode = nullptr;
+    }
+    if (!AnimBlueprint)
+    {
+        return nullptr;
+    }
+
+    TArray<UAnimGraphNode_StateMachineBase*> StateMachineNodes;
+    FBlueprintEditorUtils::GetAllNodesOfClassEx<UAnimGraphNode_StateMachineBase>(
+        AnimBlueprint,
+        StateMachineNodes);
+    for (UAnimGraphNode_StateMachineBase* Node : StateMachineNodes)
+    {
+        if (!Node || !Node->EditorStateMachineGraph)
+        {
+            continue;
+        }
+        const FString Requested = StateMachineName.ToString();
+        if (StateMachineName.IsNone()
+            || Node->EditorStateMachineGraph->GetFName() == StateMachineName
+            || Node->GetStateMachineName().Equals(Requested, ESearchCase::IgnoreCase))
+        {
+            if (OutOwnerNode)
+            {
+                *OutOwnerNode = Node;
+            }
+            return Node->EditorStateMachineGraph;
+        }
+    }
+    return nullptr;
+}
+
+static UAnimStateNode* AIStudioFindStateNode(UAnimationStateMachineGraph* Graph, FName StateName)
+{
+    if (!Graph)
+    {
+        return nullptr;
+    }
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UAnimStateNode* StateNode = Cast<UAnimStateNode>(Node);
+        if (StateNode && StateNode->GetStateName().Equals(StateName.ToString(), ESearchCase::IgnoreCase))
+        {
+            return StateNode;
+        }
+    }
+    return nullptr;
+}
+
+static UAnimStateTransitionNode* AIStudioFindTransitionNode(
+    UAnimationStateMachineGraph* Graph,
+    UAnimStateNodeBase* FromState,
+    UAnimStateNodeBase* ToState)
+{
+    if (!Graph || !FromState || !ToState)
+    {
+        return nullptr;
+    }
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UAnimStateTransitionNode* Transition = Cast<UAnimStateTransitionNode>(Node);
+        if (Transition && Transition->GetPreviousState() == FromState && Transition->GetNextState() == ToState)
+        {
+            return Transition;
+        }
+    }
+    return nullptr;
+}
+
+static UEdGraphPin* AIStudioFindPosePin(UEdGraphNode* Node, EEdGraphPinDirection Direction)
+{
+    if (!Node)
+    {
+        return nullptr;
+    }
+    for (UEdGraphPin* Pin : Node->Pins)
+    {
+        if (Pin && Pin->Direction == Direction && UAnimationGraphSchema::IsPosePin(Pin->PinType))
+        {
+            return Pin;
+        }
+    }
+    return nullptr;
+}
+
+static UAnimationGraph* AIStudioFindAnimationGraphForNode(UEdGraphNode* Node)
+{
+    return Node ? Cast<UAnimationGraph>(Node->GetGraph()) : nullptr;
+}
+
+static TSharedPtr<FJsonObject> AIStudioParseJsonObject(const FString& JsonText)
+{
+    if (JsonText.TrimStartAndEnd().IsEmpty())
+    {
+        return MakeShared<FJsonObject>();
+    }
+    TSharedPtr<FJsonObject> Parsed;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+    if (FJsonSerializer::Deserialize(Reader, Parsed) && Parsed.IsValid())
+    {
+        return Parsed;
+    }
+    return nullptr;
+}
+
+static void AIStudioSetJsonValueField(const TSharedRef<FJsonObject>& Object, const FString& FieldName, const FJsonValue* Value)
+{
+    if (!Value)
+    {
+        Object->SetStringField(FieldName, TEXT(""));
+        return;
+    }
+    switch (Value->Type)
+    {
+    case EJson::Boolean:
+        Object->SetBoolField(FieldName, Value->AsBool());
+        break;
+    case EJson::Number:
+        Object->SetNumberField(FieldName, Value->AsNumber());
+        break;
+    case EJson::String:
+        Object->SetStringField(FieldName, Value->AsString());
+        break;
+    default:
+        Object->SetStringField(FieldName, TEXT("<complex>"));
+        break;
+    }
+}
+
+static FString AIStudioPackageNameFromAssetPath(const FString& AssetPath)
+{
+    FString PackageName;
+    FString AssetName;
+    AssetPath.Split(TEXT("."), &PackageName, &AssetName);
+    return PackageName.IsEmpty() ? AssetPath : PackageName;
+}
+
+static FString AIStudioAssetNameFromAssetPath(const FString& AssetPath)
+{
+    FString PackageName = AIStudioPackageNameFromAssetPath(AssetPath);
+    FString AssetName;
+    if (PackageName.Split(TEXT("/"), nullptr, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+    {
+        return AssetName;
+    }
+    return PackageName;
+}
+
+static UObject* AIStudioLoadAssetObject(const FString& AssetPath)
+{
+    return StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+}
+
+static bool AIStudioSaveAssetPackage(UObject* Asset)
+{
+    if (!Asset)
+    {
+        return false;
+    }
+    UPackage* Package = Asset->GetOutermost();
+    if (!Package)
+    {
+        return false;
+    }
+    Package->MarkPackageDirty();
+    const FString PackageName = Package->GetName();
+    FString FileName;
+    if (!FPackageName::TryConvertLongPackageNameToFilename(
+        PackageName,
+        FileName,
+        FPackageName::GetAssetPackageExtension()))
+    {
+        return false;
+    }
+    FSavePackageArgs SaveArgs;
+    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+    SaveArgs.SaveFlags = SAVE_None;
+    return UPackage::SavePackage(Package, Asset, *FileName, SaveArgs);
+}
+
+static TSharedRef<FJsonObject> AIStudioReflectedPropertyValue(UObject* Object, FProperty* Property)
+{
+    const TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+    Row->SetStringField(TEXT("name"), Property ? Property->GetName() : TEXT(""));
+    Row->SetStringField(TEXT("type"), Property ? Property->GetCPPType() : TEXT(""));
+    if (!Object || !Property)
+    {
+        Row->SetStringField(TEXT("value"), TEXT(""));
+        return Row;
+    }
+    const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Object);
+    FString Exported;
+    Property->ExportTextItem_Direct(Exported, ValuePtr, nullptr, Object, PPF_None);
+    Row->SetStringField(TEXT("value"), Exported);
+    return Row;
+}
+
+static bool AIStudioSetPropertyFromJsonValue(UObject* Object, FProperty* Property, const FJsonValue* Value, FString& OutError)
+{
+    if (!Object || !Property || !Value)
+    {
+        OutError = TEXT("Object, property, and JSON value are required.");
+        return false;
+    }
+    void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Object);
+    if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+    {
+        BoolProperty->SetPropertyValue(ValuePtr, Value->AsBool());
+        return true;
+    }
+    if (FNumericProperty* NumericProperty = CastField<FNumericProperty>(Property))
+    {
+        if (NumericProperty->IsInteger())
+        {
+            NumericProperty->SetIntPropertyValue(ValuePtr, static_cast<int64>(Value->AsNumber()));
+        }
+        else
+        {
+            NumericProperty->SetFloatingPointPropertyValue(ValuePtr, Value->AsNumber());
+        }
+        return true;
+    }
+    if (FStrProperty* StrProperty = CastField<FStrProperty>(Property))
+    {
+        StrProperty->SetPropertyValue(ValuePtr, Value->AsString());
+        return true;
+    }
+    if (FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+    {
+        NameProperty->SetPropertyValue(ValuePtr, FName(*Value->AsString()));
+        return true;
+    }
+    if (FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+    {
+        TextProperty->SetPropertyValue(ValuePtr, FText::FromString(Value->AsString()));
+        return true;
+    }
+    if (FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+    {
+        UObject* LoadedObject = AIStudioLoadAssetObject(Value->AsString());
+        if (!LoadedObject)
+        {
+            OutError = FString::Printf(TEXT("Could not load object value '%s'."), *Value->AsString());
+            return false;
+        }
+        if (!LoadedObject->IsA(ObjectProperty->PropertyClass))
+        {
+            OutError = FString::Printf(TEXT("Loaded object '%s' is not a %s."), *Value->AsString(), *ObjectProperty->PropertyClass->GetName());
+            return false;
+        }
+        ObjectProperty->SetObjectPropertyValue(ValuePtr, LoadedObject);
+        return true;
+    }
+    FString Imported = Value->Type == EJson::String ? Value->AsString() : TEXT("");
+    if (!Imported.IsEmpty() && Property->ImportText_Direct(*Imported, ValuePtr, Object, PPF_None))
+    {
+        return true;
+    }
+    OutError = FString::Printf(TEXT("Unsupported reflected property type '%s'."), *Property->GetCPPType());
+    return false;
+}
+
+static bool AIStudioSetPropertiesFromJson(UObject* Object, const TSharedPtr<FJsonObject>& Properties, TArray<FString>& OutErrors)
+{
+    if (!Object || !Properties.IsValid())
+    {
+        return false;
+    }
+    bool bAnyApplied = false;
+    for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Properties->Values)
+    {
+        FProperty* Property = Object->GetClass()->FindPropertyByName(FName(*Pair.Key));
+        if (!Property)
+        {
+            OutErrors.Add(FString::Printf(TEXT("Property '%s' was not found on %s."), *Pair.Key, *Object->GetClass()->GetName()));
+            continue;
+        }
+        FString Error;
+        if (AIStudioSetPropertyFromJsonValue(Object, Property, Pair.Value.Get(), Error))
+        {
+            bAnyApplied = true;
+        }
+        else
+        {
+            OutErrors.Add(Error);
+        }
+    }
+    return bAnyApplied || Properties->Values.Num() == 0;
+}
+
+static UK2Node_CallFunction* AIStudioCreateMathCallNode(
+    UEdGraph* Graph,
+    FName FunctionName,
+    int32 NodePosX,
+    int32 NodePosY)
+{
+    if (!Graph)
+    {
+        return nullptr;
+    }
+    const UFunction* Function = UKismetMathLibrary::StaticClass()->FindFunctionByName(FunctionName);
+    if (!Function)
+    {
+        return nullptr;
+    }
+
+    UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
+    Graph->Modify();
+    Graph->AddNode(CallNode, true, false);
+    CallNode->CreateNewGuid();
+    CallNode->PostPlacedNewNode();
+    CallNode->SetFromFunction(Function);
+    CallNode->NodePosX = NodePosX;
+    CallNode->NodePosY = NodePosY;
+    CallNode->AllocateDefaultPins();
+    return CallNode;
+}
+
+static UK2Node_VariableGet* AIStudioCreateVariableGetNode(
+    UEdGraph* Graph,
+    FName VariableName,
+    int32 NodePosX,
+    int32 NodePosY)
+{
+    if (!Graph || VariableName.IsNone())
+    {
+        return nullptr;
+    }
+
+    UK2Node_VariableGet* VariableNode = NewObject<UK2Node_VariableGet>(Graph);
+    Graph->Modify();
+    Graph->AddNode(VariableNode, true, false);
+    VariableNode->CreateNewGuid();
+    VariableNode->PostPlacedNewNode();
+    VariableNode->VariableReference.SetSelfMember(VariableName);
+    VariableNode->NodePosX = NodePosX;
+    VariableNode->NodePosY = NodePosY;
+    VariableNode->AllocateDefaultPins();
+    return VariableNode;
+}
+
+static UEdGraphPin* AIStudioFindFirstOutputPin(UEdGraphNode* Node)
+{
+    if (!Node)
+    {
+        return nullptr;
+    }
+    for (UEdGraphPin* Pin : Node->Pins)
+    {
+        if (Pin && Pin->Direction == EGPD_Output)
+        {
+            return Pin;
+        }
+    }
+    return nullptr;
+}
+
+static UEdGraphPin* AIStudioFindReturnPin(UEdGraphNode* Node)
+{
+    return Node ? Node->FindPin(TEXT("ReturnValue")) : nullptr;
+}
+
+static bool AIStudioConnectPins(UEdGraph* Graph, UEdGraphPin* OutputPin, UEdGraphPin* InputPin)
+{
+    if (!Graph || !OutputPin || !InputPin)
+    {
+        return false;
+    }
+    const UEdGraphSchema* Schema = Graph->GetSchema();
+    return Schema && Schema->TryCreateConnection(OutputPin, InputPin);
+}
+
+static bool AIStudioParseDouble(const FString& Text, double& OutValue)
+{
+    const FString Trimmed = Text.TrimStartAndEnd();
+    if (Trimmed.IsEmpty())
+    {
+        return false;
+    }
+    return LexTryParseString(OutValue, *Trimmed);
+}
+
+static FName AIStudioComparisonFunctionForOperator(const FString& Operator)
+{
+    if (Operator == TEXT(">"))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Greater_DoubleDouble);
+    }
+    if (Operator == TEXT("<"))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Less_DoubleDouble);
+    }
+    if (Operator == TEXT(">="))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, GreaterEqual_DoubleDouble);
+    }
+    if (Operator == TEXT("<="))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, LessEqual_DoubleDouble);
+    }
+    if (Operator == TEXT("=="))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_DoubleDouble);
+    }
+    if (Operator == TEXT("!="))
+    {
+        return GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, NotEqual_DoubleDouble);
+    }
+    return NAME_None;
+}
+
+static bool AIStudioSplitComparison(
+    const FString& Atom,
+    FString& OutLeft,
+    FString& OutOperator,
+    FString& OutRight)
+{
+    static const TArray<FString> Operators = {
+        TEXT(">="),
+        TEXT("<="),
+        TEXT("=="),
+        TEXT("!="),
+        TEXT(">"),
+        TEXT("<"),
+    };
+    for (const FString& Operator : Operators)
+    {
+        int32 Index = INDEX_NONE;
+        if (Atom.FindChar(Operator[0], Index))
+        {
+            Index = Atom.Find(Operator, ESearchCase::CaseSensitive);
+            if (Index != INDEX_NONE)
+            {
+                OutLeft = Atom.Left(Index).TrimStartAndEnd();
+                OutOperator = Operator;
+                OutRight = Atom.Mid(Index + Operator.Len()).TrimStartAndEnd();
+                return !OutLeft.IsEmpty() && !OutRight.IsEmpty();
+            }
+        }
+    }
+    return false;
+}
+
+static UEdGraphPin* AIStudioBuildNumericReadPin(
+    UEdGraph* Graph,
+    const FString& VariableExpression,
+    int32 NodePosX,
+    int32 NodePosY,
+    TArray<FString>& OutUnsupportedReasons)
+{
+    FString VariableName = VariableExpression.TrimStartAndEnd();
+    FString ComponentName;
+    int32 DotIndex = INDEX_NONE;
+    if (VariableName.FindChar(TEXT('.'), DotIndex))
+    {
+        ComponentName = VariableName.Mid(DotIndex + 1).TrimStartAndEnd().ToUpper();
+        VariableName = VariableName.Left(DotIndex).TrimStartAndEnd();
+    }
+
+    UK2Node_VariableGet* VariableNode = AIStudioCreateVariableGetNode(Graph, FName(*VariableName), NodePosX, NodePosY);
+    UEdGraphPin* VariablePin = AIStudioFindFirstOutputPin(VariableNode);
+    if (!VariablePin)
+    {
+        OutUnsupportedReasons.Add(FString::Printf(TEXT("Could not create/read variable '%s'."), *VariableName));
+        return nullptr;
+    }
+    if (ComponentName.IsEmpty())
+    {
+        return VariablePin;
+    }
+    if (ComponentName != TEXT("X") && ComponentName != TEXT("Y") && ComponentName != TEXT("Z"))
+    {
+        OutUnsupportedReasons.Add(FString::Printf(TEXT("Unsupported vector component '%s'."), *ComponentName));
+        return nullptr;
+    }
+
+    UK2Node_CallFunction* BreakNode = AIStudioCreateMathCallNode(
+        Graph,
+        GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BreakVector),
+        NodePosX + 220,
+        NodePosY);
+    if (!BreakNode)
+    {
+        OutUnsupportedReasons.Add(TEXT("Could not create BreakVector node."));
+        return nullptr;
+    }
+    if (!AIStudioConnectPins(Graph, VariablePin, BreakNode->FindPin(TEXT("InVec"))))
+    {
+        OutUnsupportedReasons.Add(FString::Printf(TEXT("Could not connect '%s' to BreakVector."), *VariableName));
+        return nullptr;
+    }
+    return BreakNode->FindPin(*ComponentName);
+}
+
+static UEdGraphPin* AIStudioBuildRuleAtomPin(
+    UEdGraph* Graph,
+    const FString& AtomExpression,
+    int32 NodePosX,
+    int32 NodePosY,
+    TArray<FString>& OutUnsupportedReasons)
+{
+    FString Atom = AtomExpression.TrimStartAndEnd();
+    if (Atom.StartsWith(TEXT("(")) && Atom.EndsWith(TEXT(")")))
+    {
+        Atom = Atom.Mid(1, Atom.Len() - 2).TrimStartAndEnd();
+    }
+    bool bNegate = false;
+    while (Atom.StartsWith(TEXT("!")))
+    {
+        bNegate = !bNegate;
+        Atom = Atom.Mid(1).TrimStartAndEnd();
+    }
+
+    UEdGraphPin* ConditionPin = nullptr;
+    FString Left;
+    FString Operator;
+    FString Right;
+    if (AIStudioSplitComparison(Atom, Left, Operator, Right))
+    {
+        double LiteralValue = 0.0;
+        if (!AIStudioParseDouble(Right, LiteralValue))
+        {
+            OutUnsupportedReasons.Add(FString::Printf(TEXT("Comparison right side must be a numeric literal: '%s'."), *Atom));
+            return nullptr;
+        }
+        UEdGraphPin* LeftPin = AIStudioBuildNumericReadPin(Graph, Left, NodePosX, NodePosY, OutUnsupportedReasons);
+        UK2Node_CallFunction* CompareNode = AIStudioCreateMathCallNode(
+            Graph,
+            AIStudioComparisonFunctionForOperator(Operator),
+            NodePosX + 460,
+            NodePosY);
+        if (!LeftPin || !CompareNode)
+        {
+            OutUnsupportedReasons.Add(FString::Printf(TEXT("Could not synthesize comparison '%s'."), *Atom));
+            return nullptr;
+        }
+        AIStudioConnectPins(Graph, LeftPin, CompareNode->FindPin(TEXT("A")));
+        if (UEdGraphPin* BPin = CompareNode->FindPin(TEXT("B")))
+        {
+            BPin->DefaultValue = FString::SanitizeFloat(LiteralValue);
+        }
+        ConditionPin = AIStudioFindReturnPin(CompareNode);
+    }
+    else
+    {
+        UK2Node_VariableGet* VariableNode = AIStudioCreateVariableGetNode(Graph, FName(*Atom), NodePosX, NodePosY);
+        ConditionPin = AIStudioFindFirstOutputPin(VariableNode);
+        if (!ConditionPin)
+        {
+            OutUnsupportedReasons.Add(FString::Printf(TEXT("Could not create/read boolean variable '%s'."), *Atom));
+            return nullptr;
+        }
+    }
+
+    if (bNegate)
+    {
+        UK2Node_CallFunction* NotNode = AIStudioCreateMathCallNode(
+            Graph,
+            GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Not_PreBool),
+            NodePosX + 700,
+            NodePosY);
+        if (!NotNode || !AIStudioConnectPins(Graph, ConditionPin, NotNode->FindPin(TEXT("A"))))
+        {
+            OutUnsupportedReasons.Add(FString::Printf(TEXT("Could not synthesize negation for '%s'."), *AtomExpression));
+            return nullptr;
+        }
+        ConditionPin = AIStudioFindReturnPin(NotNode);
+    }
+    return ConditionPin;
+}
+
+static bool AIStudioApplyConstantTransitionRule(
+    UAnimGraphNode_TransitionResult* ResultNode,
+    const FString& NormalizedRule,
+    bool& OutRuleValue)
+{
+    if (!ResultNode)
+    {
+        return false;
+    }
+    const bool bSupportedConstantRule = NormalizedRule.IsEmpty()
+        || NormalizedRule == TEXT("true")
+        || NormalizedRule == TEXT("false")
+        || NormalizedRule == TEXT("always")
+        || NormalizedRule == TEXT("never");
+    if (!bSupportedConstantRule)
+    {
+        return false;
+    }
+    OutRuleValue = !(NormalizedRule == TEXT("false") || NormalizedRule == TEXT("never"));
+    if (UEdGraphPin* CanEnterPin = ResultNode->FindPin(TEXT("bCanEnterTransition")))
+    {
+        CanEnterPin->Modify();
+        CanEnterPin->BreakAllPinLinks();
+        CanEnterPin->DefaultValue = OutRuleValue ? TEXT("true") : TEXT("false");
+        return true;
+    }
+    return false;
+}
+
+static bool AIStudioSynthesizeTransitionRuleGraph(
+    UAnimationTransitionGraph* TransitionGraph,
+    const FString& RuleExpression,
+    TArray<FString>& OutUnsupportedReasons,
+    int32& OutCreatedNodeCount,
+    FString& OutFinalSourceNode)
+{
+    OutCreatedNodeCount = 0;
+    if (!TransitionGraph)
+    {
+        OutUnsupportedReasons.Add(TEXT("Transition graph was null."));
+        return false;
+    }
+    UAnimGraphNode_TransitionResult* ResultNode = TransitionGraph->GetResultNode();
+    UEdGraphPin* CanEnterPin = ResultNode ? ResultNode->FindPin(TEXT("bCanEnterTransition")) : nullptr;
+    if (!CanEnterPin)
+    {
+        OutUnsupportedReasons.Add(TEXT("Transition result node did not expose bCanEnterTransition."));
+        return false;
+    }
+
+    const int32 BeforeNodes = TransitionGraph->Nodes.Num();
+    TArray<FString> Terms;
+    RuleExpression.ParseIntoArray(Terms, TEXT("&&"), true);
+    if (Terms.IsEmpty())
+    {
+        OutUnsupportedReasons.Add(TEXT("Rule expression was empty."));
+        return false;
+    }
+    if (RuleExpression.Contains(TEXT("||")))
+    {
+        OutUnsupportedReasons.Add(TEXT("OR expressions are not yet supported; use && terms or split the transition."));
+        return false;
+    }
+
+    TArray<UEdGraphPin*> TermPins;
+    for (int32 Index = 0; Index < Terms.Num(); ++Index)
+    {
+        UEdGraphPin* TermPin = AIStudioBuildRuleAtomPin(
+            TransitionGraph,
+            Terms[Index],
+            ResultNode->NodePosX - 920,
+            ResultNode->NodePosY + Index * 150,
+            OutUnsupportedReasons);
+        if (!TermPin)
+        {
+            return false;
+        }
+        TermPins.Add(TermPin);
+    }
+
+    UEdGraphPin* FinalPin = TermPins[0];
+    for (int32 Index = 1; Index < TermPins.Num(); ++Index)
+    {
+        UK2Node_CallFunction* AndNode = AIStudioCreateMathCallNode(
+            TransitionGraph,
+            GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BooleanAND),
+            ResultNode->NodePosX - 300,
+            ResultNode->NodePosY + Index * 120);
+        if (!AndNode
+            || !AIStudioConnectPins(TransitionGraph, FinalPin, AndNode->FindPin(TEXT("A")))
+            || !AIStudioConnectPins(TransitionGraph, TermPins[Index], AndNode->FindPin(TEXT("B"))))
+        {
+            OutUnsupportedReasons.Add(TEXT("Could not synthesize BooleanAND chain."));
+            return false;
+        }
+        FinalPin = AIStudioFindReturnPin(AndNode);
+    }
+
+    CanEnterPin->Modify();
+    CanEnterPin->BreakAllPinLinks();
+    CanEnterPin->DefaultValue.Reset();
+    if (!AIStudioConnectPins(TransitionGraph, FinalPin, CanEnterPin))
+    {
+        OutUnsupportedReasons.Add(TEXT("Could not connect synthesized rule result into bCanEnterTransition."));
+        return false;
+    }
+    OutCreatedNodeCount = TransitionGraph->Nodes.Num() - BeforeNodes;
+    OutFinalSourceNode = FinalPin && FinalPin->GetOwningNode() ? FinalPin->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString() : TEXT("");
+    return true;
+}
+#endif
+
+FString UAIStudioBridgeLibrary::InspectAnimBlueprintGraph(UAnimBlueprint* AnimBlueprint)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("inspect_anim_blueprint_graph"));
+    Root->SetBoolField(TEXT("ok"), false);
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    Root->SetBoolField(TEXT("ok"), true);
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+
+    TArray<UEdGraph*> Graphs;
+    AIStudioCollectBlueprintGraphs(AnimBlueprint, Graphs);
+
+    TArray<TSharedPtr<FJsonValue>> GraphValues;
+    for (UEdGraph* Graph : Graphs)
+    {
+        if (!Graph)
+        {
+            continue;
+        }
+
+        const TSharedRef<FJsonObject> GraphObject = MakeShared<FJsonObject>();
+        GraphObject->SetStringField(TEXT("name"), Graph->GetName());
+        GraphObject->SetStringField(TEXT("class"), Graph->GetClass()->GetName());
+
+        TArray<TSharedPtr<FJsonValue>> NodeValues;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+
+            const TSharedRef<FJsonObject> NodeObject = MakeShared<FJsonObject>();
+            NodeObject->SetStringField(TEXT("name"), Node->GetName());
+            NodeObject->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+            NodeObject->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+            NodeObject->SetNumberField(TEXT("pin_count"), Node->Pins.Num());
+
+            TArray<TSharedPtr<FJsonValue>> PinValues;
+            for (UEdGraphPin* Pin : Node->Pins)
+            {
+                if (!Pin)
+                {
+                    continue;
+                }
+                const TSharedRef<FJsonObject> PinObject = MakeShared<FJsonObject>();
+                PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                PinObject->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+                PinObject->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+                PinObject->SetNumberField(TEXT("linked_to_count"), Pin->LinkedTo.Num());
+                PinValues.Add(MakeShared<FJsonValueObject>(PinObject));
+            }
+            NodeObject->SetArrayField(TEXT("pins"), PinValues);
+            NodeValues.Add(MakeShared<FJsonValueObject>(NodeObject));
+        }
+
+        GraphObject->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
+        GraphObject->SetArrayField(TEXT("nodes"), NodeValues);
+        GraphValues.Add(MakeShared<FJsonValueObject>(GraphObject));
+    }
+
+    Root->SetArrayField(TEXT("graphs"), GraphValues);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.inspect_anim_blueprint_graph(anim_bp)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::CreateKnownAssetByClassPath(
+    const FString& AssetPath,
+    const FString& ClassPath,
+    const FString& InitialPropertiesJson)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("create_known_asset_by_class_path"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("asset_path"), AssetPath);
+    Root->SetStringField(TEXT("class_path"), ClassPath);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.create_known_asset_by_class_path(asset_path, class_path, initial_properties_json)"));
+
+#if WITH_EDITOR
+    UClass* AssetClass = LoadClass<UObject>(nullptr, *ClassPath);
+    TSharedPtr<FJsonObject> InitialProperties = AIStudioParseJsonObject(InitialPropertiesJson);
+    if (AssetPath.IsEmpty() || !AssetClass || !InitialProperties.IsValid())
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_asset_class_or_properties"));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "CreateKnownAssetByClassPath", "AIStudioBridge Create Known Asset By Class Path"));
+    const FString PackageName = AIStudioPackageNameFromAssetPath(AssetPath);
+    UPackage* Package = CreatePackage(*PackageName);
+    UObject* Asset = Package
+        ? NewObject<UObject>(Package, AssetClass, FName(*AIStudioAssetNameFromAssetPath(AssetPath)), RF_Public | RF_Standalone | RF_Transactional)
+        : nullptr;
+    if (!Asset)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("asset_create_failed"));
+        return AIStudioJsonString(Root);
+    }
+    Asset->Modify();
+    TArray<FString> Errors;
+    const bool bPropertiesApplied = AIStudioSetPropertiesFromJson(Asset, InitialProperties, Errors);
+    FAssetRegistryModule::AssetCreated(Asset);
+    const bool bSaved = AIStudioSaveAssetPackage(Asset);
+    TArray<TSharedPtr<FJsonValue>> ErrorValues;
+    for (const FString& Error : Errors)
+    {
+        ErrorValues.Add(MakeShared<FJsonValueString>(Error));
+    }
+    Root->SetArrayField(TEXT("property_errors"), ErrorValues);
+    Root->SetBoolField(TEXT("ok"), bSaved && bPropertiesApplied && Errors.IsEmpty());
+    Root->SetStringField(TEXT("status"), bSaved ? (Errors.IsEmpty() ? TEXT("created_and_saved") : TEXT("created_with_property_errors")) : TEXT("save_failed"));
+    Root->SetStringField(TEXT("asset_name"), Asset->GetName());
+    Root->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetPathName());
+    Root->SetStringField(TEXT("saved_package"), PackageName);
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::InspectReflectedAsset(const FString& AssetPath, const TArray<FName>& PropertyNames)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("inspect_reflected_asset"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("asset_path"), AssetPath);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.inspect_reflected_asset(asset_path, property_names)"));
+
+#if WITH_EDITOR
+    UObject* Asset = AIStudioLoadAssetObject(AssetPath);
+    if (!Asset)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("asset_not_found"));
+        return AIStudioJsonString(Root);
+    }
+    TArray<TSharedPtr<FJsonValue>> Properties;
+    if (PropertyNames.Num() > 0)
+    {
+        for (FName Name : PropertyNames)
+        {
+            if (FProperty* Property = Asset->GetClass()->FindPropertyByName(Name))
+            {
+                Properties.Add(MakeShared<FJsonValueObject>(AIStudioReflectedPropertyValue(Asset, Property)));
+            }
+        }
+    }
+    else
+    {
+        for (TFieldIterator<FProperty> It(Asset->GetClass()); It; ++It)
+        {
+            Properties.Add(MakeShared<FJsonValueObject>(AIStudioReflectedPropertyValue(Asset, *It)));
+        }
+    }
+    Root->SetBoolField(TEXT("ok"), true);
+    Root->SetStringField(TEXT("status"), TEXT("inspected"));
+    Root->SetStringField(TEXT("asset_name"), Asset->GetName());
+    Root->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetPathName());
+    Root->SetArrayField(TEXT("properties"), Properties);
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::SetReflectedAssetProperty(const FString& AssetPath, FName PropertyName, const FString& ValueJson)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("set_reflected_asset_property"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("asset_path"), AssetPath);
+    Root->SetStringField(TEXT("property_name"), PropertyName.ToString());
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.set_reflected_asset_property(asset_path, property_name, value_json)"));
+
+#if WITH_EDITOR
+    UObject* Asset = AIStudioLoadAssetObject(AssetPath);
+    FProperty* Property = Asset ? Asset->GetClass()->FindPropertyByName(PropertyName) : nullptr;
+    if (!Asset || !Property)
+    {
+        Root->SetStringField(TEXT("status"), Asset ? TEXT("property_not_found") : TEXT("asset_not_found"));
+        return AIStudioJsonString(Root);
+    }
+    TSharedPtr<FJsonValue> ParsedValue;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ValueJson);
+    if (!FJsonSerializer::Deserialize(Reader, ParsedValue) || !ParsedValue.IsValid())
+    {
+        ParsedValue = MakeShared<FJsonValueString>(ValueJson);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "SetReflectedAssetProperty", "AIStudioBridge Set Reflected Asset Property"));
+    Asset->Modify();
+    FString Error;
+    const bool bApplied = AIStudioSetPropertyFromJsonValue(Asset, Property, ParsedValue.Get(), Error);
+    const bool bSaved = bApplied && AIStudioSaveAssetPackage(Asset);
+    Root->SetBoolField(TEXT("ok"), bApplied && bSaved);
+    Root->SetStringField(TEXT("status"), bApplied ? (bSaved ? TEXT("property_set_and_saved") : TEXT("save_failed")) : TEXT("property_set_failed"));
+    Root->SetStringField(TEXT("error"), Error);
+    Root->SetObjectField(TEXT("readback"), AIStudioReflectedPropertyValue(Asset, Property));
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::AddObjectReferenceToReflectedArray(const FString& AssetPath, FName PropertyName, const FString& ObjectPath)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("add_object_reference_to_reflected_array"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("asset_path"), AssetPath);
+    Root->SetStringField(TEXT("property_name"), PropertyName.ToString());
+    Root->SetStringField(TEXT("object_path"), ObjectPath);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.add_object_reference_to_reflected_array(asset_path, property_name, object_path)"));
+
+#if WITH_EDITOR
+    UObject* Asset = AIStudioLoadAssetObject(AssetPath);
+    UObject* Object = AIStudioLoadAssetObject(ObjectPath);
+    FArrayProperty* ArrayProperty = Asset ? CastField<FArrayProperty>(Asset->GetClass()->FindPropertyByName(PropertyName)) : nullptr;
+    FObjectProperty* InnerObjectProperty = ArrayProperty ? CastField<FObjectProperty>(ArrayProperty->Inner) : nullptr;
+    if (!Asset || !Object || !ArrayProperty || !InnerObjectProperty || !Object->IsA(InnerObjectProperty->PropertyClass))
+    {
+        Root->SetStringField(TEXT("status"), TEXT("unsupported_asset_object_or_array_property"));
+        return AIStudioJsonString(Root);
+    }
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "AddObjectReferenceToReflectedArray", "AIStudioBridge Add Object Reference To Reflected Array"));
+    Asset->Modify();
+    void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Asset);
+    FScriptArrayHelper Helper(ArrayProperty, ArrayPtr);
+    const int32 Index = Helper.AddValue();
+    InnerObjectProperty->SetObjectPropertyValue(Helper.GetRawPtr(Index), Object);
+    const bool bSaved = AIStudioSaveAssetPackage(Asset);
+    Root->SetBoolField(TEXT("ok"), bSaved);
+    Root->SetStringField(TEXT("status"), bSaved ? TEXT("reference_added_and_saved") : TEXT("save_failed"));
+    Root->SetNumberField(TEXT("array_count"), Helper.Num());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::RemoveObjectReferenceFromReflectedArray(const FString& AssetPath, FName PropertyName, const FString& ObjectPath)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("remove_object_reference_from_reflected_array"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("asset_path"), AssetPath);
+    Root->SetStringField(TEXT("property_name"), PropertyName.ToString());
+    Root->SetStringField(TEXT("object_path"), ObjectPath);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.remove_object_reference_from_reflected_array(asset_path, property_name, object_path)"));
+
+#if WITH_EDITOR
+    UObject* Asset = AIStudioLoadAssetObject(AssetPath);
+    UObject* Object = AIStudioLoadAssetObject(ObjectPath);
+    FArrayProperty* ArrayProperty = Asset ? CastField<FArrayProperty>(Asset->GetClass()->FindPropertyByName(PropertyName)) : nullptr;
+    FObjectProperty* InnerObjectProperty = ArrayProperty ? CastField<FObjectProperty>(ArrayProperty->Inner) : nullptr;
+    if (!Asset || !Object || !ArrayProperty || !InnerObjectProperty)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("unsupported_asset_object_or_array_property"));
+        return AIStudioJsonString(Root);
+    }
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "RemoveObjectReferenceFromReflectedArray", "AIStudioBridge Remove Object Reference From Reflected Array"));
+    Asset->Modify();
+    void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Asset);
+    FScriptArrayHelper Helper(ArrayProperty, ArrayPtr);
+    bool bRemoved = false;
+    for (int32 Index = Helper.Num() - 1; Index >= 0; --Index)
+    {
+        if (InnerObjectProperty->GetObjectPropertyValue(Helper.GetRawPtr(Index)) == Object)
+        {
+            Helper.RemoveValues(Index);
+            bRemoved = true;
+        }
+    }
+    const bool bSaved = bRemoved && AIStudioSaveAssetPackage(Asset);
+    Root->SetBoolField(TEXT("ok"), bRemoved && bSaved);
+    Root->SetStringField(TEXT("status"), bRemoved ? (bSaved ? TEXT("reference_removed_and_saved") : TEXT("save_failed")) : TEXT("reference_not_found"));
+    Root->SetNumberField(TEXT("array_count"), Helper.Num());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::AddAnimGraphState(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName StateName,
+    UObject* AnimationAsset)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("add_anim_graph_state"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("state_name"), StateName.ToString());
+    Root->SetStringField(TEXT("animation_asset"), AnimationAsset ? AnimationAsset->GetPathName() : TEXT(""));
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.add_anim_graph_state(anim_bp, state_machine, state_name, animation_asset)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    if (StateName.IsNone())
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_state_name"));
+        Root->SetStringField(TEXT("error"), TEXT("StateName is required."));
+        return AIStudioJsonString(Root);
+    }
+
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    if (!StateMachineGraph)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_machine_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested state machine graph was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "AddAnimGraphState", "AIStudioBridge Add Anim Graph State"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+
+    UAnimStateNode* StateNode = AIStudioFindStateNode(StateMachineGraph, StateName);
+    const bool bCreated = StateNode == nullptr;
+    if (!StateNode)
+    {
+        const int32 NodeOffset = StateMachineGraph->Nodes.Num() * 120;
+        StateNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateNode>(
+            StateMachineGraph,
+            NewObject<UAnimStateNode>(),
+            FVector2f(300.0f + NodeOffset, 100.0f),
+            false);
+        if (!StateNode)
+        {
+            Root->SetStringField(TEXT("status"), TEXT("state_create_failed"));
+            Root->SetStringField(TEXT("error"), TEXT("Unreal did not create the UAnimStateNode."));
+            return AIStudioJsonString(Root);
+        }
+        FEdGraphUtilities::RenameGraphToNameOrCloseToName(StateNode->BoundGraph, StateName.ToString());
+        StateNode->ReconstructNode();
+    }
+
+    bool bAnimationAssigned = false;
+    if (UAnimSequenceBase* Sequence = Cast<UAnimSequenceBase>(AnimationAsset))
+    {
+        if (UEdGraphPin* PosePin = StateNode->GetPoseSinkPinInsideState())
+        {
+            StateNode->BoundGraph->Modify();
+            UAnimGraphNode_SequencePlayer* SequencePlayer = nullptr;
+            for (UEdGraphNode* ExistingNode : StateNode->BoundGraph->Nodes)
+            {
+                UAnimGraphNode_SequencePlayer* ExistingPlayer = Cast<UAnimGraphNode_SequencePlayer>(ExistingNode);
+                if (ExistingPlayer && ExistingPlayer->Node.GetSequence() == Sequence)
+                {
+                    SequencePlayer = ExistingPlayer;
+                    break;
+                }
+            }
+            if (!SequencePlayer)
+            {
+                FGraphNodeCreator<UAnimGraphNode_SequencePlayer> NodeCreator(*StateNode->BoundGraph);
+                SequencePlayer = NodeCreator.CreateNode();
+                SequencePlayer->NodePosX = -300;
+                SequencePlayer->NodePosY = 0;
+                SequencePlayer->Node.SetSequence(Sequence);
+                NodeCreator.Finalize();
+                SequencePlayer->ReconstructNode();
+            }
+
+            if (UEdGraphPin* SequencePosePin = AIStudioFindPosePin(SequencePlayer, EGPD_Output))
+            {
+                bAnimationAssigned = PosePin->LinkedTo.Contains(SequencePosePin);
+                const UEdGraphSchema* StateSchema = StateNode->BoundGraph->GetSchema();
+                if (!bAnimationAssigned)
+                {
+                    bAnimationAssigned = StateSchema && StateSchema->TryCreateConnection(SequencePosePin, PosePin);
+                }
+            }
+        }
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    const bool bAnimationRequired = AnimationAsset != nullptr;
+    const bool bOperationOk = !bAnimationRequired || bAnimationAssigned;
+    Root->SetBoolField(TEXT("ok"), bOperationOk);
+    Root->SetStringField(
+        TEXT("status"),
+        bOperationOk
+            ? (bCreated ? TEXT("created") : TEXT("already_exists"))
+            : TEXT("state_created_animation_not_assigned"));
+    Root->SetStringField(TEXT("state_graph"), StateNode->BoundGraph ? StateNode->BoundGraph->GetName() : TEXT(""));
+    Root->SetBoolField(TEXT("animation_assigned"), bAnimationAssigned);
+    Root->SetBoolField(TEXT("animation_required"), bAnimationRequired);
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::AddAnimGraphTransitionRule(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName FromState,
+    FName ToState,
+    const FString& RuleExpression)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("add_anim_graph_transition_rule"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("from_state"), FromState.ToString());
+    Root->SetStringField(TEXT("to_state"), ToState.ToString());
+    Root->SetStringField(TEXT("rule_expression"), RuleExpression);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.add_anim_graph_transition_rule(anim_bp, state_machine, from_state, to_state, rule_expression)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    if (!StateMachineGraph)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_machine_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested state machine graph was not found."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimStateNode* FromNode = AIStudioFindStateNode(StateMachineGraph, FromState);
+    UAnimStateNode* ToNode = AIStudioFindStateNode(StateMachineGraph, ToState);
+    if (!FromNode || !ToNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("Both source and destination states must exist before adding a transition."));
+        Root->SetBoolField(TEXT("from_state_found"), FromNode != nullptr);
+        Root->SetBoolField(TEXT("to_state_found"), ToNode != nullptr);
+        return AIStudioJsonString(Root);
+    }
+
+    const FString NormalizedRule = RuleExpression.TrimStartAndEnd().ToLower();
+    const bool bSupportedConstantRule = NormalizedRule.IsEmpty()
+        || NormalizedRule == TEXT("true")
+        || NormalizedRule == TEXT("false")
+        || NormalizedRule == TEXT("always")
+        || NormalizedRule == TEXT("never");
+    if (!bSupportedConstantRule)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("unsupported_rule_expression"));
+        Root->SetStringField(TEXT("error"), TEXT("This wrapper currently supports constant transition rules only: true/always or false/never. Use a rule-graph synthesis capability for arbitrary Blueprint expressions."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "AddAnimGraphTransitionRule", "AIStudioBridge Add Anim Graph Transition Rule"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+
+    UAnimStateTransitionNode* TransitionNode = AIStudioFindTransitionNode(StateMachineGraph, FromNode, ToNode);
+    const bool bCreated = TransitionNode == nullptr;
+    if (!TransitionNode)
+    {
+        const FVector2f Location = (FVector2f(FromNode->NodePosX, FromNode->NodePosY) + FVector2f(ToNode->NodePosX, ToNode->NodePosY)) * 0.5f;
+        TransitionNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateTransitionNode>(
+            StateMachineGraph,
+            NewObject<UAnimStateTransitionNode>(),
+            Location,
+            false);
+        if (!TransitionNode)
+        {
+            Root->SetStringField(TEXT("status"), TEXT("transition_create_failed"));
+            Root->SetStringField(TEXT("error"), TEXT("Unreal did not create the UAnimStateTransitionNode."));
+            return AIStudioJsonString(Root);
+        }
+        TransitionNode->CreateConnections(FromNode, ToNode);
+    }
+
+    bool bRuleApplied = false;
+    bool bRuleValue = !(NormalizedRule == TEXT("false") || NormalizedRule == TEXT("never"));
+    if (UAnimationTransitionGraph* TransitionGraph = Cast<UAnimationTransitionGraph>(TransitionNode->GetBoundGraph()))
+    {
+        if (UAnimGraphNode_TransitionResult* ResultNode = TransitionGraph->GetResultNode())
+        {
+            if (UEdGraphPin* CanEnterPin = ResultNode->FindPin(TEXT("bCanEnterTransition")))
+            {
+                CanEnterPin->Modify();
+                CanEnterPin->DefaultValue = bRuleValue ? TEXT("true") : TEXT("false");
+                bRuleApplied = true;
+            }
+        }
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    Root->SetBoolField(TEXT("ok"), bRuleApplied);
+    Root->SetStringField(TEXT("status"), bRuleApplied ? (bCreated ? TEXT("created") : TEXT("already_exists")) : TEXT("rule_apply_failed"));
+    Root->SetBoolField(TEXT("created"), bCreated);
+    Root->SetBoolField(TEXT("rule_applied"), bRuleApplied);
+    Root->SetBoolField(TEXT("constant_rule_value"), bRuleValue);
+    Root->SetStringField(TEXT("transition_graph"), TransitionNode->GetBoundGraph() ? TransitionNode->GetBoundGraph()->GetName() : TEXT(""));
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::DeleteAnimGraphState(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName StateName)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("delete_anim_graph_state"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("state_name"), StateName.ToString());
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.delete_anim_graph_state(anim_bp, state_machine, state_name)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    if (!StateMachineGraph)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_machine_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested state machine graph was not found."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimStateNode* StateNode = AIStudioFindStateNode(StateMachineGraph, StateName);
+    if (!StateNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested state was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "DeleteAnimGraphState", "AIStudioBridge Delete Anim Graph State"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+    const int32 BeforeCount = StateMachineGraph->Nodes.Num();
+    FBlueprintEditorUtils::RemoveNode(AnimBlueprint, StateNode, true);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    const bool bRemoved = AIStudioFindStateNode(StateMachineGraph, StateName) == nullptr;
+    Root->SetBoolField(TEXT("ok"), bRemoved);
+    Root->SetStringField(TEXT("status"), bRemoved ? TEXT("deleted") : TEXT("delete_failed"));
+    Root->SetNumberField(TEXT("node_count_before"), BeforeCount);
+    Root->SetNumberField(TEXT("node_count_after"), StateMachineGraph->Nodes.Num());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::DeleteAnimGraphTransition(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName FromState,
+    FName ToState)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("delete_anim_graph_transition"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("from_state"), FromState.ToString());
+    Root->SetStringField(TEXT("to_state"), ToState.ToString());
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.delete_anim_graph_transition(anim_bp, state_machine, from_state, to_state)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    UAnimStateNode* FromNode = AIStudioFindStateNode(StateMachineGraph, FromState);
+    UAnimStateNode* ToNode = AIStudioFindStateNode(StateMachineGraph, ToState);
+    UAnimStateTransitionNode* TransitionNode = AIStudioFindTransitionNode(StateMachineGraph, FromNode, ToNode);
+    if (!TransitionNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("transition_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested transition was not found."));
+        Root->SetBoolField(TEXT("from_state_found"), FromNode != nullptr);
+        Root->SetBoolField(TEXT("to_state_found"), ToNode != nullptr);
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "DeleteAnimGraphTransition", "AIStudioBridge Delete Anim Graph Transition"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+    const int32 BeforeCount = StateMachineGraph->Nodes.Num();
+    FBlueprintEditorUtils::RemoveNode(AnimBlueprint, TransitionNode, true);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    const bool bRemoved = AIStudioFindTransitionNode(StateMachineGraph, FromNode, ToNode) == nullptr;
+    Root->SetBoolField(TEXT("ok"), bRemoved);
+    Root->SetStringField(TEXT("status"), bRemoved ? TEXT("deleted") : TEXT("delete_failed"));
+    Root->SetNumberField(TEXT("node_count_before"), BeforeCount);
+    Root->SetNumberField(TEXT("node_count_after"), StateMachineGraph->Nodes.Num());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::RenameAnimGraphState(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName OldStateName,
+    FName NewStateName)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("rename_anim_graph_state"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("old_state_name"), OldStateName.ToString());
+    Root->SetStringField(TEXT("new_state_name"), NewStateName.ToString());
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.rename_anim_graph_state(anim_bp, state_machine, old_state_name, new_state_name)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    if (NewStateName.IsNone())
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_state_name"));
+        Root->SetStringField(TEXT("error"), TEXT("NewStateName is required."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    UAnimStateNode* StateNode = AIStudioFindStateNode(StateMachineGraph, OldStateName);
+    if (!StateNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested source state was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "RenameAnimGraphState", "AIStudioBridge Rename Anim Graph State"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+    StateNode->Modify();
+    if (StateNode->BoundGraph)
+    {
+        StateNode->BoundGraph->Modify();
+        FEdGraphUtilities::RenameGraphToNameOrCloseToName(StateNode->BoundGraph, NewStateName.ToString());
+    }
+    StateNode->ReconstructNode();
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    const bool bRenamed = AIStudioFindStateNode(StateMachineGraph, NewStateName) == StateNode;
+    Root->SetBoolField(TEXT("ok"), bRenamed);
+    Root->SetStringField(TEXT("status"), bRenamed ? TEXT("renamed") : TEXT("rename_failed"));
+    Root->SetStringField(TEXT("readback_state_name"), StateNode->GetStateName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::SetAnimGraphTransitionRule(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName FromState,
+    FName ToState,
+    const FString& RuleExpression)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("set_anim_graph_transition_rule"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("from_state"), FromState.ToString());
+    Root->SetStringField(TEXT("to_state"), ToState.ToString());
+    Root->SetStringField(TEXT("rule_expression"), RuleExpression);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.set_anim_graph_transition_rule(anim_bp, state_machine, from_state, to_state, rule_expression)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    UAnimStateNode* FromNode = AIStudioFindStateNode(StateMachineGraph, FromState);
+    UAnimStateNode* ToNode = AIStudioFindStateNode(StateMachineGraph, ToState);
+    UAnimStateTransitionNode* TransitionNode = AIStudioFindTransitionNode(StateMachineGraph, FromNode, ToNode);
+    if (!TransitionNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("transition_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested transition was not found."));
+        Root->SetBoolField(TEXT("from_state_found"), FromNode != nullptr);
+        Root->SetBoolField(TEXT("to_state_found"), ToNode != nullptr);
+        return AIStudioJsonString(Root);
+    }
+
+    const FString NormalizedRule = RuleExpression.TrimStartAndEnd().ToLower();
+    const bool bSupportedConstantRule = NormalizedRule.IsEmpty()
+        || NormalizedRule == TEXT("true")
+        || NormalizedRule == TEXT("false")
+        || NormalizedRule == TEXT("always")
+        || NormalizedRule == TEXT("never");
+    if (!bSupportedConstantRule)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("unsupported_rule_expression"));
+        Root->SetStringField(TEXT("error"), TEXT("This wrapper currently supports constant transition rules only. Use a rule-graph synthesis capability for arbitrary Blueprint expressions."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "SetAnimGraphTransitionRule", "AIStudioBridge Set Anim Graph Transition Rule"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+    TransitionNode->Modify();
+    bool bRuleApplied = false;
+    const bool bRuleValue = !(NormalizedRule == TEXT("false") || NormalizedRule == TEXT("never"));
+    if (UAnimationTransitionGraph* TransitionGraph = Cast<UAnimationTransitionGraph>(TransitionNode->GetBoundGraph()))
+    {
+        TransitionGraph->Modify();
+        if (UAnimGraphNode_TransitionResult* ResultNode = TransitionGraph->GetResultNode())
+        {
+            ResultNode->Modify();
+            if (UEdGraphPin* CanEnterPin = ResultNode->FindPin(TEXT("bCanEnterTransition")))
+            {
+                CanEnterPin->Modify();
+                CanEnterPin->DefaultValue = bRuleValue ? TEXT("true") : TEXT("false");
+                bRuleApplied = true;
+            }
+        }
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    Root->SetBoolField(TEXT("ok"), bRuleApplied);
+    Root->SetStringField(TEXT("status"), bRuleApplied ? TEXT("rule_applied") : TEXT("rule_apply_failed"));
+    Root->SetBoolField(TEXT("constant_rule_value"), bRuleValue);
+    Root->SetStringField(TEXT("transition_graph"), TransitionNode->GetBoundGraph() ? TransitionNode->GetBoundGraph()->GetName() : TEXT(""));
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::SynthesizeAnimGraphTransitionRuleExpression(
+    UAnimBlueprint* AnimBlueprint,
+    FName StateMachineName,
+    FName FromState,
+    FName ToState,
+    const FString& RuleExpression)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("synthesize_anim_graph_transition_rule_expression"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(TEXT("from_state"), FromState.ToString());
+    Root->SetStringField(TEXT("to_state"), ToState.ToString());
+    Root->SetStringField(TEXT("rule_expression"), RuleExpression);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.synthesize_anim_graph_transition_rule_expression(anim_bp, state_machine, from_state, to_state, rule_expression)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(AnimBlueprint, StateMachineName);
+    UAnimStateNode* FromNode = AIStudioFindStateNode(StateMachineGraph, FromState);
+    UAnimStateNode* ToNode = AIStudioFindStateNode(StateMachineGraph, ToState);
+    UAnimStateTransitionNode* TransitionNode = AIStudioFindTransitionNode(StateMachineGraph, FromNode, ToNode);
+    if (!TransitionNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("transition_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested transition was not found. Create the transition edge before synthesizing its rule graph."));
+        Root->SetBoolField(TEXT("from_state_found"), FromNode != nullptr);
+        Root->SetBoolField(TEXT("to_state_found"), ToNode != nullptr);
+        return AIStudioJsonString(Root);
+    }
+    UAnimationTransitionGraph* TransitionGraph = Cast<UAnimationTransitionGraph>(TransitionNode->GetBoundGraph());
+    if (!TransitionGraph)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("transition_graph_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The transition node did not expose a transition graph."));
+        return AIStudioJsonString(Root);
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "SynthesizeAnimGraphTransitionRuleExpression", "AIStudioBridge Synthesize Anim Graph Transition Rule Expression"));
+    AnimBlueprint->Modify();
+    StateMachineGraph->Modify();
+    TransitionNode->Modify();
+    TransitionGraph->Modify();
+
+    bool bApplied = false;
+    bool bConstantValue = false;
+    int32 CreatedNodeCount = 0;
+    FString FinalSourceNode;
+    TArray<FString> UnsupportedReasons;
+    const FString NormalizedRule = RuleExpression.TrimStartAndEnd().ToLower();
+    if (UAnimGraphNode_TransitionResult* ResultNode = TransitionGraph->GetResultNode())
+    {
+        bApplied = AIStudioApplyConstantTransitionRule(ResultNode, NormalizedRule, bConstantValue);
+    }
+    if (!bApplied)
+    {
+        bApplied = AIStudioSynthesizeTransitionRuleGraph(
+            TransitionGraph,
+            RuleExpression,
+            UnsupportedReasons,
+            CreatedNodeCount,
+            FinalSourceNode);
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+    Root->SetBoolField(TEXT("ok"), bApplied);
+    Root->SetStringField(TEXT("status"), bApplied ? TEXT("rule_graph_synthesized") : TEXT("unsupported_rule_expression"));
+    Root->SetBoolField(TEXT("constant_rule"), bApplied && CreatedNodeCount == 0);
+    Root->SetBoolField(TEXT("constant_rule_value"), bConstantValue);
+    Root->SetNumberField(TEXT("created_node_count"), CreatedNodeCount);
+    Root->SetStringField(TEXT("final_source_node"), FinalSourceNode);
+    Root->SetStringField(TEXT("transition_graph"), TransitionGraph->GetName());
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+    TArray<TSharedPtr<FJsonValue>> ReasonValues;
+    for (const FString& Reason : UnsupportedReasons)
+    {
+        ReasonValues.Add(MakeShared<FJsonValueString>(Reason));
+    }
+    Root->SetArrayField(TEXT("unsupported_reasons"), ReasonValues);
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::WireAnimGraphOutputPose(UAnimBlueprint* AnimBlueprint, FName StateMachineName)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("wire_anim_graph_output_pose"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("state_machine"), StateMachineName.ToString());
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.wire_anim_graph_output_pose(anim_bp, state_machine)"));
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("invalid_target"));
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    UAnimGraphNode_StateMachineBase* StateMachineNode = nullptr;
+    UAnimationStateMachineGraph* StateMachineGraph = AIStudioFindStateMachineGraph(
+        AnimBlueprint,
+        StateMachineName,
+        &StateMachineNode);
+    if (!StateMachineGraph || !StateMachineNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("state_machine_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The requested state machine node was not found in an AnimGraph."));
+        return AIStudioJsonString(Root);
+    }
+
+    UAnimationGraph* AnimGraph = AIStudioFindAnimationGraphForNode(StateMachineNode);
+    if (!AnimGraph)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("anim_graph_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("The owning AnimGraph for the state machine node was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    UAnimGraphNode_Root* RootNode = nullptr;
+    for (UEdGraphNode* Node : AnimGraph->Nodes)
+    {
+        RootNode = Cast<UAnimGraphNode_Root>(Node);
+        if (RootNode)
+        {
+            break;
+        }
+    }
+    if (!RootNode)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("output_pose_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("No AnimGraph output pose root node was found."));
+        return AIStudioJsonString(Root);
+    }
+
+    UEdGraphPin* MachinePosePin = AIStudioFindPosePin(StateMachineNode, EGPD_Output);
+    UEdGraphPin* OutputPosePin = AIStudioFindPosePin(RootNode, EGPD_Input);
+    if (!MachinePosePin || !OutputPosePin)
+    {
+        Root->SetStringField(TEXT("status"), TEXT("pose_pin_not_found"));
+        Root->SetStringField(TEXT("error"), TEXT("Could not resolve compatible pose pins on the state machine and output pose nodes."));
+        Root->SetBoolField(TEXT("machine_pose_pin_found"), MachinePosePin != nullptr);
+        Root->SetBoolField(TEXT("output_pose_pin_found"), OutputPosePin != nullptr);
+        return AIStudioJsonString(Root);
+    }
+
+    const bool bAlreadyLinked = OutputPosePin->LinkedTo.Contains(MachinePosePin);
+    bool bLinked = bAlreadyLinked;
+    if (!bAlreadyLinked)
+    {
+        const FScopedTransaction Transaction(NSLOCTEXT("AIStudioBridge", "WireAnimGraphOutputPose", "AIStudioBridge Wire Anim Graph Output Pose"));
+        AnimBlueprint->Modify();
+        AnimGraph->Modify();
+        StateMachineNode->Modify();
+        RootNode->Modify();
+        MachinePosePin->Modify();
+        OutputPosePin->Modify();
+        OutputPosePin->BreakAllPinLinks();
+        const UEdGraphSchema* Schema = AnimGraph->GetSchema();
+        bLinked = Schema && Schema->TryCreateConnection(MachinePosePin, OutputPosePin);
+        if (bLinked)
+        {
+            FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
+        }
+    }
+
+    Root->SetBoolField(TEXT("ok"), bLinked);
+    Root->SetStringField(TEXT("status"), bLinked ? (bAlreadyLinked ? TEXT("already_linked") : TEXT("linked")) : TEXT("link_failed"));
+    Root->SetStringField(TEXT("anim_graph"), AnimGraph->GetName());
+    Root->SetStringField(TEXT("state_machine_graph"), StateMachineGraph->GetName());
+    Root->SetStringField(TEXT("machine_pose_pin"), MachinePosePin->PinName.ToString());
+    Root->SetStringField(TEXT("output_pose_pin"), OutputPosePin->PinName.ToString());
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+#else
+    Root->SetStringField(TEXT("status"), TEXT("editor_only"));
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::CompileAndSaveAnimBlueprint(UAnimBlueprint* AnimBlueprint)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("compile_and_save_anim_blueprint"));
+    Root->SetBoolField(TEXT("ok"), false);
+
+#if WITH_EDITOR
+    if (!AnimBlueprint)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("AnimBlueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    FKismetEditorUtilities::CompileBlueprint(AnimBlueprint);
+    UPackage* Package = AnimBlueprint->GetOutermost();
+    bool bSaved = false;
+    if (Package)
+    {
+        Package->SetDirtyFlag(true);
+        const FString PackageFileName = FPackageName::LongPackageNameToFilename(
+            Package->GetName(),
+            FPackageName::GetAssetPackageExtension());
+        if (!PackageFileName.IsEmpty())
+        {
+            FSavePackageArgs SaveArgs;
+            SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+            bSaved = UPackage::SavePackage(Package, AnimBlueprint, *PackageFileName, SaveArgs);
+        }
+    }
+
+    Root->SetBoolField(TEXT("ok"), bSaved);
+    Root->SetStringField(TEXT("status"), bSaved ? TEXT("compiled_and_saved") : TEXT("save_failed"));
+    Root->SetStringField(TEXT("asset_name"), AnimBlueprint->GetName());
+    Root->SetStringField(TEXT("asset_path"), AnimBlueprint->GetPathName());
+    Root->SetBoolField(TEXT("save_attempted"), Package != nullptr);
+    Root->SetBoolField(TEXT("saved"), bSaved);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.compile_and_save_anim_blueprint(anim_bp)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::InspectAnimationSequence(UAnimSequence* Animation)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("inspect_animation_sequence"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.inspect_animation_sequence(animation)"));
+    if (!Animation)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("Animation was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    Root->SetBoolField(TEXT("ok"), true);
+    Root->SetStringField(TEXT("asset_name"), Animation->GetName());
+    Root->SetStringField(TEXT("asset_path"), Animation->GetPathName());
+    Root->SetStringField(TEXT("skeleton"), Animation->GetSkeleton() ? Animation->GetSkeleton()->GetPathName() : TEXT(""));
+    Root->SetNumberField(TEXT("play_length_seconds"), Animation->GetPlayLength());
+    Root->SetNumberField(TEXT("sampled_keys"), Animation->GetNumberOfSampledKeys());
+    Root->SetNumberField(TEXT("sample_rate_fps"), Animation->GetSamplingFrameRate().AsDecimal());
+    Root->SetBoolField(TEXT("has_root_motion"), Animation->HasRootMotion());
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::InspectCharacterInPIE(UClass* CharacterClass, FString ExpectedAnimClassContains, const TArray<FName>& PropertyNames)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("inspect_character_in_pie"));
+    Root->SetBoolField(TEXT("ok"), false);
+
+#if WITH_EDITOR
+    if (!GEditor || !GEditor->PlayWorld || !CharacterClass)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("Active PIE world and CharacterClass are required."));
+        return AIStudioJsonString(Root);
+    }
+
+    AActor* RuntimeActor = nullptr;
+    for (TActorIterator<AActor> It(GEditor->PlayWorld); It; ++It)
+    {
+        if (*It && It->IsA(CharacterClass))
+        {
+            RuntimeActor = *It;
+            break;
+        }
+    }
+    if (!RuntimeActor)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No runtime actor of CharacterClass was found in PIE."));
+        return AIStudioJsonString(Root);
+    }
+
+    Root->SetStringField(TEXT("actor"), RuntimeActor->GetName());
+    Root->SetStringField(TEXT("actor_class"), RuntimeActor->GetClass()->GetPathName());
+    Root->SetStringField(TEXT("location"), RuntimeActor->GetActorLocation().ToString());
+    Root->SetStringField(TEXT("velocity"), RuntimeActor->GetVelocity().ToString());
+
+    if (const ACharacter* Character = Cast<ACharacter>(RuntimeActor))
+    {
+        if (const UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+        {
+            Root->SetStringField(TEXT("movement_mode"), Movement->GetMovementName());
+            Root->SetNumberField(TEXT("gravity_scale"), Movement->GravityScale);
+        }
+    }
+
+    UAnimInstance* SelectedAnimInstance = nullptr;
+    TArray<USkeletalMeshComponent*> Meshes;
+    RuntimeActor->GetComponents(Meshes);
+    for (USkeletalMeshComponent* Mesh : Meshes)
+    {
+        UAnimInstance* Instance = Mesh ? Mesh->GetAnimInstance() : nullptr;
+        const FString ClassPath = Instance ? Instance->GetClass()->GetPathName() : TEXT("");
+        if (Instance && (ExpectedAnimClassContains.IsEmpty() || ClassPath.Contains(ExpectedAnimClassContains)))
+        {
+            SelectedAnimInstance = Instance;
+            Root->SetStringField(TEXT("anim_class"), ClassPath);
+            if (UAnimMontage* ActiveMontage = Instance->GetCurrentActiveMontage())
+            {
+                Root->SetStringField(TEXT("active_montage"), ActiveMontage->GetPathName());
+                Root->SetNumberField(TEXT("active_montage_position"), Instance->Montage_GetPosition(ActiveMontage));
+            }
+            break;
+        }
+    }
+
+    const TSharedRef<FJsonObject> Properties = MakeShared<FJsonObject>();
+    const TSharedRef<FJsonObject> PropertyOwners = MakeShared<FJsonObject>();
+    for (const FName PropertyName : PropertyNames)
+    {
+        UObject* Owner = RuntimeActor;
+        FProperty* Property = FindFProperty<FProperty>(Owner->GetClass(), PropertyName);
+        if (!Property)
+        {
+            TInlineComponentArray<UActorComponent*> Components(RuntimeActor);
+            for (UActorComponent* Component : Components)
+            {
+                if (!Component)
+                {
+                    continue;
+                }
+                Property = FindFProperty<FProperty>(Component->GetClass(), PropertyName);
+                if (Property)
+                {
+                    Owner = Component;
+                    break;
+                }
+            }
+        }
+        if (!Property && SelectedAnimInstance)
+        {
+            Owner = SelectedAnimInstance;
+            Property = FindFProperty<FProperty>(Owner->GetClass(), PropertyName);
+        }
+        if (!Property)
+        {
+            Properties->SetStringField(PropertyName.ToString(), TEXT("<missing>"));
+            PropertyOwners->SetStringField(PropertyName.ToString(), TEXT("<missing>"));
+            continue;
+        }
+        FString Value;
+        Property->ExportTextItem_Direct(Value, Property->ContainerPtrToValuePtr<void>(Owner), nullptr, Owner, PPF_None);
+        Properties->SetStringField(PropertyName.ToString(), Value);
+        PropertyOwners->SetStringField(PropertyName.ToString(), Owner->GetPathName());
+    }
+    Root->SetObjectField(TEXT("properties"), Properties);
+    Root->SetObjectField(TEXT("property_owners"), PropertyOwners);
+    Root->SetBoolField(TEXT("anim_instance_matched"), SelectedAnimInstance != nullptr);
+    Root->SetBoolField(TEXT("ok"), SelectedAnimInstance != nullptr || ExpectedAnimClassContains.IsEmpty());
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.inspect_character_in_pie(character_class, expected_anim_class_contains, property_names)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::ValidateCharacterMontagesInPIE(UClass* CharacterClass, const TArray<UAnimMontage*>& Montages, FString ExpectedAnimClassContains)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("validate_character_montages_in_pie"));
+    Root->SetBoolField(TEXT("ok"), false);
+
+#if WITH_EDITOR
+    if (!GEditor || !GEditor->PlayWorld)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No active PIE world was found."));
+        return AIStudioJsonString(Root);
+    }
+    if (!CharacterClass)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("CharacterClass was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    UWorld* World = GEditor->PlayWorld;
+    Root->SetStringField(TEXT("world"), World ? World->GetName() : TEXT(""));
+    Root->SetStringField(TEXT("character_class"), CharacterClass->GetPathName());
+
+    AActor* RuntimeActor = nullptr;
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Candidate = *It;
+        if (Candidate && Candidate->IsA(CharacterClass))
+        {
+            RuntimeActor = Candidate;
+            break;
+        }
+    }
+
+    if (!RuntimeActor)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No runtime actor of CharacterClass was found in PIE."));
+        return AIStudioJsonString(Root);
+    }
+    Root->SetStringField(TEXT("actor"), RuntimeActor->GetName());
+    Root->SetStringField(TEXT("actor_class"), RuntimeActor->GetClass()->GetPathName());
+
+    TArray<USkeletalMeshComponent*> Meshes;
+    RuntimeActor->GetComponents(Meshes);
+
+    UAnimInstance* SelectedAnimInstance = nullptr;
+    TArray<TSharedPtr<FJsonValue>> ComponentValues;
+    for (USkeletalMeshComponent* Mesh : Meshes)
+    {
+        if (!Mesh)
+        {
+            continue;
+        }
+        UAnimInstance* AnimInstance = Mesh->GetAnimInstance();
+        const FString AnimClassPath = AnimInstance ? AnimInstance->GetClass()->GetPathName() : TEXT("");
+        const bool bMatchesExpected = ExpectedAnimClassContains.IsEmpty() || AnimClassPath.Contains(ExpectedAnimClassContains);
+
+        const TSharedRef<FJsonObject> ComponentObject = MakeShared<FJsonObject>();
+        ComponentObject->SetStringField(TEXT("name"), Mesh->GetName());
+        ComponentObject->SetStringField(TEXT("skeletal_mesh"), Mesh->GetSkeletalMeshAsset() ? Mesh->GetSkeletalMeshAsset()->GetPathName() : TEXT(""));
+        ComponentObject->SetStringField(TEXT("anim_class"), AnimClassPath);
+        ComponentObject->SetBoolField(TEXT("matches_expected_anim_class"), bMatchesExpected);
+        ComponentValues.Add(MakeShared<FJsonValueObject>(ComponentObject));
+
+        if (!SelectedAnimInstance && AnimInstance && bMatchesExpected)
+        {
+            SelectedAnimInstance = AnimInstance;
+        }
+    }
+    Root->SetArrayField(TEXT("components"), ComponentValues);
+
+    if (!SelectedAnimInstance)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No runtime AnimInstance matched ExpectedAnimClassContains."));
+        return AIStudioJsonString(Root);
+    }
+    Root->SetStringField(TEXT("selected_anim_class"), SelectedAnimInstance->GetClass()->GetPathName());
+
+    bool bAllMontagesPlayable = Montages.Num() > 0;
+    TArray<TSharedPtr<FJsonValue>> MontageValues;
+    for (UAnimMontage* Montage : Montages)
+    {
+        const TSharedRef<FJsonObject> MontageObject = MakeShared<FJsonObject>();
+        MontageObject->SetBoolField(TEXT("asset_exists"), Montage != nullptr);
+        MontageObject->SetStringField(TEXT("asset_path"), Montage ? Montage->GetPathName() : TEXT(""));
+        float PlayResult = 0.0f;
+        bool bActive = false;
+        bool bPlaying = false;
+        if (Montage)
+        {
+            PlayResult = SelectedAnimInstance->Montage_Play(Montage, 1.0f);
+            bActive = SelectedAnimInstance->Montage_IsActive(Montage);
+            bPlaying = SelectedAnimInstance->Montage_IsPlaying(Montage);
+            SelectedAnimInstance->Montage_Stop(0.0f, Montage);
+        }
+        MontageObject->SetNumberField(TEXT("play_result"), PlayResult);
+        MontageObject->SetBoolField(TEXT("active_after_play"), bActive);
+        MontageObject->SetBoolField(TEXT("playing_after_play"), bPlaying);
+        const bool bPlayable = Montage && PlayResult > 0.0f && (bActive || bPlaying);
+        MontageObject->SetBoolField(TEXT("playable"), bPlayable);
+        bAllMontagesPlayable = bAllMontagesPlayable && bPlayable;
+        MontageValues.Add(MakeShared<FJsonValueObject>(MontageObject));
+    }
+    Root->SetArrayField(TEXT("montages"), MontageValues);
+    Root->SetBoolField(TEXT("ok"), bAllMontagesPlayable);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.validate_character_montages_in_pie(character_class, montages, expected_anim_class_contains)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::InjectKeyInPIE(FKey Key, bool bPressed)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("inject_key_in_pie"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("key"), Key.ToString());
+    Root->SetBoolField(TEXT("pressed"), bPressed);
+
+#if WITH_EDITOR
+    if (!GEditor || !GEditor->PlayWorld)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No active PIE world was found."));
+        return AIStudioJsonString(Root);
+    }
+    APlayerController* Controller = GEditor->PlayWorld->GetFirstPlayerController();
+    if (!Controller)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No PIE player controller was found."));
+        return AIStudioJsonString(Root);
+    }
+    const EInputEvent Event = bPressed ? IE_Pressed : IE_Released;
+    const FInputKeyEventArgs InputParams = FInputKeyEventArgs::CreateSimulated(
+        Key,
+        Event,
+        bPressed ? 1.0f : 0.0f);
+    const bool bHandled = Controller->InputKey(InputParams);
+    Root->SetStringField(TEXT("controller"), Controller->GetPathName());
+    Root->SetBoolField(TEXT("handled"), bHandled);
+    Root->SetBoolField(TEXT("ok"), true);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.inject_key_in_pie(key, pressed)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::DescribeBlueprintNodeAction(
+    UBlueprint* Blueprint,
+    FName GraphName,
+    const FString& NodeWithCategory)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("describe_blueprint_node_action"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("graph_name"), GraphName.ToString());
+    Root->SetStringField(TEXT("palette_action"), NodeWithCategory);
+
+#if WITH_EDITOR
+    if (!Blueprint)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("Blueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+
+    UEdGraph* SourceGraph = nullptr;
+    TArray<UEdGraph*> Graphs;
+    Graphs.Append(Blueprint->UbergraphPages);
+    Graphs.Append(Blueprint->FunctionGraphs);
+    Graphs.Append(Blueprint->MacroGraphs);
+    Graphs.Append(Blueprint->DelegateSignatureGraphs);
+    for (UEdGraph* Graph : Graphs)
+    {
+        if (Graph && Graph->GetFName() == GraphName)
+        {
+            SourceGraph = Graph;
+            break;
+        }
+    }
+    if (!SourceGraph)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("The requested graph was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    const int32 OriginalNodeCount = SourceGraph->Nodes.Num();
+    const bool bPackageDirtyBefore = Blueprint->GetOutermost()->IsDirty();
+    FBlueprintActionFilter Filter;
+    FBlueprintActionContext& FilterContext = Filter.Context;
+    FilterContext.Graphs.Add(SourceGraph);
+    FilterContext.Blueprints.Add(Blueprint);
+
+    TArray<TSharedPtr<FJsonValue>> MatchValues;
+    const FBlueprintActionDatabase::FActionRegistry& Registry =
+        FBlueprintActionDatabase::Get().GetAllActions();
+    for (auto Iterator(Registry.CreateConstIterator()); Iterator; ++Iterator)
+    {
+        UObject* ActionObject = Iterator->Key.ResolveObjectPtr();
+        if (!ActionObject)
+        {
+            continue;
+        }
+        for (const UBlueprintNodeSpawner* Spawner : Iterator->Value)
+        {
+            if (!Spawner)
+            {
+                continue;
+            }
+            FBlueprintActionInfo ActionInfo(ActionObject, Spawner);
+            if (Filter.IsFiltered(ActionInfo))
+            {
+                continue;
+            }
+            const FBlueprintActionUiSpec UiSpec = Spawner->GetUiSpec(
+                FilterContext,
+                ActionInfo.GetBindings());
+            const FString QualifiedName = FString::Printf(
+                TEXT("%s|%s"),
+                *UiSpec.Category.ToString().Replace(TEXT(" "), TEXT("")),
+                *UiSpec.MenuName.ToString().Replace(TEXT(" "), TEXT("")));
+            if (!QualifiedName.Equals(NodeWithCategory, ESearchCase::CaseSensitive))
+            {
+                continue;
+            }
+
+            const TSharedRef<FJsonObject> Match = MakeShared<FJsonObject>();
+            Match->SetStringField(TEXT("palette_action"), QualifiedName);
+            Match->SetStringField(TEXT("action_object"), ActionObject->GetPathName());
+            Match->SetStringField(TEXT("action_object_class"), ActionObject->GetClass()->GetName());
+            Match->SetStringField(TEXT("category"), UiSpec.Category.ToString());
+            Match->SetStringField(TEXT("menu_name"), UiSpec.MenuName.ToString());
+            Match->SetStringField(TEXT("tooltip"), UiSpec.Tooltip.ToString());
+            Match->SetBoolField(TEXT("pin_probe_required"), true);
+            MatchValues.Add(MakeShared<FJsonValueObject>(Match));
+        }
+    }
+
+    const bool bOriginalGraphUnchanged = SourceGraph->Nodes.Num() == OriginalNodeCount;
+    const bool bDirtyStateUnchanged = Blueprint->GetOutermost()->IsDirty() == bPackageDirtyBefore;
+    Root->SetArrayField(TEXT("matches"), MatchValues);
+    Root->SetNumberField(TEXT("match_count"), MatchValues.Num());
+    Root->SetBoolField(TEXT("original_graph_unchanged"), bOriginalGraphUnchanged);
+    Root->SetBoolField(TEXT("package_dirty_state_unchanged"), bDirtyStateUnchanged);
+    Root->SetBoolField(
+        TEXT("ok"),
+        MatchValues.Num() > 0 && bOriginalGraphUnchanged && bDirtyStateUnchanged);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.describe_blueprint_node_action(blueprint, graph_name, palette_action)"));
+    if (MatchValues.Num() == 0)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("No exact filtered palette action matched."));
+    }
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::SearchBlueprintNodeActions(
+    UBlueprint* Blueprint,
+    FName GraphName,
+    const FString& Query,
+    int32 MaxResults)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("search_blueprint_node_actions"));
+    Root->SetBoolField(TEXT("ok"), false);
+    Root->SetStringField(TEXT("graph_name"), GraphName.ToString());
+    Root->SetStringField(TEXT("query"), Query);
+
+#if WITH_EDITOR
+    if (!Blueprint)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("Blueprint was null."));
+        return AIStudioJsonString(Root);
+    }
+    const FString NormalizedQuery = Query.TrimStartAndEnd().ToLower();
+    if (NormalizedQuery.IsEmpty())
+    {
+        Root->SetStringField(TEXT("error"), TEXT("A non-empty search query is required."));
+        return AIStudioJsonString(Root);
+    }
+    MaxResults = FMath::Clamp(MaxResults, 1, 200);
+
+    UEdGraph* SourceGraph = nullptr;
+    TArray<UEdGraph*> Graphs;
+    Graphs.Append(Blueprint->UbergraphPages);
+    Graphs.Append(Blueprint->FunctionGraphs);
+    Graphs.Append(Blueprint->MacroGraphs);
+    Graphs.Append(Blueprint->DelegateSignatureGraphs);
+    for (UEdGraph* Graph : Graphs)
+    {
+        if (Graph && Graph->GetFName() == GraphName)
+        {
+            SourceGraph = Graph;
+            break;
+        }
+    }
+    if (!SourceGraph)
+    {
+        Root->SetStringField(TEXT("error"), TEXT("The requested graph was not found."));
+        return AIStudioJsonString(Root);
+    }
+
+    const int32 OriginalNodeCount = SourceGraph->Nodes.Num();
+    const bool bPackageDirtyBefore = Blueprint->GetOutermost()->IsDirty();
+    FBlueprintActionFilter Filter;
+    FBlueprintActionContext& FilterContext = Filter.Context;
+    FilterContext.Graphs.Add(SourceGraph);
+    FilterContext.Blueprints.Add(Blueprint);
+
+    struct FSearchMatch
+    {
+        int32 Score = 0;
+        FString QualifiedName;
+        FString Category;
+        FString MenuName;
+        FString Tooltip;
+        FString ActionObject;
+        FString ActionObjectClass;
+    };
+    TArray<FSearchMatch> Matches;
+    TSet<FString> Seen;
+    const FBlueprintActionDatabase::FActionRegistry& Registry =
+        FBlueprintActionDatabase::Get().GetAllActions();
+    for (auto Iterator(Registry.CreateConstIterator()); Iterator; ++Iterator)
+    {
+        UObject* ActionObject = Iterator->Key.ResolveObjectPtr();
+        if (!ActionObject)
+        {
+            continue;
+        }
+        for (const UBlueprintNodeSpawner* Spawner : Iterator->Value)
+        {
+            if (!Spawner)
+            {
+                continue;
+            }
+            FBlueprintActionInfo ActionInfo(ActionObject, Spawner);
+            if (Filter.IsFiltered(ActionInfo))
+            {
+                continue;
+            }
+            const FBlueprintActionUiSpec UiSpec = Spawner->GetUiSpec(
+                FilterContext,
+                ActionInfo.GetBindings());
+            const FString Category = UiSpec.Category.ToString();
+            const FString MenuName = UiSpec.MenuName.ToString();
+            const FString QualifiedName = FString::Printf(
+                TEXT("%s|%s"),
+                *Category.Replace(TEXT(" "), TEXT("")),
+                *MenuName.Replace(TEXT(" "), TEXT("")));
+            const FString SearchText = FString::Printf(
+                TEXT("%s %s %s %s"),
+                *Category,
+                *MenuName,
+                *UiSpec.Tooltip.ToString(),
+                *ActionObject->GetPathName()).ToLower();
+            if (!SearchText.Contains(NormalizedQuery) || Seen.Contains(QualifiedName))
+            {
+                continue;
+            }
+            Seen.Add(QualifiedName);
+            FSearchMatch Match;
+            Match.QualifiedName = QualifiedName;
+            Match.Category = Category;
+            Match.MenuName = MenuName;
+            Match.Tooltip = UiSpec.Tooltip.ToString();
+            Match.ActionObject = ActionObject->GetPathName();
+            Match.ActionObjectClass = ActionObject->GetClass()->GetName();
+            const FString NormalizedMenu = MenuName.ToLower();
+            Match.Score = NormalizedMenu.Equals(NormalizedQuery) ? 300
+                : NormalizedMenu.StartsWith(NormalizedQuery) ? 200
+                : NormalizedMenu.Contains(NormalizedQuery) ? 100
+                : 10;
+            Matches.Add(MoveTemp(Match));
+        }
+    }
+    Matches.Sort([](const FSearchMatch& A, const FSearchMatch& B)
+    {
+        if (A.Score != B.Score)
+        {
+            return A.Score > B.Score;
+        }
+        return A.QualifiedName < B.QualifiedName;
+    });
+
+    TArray<TSharedPtr<FJsonValue>> MatchValues;
+    for (int32 Index = 0; Index < FMath::Min(MaxResults, Matches.Num()); ++Index)
+    {
+        const FSearchMatch& Match = Matches[Index];
+        const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+        Object->SetNumberField(TEXT("score"), Match.Score);
+        Object->SetStringField(TEXT("palette_action"), Match.QualifiedName);
+        Object->SetStringField(TEXT("category"), Match.Category);
+        Object->SetStringField(TEXT("menu_name"), Match.MenuName);
+        Object->SetStringField(TEXT("tooltip"), Match.Tooltip);
+        Object->SetStringField(TEXT("action_object"), Match.ActionObject);
+        Object->SetStringField(TEXT("action_object_class"), Match.ActionObjectClass);
+        MatchValues.Add(MakeShared<FJsonValueObject>(Object));
+    }
+    const bool bOriginalGraphUnchanged = SourceGraph->Nodes.Num() == OriginalNodeCount;
+    const bool bDirtyStateUnchanged = Blueprint->GetOutermost()->IsDirty() == bPackageDirtyBefore;
+    Root->SetArrayField(TEXT("matches"), MatchValues);
+    Root->SetNumberField(TEXT("total_match_count"), Matches.Num());
+    Root->SetNumberField(TEXT("returned_match_count"), MatchValues.Num());
+    Root->SetBoolField(TEXT("original_graph_unchanged"), bOriginalGraphUnchanged);
+    Root->SetBoolField(TEXT("package_dirty_state_unchanged"), bDirtyStateUnchanged);
+    Root->SetBoolField(TEXT("ok"), bOriginalGraphUnchanged && bDirtyStateUnchanged);
+    Root->SetStringField(
+        TEXT("python_call"),
+        TEXT("unreal.AIStudioBridgeLibrary.search_blueprint_node_actions(blueprint, graph_name, query, max_results)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}
+
+FString UAIStudioBridgeLibrary::BindNiagaraUserParametersOnBeginPlay(
+    UBlueprint* Blueprint,
+    const TArray<FName>& ComponentNames,
+    const FString& BindingsJson)
+{
+    const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("capability"), TEXT("bind_niagara_user_parameters_on_begin_play"));
+    Root->SetBoolField(TEXT("ok"), false);
+#if WITH_EDITOR
+    if (!Blueprint || Blueprint->UbergraphPages.Num() == 0 || !Blueprint->UbergraphPages[0])
+    {
+        Root->SetStringField(TEXT("error"), TEXT("Blueprint or EventGraph was unavailable."));
+        return AIStudioJsonString(Root);
+    }
+    TArray<TSharedPtr<FJsonValue>> BindingValues;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BindingsJson);
+    if (!FJsonSerializer::Deserialize(Reader, BindingValues))
+    {
+        Root->SetStringField(TEXT("error"), TEXT("BindingsJson must be a JSON array."));
+        return AIStudioJsonString(Root);
+    }
+
+    UEdGraph* Graph = Blueprint->UbergraphPages[0];
+    const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+    UK2Node_Event* BeginPlay = nullptr;
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node);
+        if (EventNode && EventNode->EventReference.GetMemberName() == FName(TEXT("ReceiveBeginPlay")))
+        {
+            BeginPlay = EventNode;
+            break;
+        }
+    }
+    if (!BeginPlay)
+    {
+        BeginPlay = NewObject<UK2Node_Event>(Graph);
+        Graph->Modify();
+        Graph->AddNode(BeginPlay, true, false);
+        BeginPlay->CreateNewGuid();
+        BeginPlay->EventReference.SetExternalMember(FName(TEXT("ReceiveBeginPlay")), AActor::StaticClass());
+        BeginPlay->PostPlacedNewNode();
+        BeginPlay->AllocateDefaultPins();
+        BeginPlay->NodePosX = 0;
+        BeginPlay->NodePosY = -120;
+    }
+
+    UK2Node_ExecutionSequence* Sequence = nullptr;
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (Node && Node->GetName().StartsWith(TEXT("AIStudio_FXBind_Sequence")))
+        {
+            Sequence = Cast<UK2Node_ExecutionSequence>(Node);
+            break;
+        }
+    }
+    const bool bCreatedSequence = Sequence == nullptr;
+    if (!Sequence)
+    {
+        Sequence = NewObject<UK2Node_ExecutionSequence>(Graph);
+        Graph->Modify();
+        Graph->AddNode(Sequence, true, false);
+        Sequence->CreateNewGuid();
+        Sequence->PostPlacedNewNode();
+        Sequence->AllocateDefaultPins();
+        Sequence->Rename(TEXT("AIStudio_FXBind_Sequence"));
+        Sequence->NodePosX = 280;
+        Sequence->NodePosY = -60;
+    }
+
+    UEdGraphPin* BeginThen = BeginPlay->FindPin(UEdGraphSchema_K2::PN_Then);
+    UEdGraphPin* SequenceExec = Sequence->GetExecPin();
+    UEdGraphPin* Then0 = Sequence->FindPin(TEXT("then_0"));
+    UEdGraphPin* ChainExec = Sequence->FindPin(TEXT("then_1"));
+    if (bCreatedSequence && BeginThen && SequenceExec)
+    {
+        TArray<UEdGraphPin*> PreviousLinks = BeginThen->LinkedTo;
+        BeginThen->BreakAllPinLinks();
+        K2Schema->TryCreateConnection(BeginThen, SequenceExec);
+        for (UEdGraphPin* Previous : PreviousLinks)
+        {
+            if (Previous && Then0)
+            {
+                K2Schema->TryCreateConnection(Then0, Previous);
+            }
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Created;
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (!Node || !Node->GetName().StartsWith(TEXT("AIStudio_FXBind_")) || Node == Sequence)
+        {
+            continue;
+        }
+        if (UEdGraphPin* ThenPin = Node->FindPin(UEdGraphSchema_K2::PN_Then))
+        {
+            if (ThenPin->LinkedTo.Num() == 0)
+            {
+                ChainExec = ThenPin;
+            }
+        }
+    }
+    int32 NodeY = 140;
+    for (const FName& ComponentName : ComponentNames)
+    {
+        UK2Node_VariableGet* ComponentGet = AIStudioCreateVariableGetNode(Graph, ComponentName, 520, NodeY);
+        UEdGraphPin* ComponentPin = AIStudioFindFirstOutputPin(ComponentGet);
+        for (const TSharedPtr<FJsonValue>& Value : BindingValues)
+        {
+            const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr;
+            if (!Binding.IsValid())
+            {
+                continue;
+            }
+            const FString VariableName = Binding->GetStringField(TEXT("variable_name"));
+            const FString VariableType = Binding->GetStringField(TEXT("variable_type")).ToLower();
+            const FString ParameterName = Binding->GetStringField(TEXT("parameter_name"));
+            FName FunctionName = NAME_None;
+            if (VariableType == TEXT("real") || VariableType == TEXT("float") || VariableType == TEXT("double"))
+            {
+                FunctionName = FName(TEXT("SetNiagaraVariableFloat"));
+            }
+            else if (VariableType == TEXT("bool") || VariableType == TEXT("boolean"))
+            {
+                FunctionName = FName(TEXT("SetNiagaraVariableBool"));
+            }
+            else if (VariableType == TEXT("linearcolor") || VariableType == TEXT("linear_color") || VariableType == TEXT("color"))
+            {
+                FunctionName = FName(TEXT("SetNiagaraVariableLinearColor"));
+            }
+            else if (VariableType == TEXT("vector") || VariableType == TEXT("vec3"))
+            {
+                FunctionName = FName(TEXT("SetNiagaraVariableVec3"));
+            }
+            const UFunction* Function = FunctionName.IsNone() ? nullptr : UNiagaraComponent::StaticClass()->FindFunctionByName(FunctionName);
+            if (!Function)
+            {
+                continue;
+            }
+            const FString SetterNodeName = FString::Printf(TEXT("AIStudio_FXBind_%s_%s"), *ComponentName.ToString(), *VariableName);
+            bool bAlreadyExists = false;
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (Node && Node->GetName() == SetterNodeName)
+                {
+                    bAlreadyExists = true;
+                    break;
+                }
+            }
+            if (bAlreadyExists)
+            {
+                const TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+                Row->SetStringField(TEXT("component_name"), ComponentName.ToString());
+                Row->SetStringField(TEXT("variable_name"), VariableName);
+                Row->SetStringField(TEXT("parameter_name"), ParameterName);
+                Row->SetStringField(TEXT("function"), FunctionName.ToString());
+                Row->SetBoolField(TEXT("already_exists"), true);
+                Row->SetBoolField(TEXT("exec_connected"), true);
+                Row->SetBoolField(TEXT("self_connected"), true);
+                Row->SetBoolField(TEXT("value_connected"), true);
+                Created.Add(MakeShared<FJsonValueObject>(Row));
+                continue;
+            }
+            UK2Node_VariableGet* VariableGet = AIStudioCreateVariableGetNode(Graph, FName(*VariableName), 840, NodeY);
+            UK2Node_CallFunction* Setter = NewObject<UK2Node_CallFunction>(Graph);
+            Graph->Modify();
+            Graph->AddNode(Setter, true, false);
+            Setter->CreateNewGuid();
+            Setter->PostPlacedNewNode();
+            Setter->SetFromFunction(Function);
+            Setter->NodePosX = 1180;
+            Setter->NodePosY = NodeY;
+            Setter->AllocateDefaultPins();
+            Setter->Rename(*SetterNodeName);
+
+            UEdGraphPin* ExecutePin = Setter->FindPin(UEdGraphSchema_K2::PN_Execute);
+            UEdGraphPin* ThenPin = Setter->FindPin(UEdGraphSchema_K2::PN_Then);
+            UEdGraphPin* SelfPin = Setter->FindPin(UEdGraphSchema_K2::PN_Self);
+            UEdGraphPin* NamePin = Setter->FindPin(TEXT("InVariableName"));
+            UEdGraphPin* ValuePin = Setter->FindPin(TEXT("InValue"));
+            UEdGraphPin* VariablePin = AIStudioFindFirstOutputPin(VariableGet);
+            const bool bExec = ChainExec && ExecutePin && K2Schema->TryCreateConnection(ChainExec, ExecutePin);
+            const bool bSelf = ComponentPin && SelfPin && K2Schema->TryCreateConnection(ComponentPin, SelfPin);
+            const bool bValue = VariablePin && ValuePin && K2Schema->TryCreateConnection(VariablePin, ValuePin);
+            if (NamePin)
+            {
+                NamePin->DefaultValue = ParameterName;
+            }
+            if (ThenPin)
+            {
+                ChainExec = ThenPin;
+            }
+            const TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+            Row->SetStringField(TEXT("component_name"), ComponentName.ToString());
+            Row->SetStringField(TEXT("variable_name"), VariableName);
+            Row->SetStringField(TEXT("parameter_name"), ParameterName);
+            Row->SetStringField(TEXT("function"), FunctionName.ToString());
+            Row->SetBoolField(TEXT("exec_connected"), bExec);
+            Row->SetBoolField(TEXT("self_connected"), bSelf);
+            Row->SetBoolField(TEXT("value_connected"), bValue);
+            Created.Add(MakeShared<FJsonValueObject>(Row));
+            NodeY += 96;
+        }
+        NodeY += 160;
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    AIStudioSaveAssetPackage(Blueprint);
+    Root->SetArrayField(TEXT("bindings_created"), Created);
+    Root->SetNumberField(TEXT("binding_count"), Created.Num());
+    Root->SetBoolField(TEXT("ok"), Created.Num() > 0);
+    Root->SetStringField(TEXT("python_call"), TEXT("unreal.AIStudioBridgeLibrary.bind_niagara_user_parameters_on_begin_play(blueprint, component_names, bindings_json)"));
+#else
+    Root->SetStringField(TEXT("error"), TEXT("Tech Connector bridge wrappers are editor-only."));
+#endif
+    return AIStudioJsonString(Root);
+}

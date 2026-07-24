@@ -9,6 +9,7 @@ new index.
 """
 
 import json
+import re
 import time
 from typing import Any
 
@@ -19,6 +20,9 @@ from tech_connector.services.unreal.unreal_operation_service import (
     UNREAL_OPERATIONS,
     unreal_operation_payload,
     unreal_prompt_to_operation,
+)
+from tech_connector.services.unreal.unreal_capability_inventory_service import (
+    build_unreal_capability_inventory,
 )
 
 DCC = "Unreal"
@@ -32,6 +36,13 @@ def _entrypoint_for_spec(spec) -> str:
     if spec.mode == "context_call":
         return spec.context_call
     return spec.function or spec.operation or spec.context_call
+
+
+def _python_method_name(function_name: str) -> str:
+    return "".join(
+        ("_" + char.lower()) if char.isupper() and index else char.lower()
+        for index, char in enumerate(function_name or "")
+    )
 
 
 def _arg_schema(args: list[dict[str, Any]]) -> dict[str, Any]:
@@ -53,23 +64,115 @@ def _json_row_value(row: dict[str, Any], key: str, fallback: Any) -> Any:
     value = row.get(key)
     if not value:
         return fallback
+    try:
+        return json.loads(value)
+    except Exception:
+        return fallback
 
 
 def _tokens(text: str) -> set[str]:
-    normalized = "".join(ch.lower() if ch.isalnum() else " " for ch in text or "")
-    return {part for part in normalized.split() if len(part) > 2}
+    expanded = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", text or "")
+    expanded = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", expanded)
+    normalized = "".join(ch.lower() if ch.isalnum() else " " for ch in expanded)
+    tokens = {part for part in normalized.split() if len(part) > 2}
+    for part in list(tokens):
+        if len(part) > 5 and part.endswith("es"):
+            tokens.add(part[:-2])
+        elif len(part) > 4 and part.endswith("s"):
+            tokens.add(part[:-1])
+    return tokens
+
+
+def _api_name_search_terms(text: str) -> list[str]:
+    stopwords = {
+        "add", "and", "build", "create", "delete", "edit", "find", "get",
+        "make", "remove", "set", "the", "then", "with",
+    }
+    ordered_tokens = [
+        part
+        for part in "".join(ch.lower() if ch.isalnum() else " " for ch in text or "").split()
+        if len(part) > 2 and part not in stopwords
+    ]
+    terms = []
+    for width in (3, 2):
+        for index in range(max(0, len(ordered_tokens) - width + 1)):
+            terms.append("_".join(ordered_tokens[index:index + width]))
+    terms.extend(ordered_tokens)
+    return list(dict.fromkeys(terms))[:12]
+
+
+def _search_python_api_natural(
+    store,
+    project_id: int,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    terms = _api_name_search_terms(query)
+    query_tokens = list(_tokens(query))
+    corrected = store.suggest_python_api_terms(query_tokens)
+    terms.extend(corrected)
+    terms = list(dict.fromkeys(terms))
+    frequencies = store.python_api_term_frequencies([*query_tokens, *corrected])
+    discriminating = [
+        term
+        for term, _ in sorted(frequencies.items(), key=lambda item: (item[1], item[0]))
+    ][:4]
+    focused_rows = []
+    focused_strength: dict[str, int] = {}
+    for width in range(2, min(4, len(discriminating)) + 1):
+        rows = store.search_python_api_fts(
+            project_id,
+            DCC,
+            discriminating[:width],
+            limit=max(40, limit * 8),
+            match_all=True,
+        )
+        focused_rows.extend(rows)
+        for row in rows:
+            qualified = str(row.get("qualified_name") or "")
+            focused_strength[qualified] = max(focused_strength.get(qualified, 0), 60 - width * 10)
+    broad_rows = store.search_python_api_fts(
+        project_id,
+        DCC,
+        terms,
+        limit=max(80, limit * 16),
+    )
+    candidates = {
+        str(row.get("qualified_name") or ""): row
+        for row in [*focused_rows, *broad_rows]
+        if row.get("qualified_name")
+    }
+    if not candidates:
+        for term in terms[:4]:
+            for row in store.search_python_api_names(project_id, DCC, term, limit=max(20, limit * 4)):
+                qualified = str(row.get("qualified_name") or "")
+                if qualified:
+                    candidates.setdefault(qualified, row)
+    score_query = query + (" " + " ".join(corrected) if corrected else "")
+    ranked = sorted(
+        candidates.values(),
+        key=lambda row: (
+            _score_row(row, score_query, ("qualified_name", "signature", "docstring", "object_type"))
+            + focused_strength.get(str(row.get("qualified_name") or ""), 0),
+            -len(str(row.get("qualified_name") or "")),
+        ),
+        reverse=True,
+    )
+    return ranked[:limit]
 
 
 def _score_row(row: dict[str, Any], query: str, fields: tuple[str, ...]) -> int:
     query_tokens = _tokens(query)
     if not query_tokens:
         return 0
+    qualified = str(row.get("qualified_name") or row.get("name") or "")
     haystack = " ".join(str(row.get(field) or "") for field in fields)
     metadata = _json_row_value(row, "metadata_json", {})
     if metadata:
         haystack += " " + json.dumps(metadata, default=str)
     hay_tokens = _tokens(haystack)
-    score = len(query_tokens & hay_tokens) * 10
+    score = len(query_tokens & _tokens(qualified)) * 20
+    score += len(query_tokens & hay_tokens) * 5
     compact_query = (query or "").lower().replace(" ", "_")
     compact_hay = haystack.lower().replace(" ", "_")
     if compact_query and compact_query in compact_hay:
@@ -150,10 +253,6 @@ def _validate_schema(schema: dict[str, Any], params: dict[str, Any]) -> tuple[li
         if isinstance(spec, dict):
             errors.extend(_validate_value(key, value, spec))
     return missing, errors
-    try:
-        return json.loads(value)
-    except Exception:
-        return fallback
 
 
 def sync_unreal_capability_graph(project_root: str | None = None) -> dict[str, Any]:
@@ -163,6 +262,7 @@ def sync_unreal_capability_graph(project_root: str | None = None) -> dict[str, A
         project = ensure_project(store, project_root)
         capability_count = 0
         function_count = 0
+        inventory = build_unreal_capability_inventory(project_root)
 
         for name, spec in UNREAL_CAPABILITIES.items():
             data = spec.to_dict()
@@ -300,6 +400,67 @@ def sync_unreal_capability_graph(project_root: str | None = None) -> dict[str, A
             capability_count += 1
             function_count += 1
 
+        for function_name, row in (inventory.get("plugin_functions") or {}).items():
+            python_call = row.get("python_call") or ""
+            store.upsert_function(
+                project.id,
+                DCC,
+                function_name=_python_method_name(function_name),
+                qualified_name=python_call.split("(", 1)[0] if python_call else f"unreal.AIStudioBridgeLibrary.{_python_method_name(function_name)}",
+                source_path=row.get("source") or "plugins/AIStudioBridge/AIStudioBridgeCapabilities.json",
+                signature=python_call,
+                docstring=row.get("name") or function_name,
+                metadata={
+                    "source": "canonical_unreal_capability_inventory",
+                    "location": row.get("location"),
+                    "plugin_function": function_name,
+                    "aliases": row.get("aliases") or [],
+                    "implementation_state": row.get("implementation_state"),
+                },
+            )
+            store.upsert_symbol(
+                project.id,
+                DCC,
+                symbol_key=f"plugin_function.{function_name}",
+                symbol_kind="plugin_function",
+                display_name=function_name,
+                qualified_name=python_call,
+                source_ref=row.get("source") or "plugins/AIStudioBridge/AIStudioBridgeCapabilities.json",
+                summary=row.get("name") or function_name,
+                metadata={"source": "canonical_unreal_capability_inventory", "aliases": row.get("aliases") or []},
+            )
+            function_count += 1
+
+        for qualified_name, row in (inventory.get("unreal_tools_functions") or {}).items():
+            store.upsert_function(
+                project.id,
+                DCC,
+                function_name=qualified_name.rsplit(".", 1)[-1],
+                qualified_name=qualified_name,
+                source_path=row.get("source") or "unreal_tools",
+                signature=f"{qualified_name}({', '.join(row.get('required') or [])})",
+                docstring=row.get("docstring") or qualified_name,
+                metadata={
+                    "source": "canonical_unreal_capability_inventory",
+                    "location": row.get("location"),
+                    "module": row.get("module"),
+                    "required": row.get("required") or [],
+                    "implementation_state": row.get("implementation_state"),
+                },
+            )
+            store.upsert_symbol(
+                project.id,
+                DCC,
+                symbol_key=f"unreal_tools_function.{qualified_name}",
+                symbol_kind="unreal_tools_function",
+                display_name=qualified_name,
+                qualified_name=qualified_name,
+                source_ref=row.get("source") or "unreal_tools",
+                summary=row.get("docstring") or qualified_name,
+                metadata={"source": "canonical_unreal_capability_inventory", "module": row.get("module")},
+            )
+            function_count += 1
+
         return {
             "success": True,
             "project_id": project.id,
@@ -323,14 +484,42 @@ def search_unreal_capability_graph(
     try:
         project = ensure_project(store, project_root)
         q = query or ""
+        natural_python_api = _search_python_api_natural(store, project.id, q, limit)
+        query_parts = _tokens(q)
+        exact_style = q.startswith("unreal.") or len(query_parts) <= 2
+        direct_python_api = (
+            store.search_python_api(project.id, DCC, q, limit=limit)
+            if exact_style or len(natural_python_api) < limit
+            else []
+        )
+        python_api = []
+        seen_api = set()
+        for row in [*natural_python_api, *direct_python_api]:
+            qualified = row.get("qualified_name")
+            if qualified in seen_api:
+                continue
+            seen_api.add(qualified)
+            python_api.append(row)
+            if len(python_api) >= limit:
+                break
+        capabilities = store.search_capabilities(project.id, q, limit=limit)
+        use_deep_legacy_search = exact_style or (not capabilities and not python_api)
         return {
             "success": True,
             "query": q,
             "project_id": project.id,
-            "capabilities": store.search_capabilities(project.id, q, limit=limit),
-            "functions": store.search_functions(project.id, q, limit=limit, dcc=DCC),
-            "python_api": store.search_python_api(project.id, DCC, q, limit=limit),
-            "symbols": store.search_symbols(project.id, DCC, q, limit=limit),
+            "capabilities": capabilities,
+            "functions": (
+                store.search_functions(project.id, q, limit=limit, dcc=DCC)
+                if use_deep_legacy_search
+                else []
+            ),
+            "python_api": python_api,
+            "symbols": (
+                store.search_symbols(project.id, DCC, q, limit=limit)
+                if use_deep_legacy_search
+                else []
+            ),
         }
     finally:
         store.close()

@@ -254,7 +254,7 @@ class AdaptiveExecutionState:
         route_confidence = float(data.get("confidence") or 0.5)
         target_confidence = route_confidence if data.get("target_identifier") or active_file else min(0.45, route_confidence)
         from tech_connector.services.execution_contract_service import build_execution_contract
-        from tech_connector.services.prompt_intent_service import parse_intent_frame
+        from tech_connector.services.prompt.prompt_intent_service import parse_intent_frame
         execution_contract = build_execution_contract(
             prompt,
             active_file=active_file or str(data.get("target_identifier") or ""),
@@ -349,7 +349,7 @@ class AdaptiveExecutionState:
         goal_id = str(goal.get("goal_id") or self.current_goal_id or "")
         if not goal_id:
             raise ValueError("Cannot commit a goal result without a goal id")
-        from tech_connector.services.answer_sufficiency_service import validate_answer_sufficiency
+        from tech_connector.services.reasoning.answer_sufficiency_service import validate_answer_sufficiency
 
         adequacy = validate_answer_sufficiency(self, result, goal=goal)
         externally_valid = True if validated is None else bool(validated)

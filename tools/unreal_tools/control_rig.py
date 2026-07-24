@@ -607,3 +607,92 @@ def build_modular_fk_control_rig(skeletal_mesh_name, rig_name, joint_map):
 
 #control_rig_bp = build_modular_fk_control_rig("/Game/Characters/SK_juice", "/Game/Characters/CR_SK_juicy5")
 
+
+def _json_result(**payload):
+    import json
+
+    return json.dumps(payload, indent=2, default=str)
+
+
+def list_controls(rig_path):
+    rig = unreal.load_asset(rig_path)
+    if not rig:
+        return _json_result(ok=False, error="control_rig_not_found", rig_path=rig_path)
+    hierarchy = None
+    try:
+        hierarchy = rig.hierarchy
+    except Exception:
+        try:
+            hierarchy = rig.get_hierarchy()
+        except Exception:
+            pass
+    if not hierarchy:
+        return _json_result(ok=False, status="api_unavailable", rig_path=rig_path)
+    rows = []
+    try:
+        for key in hierarchy.get_all_keys():
+            if "control" in str(key.type).lower():
+                rows.append({"name": str(key.name), "type": str(key.type)})
+    except Exception as exc:
+        return _json_result(ok=False, error=str(exc), rig_path=rig_path)
+    return _json_result(ok=True, rig_path=rig_path, controls=rows, count=len(rows))
+
+
+def set_control_property(rig_path, control_name, property_name, value, save=True):
+    rig = unreal.load_asset(rig_path)
+    if not rig:
+        return _json_result(ok=False, error="control_rig_not_found", rig_path=rig_path)
+    try:
+        rig.set_editor_property(str(property_name), value)
+    except Exception as exc:
+        return _json_result(ok=False, error=str(exc), rig_path=rig_path, control_name=control_name, property_name=property_name)
+    if save:
+        unreal.EditorAssetLibrary.save_loaded_asset(rig, False)
+    return _json_result(ok=True, rig_path=rig_path, control_name=control_name, property_name=property_name, value=value, saved=bool(save))
+
+
+def set_control_default(rig_path, control_name, value, save=True):
+    return set_control_property(rig_path, control_name, "initial_value", value, save=save)
+
+
+def rename_control(rig_path, old_name, new_name, save=True):
+    rig = unreal.load_asset(rig_path)
+    if not rig:
+        return _json_result(ok=False, error="control_rig_not_found", rig_path=rig_path)
+    try:
+        controller = rig.get_controller()
+        renamed = bool(controller.rename_element(old_name, new_name))
+    except Exception as exc:
+        return _json_result(ok=False, status="api_unavailable", error=str(exc), rig_path=rig_path)
+    if save:
+        unreal.EditorAssetLibrary.save_loaded_asset(rig, False)
+    return _json_result(ok=renamed, rig_path=rig_path, old_name=old_name, new_name=new_name, saved=bool(save))
+
+
+def add_rig_element(rig_path, element_name, element_type, parent_name="", save=True):
+    rig = unreal.load_asset(rig_path)
+    if not rig:
+        return _json_result(ok=False, error="control_rig_not_found", rig_path=rig_path)
+    try:
+        controller = rig.get_controller()
+        added = bool(controller.add_element(str(element_type), str(element_name), str(parent_name or "")))
+    except Exception as exc:
+        return _json_result(ok=False, status="api_unavailable", error=str(exc), rig_path=rig_path)
+    if save:
+        unreal.EditorAssetLibrary.save_loaded_asset(rig, False)
+    return _json_result(ok=added, rig_path=rig_path, element_name=element_name, element_type=element_type, parent_name=parent_name, saved=bool(save))
+
+
+def connect_rig_nodes(rig_path, source_node, source_pin, target_node, target_pin, save=True):
+    rig = unreal.load_asset(rig_path)
+    if not rig:
+        return _json_result(ok=False, error="control_rig_not_found", rig_path=rig_path)
+    try:
+        controller = rig.get_controller()
+        linked = bool(controller.add_link(f"{source_node}.{source_pin}", f"{target_node}.{target_pin}"))
+    except Exception as exc:
+        return _json_result(ok=False, status="api_unavailable", error=str(exc), rig_path=rig_path)
+    if save:
+        unreal.EditorAssetLibrary.save_loaded_asset(rig, False)
+    return _json_result(ok=linked, rig_path=rig_path, source=f"{source_node}.{source_pin}", target=f"{target_node}.{target_pin}", saved=bool(save))
+

@@ -17,10 +17,13 @@ from tech_connector.services.ollama_service import (
     FALLBACK_CODE_MODEL,
     FALLBACK_GENERAL_MODEL,
     as_mcphost_model,
+    normalize_ollama_model_name,
+    unload_ollama_models,
 )
 from tech_connector.services.model_provider_service import (
     is_provider_model,
     is_credit_or_quota_failure,
+    provider_for_model,
     provider_status_lines,
     resolve_model_for_policy,
 )
@@ -264,6 +267,7 @@ class MCPHostManager:
     def __init__(self, settings):
         self.settings = settings
         self.sessions = {}
+        self.local_models_used = set()
         self.use_fallback_models = bool(settings.get("use_fallback_models", False))
 
     def set_use_fallback_models(self, enabled):
@@ -307,6 +311,8 @@ class MCPHostManager:
             return True, f"{role} session already running.", ""
 
         session.model = model_override or self.get_model_for_role(role)
+        if provider_for_model(session.model) == "ollama":
+            self.local_models_used.add(normalize_ollama_model_name(session.model))
 
         ok, cmd_display, error = start_mcphost(
             bridge=session.bridge,
@@ -333,10 +339,7 @@ class MCPHostManager:
         return True, f"Sent to {role} session."
 
     def mark_cloud_unavailable_if_needed(self, text):
-        if is_credit_or_quota_failure(text):
-            self.settings["cloud_model_unavailable"] = True
-            return True
-        return False
+        return is_credit_or_quota_failure(text)
 
     def stop_session(self, role):
         session = self.sessions.get(role)
@@ -352,3 +355,7 @@ class MCPHostManager:
             session.bridge.stop()
             session.running = False
             session.ready = False
+
+    def release_local_models(self):
+        """Unload Ollama models this manager asked MCPHost to use."""
+        return unload_ollama_models(sorted(self.local_models_used))

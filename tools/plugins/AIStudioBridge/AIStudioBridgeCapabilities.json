@@ -8,7 +8,88 @@
       "label": "Inspect Anim Blueprint Graph",
       "function": "InspectAnimBlueprintGraph",
       "python_call": "unreal.AIStudioBridgeLibrary.inspect_anim_blueprint_graph(anim_bp)",
+      "operation_aliases": ["blueprint.scan", "anim_bp.inspect_graph_cpp"],
       "summary": "Read graph, node, pin, and link topology from an AnimBlueprint."
+    },
+    {
+      "name": "add_anim_graph_state",
+      "label": "Add Anim Graph State",
+      "function": "AddAnimGraphState",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_anim_graph_state(anim_bp, state_machine, state_name, animation_asset)",
+      "operation_aliases": ["anim_graph.add_state", "anim_graph.add_state_cpp"],
+      "summary": "Create an AnimBlueprint state-machine state and optionally assign a sequence player. The C++ body is build-validated; target-asset live validation is still required before claiming mutation success."
+    },
+    {
+      "name": "add_anim_graph_state_machine",
+      "label": "Add Anim Graph State Machine",
+      "function": "AddAnimGraphStateMachine",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_anim_graph_state_machine(anim_bp, state_machine)",
+      "operation_aliases": ["anim_graph.add_state_machine"],
+      "summary": "Create or reuse a named state-machine node and bound graph in an Animation Blueprint AnimGraph."
+    },
+    {
+      "name": "add_anim_graph_transition_rule",
+      "label": "Add Anim Graph Transition Rule",
+      "function": "AddAnimGraphTransitionRule",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_anim_graph_transition_rule(anim_bp, state_machine, from_state, to_state, rule_expression)",
+      "operation_aliases": ["anim_graph.add_transition_rule", "anim_graph.add_transition_rule_cpp"],
+      "summary": "Create an AnimBlueprint state-machine transition edge and support constant true/false rule defaults. Complex rule graph synthesis still requires a separate validated capability."
+    },
+    {
+      "name": "delete_anim_graph_state",
+      "label": "Delete Anim Graph State",
+      "function": "DeleteAnimGraphState",
+      "python_call": "unreal.AIStudioBridgeLibrary.delete_anim_graph_state(anim_bp, state_machine, state_name)",
+      "operation_aliases": ["animation.delete_state"],
+      "summary": "Delete an AnimBlueprint state-machine state through a reflected C++ editor wrapper with readback."
+    },
+    {
+      "name": "delete_anim_graph_transition",
+      "label": "Delete Anim Graph Transition",
+      "function": "DeleteAnimGraphTransition",
+      "python_call": "unreal.AIStudioBridgeLibrary.delete_anim_graph_transition(anim_bp, state_machine, from_state, to_state)",
+      "operation_aliases": ["animation.delete_transition"],
+      "summary": "Delete an AnimBlueprint state-machine transition through a reflected C++ editor wrapper with readback."
+    },
+    {
+      "name": "rename_anim_graph_state",
+      "label": "Rename Anim Graph State",
+      "function": "RenameAnimGraphState",
+      "python_call": "unreal.AIStudioBridgeLibrary.rename_anim_graph_state(anim_bp, state_machine, old_state_name, new_state_name)",
+      "operation_aliases": ["animation.rename_state"],
+      "summary": "Rename an AnimBlueprint state-machine state through a reflected C++ editor wrapper with readback."
+    },
+    {
+      "name": "set_anim_graph_transition_rule",
+      "label": "Set Anim Graph Transition Rule",
+      "function": "SetAnimGraphTransitionRule",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_anim_graph_transition_rule(anim_bp, state_machine, from_state, to_state, rule_expression)",
+      "operation_aliases": ["animation.set_state_transition_rule"],
+      "summary": "Set an existing AnimBlueprint transition rule through a reflected C++ editor wrapper. Constant true/false rules are supported; complex expression graph synthesis remains separate."
+    },
+    {
+      "name": "synthesize_anim_graph_transition_rule_expression",
+      "label": "Synthesize Anim Graph Transition Rule Expression",
+      "function": "SynthesizeAnimGraphTransitionRuleExpression",
+      "python_call": "unreal.AIStudioBridgeLibrary.synthesize_anim_graph_transition_rule_expression(anim_bp, state_machine, from_state, to_state, rule_expression)",
+      "operation_aliases": ["anim_graph.synthesize_transition_rule_expression"],
+      "summary": "Create Blueprint transition-rule nodes for bounded prompt-derived boolean expressions and wire the final bool into bCanEnterTransition with readback."
+    },
+    {
+      "name": "wire_anim_graph_output_pose",
+      "label": "Wire Anim Graph Output Pose",
+      "function": "WireAnimGraphOutputPose",
+      "python_call": "unreal.AIStudioBridgeLibrary.wire_anim_graph_output_pose(anim_bp, state_machine)",
+      "operation_aliases": ["anim_graph.wire_state_machine_to_output_pose", "anim_graph.wire_output_pose_cpp"],
+      "summary": "Wire an AnimBlueprint state machine pose output into the AnimGraph output pose. The C++ body is build-validated; target-asset live validation is still required before claiming mutation success."
+    },
+    {
+      "name": "compile_and_save_anim_blueprint",
+      "label": "Compile And Save Anim Blueprint",
+      "function": "CompileAndSaveAnimBlueprint",
+      "python_call": "unreal.AIStudioBridgeLibrary.compile_and_save_anim_blueprint(anim_bp)",
+      "operation_aliases": ["blueprint.compile_and_save", "anim_bp.compile"],
+      "summary": "Compile and save an AnimBlueprint through the AIStudioBridge C++ wrapper."
     },
     {
       "name": "inspect_animation_sequence",
@@ -16,6 +97,14 @@
       "function": "InspectAnimationSequence",
       "python_call": "unreal.AIStudioBridgeLibrary.inspect_animation_sequence(animation)",
       "summary": "Read skeleton, duration, sample rate, sampled keys, and root-motion facts."
+    },
+    {
+      "name": "configure_blend_space",
+      "label": "Configure Blend Space",
+      "function": "ConfigureBlendSpace",
+      "python_call": "unreal.AIStudioBridgeLibrary.configure_blend_space(blend_space, samples_json, axis_x_json, axis_y_json, save)",
+      "operation_aliases": ["unreal.create_blendspace"],
+      "summary": "Configure BlendSpace axes, add skeleton-compatible animation samples, save, and return per-sample readback."
     },
     {
       "name": "inspect_character_in_pie",
@@ -51,6 +140,245 @@
       "function": "SearchBlueprintNodeActions",
       "python_call": "unreal.AIStudioBridgeLibrary.search_blueprint_node_actions(blueprint, graph_name, query, max_results)",
       "summary": "Search context-filtered live Blueprint palette actions and return ranked exact action identifiers without modifying the source Blueprint."
+    },
+    {
+      "name": "configure_blueprint_replication",
+      "label": "Configure Blueprint Replication",
+      "function": "ConfigureBlueprintReplication",
+      "python_call": "unreal.AIStudioBridgeLibrary.configure_blueprint_replication(blueprint, replicated_variables, rep_notify_variables, server_rpc_functions, reliable, save)",
+      "operation_aliases": ["blueprint.configure_replication"],
+      "summary": "Set Blueprint member variables to replicated or RepNotify, create missing OnRep and server RPC function graphs, apply server/reliable flags, compile, save, and return metadata readback."
+    },
+    {
+      "name": "ensure_blueprint_function",
+      "label": "Ensure Blueprint Function",
+      "function": "EnsureBlueprintFunction",
+      "python_call": "unreal.AIStudioBridgeLibrary.ensure_blueprint_function(blueprint, function_name, inputs_json, outputs_json, save)",
+      "operation_aliases": ["blueprint.add_function"],
+      "summary": "Create or reuse a Blueprint function graph, author typed input/output pins, compile, save, and return pin readback."
+    },
+    {
+      "name": "rename_blueprint_symbol",
+      "label": "Rename Blueprint Symbol",
+      "function": "RenameBlueprintSymbol",
+      "python_call": "unreal.AIStudioBridgeLibrary.rename_blueprint_symbol(blueprint, old_name, new_name, save)",
+      "operation_aliases": ["project.rename_symbol"],
+      "summary": "Rename a Blueprint member variable or function graph with structural compile/save readback."
+    },
+    {
+      "name": "bind_niagara_user_parameters_on_begin_play",
+      "label": "Bind Niagara User Parameters On Begin Play",
+      "function": "BindNiagaraUserParametersOnBeginPlay",
+      "python_call": "unreal.AIStudioBridgeLibrary.bind_niagara_user_parameters_on_begin_play(blueprint, component_names, bindings_json)",
+      "summary": "Create Blueprint BeginPlay setter calls that bind reflected Blueprint values to Niagara user parameters and return graph readback."
+    },
+    {
+      "name": "list_niagara_module_inputs",
+      "label": "List Niagara Module Inputs",
+      "function": "ListNiagaraModuleInputs",
+      "python_call": "unreal.AIStudioBridgeLibrary.list_niagara_module_inputs(system_path, emitter_name)",
+      "operation_aliases": ["niagara.list_module_inputs"],
+      "summary": "Read emitter stack topology and resolved module input values through UE 5.8 Niagara external edit utilities."
+    },
+    {
+      "name": "set_niagara_user_parameter",
+      "label": "Set Niagara User Parameter",
+      "function": "SetNiagaraUserParameter",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_niagara_user_parameter(system_path, parameter_name, value_json, value_type)",
+      "operation_aliases": ["niagara.set_user_parameter"],
+      "summary": "Create or replace a typed Niagara user parameter, save the system, and return readback."
+    },
+    {
+      "name": "set_niagara_renderer_property",
+      "label": "Set Niagara Renderer Property",
+      "function": "SetNiagaraRendererProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_niagara_renderer_property(system_path, emitter_name, renderer_index, property_name, value_json)",
+      "operation_aliases": ["niagara.set_renderer_property"],
+      "summary": "Mutate a renderer property through Niagara's external edit data contract and save the system."
+    },
+    {
+      "name": "set_niagara_module_input",
+      "label": "Set Niagara Module Input",
+      "function": "SetNiagaraModuleInput",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_niagara_module_input(system_path, emitter_name, script_name, module_name, input_name, value_json)",
+      "operation_aliases": ["niagara.set_module_input"],
+      "summary": "Resolve an exact emitter/script/module/input stack reference, write its typed value, and save with error readback."
+    },
+    {
+      "name": "remove_niagara_emitter",
+      "label": "Remove Niagara Emitter",
+      "function": "RemoveNiagaraEmitter",
+      "python_call": "unreal.AIStudioBridgeLibrary.remove_niagara_emitter(system_path, emitter_name)",
+      "operation_aliases": ["niagara.delete_emitter"],
+      "summary": "Remove a named emitter with Niagara's supported external edit utility and save the system."
+    },
+    {
+      "name": "set_niagara_emitter_property",
+      "label": "Set Niagara Emitter Property",
+      "function": "SetNiagaraEmitterProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_niagara_emitter_property(system_path, emitter_name, property_name, value_json)",
+      "operation_aliases": ["niagara.set_emitter_property"],
+      "summary": "Mutate emitter data through Niagara's external edit data contract and save with readback."
+    },
+    {
+      "name": "create_pose_search_schema",
+      "label": "Create Pose Search Schema",
+      "function": "CreatePoseSearchSchema",
+      "python_call": "unreal.AIStudioBridgeLibrary.create_pose_search_schema(skeleton_path, asset_path, sample_rate)",
+      "operation_aliases": ["motion_matching.create_schema"],
+      "summary": "Create and save a Pose Search schema with a concrete skeleton and sample rate."
+    },
+    {
+      "name": "add_pose_search_schema_channel",
+      "label": "Add Pose Search Schema Channel",
+      "function": "AddPoseSearchSchemaChannel",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_pose_search_schema_channel(schema_path, channel_class_path, settings_json)",
+      "operation_aliases": ["motion_matching.add_schema_channel"],
+      "summary": "Instantiate a typed Pose Search feature channel, apply reflected settings, save, and report channel count."
+    },
+    {
+      "name": "create_pose_search_database",
+      "label": "Create Pose Search Database",
+      "function": "CreatePoseSearchDatabase",
+      "python_call": "unreal.AIStudioBridgeLibrary.create_pose_search_database(schema_path, asset_path)",
+      "operation_aliases": ["motion_matching.create_database"],
+      "summary": "Create and save a Pose Search database bound to a concrete schema."
+    },
+    {
+      "name": "add_pose_search_animation",
+      "label": "Add Pose Search Animation",
+      "function": "AddPoseSearchAnimation",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_pose_search_animation(database_path, animation_path)",
+      "operation_aliases": ["motion_matching.add_animation"],
+      "summary": "Add an animation asset idempotently to a Pose Search database and return count readback."
+    },
+    {
+      "name": "remove_pose_search_animation",
+      "label": "Remove Pose Search Animation",
+      "function": "RemovePoseSearchAnimation",
+      "python_call": "unreal.AIStudioBridgeLibrary.remove_pose_search_animation(database_path, animation_path)",
+      "operation_aliases": ["motion_matching.remove_animation"],
+      "summary": "Remove a concrete animation asset from a Pose Search database and return count readback."
+    },
+    {
+      "name": "create_physics_asset",
+      "label": "Create Physics Asset",
+      "function": "CreatePhysicsAsset",
+      "python_call": "unreal.AIStudioBridgeLibrary.create_physics_asset(skeletal_mesh_path, asset_path, assign_to_mesh)",
+      "operation_aliases": ["physics.create_physics_asset"],
+      "summary": "Generate a PhysicsAsset from a skeletal mesh, optionally assign it, save, and report body and constraint counts."
+    },
+    {
+      "name": "add_physics_body",
+      "label": "Add Physics Body",
+      "function": "AddPhysicsBody",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_physics_body(physics_asset_path, bone_name, shape_type)",
+      "operation_aliases": ["physics.add_body"],
+      "summary": "Create a bone body with sphere, box, or capsule geometry and save it with index readback."
+    },
+    {
+      "name": "add_physics_constraint",
+      "label": "Add Physics Constraint",
+      "function": "AddPhysicsConstraint",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_physics_constraint(physics_asset_path, bone_name_a, bone_name_b)",
+      "operation_aliases": ["physics.add_constraint"],
+      "summary": "Create and bind a PhysicsAsset constraint between two existing bone bodies, save, and return index readback."
+    },
+    {
+      "name": "inspect_physics_asset",
+      "label": "Inspect Physics Asset",
+      "function": "InspectPhysicsAsset",
+      "python_call": "unreal.AIStudioBridgeLibrary.inspect_physics_asset(physics_asset_path)",
+      "operation_aliases": ["physics.list_bodies", "physics.list_constraints"],
+      "summary": "Read body, bone, shape, constraint, and profile topology from a PhysicsAsset."
+    },
+    {
+      "name": "set_physics_body_property",
+      "label": "Set Physics Body Property",
+      "function": "SetPhysicsBodyProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_physics_body_property(physics_asset_path, body_name, property_name, value_json)",
+      "operation_aliases": ["physics.set_body_property"],
+      "summary": "Set a reflected property on a named PhysicsAsset body, save it, and return typed readback."
+    },
+    {
+      "name": "set_physics_constraint_property",
+      "label": "Set Physics Constraint Property",
+      "function": "SetPhysicsConstraintProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_physics_constraint_property(physics_asset_path, constraint_name, property_name, value_json)",
+      "operation_aliases": ["physics.set_constraint_property"],
+      "summary": "Set a reflected property on a named PhysicsAsset constraint template, save it, and return typed readback."
+    },
+    {
+      "name": "set_physics_profile_property",
+      "label": "Set Physics Profile Property",
+      "function": "SetPhysicsProfileProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_physics_profile_property(physics_asset_path, profile_name, property_name, value_json)",
+      "operation_aliases": ["physics.set_profile_property"],
+      "summary": "Set a reflected physical-animation or constraint-profile property across matching PhysicsAsset entries, save, and report changed counts."
+    },
+    {
+      "name": "list_physics_profiles",
+      "label": "List Physics Profiles",
+      "function": "ListPhysicsProfiles",
+      "python_call": "unreal.AIStudioBridgeLibrary.list_physics_profiles(physics_asset_path)",
+      "operation_aliases": ["physics.list_profiles"],
+      "summary": "List named physical-animation and constraint profiles with their assignment counts."
+    },
+    {
+      "name": "add_physics_profile",
+      "label": "Add Physics Profile",
+      "function": "AddPhysicsProfile",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_physics_profile(physics_asset_path, profile_name, profile_type, assign_all)",
+      "operation_aliases": ["physics.add_profile"],
+      "summary": "Create a physical-animation or constraint profile and optionally assign it to every compatible body or constraint."
+    },
+    {
+      "name": "remove_physics_profile",
+      "label": "Remove Physics Profile",
+      "function": "RemovePhysicsProfile",
+      "python_call": "unreal.AIStudioBridgeLibrary.remove_physics_profile(physics_asset_path, profile_name, profile_type)",
+      "operation_aliases": ["physics.remove_profile"],
+      "summary": "Remove a named physical-animation or constraint profile and all of its assignments."
+    },
+    {
+      "name": "create_known_asset_by_class_path",
+      "label": "Create Known Asset By Class Path",
+      "function": "CreateKnownAssetByClassPath",
+      "python_call": "unreal.AIStudioBridgeLibrary.create_known_asset_by_class_path(asset_path, class_path, initial_properties_json)",
+      "operation_aliases": ["asset.create_by_class_path"],
+      "summary": "Create a known Unreal asset class by reflected class path, apply typed initial properties from JSON, save, and return readback."
+    },
+    {
+      "name": "inspect_reflected_asset",
+      "label": "Inspect Reflected Asset",
+      "function": "InspectReflectedAsset",
+      "python_call": "unreal.AIStudioBridgeLibrary.inspect_reflected_asset(asset_path, property_names)",
+      "operation_aliases": ["asset.inspect_reflected"],
+      "summary": "Inspect reflected properties on any loaded Unreal asset and return typed exported values."
+    },
+    {
+      "name": "set_reflected_asset_property",
+      "label": "Set Reflected Asset Property",
+      "function": "SetReflectedAssetProperty",
+      "python_call": "unreal.AIStudioBridgeLibrary.set_reflected_asset_property(asset_path, property_name, value_json)",
+      "operation_aliases": ["asset.set_reflected_property"],
+      "summary": "Set a reflected asset property from JSON with type coercion, save, and read back the edited value."
+    },
+    {
+      "name": "add_object_reference_to_reflected_array",
+      "label": "Add Object Reference To Reflected Array",
+      "function": "AddObjectReferenceToReflectedArray",
+      "python_call": "unreal.AIStudioBridgeLibrary.add_object_reference_to_reflected_array(asset_path, property_name, object_path)",
+      "operation_aliases": ["asset.array_add_object_reference"],
+      "summary": "Append an object reference to a reflected UObject array property, save, and report the resulting array count."
+    },
+    {
+      "name": "remove_object_reference_from_reflected_array",
+      "label": "Remove Object Reference From Reflected Array",
+      "function": "RemoveObjectReferenceFromReflectedArray",
+      "python_call": "unreal.AIStudioBridgeLibrary.remove_object_reference_from_reflected_array(asset_path, property_name, object_path)",
+      "operation_aliases": ["asset.array_remove_object_reference"],
+      "summary": "Remove an object reference from a reflected UObject array property, save, and report the resulting array count."
     }
   ]
 }

@@ -90,12 +90,77 @@ class UnrealOperation:
 
 
 UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
+    "anim_graph.add_state_machine": UnrealOperation(
+        key="anim_graph.add_state_machine",
+        label="Unreal Anim Graph Add State Machine",
+        function="unreal_tools.animation.add_state_machine",
+        required=("anim_bp_path", "state_machine_name"),
+        mutates_project=True,
+        description="Add a new State Machine node to the AnimGraph of an Animation Blueprint.",
+    ),
+    "anim_graph.add_state": UnrealOperation(
+        key="anim_graph.add_state",
+        label="Unreal Anim Graph Add State",
+        function="unreal_tools.animation.add_state",
+        required=("anim_bp_path", "state_machine_name", "state_name"),
+        optional={"animation_asset_path": ""},
+        mutates_project=True,
+        description="Add a state (with optional animation asset) to a State Machine inside an Animation Blueprint.",
+    ),
+    "anim_graph.add_transition_rule": UnrealOperation(
+        key="anim_graph.add_transition_rule",
+        label="Unreal Anim Graph Add Transition Rule",
+        function="unreal_tools.animation.add_transition_rule",
+        required=("anim_bp_path", "state_machine_name", "from_state", "to_state", "rule_expression"),
+        mutates_project=True,
+        description="Add a transition rule between two states inside an Animation Blueprint State Machine.",
+    ),
+    "anim_graph.wire_state_machine_to_output_pose": UnrealOperation(
+        key="anim_graph.wire_state_machine_to_output_pose",
+        label="Unreal Anim Graph Wire State Machine to Output Pose",
+        function="unreal_tools.animation.wire_state_machine_to_output_pose",
+        required=("anim_bp_path", "state_machine_name"),
+        mutates_project=True,
+        description="Wire a State Machine node's output to the Output Pose node in an Animation Blueprint.",
+    ),
+    "anim_graph.synthesize_transition_rule_expression": UnrealOperation(
+        key="anim_graph.synthesize_transition_rule_expression",
+        label="Unreal Anim Graph Synthesize Transition Rule Expression",
+        function="unreal_tools.animation.synthesize_transition_rule_expression",
+        required=("anim_bp_path", "state_machine_name", "from_state", "to_state", "rule_expression"),
+        mutates_project=True,
+        description="Synthesize and apply a transition rule expression (e.g. variable comparison) between two states.",
+    ),
     "project.snapshot": UnrealOperation(
         key="project.snapshot",
         label="Unreal Project Snapshot",
         function="ai_studio.synthetic.project_snapshot",
         optional={"directory": "/Game/"},
         description="Gather loaded-level state plus core project asset inventory for model context.",
+    ),
+    "knowledge.search_sources": UnrealOperation(
+        key="knowledge.search_sources",
+        label="Search Knowledge Sources",
+        function="tech_connector.services.knowledge_research_service.search_public_sources",
+        required=("query",),
+        execution_host="desktop",
+        description="Search public sources for research.",
+    ),
+    "knowledge.extract_claims": UnrealOperation(
+        key="knowledge.extract_claims",
+        label="Extract Claims from Sources",
+        function="tech_connector.services.knowledge_research_service.extract_public_source_claims",
+        required=("sources",),
+        execution_host="desktop",
+        description="Extract claims from search results.",
+    ),
+    "knowledge.compare_approaches": UnrealOperation(
+        key="knowledge.compare_approaches",
+        label="Compare Approaches",
+        function="tech_connector.services.unreal.technique_currency_service.compare_technique_candidates",
+        required=("baseline", "candidates"),
+        execution_host="desktop",
+        description="Compare baseline technique against candidates.",
     ),
     "level.scan_loaded": UnrealOperation(
         key="level.scan_loaded",
@@ -923,8 +988,85 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         mutates_project=True,
         description="Add a channel/feature description (like feet alignment or history) to a Pose Search Schema.",
     ),
-
+    "blueprint.compile_and_save": UnrealOperation(
+        key="blueprint.compile_and_save",
+        label="Unreal Compile and Save Blueprint",
+        function="unreal_tools.blueprint.compile_and_save_blueprint",
+        required=("asset_path",),
+        mutates_project=True,
+        description="Compile a Blueprint and save it if compilation succeeds.",
+    ),
 }
+
+UNREAL_OPERATIONS_REQUIRING_IMPLEMENTATION_STRATEGY: set[str] = set()
+
+
+def build_unreal_editable_character_fx_params(text: str) -> dict[str, Any]:
+    """Build niagara.attach_editable_character_fx params from a natural-language prompt."""
+    q = (text or "").lower()
+
+    # Determine target blueprint
+    blueprint_path = "BP_ThirdPersonCharacter"
+    for token in re.findall(r'\bBP_\w+', text):
+        blueprint_path = token
+        break
+
+    # Determine socket
+    socket_match = re.search(
+        r'\b(spine_0[0-9]|hand_[lr]|pelvis|root|head|neck_0[0-9]|chest)\b', q
+    )
+    socket_name = socket_match.group(1) if socket_match else "spine_03"
+
+    # Determine profile / component name and system path
+    component_name = "AIStudio_AuraFX"
+    system_path = "/Game/AIStudio/Prototypes/Niagara/NS_AIStudio_CharacterAura"
+    profile = "default"
+
+    if "silhouette" in q or "outline" in q or "camera" in q:
+        component_name = "AIStudio_CameraSilhouetteOutlineFX"
+        system_path = "/Game/AIStudio/Prototypes/Niagara/NS_AIStudio_CameraSilhouetteOutline"
+        profile = "camera_silhouette_outline"
+
+    # Base parameters
+    params: dict[str, Any] = {
+        "blueprint_path": blueprint_path,
+        "component_name": component_name,
+        "socket_name": socket_name,
+        "system_path": system_path,
+        "parameters": {
+            "FX_Profile": profile,
+            "FX_Color": [0.0, 0.85, 1.0, 1.0] if profile == "camera_silhouette_outline" else [0.2, 0.85, 1.0, 1.0],
+            "FX_Intensity": 6.0,
+            "FX_SpawnRate": 160.0,
+            "FX_Radius": 72.0,
+            "FX_Lifetime": 1.25,
+            "FX_PulseSpeed": 2.5,
+        },
+    }
+
+    # Source mode for camera-facing profiles
+    if profile == "camera_silhouette_outline":
+        params["parameters"]["FX_SourceMode"] = "camera_facing_character_outline"
+        params["parameters"]["FX_EdgeThickness"] = 2.0
+        params["parameters"]["FX_CameraFade"] = 0.85
+
+    # Optional tunable expansion based on prompt keywords
+    if "color" in q:
+        params["parameters"].setdefault("FX_SecondaryColor", [0.75, 0.15, 1.0, 1.0])
+    if "spawn" in q or "rate" in q:
+        params["parameters"].setdefault("FX_SpawnRate", 160.0)
+    if "lifetime" in q:
+        params["parameters"].setdefault("FX_Lifetime", 1.25)
+    if "radius" in q:
+        params["parameters"].setdefault("FX_Radius", 72.0)
+    if "pulse" in q:
+        params["parameters"].setdefault("FX_PulseSpeed", 2.5)
+    if "offset" in q:
+        params["parameters"].setdefault("FX_AttachOffset", [0.0, 0.0, 0.0])
+    if "auto activate" in q or "auto_activate" in q:
+        params["parameters"].setdefault("FX_AutoActivate", True)
+
+    return params
 
 
 def operation_catalog() -> list[dict[str, Any]]:

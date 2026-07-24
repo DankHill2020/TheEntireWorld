@@ -58,5 +58,5 @@ def ingest_unreal_if_connected(project_root: str | None = None, *, mode: str = "
 
 
 def build_prompt_draft(user_text: str, project_root: str | None = None) -> str:
-    from tech_connector.services.prompt_dispatch_service import PromptStagingService
+    from tech_connector.services.prompt.prompt_dispatch_service import PromptStagingService
     return PromptStagingService().build_draft(user_text, project_root=project_root).render_for_composer()

@@ -6,6 +6,7 @@ Mimics the deep exploration, blueprint loading, and stub searching
 behaviors of advanced Unreal Engine AI tools (like Ludus AI).
 """
 
+from contextlib import closing
 from typing import Any, Callable
 
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
@@ -107,26 +108,25 @@ class DCCDiscoveryService:
             if db_path.exists():
                 try:
                     import sqlite3
-                    conn = sqlite3.connect(db_path)
-                    cur = conn.cursor()
-                    for term in query_terms:
-                        like_pattern = f"%{term}%"
-                        # Filter out internal mixed-in classes to make results cleaner
-                        cur.execute("""
-                            SELECT symbols.kind, symbols.qualname, symbols.signature, symbols.docstring
-                            FROM symbols
-                            WHERE (symbols.name LIKE ? OR symbols.qualname LIKE ?)
-                              AND symbols.qualname NOT LIKE 'MainWindow%'
-                            LIMIT 2
-                        """, (like_pattern, like_pattern))
-                        for row in cur.fetchall():
-                            results.append({
-                                "kind": row[0],
-                                "qualname": row[1],
-                                "signature": row[2],
-                                "docstring": row[3]
-                            })
-                    conn.close()
+                    with closing(sqlite3.connect(db_path)) as conn:
+                        cur = conn.cursor()
+                        for term in query_terms:
+                            like_pattern = f"%{term}%"
+                            # Filter out internal mixed-in classes to make results cleaner
+                            cur.execute("""
+                                SELECT symbols.kind, symbols.qualname, symbols.signature, symbols.docstring
+                                FROM symbols
+                                WHERE (symbols.name LIKE ? OR symbols.qualname LIKE ?)
+                                  AND symbols.qualname NOT LIKE 'MainWindow%'
+                                LIMIT 2
+                            """, (like_pattern, like_pattern))
+                            for row in cur.fetchall():
+                                results.append({
+                                    "kind": row[0],
+                                    "qualname": row[1],
+                                    "signature": row[2],
+                                    "docstring": row[3]
+                                })
                 except Exception:
                     pass
         return results

@@ -128,7 +128,7 @@ def problem_formulation_contribution(
 ) -> ContextContribution:
     """Create a required high-priority contribution that gates later context."""
     try:
-        from tech_connector.services.problem_formulation_service import (
+        from tech_connector.services.reasoning.problem_formulation_service import (
             build_problem_formulation,
             problem_formulation_context,
         )

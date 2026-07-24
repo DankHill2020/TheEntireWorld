@@ -1,0 +1,63 @@
+{
+  "prompt": "Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.",
+  "plan_elapsed_seconds": 0.066,
+  "total_seconds": 140.268,
+  "updates": [
+    {
+      "seconds": 0.009,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.066,
+      "message": "Prepared deterministic disposable-artifact plan; deferring file-contract synthesis until approval"
+    },
+    {
+      "seconds": 0.067,
+      "message": "Querying indexed target files and reusable project systems"
+    },
+    {
+      "seconds": 0.092,
+      "message": "Using bounded multi-file workers; generating dependency files, consumers, then focused tests"
+    },
+    {
+      "seconds": 0.092,
+      "message": "Designing generated file contract; qwen2.5:1.5b; attempt 1/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 38.868,
+      "message": "Designing generated file contract; qwen2.5:3b; attempt 2/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 50.208,
+      "message": "Designing generated file contract; qwen2.5-coder:7b; attempt 3/3; validating paths and dependencies"
+    },
+    {
+      "seconds": 140.265,
+      "message": "Rejected generated artifact manifest: Artifact manifest JSON did not parse: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "seconds": 140.266,
+      "message": "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+    },
+    {
+      "seconds": 140.268,
+      "message": "Generating patchable code changes completed"
+    }
+  ],
+  "plan_text": "## Implementation Plan\n\nImplementation Plan\nObjective: Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.\n\nReview this plan, then use **Approve Plan** to generate a code preview. No code or files have been changed.",
+  "plan_payload": {
+    "type": "project_edit_plan",
+    "path": "C:/depot/tools",
+    "question": "Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.",
+    "plan": "Implementation Plan\nObjective: Build a production-ready multi-file Python subsystem for Tech Connector that executes dependency DAGs with an append-only JSONL journal and atomic checkpoints. It must provide cycle detection and deterministic topological scheduling, bounded concurrency, idempotency keys, retries with exponential backoff, cancellation, compensation rollback, a worker that performs work separately from an observer that reports progress, pause the current task and merge added user context, invalidate affected downstream tasks, resume from the exact checkpoint, and recover after a crash by replaying the journal. Return complete implementation code across focused modules and comprehensive tests. Do not modify live files; materialize only in a disposable workspace, run syntax, import, and unit tests there, and return the code, command outputs, timings, and proof.\nMutation requested: yes, generate a preview after approval.\nGenerated-artifact project scope: C:\\depot\\tools.\nTarget confidence: high.\nExisting symbols and behavior to reuse or inspect:\nActive path: C:/depot/tools\nTarget confidence: high\nBest target:\n- (unnamed) | location=C:\\depot\\tools\nTop candidates:\n- (unnamed) | location=C:\\depot\\tools\nProposed changes:\n- Generate the smallest focused implementation and matching tests for the stated objective.\nPlanned files: selected after approval by a validated dependency-ordered artifact manifest\nNext stage after approval: generate a focused patch preview.\nCompletion gates: parse and compile changed Python; account for imports; run focused tests; verify host/UI boundaries; leave no unresolved required gap.\nPlan self-check: target evidence is present, requested tests are included, file scope is explicit, and implementation remains deferred until approval.\nApproval scope: approval permits code generation and diff preview only; it does not write files.",
+    "fingerprint": "7256fa8bd9bd3b8de645f757d0fb17dde30163a3ff287226b63d9a1e594d23ad"
+  },
+  "result": "## Generating patchable code changes\n\nBLOCKED: The generated patch did not pass the implementation quality gate.\n\n- Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed.",
+  "payload": {
+    "type": "project_changes_rejected",
+    "changes": [],
+    "validation_errors": [
+      "Coder reported a blocker: The validated artifact manifest or one of its bounded file workers failed."
+    ]
+  }
+}

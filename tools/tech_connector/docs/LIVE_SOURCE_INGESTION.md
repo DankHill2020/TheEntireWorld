@@ -61,8 +61,8 @@ services/github_ingest_service.py
 services/version_control_service.py
 ui/unreal_editor_dialogs.py WebImportDialog
 app/main_window_history_assets.py trigger_web_import
-services/prompt_route_service.py github_ingest route
-services/prompt_dispatch_service.py GitHubHandler UI passthrough
+services/prompt/prompt_route_service.py github_ingest route
+services/prompt/prompt_dispatch_service.py GitHubHandler UI passthrough
 ```
 
 The current GitHub route is intentionally UI-mediated. `PromptDispatchService`

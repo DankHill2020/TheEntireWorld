@@ -61,7 +61,7 @@ class ProblemFormulationContextProvider:
         max_chars: int = 6000,
     ) -> list[ContextItem]:
         try:
-            from tech_connector.services.problem_formulation_service import (
+            from tech_connector.services.reasoning.problem_formulation_service import (
                 build_problem_formulation,
                 problem_formulation_context,
             )

@@ -476,6 +476,51 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
             "function": function_path,
             "reason": "The registry entry is synthetic and has no importable implementation.",
         }
+    if function_path.startswith("unreal.AIStudioBridgeLibrary."):
+        try:
+            from tech_connector.services.unreal.unreal_capability_audit_service import (
+                audit_unreal_capability_catalogs,
+            )
+
+            audit = audit_unreal_capability_catalogs()
+        except Exception as exc:
+            return {
+                "operation": operation_key,
+                "registered": True,
+                "callable_found": False,
+                "function": function_path,
+                "reason": "AIStudioBridge plugin status could not be inspected: " + str(exc),
+            }
+        plugin_row = next(
+            (
+                row
+                for row in audit.get("plugin_capabilities") or []
+                if str(row.get("python_call") or "").startswith(function_path + "(")
+                or str(row.get("python_call") or "") == function_path
+            ),
+            None,
+        )
+        if not plugin_row:
+            return {
+                "operation": operation_key,
+                "registered": True,
+                "callable_found": False,
+                "function": function_path,
+                "reason": "AIStudioBridge function is not listed in the plugin manifest.",
+            }
+        cpp_status = str(plugin_row.get("cpp_status") or "")
+        return {
+            "operation": operation_key,
+            "registered": True,
+            "callable_found": cpp_status == "implemented",
+            "function": function_path,
+            "source_path": str(audit.get("sources", {}).get("plugin_cpp") or ""),
+            "reason": (
+                "AIStudioBridge reflected C++ body is implemented."
+                if cpp_status == "implemented"
+                else f"AIStudioBridge reflected C++ body status is `{cpp_status}`."
+            ),
+        }
     module_name, separator, function_name = function_path.rpartition(".")
     if not separator:
         return {
@@ -537,14 +582,534 @@ def _generic_requirement_specs(
             "success": "Target class, components, references, conventions, and reusable assets are supported by live evidence.",
         }
     ]
+    enhanced_input_actions = [
+        action
+        for action in ("sprint", "crouch", "prone", "crawl", "mantle", "dodge")
+        if re.search(rf"\b{action}\b", lower)
+    ]
+    if re.search(r"\b(?:enhanced\s+input|input\s+actions?|input\s+mappings?)\b", lower):
+        for action in enhanced_input_actions or ["requested_action"]:
+            action_token = "".join(part.title() for part in action.split("_"))
+            specs.append(
+                {
+                    "domain": "enhanced_input",
+                    "title": f"Create and map the {action} input action",
+                    "operations": ["input.create_action", "input.add_mapping"],
+                    "operation_arguments": {
+                        "input.create_action": {
+                            "asset_path": f"/Game/Input/IA_{action_token}",
+                            "value_type": "boolean",
+                            "description": f"Gameplay input for {action}",
+                            "save": True,
+                        },
+                        "input.add_mapping": {
+                            "mapping_context_path": "$resolved_input_mapping_context",
+                            "action_path": f"/Game/Input/IA_{action_token}",
+                            "key_name": f"$resolved_{action}_key",
+                            "save": True,
+                        },
+                    },
+                    "success": (
+                        f"IA_{action_token} exists, is mapped once in the resolved active mapping "
+                        "context, and its trigger reaches the owning character."
+                    ),
+                }
+            )
+    if "stamina" in lower:
+        specs.extend(
+            [
+                {
+                    "domain": "stamina",
+                    "title": "Create authoritative reusable stamina behavior",
+                    "operations": [
+                        "rollback.record_asset_snapshot",
+                        "gameplay.create_stamina_component",
+                        "gameplay.integrate_stamina_character",
+                        "gameplay.validate_stamina_feature",
+                    ],
+                    "operation_arguments": {
+                        "rollback.record_asset_snapshot": {
+                            "asset_path": "$target_asset",
+                            "reason": "Before stamina and movement integration",
+                            "operation": "gameplay.integrate_stamina_character",
+                        },
+                    },
+                    "success": (
+                        "Stamina ownership, drain, exhaustion, delayed recovery, movement gating, "
+                        "and character integration are implemented and read back from compiled assets."
+                    ),
+                },
+                {
+                    "domain": "stamina_replication",
+                    "title": "Replicate stamina and drive HUD updates",
+                    "operations": [
+                        "blueprint.configure_replication",
+                        "network.inspect_authority_flow",
+                        "blueprint.apply_graph_spec",
+                    ],
+                    "operation_arguments": {
+                        "blueprint.configure_replication": {
+                            "blueprint_path": "$target_asset",
+                            "rep_notify_variables": ["Stamina"],
+                            "server_rpc_functions": [
+                                "Server_StartSprint",
+                                "Server_StopSprint",
+                                "Server_RequestDodge",
+                            ],
+                            "reliable": True,
+                            "save": True,
+                        },
+                        "network.inspect_authority_flow": {
+                            "blueprint_path": "$target_asset",
+                            "required_variables": ["Stamina"],
+                            "required_server_rpcs": [
+                                "Server_StartSprint",
+                                "Server_StopSprint",
+                                "Server_RequestDodge",
+                            ],
+                            "required_onrep_functions": ["OnRep_Stamina"],
+                        },
+                        "blueprint.apply_graph_spec": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "graph_spec": {
+                                "purpose": "Server-authoritative stamina with event-driven HUD update",
+                                "required_flow": [
+                                    "owning client sends bounded movement ability requests",
+                                    "server validates and mutates Stamina",
+                                    "OnRep_Stamina broadcasts a HUD update",
+                                    "HUD consumes replicated state without polling",
+                                ],
+                            },
+                        },
+                    },
+                    "success": (
+                        "The server owns stamina mutations, Stamina uses RepNotify, OnRep_Stamina "
+                        "updates the HUD, and authority/readback inspection proves the path."
+                    ),
+                },
+            ]
+        )
+    if re.search(r"\b(?:motion\s+matching|pose\s+search)\b", lower):
+        specs.extend(
+            [
+                {
+                    "domain": "motion_matching",
+                    "title": "Create and configure the Pose Search schema",
+                    "operations": [
+                        "motion_matching.create_schema",
+                        "motion_matching.add_schema_channel",
+                    ],
+                    "operation_arguments": {
+                        "motion_matching.create_schema": {
+                            "schema_name": "PSchema_Traversal",
+                            "save_path": "$project_convention_animation_folder",
+                        },
+                        "motion_matching.add_schema_channel": {
+                            "schema_path": "$created_pose_search_schema",
+                            "channel_type": "Position",
+                            "bone_name": "$validated_motion_matching_bone",
+                        },
+                    },
+                    "success": (
+                        "A skeleton-compatible Pose Search schema exists with explicit trajectory "
+                        "and pose channels proven by reflected readback."
+                    ),
+                },
+                {
+                    "domain": "motion_matching",
+                    "title": "Build and validate the Motion Matching database",
+                    "operations": [
+                        "animation.find_compatible",
+                        "motion_matching.create_database",
+                        "motion_matching.add_animation",
+                        "motion_matching.inspect_database",
+                    ],
+                    "operation_arguments": {
+                        "animation.find_compatible": {
+                            "skeleton_path": "$target_skeleton",
+                            "directory": "$project_animation_folder",
+                        },
+                        "motion_matching.create_database": {
+                            "skeleton_path": "$target_skeleton",
+                            "animation_paths": "$contextually_accepted_animation_paths",
+                            "asset_path": "$project_convention_motion_database_path",
+                            "schema_path": "$created_pose_search_schema",
+                            "sample_rate": 30,
+                        },
+                        "motion_matching.add_animation": {
+                            "database_path": "$created_pose_search_database",
+                            "animation_path": "$each_contextually_accepted_animation",
+                        },
+                        "motion_matching.inspect_database": {
+                            "database_path": "$created_pose_search_database",
+                        },
+                    },
+                    "success": (
+                        "Only skeleton-compatible, contextually accepted animations are indexed, "
+                        "and database readback proves schema, channels, assets, and sample settings."
+                    ),
+                },
+            ]
+        )
+    if re.search(r"\b(?:ik\s+rig|ik\s+retargeter|retarget(?:er|ing)?)\b", lower):
+        specs.extend(
+            [
+                {
+                    "domain": "ik_retarget",
+                    "title": "Create source and target IK Rigs with validated chains",
+                    "operations": [
+                        "skeletal.inspect_bones",
+                        "retarget.create_ik_rig",
+                        "retarget.add_ik_chain",
+                    ],
+                    "operation_arguments": {
+                        "skeletal.inspect_bones": {
+                            "skeletal_mesh_path": "$each_source_and_target_skeletal_mesh",
+                            "include_hierarchy": True,
+                        },
+                        "retarget.create_ik_rig": {
+                            "skeletal_mesh_path": "$each_source_and_target_skeletal_mesh",
+                            "save_path": "$project_convention_ik_rig_path",
+                        },
+                        "retarget.add_ik_chain": {
+                            "ik_rig_path": "$created_ik_rig",
+                            "chain_name": "$derived_chain_name",
+                            "start_bone": "$validated_chain_start_bone",
+                            "end_bone": "$validated_chain_end_bone",
+                        },
+                    },
+                    "success": (
+                        "Source and target IK Rigs use bone-proven chain endpoints; no guessed bone "
+                        "or chain name is accepted."
+                    ),
+                },
+                {
+                    "domain": "ik_retarget",
+                    "title": "Create, map, and inspect the IK Retargeter",
+                    "operations": [
+                        "retarget.create_ik_retargeter",
+                        "retarget.set_chain_mapping",
+                        "retarget.set_root_settings",
+                        "retarget.inspect",
+                    ],
+                    "operation_arguments": {
+                        "retarget.create_ik_retargeter": {
+                            "source_ik_rig_path": "$source_ik_rig_path",
+                            "target_ik_rig_path": "$target_ik_rig_path",
+                            "save_path": "$project_convention_retargeter_path",
+                        },
+                        "retarget.set_chain_mapping": {
+                            "retargeter_path": "$created_ik_retargeter",
+                            "source_chain": "$validated_source_chain",
+                            "target_chain": "$validated_target_chain",
+                        },
+                        "retarget.set_root_settings": {
+                            "retargeter_path": "$created_ik_retargeter",
+                            "blend_height": 1.0,
+                            "scale_factor": 1.0,
+                        },
+                        "retarget.inspect": {
+                            "retargeter_path": "$created_ik_retargeter",
+                        },
+                    },
+                    "success": (
+                        "Retargeter readback proves both rigs, every requested chain mapping, root "
+                        "settings, and skeleton compatibility before animation use."
+                    ),
+                },
+            ]
+        )
+    requested_anim_states = [
+        state
+        for state in ("crouch", "prone", "crawl", "mantle", "dodge")
+        if re.search(rf"\b{state}\b", lower)
+    ]
+    if (
+        requested_anim_states
+        and re.search(r"\b(?:anim(?:ation)?\s*blueprint|animblueprint|abp_[a-z0-9_]+)\b", lower)
+        and re.search(r"\b(?:states?|state\s+machine|transition\s+rules?)\b", lower)
+    ):
+        specs.append(
+            {
+                "domain": "anim_graph_state_machine",
+                "title": "Author concrete locomotion states and transition rules",
+                "operations": [
+                    "animation.get_state_machine_graph",
+                    "anim_graph.add_state_machine",
+                    *[
+                        operation
+                        for _state in requested_anim_states
+                        for operation in (
+                            "anim_graph.add_state",
+                            "anim_graph.synthesize_transition_rule_expression",
+                            "anim_graph.add_transition_rule",
+                        )
+                    ],
+                    "anim_graph.wire_state_machine_to_output_pose",
+                    "blueprint.compile_and_save",
+                ],
+                "operation_arguments": {
+                    "animation.get_state_machine_graph": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "anim_graph.add_state_machine": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "anim_graph.add_state": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                        "state_name": "$each_requested_state",
+                        "animation_asset_path": "$accepted_animation_for_state",
+                    },
+                    "anim_graph.synthesize_transition_rule_expression": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                        "from_state": "$resolved_source_state",
+                        "to_state": "$each_requested_state",
+                        "rule_expression": "$authoritative_state_guard_expression",
+                    },
+                    "anim_graph.add_transition_rule": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                        "from_state": "$resolved_source_state",
+                        "to_state": "$each_requested_state",
+                        "rule_expression": "$validated_transition_rule_expression",
+                    },
+                    "anim_graph.wire_state_machine_to_output_pose": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "blueprint.compile_and_save": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                    },
+                },
+                "success": (
+                    "Every requested state has an accepted animation, explicit entry/exit guards, "
+                    "compiled transition graphs, and a proven path through the state machine to Output Pose."
+                ),
+            }
+        )
+    if re.search(r"\b(?:additive\s+slots?|root\s+motion|output\s+pose)\b", lower):
+        specs.append(
+            {
+                "domain": "animation_pose_path",
+                "title": "Preserve additive slots and root motion through Output Pose",
+                "operations": [
+                    "animation.inspect_imported_pipeline",
+                    "animation.get_state_machine_graph",
+                    "anim_graph.wire_state_machine_to_output_pose",
+                    "blueprint.compile_and_save",
+                    "runtime.validate_character_montages",
+                ],
+                "operation_arguments": {
+                    "animation.inspect_imported_pipeline": {
+                        "imported_paths": "$selected_animation_paths",
+                        "target_skeleton_path": "$target_skeleton",
+                        "target_skeletal_mesh_path": "$target_skeletal_mesh",
+                    },
+                    "animation.get_state_machine_graph": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "anim_graph.wire_state_machine_to_output_pose": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "blueprint.compile_and_save": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                    },
+                    "runtime.validate_character_montages": {
+                        "character_blueprint_path": "$target_asset",
+                        "montage_paths": "$accepted_additive_and_root_motion_assets",
+                        "expected_anim_class_contains": "$target_animation_blueprint",
+                    },
+                },
+                "success": (
+                    "Readback proves root-motion policy, additive slot consumption, state-machine "
+                    "connectivity, final Output Pose wiring, and possessed-character playback."
+                ),
+            }
+        )
+    if re.search(r"\b(?:physics\s*asset|physicsasset|constraint\s+profile|physical[- ]animation\s+profile)\b", lower):
+        specs.append(
+            {
+                "domain": "physics_profiles",
+                "title": "Create and validate PhysicsAsset profiles",
+                "operations": [
+                    "physics.list_bodies",
+                    "physics.list_constraints",
+                    "physics.add_profile",
+                    "physics.set_profile_property",
+                    "physics.list_profiles",
+                ],
+                "operation_arguments": {
+                    "physics.list_bodies": {"asset_path": "$resolved_physics_asset"},
+                    "physics.list_constraints": {"asset_path": "$resolved_physics_asset"},
+                    "physics.add_profile": {
+                        "asset_path": "$resolved_physics_asset",
+                        "profile_name": "$each_requested_profile_name",
+                        "profile_type": "$constraint_or_physical_animation",
+                        "assign_all": True,
+                    },
+                    "physics.set_profile_property": {
+                        "asset_path": "$resolved_physics_asset",
+                        "profile_name": "$each_requested_profile_name",
+                        "property_name": "$requested_profile_property",
+                        "value": "$requested_profile_value",
+                        "save": True,
+                    },
+                    "physics.list_profiles": {"asset_path": "$resolved_physics_asset"},
+                },
+                "success": (
+                    "The target PhysicsAsset is resolved from the live mesh, body/constraint topology "
+                    "is valid, and each constraint or physical-animation profile is assigned and read back."
+                ),
+            }
+        )
+    if any(term in lower for term in ("inventory", "pickup", "item stack", "item pickup")):
+        specs.extend(
+            [
+                {
+                    "domain": "inventory_state",
+                    "title": "Define authoritative inventory state and item identity",
+                    "operations": [
+                        "rollback.record_asset_snapshot",
+                        "blueprint.scan",
+                        "blueprint.apply_graph_spec",
+                        "blueprint.compile",
+                        "blueprint.get_compile_errors",
+                    ],
+                    "operation_arguments": {
+                        "rollback.record_asset_snapshot": {
+                            "asset_path": "$target_asset",
+                            "reason": "Before inventory graph and replication mutation",
+                            "operation": "inventory.author_state",
+                        },
+                        "blueprint.apply_graph_spec": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "graph_spec": {
+                                "purpose": "Create inventory entry schema and authoritative add/remove/query functions",
+                                "required_state": [
+                                    "InventoryEntries array keyed by stable ItemId",
+                                    "quantity per entry",
+                                    "schema version for persistence migration",
+                                ],
+                                "required_functions": [
+                                    "FindInventoryEntry",
+                                    "AddInventoryItem",
+                                    "RemoveInventoryItem",
+                                    "SerializeInventory",
+                                    "RestoreInventory",
+                                ],
+                            },
+                        },
+                        "blueprint.get_compile_errors": {
+                            "blueprint_path": "$target_asset",
+                        },
+                    },
+                    "success": "The owning Blueprint has one authoritative inventory array keyed by stable ItemId, quantity-safe add/remove/query functions, and a rollback token before mutation.",
+                },
+                {
+                    "domain": "inventory_pickup_flow",
+                    "title": "Author server-owned pickup request and overlap flow",
+                    "operations": [
+                        "blueprint.search_node_actions",
+                        "blueprint.describe_node_action",
+                        "blueprint.probe_node_action",
+                        "blueprint.apply_graph_spec",
+                        "blueprint.configure_replication",
+                        "network.inspect_authority_flow",
+                    ],
+                    "operation_arguments": {
+                        "blueprint.search_node_actions": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "query": "authority overlap valid pickup add inventory destroy actor",
+                        },
+                        "blueprint.describe_node_action": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "palette_action": "$selected_blueprint_action",
+                        },
+                        "blueprint.probe_node_action": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "palette_action": "$selected_blueprint_action",
+                        },
+                        "blueprint.apply_graph_spec": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "graph_spec": {
+                                "purpose": "Client request to server-authoritative pickup transaction",
+                                "required_flow": [
+                                    "overlap validates pickup actor and item definition",
+                                    "non-authority owner invokes Server_RequestPickup",
+                                    "server revalidates distance, ownership, item validity, and capacity",
+                                    "server mutates InventoryEntries exactly once",
+                                    "successful pickup destroys or disables the world pickup",
+                                    "OnRep_InventoryEntries emits one UI update event",
+                                ],
+                                "negative_paths": [
+                                    "duplicate request",
+                                    "full inventory",
+                                    "invalid item id",
+                                    "out-of-range pickup",
+                                    "non-owning client",
+                                ],
+                            },
+                        },
+                        "blueprint.configure_replication": {
+                            "blueprint_path": "$target_asset",
+                            "rep_notify_variables": ["InventoryEntries"],
+                            "server_rpc_functions": ["Server_RequestPickup"],
+                            "reliable": True,
+                            "save": True,
+                        },
+                        "network.inspect_authority_flow": {
+                            "blueprint_path": "$target_asset",
+                            "required_variables": ["InventoryEntries"],
+                            "required_server_rpcs": ["Server_RequestPickup"],
+                            "required_onrep_functions": ["OnRep_InventoryEntries"],
+                        },
+                    },
+                    "success": "Overlap only proposes a pickup; the owning client RPC reaches server authority, the server revalidates and mutates once, InventoryEntries replicates with OnRep, and invalid or duplicate requests fail without state change.",
+                },
+            ]
+        )
     if any(term in lower for term in ("niagara", "particle", "vfx", "effect")):
         specs.extend(
             [
                 {
                     "domain": "niagara",
-                    "title": "Inspect or create the Niagara System",
-                    "operations": ["niagara.inspect_system", "niagara.create_system"],
-                    "success": "A Niagara System exists with a compiled emitter and a visible renderer.",
+                    "title": "Create and inspect the requested Niagara emitters",
+                    "operations": [
+                        "niagara.create_emitter",
+                        "niagara.list_module_inputs",
+                        "niagara.inspect_system",
+                    ],
+                    "operation_arguments": {
+                        "niagara.create_emitter": {
+                            "asset_path": "$each_requested_emitter_path",
+                            "template": "$resolved_project_niagara_template",
+                            "parameters": "$requested_emitter_parameters",
+                        },
+                        "niagara.list_module_inputs": {
+                            "asset_path": "$resolved_niagara_system",
+                            "emitter_name": "$each_requested_emitter_name",
+                            "include_topology": False,
+                        },
+                        "niagara.inspect_system": {
+                            "asset_path": "$resolved_niagara_system",
+                        },
+                    },
+                    "success": (
+                        "Each requested emitter is created from a proven project or engine template, "
+                        "has a visible renderer, and exposes concrete stack/module readback."
+                    ),
                 },
                 {
                     "domain": "niagara",
@@ -553,9 +1118,40 @@ def _generic_requirement_specs(
                         "niagara.set_user_parameter",
                         "niagara.set_module_input",
                         "niagara.set_renderer_property",
-                        "niagara.compile",
+                        "niagara.inspect_system",
                     ],
-                    "success": "Every requested User parameter exists and drives a concrete spawn/update/renderer input.",
+                    "operation_arguments": {
+                        "niagara.set_user_parameter": {
+                            "asset_path": "$resolved_niagara_system",
+                            "parameter_name": "$each_requested_user_parameter",
+                            "value": "$requested_default_value",
+                            "value_type": "auto",
+                        },
+                        "niagara.set_module_input": {
+                            "asset_path": "$resolved_niagara_system",
+                            "emitter_name": "$resolved_emitter_name",
+                            "script_usage": "$resolved_stack_usage",
+                            "module_name": "$resolved_module_name",
+                            "input_name": "$resolved_module_input",
+                            "value": "$user_parameter_binding_or_value",
+                            "value_type": "auto",
+                        },
+                        "niagara.set_renderer_property": {
+                            "asset_path": "$resolved_niagara_system",
+                            "emitter_name": "$resolved_emitter_name",
+                            "renderer_index": 0,
+                            "property_name": "$resolved_renderer_property",
+                            "value": "$requested_renderer_value",
+                            "value_type": "auto",
+                        },
+                        "niagara.inspect_system": {
+                            "asset_path": "$resolved_niagara_system",
+                        },
+                    },
+                    "success": (
+                        "Every requested User parameter exists, is wired into a concrete spawn/update/"
+                        "renderer input, and survives system readback."
+                    ),
                 },
             ]
         )
@@ -575,12 +1171,66 @@ def _generic_requirement_specs(
                 {
                     "domain": "blueprint_integration",
                     "title": "Attach and configure the component",
-                    "operations": ["blueprint.add_component", "blueprint.attach_component"],
+                    "operations": ["blueprint.add_component", "blueprint.attach_to_socket"],
                     "success": "The component is attached to the verified mesh and bone/socket and is inactive by default.",
                 },
             ]
         )
-    if any(term in lower for term in ("notify", "anim notify", "notifystate")):
+    graph_mutation_requested = bool(
+        re.search(r"\b(?:blueprint|event\s*graph|construction\s*script|graph)\b", lower)
+        and re.search(r"\b(?:add|insert|wire|connect|rewire|mutate|modify|branch|node|pins?)\b", lower)
+    )
+    if graph_mutation_requested:
+        specs.append(
+            {
+                "domain": "blueprint_graph_mutation",
+                "title": "Plan a reversible Blueprint graph mutation transaction",
+                "operations": [
+                    "blueprint.scan",
+                    "blueprint.search_node_actions",
+                    "blueprint.describe_node_action",
+                    "blueprint.probe_node_action",
+                    "blueprint.apply_graph_spec",
+                    "blueprint.compile",
+                    "blueprint.get_compile_errors",
+                    "blueprint.scan",
+                ],
+                "success": (
+                    "Pre-scan, action discovery, pin-proofed graph spec, apply, compile, and post-scan verify "
+                    "the intended nodes/pins changed while unrelated nodes, variables, and links are preserved."
+                ),
+            }
+        )
+    data_driven_requested = bool(
+        re.search(r"\b(?:data\s*asset|dataasset|data\s*table|datatable|schema|row\s*struct)\b", lower)
+        or (
+            re.search(r"\b(?:rarity|stack\s*size|item\s*definition|pickup\s*definition)\b", lower)
+            and re.search(r"\b(?:item|inventory|pickup)\b", lower)
+        )
+    )
+    if data_driven_requested:
+        specs.append(
+            {
+                "domain": "data_driven_gameplay",
+                "title": "Define data-driven item schema and runtime lookup path",
+                "operations": [
+                    "dataasset.inspect_schema",
+                    "dataasset.create_or_update",
+                    "datatable.inspect_schema",
+                    "datatable.create_or_update",
+                    "blueprint.bind_data_lookup",
+                    "runtime.validate_data_lookup",
+                ],
+                "success": (
+                    "Item definitions expose the requested fields, runtime pickup logic reads data by stable key, "
+                    "save/load stores identifiers rather than duplicated display data, and missing rows fail safely."
+                ),
+            }
+        )
+    animation_notify_requested = bool(
+        re.search(r"\b(?:anim(?:ation)?\s+notify|notify\s*state|notifystate)\b", lower)
+    )
+    if animation_notify_requested:
         specs.append(
             {
                 "domain": "animation_notify",
@@ -651,21 +1301,142 @@ def _generic_requirement_specs(
                 "success": "Montage/notify timing drives damage through a reusable contract with duplicate-hit and interruption tests.",
             }
         )
-    if any(term in lower for term in ("widget", " ui ", "hud", "save game", "savegame", "persist")):
+    ui_requested = bool(re.search(r"\b(?:widget|user\s+interface|hud)\b", lower))
+    persistence_requested = bool(re.search(r"\b(?:save\s*game|savegame|persist(?:ence|ent)?)\b", lower))
+    inventory_requested = bool(re.search(r"\b(?:inventory|pickup|item\s+stack)\b", lower))
+    if inventory_requested:
+        replicated_variables = ["InventoryEntries"]
+        server_rpcs = ["Server_RequestPickup"]
+        onrep_functions = ["OnRep_InventoryEntries"]
+        hud_flow = [
+            "OnRep_InventoryEntries invokes InventoryChanged dispatcher",
+            "HUD or view model subscribes once",
+            "widget rows are rebuilt from authoritative replicated entries",
+            "empty, removed, and stack-updated states are represented",
+        ]
+        hud_scenario = "Inventory OnRep produces one HUD refresh per accepted server mutation"
+        network_assertions = [
+            "owning client request changes server inventory once",
+            "second client observes replicated InventoryEntries",
+            "OnRep updates HUD on both relevant clients",
+            "duplicate and non-owner requests do not mutate inventory",
+        ]
+    elif "stamina" in lower:
+        replicated_variables = ["Stamina"]
+        server_rpcs = ["Server_StartSprint", "Server_StopSprint", "Server_RequestDodge"]
+        onrep_functions = ["OnRep_Stamina"]
+        hud_flow = [
+            "OnRep_Stamina broadcasts StaminaChanged with current and maximum values",
+            "HUD or view model subscribes once",
+            "stamina bar updates from replicated values without polling",
+            "exhaustion and recovery states remain player-visible",
+        ]
+        hud_scenario = "Stamina RepNotify produces one HUD refresh per authoritative mutation"
+        network_assertions = [
+            "owning client ability request is validated by the server",
+            "second client observes replicated stamina and movement state",
+            "OnRep_Stamina updates the owning HUD",
+            "duplicate, invalid, and non-owner requests do not mutate stamina",
+        ]
+    else:
+        replicated_variables = ["$requested_replicated_variables"]
+        server_rpcs = ["$requested_server_rpc_functions"]
+        onrep_functions = ["$required_onrep_functions"]
+        hud_flow = [
+            "authoritative replicated state invokes its resolved RepNotify or dispatcher",
+            "HUD or view model subscribes once",
+            "presentation updates from event payloads without polling",
+            "empty, invalid, interrupted, and recovery states are represented",
+        ]
+        hud_scenario = "Requested replicated state produces one UI refresh per accepted server mutation"
+        network_assertions = [
+            "owning client request reaches and is revalidated by the server",
+            "all relevant clients observe the requested replicated state",
+            "RepNotify presentation executes exactly once per accepted mutation",
+            "invalid, duplicate, and non-owner requests do not mutate state",
+        ]
+    if ui_requested:
         specs.extend(
             [
                 {
                     "domain": "ui",
                     "title": "Create or extend the project UI using existing widget conventions",
-                    "operations": ["ui.inspect_widgets", "ui.create_widget", "ui.bind_view_model"],
+                    "operations": [
+                        "assets.inspect",
+                        "assets.dependencies",
+                        "blueprint.scan",
+                        "blueprint.apply_graph_spec",
+                        "blueprint.compile",
+                        "runtime.pie_validate",
+                    ],
+                    "operation_arguments": {
+                        "assets.inspect": {"asset_path": "$target_asset"},
+                        "assets.dependencies": {
+                            "asset_path": "$target_asset",
+                            "recursive": True,
+                        },
+                        "blueprint.apply_graph_spec": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "graph_spec": {
+                                "purpose": "Event-driven HUD notification for authoritative gameplay state",
+                                "required_flow": hud_flow,
+                            },
+                        },
+                        "runtime.pie_validate": {
+                            "target_assets": ["$target_asset"],
+                            "expected": {"scenario": hud_scenario},
+                            "start_pie": True,
+                        },
+                    },
                     "success": "The UI reflects authoritative gameplay state without polling or duplicating ownership.",
                 },
+            ]
+        )
+    if persistence_requested:
+        specs.extend(
+            [
                 {
                     "domain": "persistence",
                     "title": "Persist and restore the requested state",
-                    "operations": ["savegame.inspect_schema", "savegame.create_schema", "savegame.validate_round_trip"],
-                    "success": "A save/load round trip preserves the requested state and handles missing or old data safely.",
-                },
+                    "operations": [
+                        "assets.inspect",
+                        "assets.dependencies",
+                        "blueprint.scan",
+                        "blueprint.apply_graph_spec",
+                        "blueprint.compile",
+                        "runtime.pie_validate",
+                    ],
+                    "operation_arguments": {
+                        "assets.inspect": {"asset_path": "$target_asset"},
+                        "assets.dependencies": {
+                            "asset_path": "$target_asset",
+                            "recursive": True,
+                        },
+                        "blueprint.apply_graph_spec": {
+                            "blueprint_path": "$target_asset",
+                            "graph_name": "EventGraph",
+                            "graph_spec": {
+                                "purpose": "Versioned inventory SaveGame round trip",
+                                "required_flow": [
+                                    "serialize stable ItemId, quantity, and schema version",
+                                    "save only on authority or owning local persistence boundary",
+                                    "load validates item definitions and clamps invalid quantities",
+                                    "older schema migrates or reports an explicit incompatibility",
+                                    "restored authoritative state triggers the normal replicated UI path",
+                                ],
+                            },
+                        },
+                        "runtime.pie_validate": {
+                            "target_assets": ["$target_asset"],
+                            "expected": {
+                                "scenario": "save inventory, clear runtime state, load, and compare ItemId/quantity/version"
+                            },
+                            "start_pie": True,
+                        },
+                    },
+                    "success": "A save/load graph and PIE round-trip fixture preserve stable item identifiers, quantities, and version data while handling missing or old data safely.",
+                }
             ]
         )
     if any(term in lower for term in ("replicate", "replicated", "replication", "multiplayer", "networked", "server authoritative")):
@@ -678,6 +1449,30 @@ def _generic_requirement_specs(
                     "network.inspect_authority_flow",
                     "runtime.multiplayer_pie_validate",
                 ],
+                "operation_arguments": {
+                    "blueprint.configure_replication": {
+                        "blueprint_path": "$target_asset",
+                        "rep_notify_variables": replicated_variables,
+                        "server_rpc_functions": server_rpcs,
+                        "reliable": True,
+                        "save": True,
+                    },
+                    "network.inspect_authority_flow": {
+                        "blueprint_path": "$target_asset",
+                        "required_variables": replicated_variables,
+                        "required_server_rpcs": server_rpcs,
+                        "required_onrep_functions": onrep_functions,
+                    },
+                    "runtime.multiplayer_pie_validate": {
+                        "target_assets": ["$target_asset"],
+                        "client_count": 2,
+                        "start_pie": True,
+                        "expected": {
+                            "minimum_pie_worlds": 2,
+                            "assertions": network_assertions,
+                        },
+                    },
+                },
                 "success": "Authority, ownership, prediction, and replicated state are verified with at least two PIE clients.",
             }
         )
@@ -695,19 +1490,114 @@ def _generic_requirement_specs(
                 "success": "Visual/audio parameters are driven from one gameplay state and return to stable defaults.",
             }
         )
+    if re.search(r"\b(?:rollback|restore|revert|snapshot)\b", lower):
+        specs.append(
+            {
+                "domain": "rollback",
+                "title": "Journal every mutation and prove rollback",
+                "operations": [
+                    "rollback.record_asset_snapshot",
+                    "rollback.latest",
+                    "rollback.restore_asset_snapshot",
+                ],
+                "operation_arguments": {
+                    "rollback.record_asset_snapshot": {
+                        "asset_path": "$each_existing_asset_before_mutation",
+                        "reason": "$planned_mutation_reason",
+                        "operation": "$planned_operation",
+                        "metadata": {
+                            "request_id": "$request_id",
+                            "dependency_stage": "$current_dependency_stage",
+                        },
+                    },
+                    "rollback.restore_asset_snapshot": {
+                        "token": "$recorded_snapshot_token",
+                    },
+                },
+                "success": (
+                    "Every existing asset mutation has a pre-change snapshot token, created assets "
+                    "are journaled separately, and a disposable restore/readback fixture passes."
+                ),
+            }
+        )
     behavior = dict(behavior_decomposition or {})
     for row in behavior.get("selected_primitives") or []:
         row = dict(row)
-        operations = list(dict.fromkeys(str(value) for value in row.get("operations") or [] if value))
-        if not operations:
+        if row.get("always") and not row.get("match_evidence"):
             continue
         specs.append(
             {
                 "domain": "behavior_" + str(row.get("key") or "generated").replace(".", "_"),
                 "title": "Implement behavior: " + str(row.get("title") or row.get("key") or "prompt behavior"),
-                "operations": operations,
+                "operations": [
+                    "rollback.record_asset_snapshot",
+                    "blueprint.scan",
+                    "blueprint.search_node_actions",
+                    "blueprint.describe_node_action",
+                    "blueprint.probe_node_action",
+                    "blueprint.apply_graph_spec",
+                    "blueprint.compile",
+                    "blueprint.get_compile_errors",
+                ],
+                "operation_arguments": {
+                    "rollback.record_asset_snapshot": {
+                        "asset_path": "$target_asset",
+                        "reason": "Before behavior graph synthesis",
+                        "operation": "blueprint.apply_graph_spec",
+                    },
+                    "blueprint.scan": {
+                        "asset_path": "$target_asset",
+                        "include_graphs": True,
+                        "include_defaults": True,
+                    },
+                    "blueprint.search_node_actions": {
+                        "blueprint_path": "$target_asset",
+                        "graph_name": "EventGraph",
+                        "query": " ".join(
+                            [
+                                str(row.get("title") or ""),
+                                str(row.get("trigger") or ""),
+                                *[str(value) for value in row.get("observations") or []],
+                                *[str(value) for value in row.get("guards") or []],
+                                *[str(value) for value in row.get("outcomes") or []],
+                            ]
+                        ),
+                    },
+                    "blueprint.describe_node_action": {
+                        "blueprint_path": "$target_asset",
+                        "graph_name": "EventGraph",
+                        "palette_action": "$selected_blueprint_action",
+                    },
+                    "blueprint.probe_node_action": {
+                        "blueprint_path": "$target_asset",
+                        "graph_name": "EventGraph",
+                        "palette_action": "$selected_blueprint_action",
+                    },
+                    "blueprint.apply_graph_spec": {
+                        "blueprint_path": "$target_asset",
+                        "graph_name": "EventGraph",
+                        "graph_spec": {
+                            "behavior_id": row.get("id") or row.get("key"),
+                            "title": row.get("title"),
+                            "trigger": row.get("trigger"),
+                            "observations": list(row.get("observations") or []),
+                            "guards": list(row.get("guards") or []),
+                            "states": list(row.get("states") or []),
+                            "transitions": list(row.get("transitions") or []),
+                            "outcomes": list(row.get("outcomes") or []),
+                            "failure_paths": list(row.get("failure_paths") or []),
+                        },
+                    },
+                    "blueprint.compile": {"asset_path": "$target_asset"},
+                    "blueprint.get_compile_errors": {
+                        "blueprint_path": "$target_asset"
+                    },
+                },
                 "success": "; ".join(str(value) for value in row.get("proof_scenarios") or [])
-                or "The behavior's declared states, guards, outcomes, and failure paths pass runtime proof.",
+                or (
+                    "The behavior's declared trigger, observations, guards, states, outcomes, "
+                    "and failure paths compile and pass runtime proof."
+                ),
             }
         )
     if re.search(r"\bstate\w*\b", lower) and re.search(
@@ -718,9 +1608,34 @@ def _generic_requirement_specs(
                 "domain": "animation_state_integration",
                 "title": "Propagate authoritative character state into the AnimBlueprint",
                 "operations": [
-                    "state.read_owning_character_variables",
-                    "state.write_anim_instance_variables",
+                    "blueprint.scan",
+                    "blueprint.apply_graph_spec",
+                    "blueprint.compile_and_save",
                 ],
+                "operation_arguments": {
+                    "blueprint.scan": {
+                        "asset_path": "$target_animation_blueprint",
+                        "include_graphs": True,
+                        "include_defaults": True,
+                    },
+                    "blueprint.apply_graph_spec": {
+                        "blueprint_path": "$target_animation_blueprint",
+                        "graph_name": "BlueprintUpdateAnimation",
+                        "graph_spec": {
+                            "purpose": "Read authoritative traversal state from owning character",
+                            "source_blueprint": "$target_asset",
+                            "state_variables": requested_anim_states,
+                            "required_flow": [
+                                "Try Get Pawn Owner",
+                                "validated character/interface access",
+                                "copy authoritative state into AnimInstance variables",
+                            ],
+                        },
+                    },
+                    "blueprint.compile_and_save": {
+                        "anim_bp_path": "$target_animation_blueprint"
+                    },
+                },
                 "success": "Every requested animation state is copied from the owning character on each animation update and read back from the compiled graph.",
             }
         )
@@ -731,9 +1646,27 @@ def _generic_requirement_specs(
                 "title": "Bind contextually accepted animation roles through the final pose path",
                 "operations": [
                     "animation.find_compatible",
-                    "animation.bind_contextual_roles",
-                    "animation.verify_slot_output_pose",
+                    "animation.get_state_machine_graph",
+                    "anim_graph.wire_state_machine_to_output_pose",
+                    "blueprint.compile_and_save",
                 ],
+                "operation_arguments": {
+                    "animation.find_compatible": {
+                        "skeleton_path": "$target_skeleton",
+                        "directory": "$project_animation_folder",
+                    },
+                    "animation.get_state_machine_graph": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "anim_graph.wire_state_machine_to_output_pose": {
+                        "anim_bp_path": "$target_animation_blueprint",
+                        "state_machine_name": "$resolved_locomotion_state_machine",
+                    },
+                    "blueprint.compile_and_save": {
+                        "anim_bp_path": "$target_animation_blueprint"
+                    },
+                },
                 "success": "Each behavior has a skeleton-compatible, contextually accepted animation and its required slot or state reaches Output Pose.",
             }
         )
@@ -751,26 +1684,242 @@ def _generic_requirement_specs(
             "title": "Compile, inspect, run, and review diagnostics",
             "operations": [
                 "blueprint.compile",
+                "asset.save",
                 "blueprint.scan",
                 "niagara.inspect_system" if "niagara" in lower else "assets.inspect",
-                "animation.inspect_notifies" if "notify" in lower else "assets.inspect",
+                "animation.inspect_notifies" if animation_notify_requested else "assets.inspect",
                 "runtime.pie_validate",
                 "diagnostics.read_log_errors",
             ],
+            "operation_arguments": {
+                "blueprint.compile": {"asset_path": "$each_touched_blueprint"},
+                "asset.save": {"asset_path": "$each_touched_asset"},
+                "blueprint.scan": {"asset_path": "$each_touched_blueprint"},
+                "runtime.pie_validate": {
+                    "target_assets": "$all_touched_runtime_assets",
+                    "start_pie": True,
+                    "expected": "$prompt_derived_runtime_postconditions",
+                },
+            },
             "success": "All touched assets compile and runtime evidence proves behavior without new warnings or errors.",
         }
     )
+    if re.search(r"\b(?:report|full\s+results?|asset\s+paths?|readback)\b", lower):
+        specs.append(
+            {
+                "domain": "reporting",
+                "title": "Report exact execution contracts and readback evidence",
+                "operations": [
+                    "animation.report_pipeline_assets",
+                    "diagnostics.read_log_errors",
+                    "rollback.latest",
+                ],
+                "success": (
+                    "The result names every planned operation, resolved callable, argument, dependency, "
+                    "affected asset path, rollback token, elapsed stage time, and postcondition readback."
+                ),
+            }
+        )
     return specs
 
 
-def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[str, Any]:
+_COVERAGE_STOP_WORDS = {
+    "a", "all", "and", "any", "asset", "assets", "build", "create", "current",
+    "every", "for", "from", "implement", "in", "into", "of", "on", "only",
+    "please", "requested", "stack", "the", "to", "unreal", "use", "using", "with",
+}
+
+
+def _coverage_terms(text: str) -> set[str]:
+    words = set(re.findall(r"[a-z0-9]+", str(text or "").lower().replace("_", " ")))
+    aliases = {
+        "animblueprint": {"animation", "blueprint", "animgraph"},
+        "abp": {"animation", "blueprint", "animgraph"},
+        "physicsasset": {"physics", "profile", "constraint"},
+        "repnotify": {"replication", "network", "onrep"},
+        "retargeter": {"retarget", "ik"},
+        "retargeting": {"retarget", "ik"},
+        "diagnostics": {"log", "errors"},
+        "readback": {"report", "evidence", "inspect"},
+    }
+    expanded = set(words)
+    for word in words:
+        expanded.update(aliases.get(word, set()))
+        if len(word) > 4 and word.endswith("ing"):
+            expanded.add(word[:-3])
+        elif len(word) > 4 and word.endswith("ed"):
+            expanded.add(word[:-2])
+        elif len(word) > 4 and word.endswith("s"):
+            expanded.add(word[:-1])
+    return {word for word in expanded if len(word) > 1 and word not in _COVERAGE_STOP_WORDS}
+
+
+def _prompt_clause_operation_coverage(
+    prompt: str,
+    requirements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Prove that each source clause reaches one or more concrete operation chains."""
+
+    from tech_connector.services.unreal.behavior_capability_decomposition_service import _clauses
+
+    rows = []
+    for clause_index, clause in enumerate(_clauses(prompt), 1):
+        clause_terms = _coverage_terms(clause)
+        matches = []
+        represented_terms: set[str] = set()
+        for requirement_index, requirement in enumerate(requirements, 1):
+            operations = [str(value) for value in requirement.get("operations") or [] if value]
+            requirement_text = " ".join(
+                [
+                    str(requirement.get("domain") or ""),
+                    str(requirement.get("title") or ""),
+                    str(requirement.get("success") or ""),
+                    *operations,
+                ]
+            )
+            requirement_terms = _coverage_terms(requirement_text)
+            overlap = clause_terms.intersection(requirement_terms)
+            overlap_ratio = len(overlap) / max(1, len(clause_terms))
+            if not overlap or (
+                len(overlap) < 3
+                and overlap_ratio < 0.2
+                and len(clause_terms) > 3
+            ):
+                continue
+            matches.append(
+                {
+                    "requirement_id": f"requirement_{requirement_index:02d}",
+                    "domain": requirement.get("domain"),
+                    "title": requirement.get("title"),
+                    "operations": operations,
+                    "matched_terms": sorted(overlap),
+                    "_coverage_score": round(overlap_ratio, 4),
+                }
+            )
+        matches.sort(
+            key=lambda row: (
+                float(row.get("_coverage_score") or 0.0),
+                len(row.get("matched_terms") or []),
+            ),
+            reverse=True,
+        )
+        matches = matches[:8]
+        for match in matches:
+            represented_terms.update(
+                _coverage_terms(
+                    " ".join(
+                        [
+                            str(match.get("domain") or ""),
+                            str(match.get("title") or ""),
+                            *list(match.get("operations") or []),
+                        ]
+                    )
+                )
+            )
+            match.pop("_coverage_score", None)
+        covered = bool(matches)
+        rows.append(
+            {
+                "clause_id": f"clause_{clause_index:02d}",
+                "source_clause": clause,
+                "classification": "operation_chain" if covered else "unresolved",
+                "covered": covered,
+                "covered_by": [row["requirement_id"] for row in matches],
+                "operation_count": sum(len(row["operations"]) for row in matches),
+                "requirements": matches,
+                "unrepresented_terms": sorted(clause_terms - represented_terms),
+            }
+        )
+    uncovered = [row["source_clause"] for row in rows if not row["covered"]]
+    return {
+        "framework": "unreal_prompt_clause_operation_coverage_v1",
+        "source_prompt": prompt,
+        "clauses": rows,
+        "clause_count": len(rows),
+        "covered_clause_count": len(rows) - len(uncovered),
+        "coverage_ratio": (
+            round((len(rows) - len(uncovered)) / len(rows), 4) if rows else 1.0
+        ),
+        "uncovered_clauses": uncovered,
+        "complete": not uncovered,
+    }
+
+
+def _is_narrow_stamina_sprint_request(prompt: str) -> bool:
+    """Keep the legacy specialization only for a compact stamina/sprint-only ask."""
+
+    from tech_connector.services.unreal.behavior_capability_decomposition_service import _clauses
+
+    lower = str(prompt or "").lower()
+    if "stamina" not in lower or "sprint" not in lower:
+        return False
+    unrelated_domains = re.compile(
+        r"\b(?:niagara|pose\s+search|motion\s+matching|retarget|ik\s+rig|"
+        r"physics\s*asset|physicsasset|state\s+machine|transition\s+rule|"
+        r"root\s+motion|additive|multiplayer|two-client|prone|crawl|mantle)\b"
+    )
+    return (
+        len(prompt or "") < 500
+        and len(_clauses(prompt)) <= 2
+        and not unrelated_domains.search(lower)
+    )
+
+
+def build_unreal_requirement_preview(prompt: str) -> dict[str, Any]:
+    """Expose the deterministic feature stages before target discovery completes."""
+    requirements = _generic_requirement_specs(prompt)
+    clause_coverage = _prompt_clause_operation_coverage(prompt, requirements)
+    operations = []
+    for requirement_index, requirement in enumerate(requirements, 1):
+        for operation_index, operation in enumerate(requirement["operations"], 1):
+            status = _local_operation_status(operation)
+            definition = None
+            try:
+                from tech_connector.services.unreal.unreal_operation_service import UNREAL_OPERATIONS
+
+                definition = UNREAL_OPERATIONS.get(operation)
+            except Exception:
+                pass
+            operations.append(
+                {
+                    "id": f"requirement_{requirement_index:02d}_operation_{operation_index:02d}",
+                    "phase": requirement["title"],
+                    "domain": requirement["domain"],
+                    "operation": operation,
+                    "function": status.get("function") or "",
+                    "required_arguments": list(definition.required) if definition else [],
+                    "optional_arguments": dict(definition.optional) if definition else {},
+                    "planned_arguments": dict(
+                        (requirement.get("operation_arguments") or {}).get(operation) or {}
+                    ),
+                    "callable": bool(status.get("callable_found")),
+                    "mutates_project": bool(definition.mutates_project) if definition else False,
+                    "postcondition": requirement["success"],
+                }
+            )
+    return {
+        "framework": "unreal_requirement_preview_v1",
+        "requirements": requirements,
+        "operations": operations,
+        "clause_coverage": clause_coverage,
+        "missing_operations": [
+            row["operation"] for row in operations if not row["callable"]
+        ],
+    }
+
+
+def _generic_unreal_feature_plan(
+    prompt: str,
+    evidence: dict[str, Any],
+    *,
+    progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
     """Build an evidence-backed plan that turns unknown operations into acquisition work."""
 
     from tech_connector.services.task_playbook_service import matching_playbooks
     from tech_connector.services.gameplay_proof_contract_service import build_gameplay_proof_contract
     from tech_connector.services.unreal.behavior_capability_decomposition_service import (
         decompose_prompt_behaviors,
-        requires_prompt_specific_behavior_synthesis,
         synthesize_novel_behavior_contract,
     )
     from tech_connector.services.unreal.evidence_driven_feature_synthesis_service import (
@@ -781,7 +1930,21 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
     from tech_connector.services.unreal.implementation_plan_synthesis_service import (
         synthesize_detailed_implementation_plan,
     )
+    from tech_connector.services.unreal.unreal_task_sequence_service import (
+        build_unreal_task_sequence,
+        verify_unreal_task_sequence,
+    )
 
+    task_observer_events: list[dict[str, Any]] = []
+
+    def emit_task_event(event: dict[str, Any]) -> None:
+        row = dict(event or {})
+        task_observer_events.append(row)
+        if progress:
+            progress(
+                "TASK_EVENT:"
+                + json.dumps(row, separators=(",", ":"), default=str)
+            )
     playbooks = matching_playbooks(prompt, host="unreal", limit=4)
     blueprint = dict(evidence.get("blueprint") or {})
     assets = dict(evidence.get("assets") or {})
@@ -817,9 +1980,20 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
     }
     requirement_contract = derive_prompt_requirement_contract(prompt)
     initial_behavior = decompose_prompt_behaviors(prompt)
+    initial_requirements = _generic_requirement_specs(prompt, initial_behavior)
+    initial_clause_coverage = _prompt_clause_operation_coverage(
+        prompt, initial_requirements
+    )
+    emit_task_event(
+        {
+            "type": "decomposition_completed",
+            "clause_count": initial_clause_coverage["clause_count"],
+            "requirement_count": len(initial_requirements),
+        }
+    )
     model_synthesis = {}
     if (
-        requires_prompt_specific_behavior_synthesis(prompt, initial_behavior)
+        not initial_clause_coverage["complete"]
         and evidence.get("allow_model_behavior_synthesis")
     ):
         model_synthesis = synthesize_novel_behavior_contract(
@@ -828,6 +2002,7 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
         )
     behavior = decompose_prompt_behaviors(prompt, model_synthesis=model_synthesis)
     requirements = _generic_requirement_specs(prompt, behavior)
+    clause_coverage = _prompt_clause_operation_coverage(prompt, requirements)
     operation_status: dict[str, dict[str, Any]] = {}
     for requirement in requirements:
         for operation in requirement["operations"]:
@@ -843,6 +2018,40 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
         "runtime.validate_character_montages",
     ):
         operation_status.setdefault(operation, _local_operation_status(operation))
+    task_sequence = build_unreal_task_sequence(
+        requirements,
+        clause_coverage,
+        operation_status,
+    )
+    emit_task_event(
+        {
+            "type": "task_sequence_created",
+            "task_count": task_sequence["task_count"],
+        }
+    )
+    task_verification = {
+        "framework": "unreal_task_sequence_verification_v1",
+        "status": "not_requested",
+        "verified": clause_coverage["complete"],
+        "failed_clause_ids": [],
+        "verdicts": [],
+        "batches": [],
+        "elapsed_ms": 0.0,
+    }
+    if clause_coverage["complete"] and evidence.get("allow_model_behavior_synthesis"):
+        task_verification = verify_unreal_task_sequence(
+            task_sequence,
+            event=emit_task_event,
+        )
+    emit_task_event(
+        {
+            "type": "task_verification_finished",
+            "verified": bool(task_verification.get("verified")),
+            "failed_clause_ids": list(
+                task_verification.get("failed_clause_ids") or []
+            ),
+        }
+    )
     missing = [status for status in operation_status.values() if not status["callable_found"]]
     graph_namespaces = {"animation", "collision", "combat", "input", "movement", "physics", "state"}
     graph_executor_ready = operation_status["blueprint.apply_graph_spec"]["callable_found"]
@@ -863,6 +2072,7 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
                 "title": requirement["title"],
                 "domain": requirement["domain"],
                 "operations": list(requirement["operations"]),
+                "operation_arguments": dict(requirement.get("operation_arguments") or {}),
                 "available_operations": [row["operation"] for row in statuses if row["callable_found"]],
                 "missing_operations": [row["operation"] for row in statuses if not row["callable_found"]],
                 "detail": requirement["success"],
@@ -919,7 +2129,9 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
     )
     detailed_readiness = dict(detailed_plan.get("readiness") or {})
     plan_status = (
-        "capability_acquisition_required"
+        "semantic_task_repair_required"
+        if not task_verification.get("verified")
+        else "capability_acquisition_required"
         if acquisition_missing
         else "approval_ready"
         if detailed_readiness.get("ready_for_approval")
@@ -937,6 +2149,10 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             for playbook in playbooks
         ],
         "requirement_contract": requirement_contract,
+        "prompt_clause_coverage": clause_coverage,
+        "task_sequence": task_sequence,
+        "task_sequence_verification": task_verification,
+        "task_observer_events": task_observer_events,
         "behavior_decomposition": behavior,
         "novel_behavior_synthesis": model_synthesis,
         "expert_technique_selection": technique_selection,
@@ -993,7 +2209,10 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             ),
         },
         "self_review": {
-            "request_covered": bool(detected_domains),
+            "request_covered": bool(detected_domains) and clause_coverage["complete"],
+            "prompt_clause_coverage_complete": clause_coverage["complete"],
+            "prompt_clause_coverage_ratio": clause_coverage["coverage_ratio"],
+            "task_sequence_verified": bool(task_verification.get("verified")),
             "live_evidence_sufficient": bool(evidence.get("sufficient")),
             "unknowns_are_explicit": True,
             "fabricated_operations": False,
@@ -1002,12 +2221,38 @@ def _generic_unreal_feature_plan(prompt: str, evidence: dict[str, Any]) -> dict[
             "original_goal_preserved_after_acquisition": True,
         },
     }
-    if behavior.get("knowledge_required"):
+    if behavior.get("knowledge_required") and not clause_coverage["complete"]:
         result["unknowns"] = list(dict.fromkeys([
             *result.get("unknowns", []),
             *behavior.get("unmatched_behavior_clauses", []),
         ]))
         result["status"] = "capability_acquisition_required"
+    if not task_verification.get("verified"):
+        failed_ids = set(task_verification.get("failed_clause_ids") or [])
+        failed_clauses = [
+            str(row.get("source_clause") or "")
+            for row in clause_coverage.get("clauses") or []
+            if str(row.get("clause_id") or "") in failed_ids
+        ]
+        result["unknowns"] = list(dict.fromkeys([
+            *result.get("unknowns", []),
+            *failed_clauses,
+        ]))
+        result["status"] = "semantic_task_repair_required"
+        result["approval_gate"]["message"] = (
+            "Approval is disabled until the failed focused task checks are repaired "
+            "and reverified."
+        )
+    if not clause_coverage["complete"]:
+        result["unknowns"] = list(dict.fromkeys([
+            *result.get("unknowns", []),
+            *clause_coverage["uncovered_clauses"],
+        ]))
+        result["status"] = "implementation_spec_incomplete"
+        result["approval_gate"]["message"] = (
+            "Approval is disabled because one or more source prompt clauses have no "
+            "concrete operation chain."
+        )
     return result
 
 
@@ -1032,12 +2277,11 @@ def build_live_unreal_feature_plan(
         }
     if progress:
         progress("Live Unreal evidence ready; building approval plan")
-    lower = prompt.lower()
-    if "stamina" in lower and "sprint" in lower:
+    if _is_narrow_stamina_sprint_request(prompt):
         plan = _stamina_sprint_plan(prompt, evidence)
     else:
         evidence["allow_model_behavior_synthesis"] = True
-        plan = _generic_unreal_feature_plan(prompt, evidence)
+        plan = _generic_unreal_feature_plan(prompt, evidence, progress=progress)
     plan["bridge_seconds"] = bridge_seconds
     plan["live_evidence"] = evidence
     return plan
@@ -1050,6 +2294,7 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
         "capability_acquisition_required",
         "implementation_spec_incomplete",
         "knowledge_choice_required",
+        "semantic_task_repair_required",
     }:
         errors = list((plan.get("evidence") or {}).get("errors") or [])
         return "Unreal feature planning stopped because live evidence was insufficient.\n\n" + (
@@ -1090,11 +2335,25 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
                     ", ".join(str(value) for value in transition.get("guards") or []) or "none",
                 )
             )
-        if behavior.get("unmatched_behavior_clauses"):
+        task_verification = dict(plan.get("task_sequence_verification") or {})
+        if (
+            behavior.get("unmatched_behavior_clauses")
+            and not task_verification.get("verified")
+        ):
             lines.append(
                 "- Unresolved clauses: "
                 + "; ".join(str(item) for item in behavior["unmatched_behavior_clauses"])
             )
+        coverage = dict(plan.get("prompt_clause_coverage") or {})
+        lines.extend(
+            [
+                "",
+                "Request coverage:",
+                f"- Clauses: `{coverage.get('covered_clause_count', 0)}/{coverage.get('clause_count', 0)}`",
+                f"- Focused verifier: `{task_verification.get('status') or 'not run'}`",
+                f"- Verification time: `{float(task_verification.get('elapsed_ms') or 0.0) / 1000.0:.2f}s`",
+            ]
+        )
         lines.extend([
             "",
             "Matched local playbooks:",
@@ -1109,6 +2368,35 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
             lines.append("   Operations: " + ", ".join(f"`{item}`" for item in row.get("operations") or []))
             if row.get("missing_operations"):
                 lines.append("   Needs acquisition: " + ", ".join(f"`{item}`" for item in row["missing_operations"]))
+        task_sequence = dict(plan.get("task_sequence") or {})
+        if task_sequence.get("tasks"):
+            lines.extend(
+                [
+                    "",
+                    f"Dependency-ordered task sequence ({task_sequence.get('task_count', 0)} tasks):",
+                ]
+            )
+            for task in task_sequence.get("tasks") or []:
+                dependencies = ", ".join(
+                    f"`{value}`" for value in task.get("depends_on") or []
+                ) or "none"
+                lines.append(
+                    f"- `{task.get('task_id')}` {task.get('title')} "
+                    f"[depends on: {dependencies}]"
+                )
+                for operation in task.get("operations") or []:
+                    lines.append(
+                        "  - `{}` -> `{}` args={} postcondition={}".format(
+                            operation.get("operation"),
+                            operation.get("function") or "unresolved",
+                            json.dumps(
+                                operation.get("arguments") or {},
+                                separators=(",", ":"),
+                                default=str,
+                            ),
+                            operation.get("postcondition") or "",
+                        )
+                    )
         if detailed.get("action_graph"):
             lines.extend(["", "Executable action graph:"])
             for action in detailed.get("action_graph") or []:

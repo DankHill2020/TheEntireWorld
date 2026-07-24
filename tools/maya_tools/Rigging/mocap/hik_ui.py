@@ -16,6 +16,7 @@ else:
 
 from maya_tools.Rigging.mocap import setup_hik
 from maya_tools.Rigging import create_rig
+from maya_tools.Rigging import rig_template
 from maya_tools.Rigging import skinning_utils
 from unreal_tools import unreal_subprocess as usp
 from unreal_tools import unreal_project_data as upd
@@ -26,6 +27,7 @@ importlib.reload(skinning_utils)
 importlib.reload(usp)
 importlib.reload(upd)
 importlib.reload(create_rig)
+importlib.reload(rig_template)
 importlib.reload(setup_hik)
 
 script_dir = os.path.dirname(__file__).replace('\\', '/')
@@ -585,6 +587,33 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         actions_group = QtWidgets.QGroupBox("Full Rig Actions")
         actions_layout = QtWidgets.QVBoxLayout(actions_group)
 
+        template_form = QtWidgets.QFormLayout()
+        self.rig_template_path_field = QtWidgets.QLineEdit(rig_template.DEFAULT_BIPED_RIG_TEMPLATE)
+        self.rig_template_path_field.setToolTip("Path to the biped rig template scene that includes the RFL joints.")
+        template_path_btn = QtWidgets.QPushButton("Select")
+        template_path_btn.setToolTip("Choose a Maya .ma/.mb rig template file.")
+        template_path_btn.clicked.connect(self.pick_rig_template_path)
+        template_path_row = QtWidgets.QHBoxLayout()
+        template_path_row.addWidget(self.rig_template_path_field)
+        template_path_row.addWidget(template_path_btn)
+        template_form.addRow("Biped Template:", template_path_row)
+
+        self.rig_template_namespace_field = QtWidgets.QLineEdit("")
+        self.rig_template_namespace_field.setToolTip("Optional namespace for referencing or importing the template.")
+        template_form.addRow("Namespace:", self.rig_template_namespace_field)
+        actions_layout.addLayout(template_form)
+
+        template_btn_row = QtWidgets.QHBoxLayout()
+        import_template_btn = QtWidgets.QPushButton("Import Biped Template")
+        import_template_btn.setToolTip("Import the studio biped template into the current Maya scene and report RFL joints.")
+        import_template_btn.clicked.connect(lambda: self.load_biped_rig_template(reference=False))
+        reference_template_btn = QtWidgets.QPushButton("Reference Biped Template")
+        reference_template_btn.setToolTip("Reference the studio biped template into the current Maya scene and report RFL joints.")
+        reference_template_btn.clicked.connect(lambda: self.load_biped_rig_template(reference=True))
+        template_btn_row.addWidget(import_template_btn)
+        template_btn_row.addWidget(reference_template_btn)
+        actions_layout.addLayout(template_btn_row)
+
         # 1. Create Rig Mapping & Build Full Rig Buttons
         mapping_btn = QtWidgets.QPushButton("Create Rig Mapping")
         mapping_btn.setToolTip("Synchronize and cache the active HumanIK body and face mapping settings.")
@@ -944,6 +973,48 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         # Sync the mapping dict immediately so detail panels can reflect changes
         self.create_rig_mapping()
         self._refresh_all_module_details()
+
+    def pick_rig_template_path(self):
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select Biped Rig Template",
+            self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE,
+            "Maya Files (*.ma *.mb);;All Files (*.*)",
+        )
+        if path:
+            self.rig_template_path_field.setText(path.replace("\\", "/"))
+
+    def load_biped_rig_template(self, reference=False):
+        template_path = self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE
+        namespace = self.rig_template_namespace_field.text().strip()
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="Load Biped Rig Template")
+            result = rig_template.load_biped_rig_template(
+                template_path=template_path,
+                namespace=namespace,
+                reference=reference,
+            )
+            self.create_rig_mapping()
+            self._load_module_metadata_from_scene(report_missing=False)
+            self._refresh_all_module_details()
+            QtWidgets.QMessageBox.information(
+                self,
+                "Biped Template Loaded",
+                "Loaded biped rig template.\n\n"
+                f"Root joints: {len(result.get('root_joints') or [])}\n"
+                f"RFL joints: {result.get('rfl_joint_count', 0)}\n"
+                f"New nodes: {result.get('new_node_count', 0)}",
+            )
+            return result
+        except Exception as e:
+            traceback.print_exc()
+            QtWidgets.QMessageBox.critical(self, "Biped Template Load Failed", str(e))
+            raise
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
 
     def create_rig_mapping(self):
         # Check if there are empty slots in HIK fields

@@ -15,7 +15,7 @@ import time
 from typing import Callable
 
 
-ROOT = Path("C:/depot/tools/.codex_stress/project_edit_ui_stress").resolve()
+ROOT = Path("C:/depot/tools/tech_connector/reports/runtime/project_edit_ui_stress").resolve()
 PKG = ROOT / "stresspkg"
 TESTS = ROOT / "tests"
 
@@ -35,6 +35,7 @@ def _reset_root() -> None:
 
 
 def _build_fixture_index() -> None:
+    os.environ["TECH_CONNECTOR_PROJECT_ROOT"] = str(ROOT)
     from tech_connector.knowledge.build_knowledge_index_v2 import main as build_index
 
     build_index(["--root", str(ROOT)])
@@ -793,6 +794,8 @@ def _stage_audit_from_timings(flow_timings: dict[str, object] | None) -> dict[st
     })
     total_targets = len(target_generations)
     score = 100
+    if not steps:
+        score = 0
     if total_targets:
         score -= max(0, total_targets - len(first_pass_ok)) * 10
     score -= len([entry for entry in retry_steps if issue_count(entry) > 0]) * 4
@@ -800,7 +803,7 @@ def _stage_audit_from_timings(flow_timings: dict[str, object] | None) -> dict[st
         score -= 20
     if quality_steps and issue_count(quality_steps[-1]) > 0:
         score -= 20
-    if not runtime_steps and not quality_steps and steps:
+    if not runtime_steps and not quality_steps:
         score -= 25
     score = max(0, min(100, score))
     return {
@@ -816,7 +819,13 @@ def _stage_audit_from_timings(flow_timings: dict[str, object] | None) -> dict[st
             "runtime_unittest_ok": bool(runtime_steps and issue_count(runtime_steps[-1]) == 0),
             "quality_gate_ok": bool(quality_steps and issue_count(quality_steps[-1]) == 0),
             "intent_confidence_score": score,
-            "status": "clean" if score >= 95 and not retry_steps else "recovered" if score >= 75 else "needs_attention",
+            "status": (
+                "clean"
+                if score >= 95 and not retry_steps and validation_steps
+                else "recovered"
+                if score >= 75 and validation_steps
+                else "needs_attention"
+            ),
         },
         "steps": steps,
     }
@@ -889,9 +898,13 @@ def _run_preview_runtime_checks(payload: dict | None) -> dict[str, object]:
             text=True,
             timeout=45,
         )
+        output = "\n".join((completed.stdout, completed.stderr))
+        match = re.search(r"Ran\s+(\d+)\s+tests?", output)
+        ran_tests = int(match.group(1)) if match else 0
         return {
             "ran": True,
-            "ok": completed.returncode == 0,
+            "ok": completed.returncode == 0 and ran_tests > 0,
+            "ran_tests": ran_tests,
             "seconds": round(time.perf_counter() - started, 3),
             "modules": test_modules,
             "stdout": completed.stdout[-2000:],
@@ -976,6 +989,35 @@ def run_case(case_factory: Callable[[], dict[str, str]]) -> dict[str, object]:
     code_outputs = _write_code_outputs(case["name"], payload_dict)
     runtime_verification = _run_preview_runtime_checks(payload_dict)
     summary = _summarize_payload(payload_dict, str(text or ""))
+    audit = dict(summary.get("stage_audit") or {})
+    if not list(audit.get("steps") or []):
+        repair_statuses = [
+            item for item in statuses
+            if str(item.get("message") or "").startswith("Precisely repairing ")
+        ]
+        generation_statuses = [
+            item for item in statuses
+            if str(item.get("message") or "").startswith("Generating ")
+            and "completed" not in str(item.get("message") or "")
+        ]
+        runtime_ok = bool(runtime_verification.get("ran") and runtime_verification.get("ok"))
+        quality_ok = bool(summary.get("preview_ready") and not summary.get("blocked"))
+        score = 100 if runtime_ok and quality_ok else 60 if quality_ok else 0
+        audit["summary"] = {
+            "intent_stage_count": 1,
+            "generation_stage_count": len(generation_statuses),
+            "validation_stage_count": 1,
+            "retry_stage_count": len(repair_statuses),
+            "target_first_pass_ok": len(generation_statuses),
+            "target_first_pass_total": len(generation_statuses),
+            "semantic_retry_count": 0,
+            "retry_targets": [],
+            "runtime_unittest_ok": runtime_ok,
+            "quality_gate_ok": quality_ok,
+            "intent_confidence_score": score,
+            "status": "clean" if score == 100 and not repair_statuses else "recovered" if score == 100 else "needs_attention",
+        }
+        summary["stage_audit"] = audit
     summary.update(
         {
             "case": case["name"],

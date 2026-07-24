@@ -49,7 +49,7 @@ import json
 import difflib
 from pathlib import Path
 import traceback
-from tech_connector.models.constants import TOOLS_ROOT
+from tech_connector.models.constants import EXTERNAL_TOOLS_DIR, TOOLS_ROOT
 from tech_connector.knowledge.search import find_in_project, local_answer_about_file
 
 class EditorAssistWorker(QThread):
@@ -1052,7 +1052,7 @@ class WebImportDialog(QDialog):
             configured = main_win.settings.get("external_tools_dir", "")
             if configured:
                 return Path(configured)
-        return TOOLS_ROOT / "external_tools"
+        return EXTERNAL_TOOLS_DIR
 
     def choose_install_dir(self):
         start = self.install_dir_input.text().strip() or str(self.default_install_dir())

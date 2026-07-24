@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tech_connector.services.engineering_reasoning_service import EngineeringReasoning
+    from tech_connector.services.reasoning.engineering_reasoning_service import EngineeringReasoning
 
 
 def build_execution_plan(decision: dict[str, Any], request: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -350,7 +350,7 @@ def is_senior_engineering_prompt(prompt: str) -> bool:
     Safe to call even if the service import fails.
     """
     try:
-        from tech_connector.services.engineering_reasoning_service import is_senior_engineering_prompt as _impl
+        from tech_connector.services.reasoning.engineering_reasoning_service import is_senior_engineering_prompt as _impl
         return _impl(prompt)
     except Exception:
         return False

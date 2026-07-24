@@ -23,7 +23,7 @@ if str(TOOLS_ROOT) not in sys.path:
 
 from tech_connector.engine.request_context import RequestContext
 from tech_connector.engine.request_engine import RequestEngine
-from tech_connector.services.prompt_route_service import classify_prompt_route
+from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 
 
 def _shorten(value: Any, limit: int = 3000) -> Any:

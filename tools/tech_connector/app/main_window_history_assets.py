@@ -59,6 +59,7 @@ from tech_connector.models.constants import (
 
     DCC_TOOL_PACKAGE_DIRS,
     DEFAULT_CONFIGS,
+    EXTERNAL_TOOLS_DIR,
 
     HISTORY_DIR,
     IMAGE_DIR,
@@ -852,7 +853,8 @@ class MainWindowHistoryAssetsMixin:
             if dialog.exec():
                 key = dialog.api_key
                 self.settings[f"{provider_id}_api_key"] = key
-                if provider_id == "gemini":
+                if provider_id in {"google", "gemini"}:
+                    self.settings["gemini_api_key"] = key
                     self.settings["google_api_key"] = key
                     os.environ["GOOGLE_API_KEY"] = key
                     os.environ["GEMINI_API_KEY"] = key
@@ -877,6 +879,9 @@ class MainWindowHistoryAssetsMixin:
 
         # Save to settings
         self.settings["model"] = model
+        if provider_for_model(model) != "ollama":
+            self.settings["cloud_provider_model"] = model
+            self.settings["cloud_model_unavailable"] = False
         self.last_selected_model = model
         self.service.save_settings(self.settings)
 
@@ -1073,8 +1078,9 @@ class MainWindowHistoryAssetsMixin:
         layout.addWidget(title)
 
         help_text = QLabel(
-            "Choose whether the Studio should use local Ollama models only, or cloud providers with local fallback. "
-            "Provider API keys are not stored in settings.json. Use the official setup links, then configure the listed environment variable."
+            "Choose local Ollama or a cloud provider. A cloud provider/model is locked "
+            "for the complete prompt run and failures are reported without silently "
+            "switching models."
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #cfcfcf;")
@@ -1083,7 +1089,9 @@ class MainWindowHistoryAssetsMixin:
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel("Model source:"))
         source_box = QComboBox()
-        source_box.addItem("Auto cloud -> local", "auto_with_local_fallback")
+        source_box.addItem(
+            "Cloud locked / local if unset", "auto_with_local_fallback"
+        )
         source_box.addItem("Always local", "local_only")
         idx = source_box.findData(
             self.settings.get("model_source_mode", "auto_with_local_fallback")
@@ -1403,7 +1411,7 @@ class MainWindowHistoryAssetsMixin:
         external_tools_row.addWidget(QLabel("External tools folder:"))
         external_tools_edit = QLineEdit()
         external_tools_edit.setText(self.settings.get("external_tools_dir", ""))
-        external_tools_edit.setPlaceholderText(str(TOOLS_ROOT / "external_tools"))
+        external_tools_edit.setPlaceholderText(str(EXTERNAL_TOOLS_DIR))
         external_tools_edit.setToolTip(
             "Folder used for ingested GitHub/external Python tools."
         )
@@ -1430,9 +1438,7 @@ class MainWindowHistoryAssetsMixin:
         layout.addWidget(dcc_package_label)
 
         def browse_external_tools_dir():
-            start = external_tools_edit.text().strip() or str(
-                TOOLS_ROOT / "external_tools"
-            )
+            start = external_tools_edit.text().strip() or str(EXTERNAL_TOOLS_DIR)
             selected = QFileDialog.getExistingDirectory(
                 dialog, "Select External Tools Folder", start
             )

@@ -104,12 +104,71 @@ def _extract_selected_file(answer: str, fallback: str = "") -> str:
     text = str(answer or "")
     for pattern in (
         r"Best match:\s*`?([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))`?(?:\s|$)",
+        r"^\s*\d+\.\s+`?[^`\n]+`?\s+-\s+`?([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))(?:\:\d+)?`?\s*$",
         r"^\s*`?([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))`?\s*$",
     ):
         match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
             return match.group(1).strip()
     return str(fallback or "")
+
+
+def _extract_selected_symbol(answer: str) -> str:
+    """Return the first ranked callable name from a deterministic index answer."""
+    import re
+
+    text = str(answer or "")
+    for pattern in (
+        r"^\s*\d+\.\s+`?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        r"^\s*-\s+`?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    ):
+        match = re.search(pattern, text, re.MULTILINE)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _extract_ranked_symbol_rows(answer: str) -> list[dict[str, str]]:
+    """Extract ordered callable/file rows from a ranked index response."""
+    import re
+
+    rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    pattern = re.compile(
+        r"^\s*\d+\.\s+`?([A-Za-z_][A-Za-z0-9_]*)\s*\([^`\n]*\)`?"
+        r"\s+-\s+`?([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))"
+        r"(?:\:\d+)?`?\s*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    for match in pattern.finditer(str(answer or "")):
+        key = (match.group(1), match.group(2).strip())
+        if key not in seen:
+            rows.append({"symbol": key[0], "file": key[1]})
+            seen.add(key)
+
+    current_file = ""
+    file_header = re.compile(
+        r"^\s*\d+\.\s+`?([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))`?\s*$",
+        re.IGNORECASE,
+    )
+    nested_callable = re.compile(
+        r"^\s*-\s+`?([A-Za-z_][A-Za-z0-9_]*)\s*\([^`\n]*\)`?"
+        r"(?:\s+on\s+line\s+`?\d+`?)?\s*$",
+        re.IGNORECASE,
+    )
+    for line in str(answer or "").splitlines():
+        file_match = file_header.match(line)
+        if file_match:
+            current_file = file_match.group(1).strip()
+            continue
+        callable_match = nested_callable.match(line)
+        if not callable_match or not current_file:
+            continue
+        key = (callable_match.group(1), current_file)
+        if key not in seen:
+            rows.append({"symbol": key[0], "file": key[1]})
+            seen.add(key)
+    return rows
 
 
 def _extract_project_answer_files(answer: str, fallback: str = "") -> list[str]:
@@ -161,7 +220,7 @@ def _project_search_workspace_update(answer: str, *, primary_file: str = "", sou
 def _augment_explicit_file_candidates(context: RequestContext, candidates: list[dict]) -> list[dict]:
     """Ensure explicitly named files reach evidence ranking even when symbol search is empty."""
     from pathlib import Path
-    from tech_connector.services.target_entity_service import extract_target_entities
+    from tech_connector.services.reasoning.target_entity_service import extract_target_entities
 
     augmented = [dict(item) for item in candidates if isinstance(item, dict)]
     known = {
@@ -214,6 +273,91 @@ def _augment_explicit_file_candidates(context: RequestContext, candidates: list[
     return augmented
 
 
+def _expected_file_candidates_from_route(context: RequestContext) -> list[dict]:
+    """Promote planned generated-code targets into target discovery evidence."""
+    from pathlib import Path
+
+    decision = _route_decision(context)
+    plan = decision.get("capability_gap_plan") or {}
+    if not isinstance(plan, dict):
+        return []
+
+    expected: list[dict] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            files = value.get("expected_files")
+            if isinstance(files, list):
+                for item in files:
+                    if isinstance(item, dict) and item.get("path"):
+                        expected.append(dict(item))
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(plan)
+    if not expected:
+        return []
+
+    roots = [Path(root) for root in context.project_roots or () if str(root or "").strip()]
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for index, item in enumerate(expected):
+        raw_path = str(item.get("path") or "").strip()
+        if not raw_path or " or " in raw_path:
+            continue
+        path = Path(raw_path)
+        if path.suffix.lower() not in {
+            ".c", ".cc", ".cpp", ".cs", ".h", ".hpp", ".js", ".json",
+            ".py", ".qml", ".ts", ".tsx", ".ui",
+        }:
+            continue
+        resolved = ""
+        if path.is_absolute():
+            resolved = str(path)
+        else:
+            resolved = str((roots[0] / path) if roots else path)
+        key = resolved.replace("\\", "/").casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        candidates.append({
+            "path": resolved,
+            "score": 120 - index * 5,
+            "symbols": [],
+            "chunks": [],
+            "candidate_source": "capability_gap_expected_file",
+            "expected_file_rank": index,
+            "purpose": str(item.get("purpose") or ""),
+        })
+    return candidates
+
+
+def _candidate_identity_keys(context: RequestContext, path_text: str) -> set[str]:
+    from pathlib import Path
+
+    raw = str(path_text or "").strip()
+    if not raw:
+        return set()
+    path = Path(raw)
+    keys = {raw.replace("\\", "/").casefold()}
+    if not path.is_absolute():
+        for root in context.project_roots or ():
+            if str(root or "").strip():
+                keys.add(str(Path(root) / path).replace("\\", "/").casefold())
+    else:
+        for root in context.project_roots or ():
+            root_path = Path(root)
+            try:
+                rel = path.relative_to(root_path)
+                keys.add(str(rel).replace("\\", "/").casefold())
+            except Exception:
+                pass
+    return keys
+
+
 def _is_import_coverage_request(text: str) -> bool:
     lower = (text or "").lower()
     return bool(
@@ -241,7 +385,7 @@ class ImportCoverageProvider:
         return _is_import_coverage_request(context.text)
 
     def handle(self, context: RequestContext, emit: ProgressCallback, activity: ActivityCallback | None = None) -> EngineResult:
-        from tech_connector.services.prompt_dispatch_service import PromptDispatchService
+        from tech_connector.services.prompt.prompt_dispatch_service import PromptDispatchService
 
         decision = dict(_route_decision(context) or {})
         decision.update({
@@ -281,7 +425,14 @@ class ActionGraphProvider:
             return False
 
     def _plan_from_route_decision(self, context: RequestContext, route_decision: dict) -> dict | None:
-        operations = list(route_decision.get("operations") or [])
+        operations = [
+            dict(operation)
+            for operation in (route_decision.get("operations") or [])
+            if any(
+                dict(operation).get(key)
+                for key in ("operation", "callable", "args", "produces", "requires")
+            )
+        ]
         if not operations:
             return None
         actions = []
@@ -332,7 +483,7 @@ class ActionGraphProvider:
         if not plan:
             plan = plan_prompt_to_action_graph(context.text, list(context.project_roots or []))
         if plan.get("intent") == "needs_llm_planner" and should_route_to_action_graph(context.text, list(context.project_roots or [])):
-            from tech_connector.services.prompt_intent_service import build_action_graph_clarification
+            from tech_connector.services.prompt.prompt_intent_service import build_action_graph_clarification
 
             _emit(emit, "action_plan", "Structured request needs clarification", 1, 1)
             _activity(
@@ -461,8 +612,15 @@ class TargetDiscoveryEditProvider:
     def can_handle(self, context: RequestContext) -> bool:
         route_decision = _route_decision(context)
         if route_decision:
+            from tech_connector.services.prompt.artifact_contract_service import (
+                requests_generated_code_artifact,
+            )
+
             understanding = dict(route_decision.get("request_understanding") or {})
-            if understanding:
+            operation_mode = str(route_decision.get("operation_mode") or "").lower()
+            if understanding and not requests_generated_code_artifact(route_decision):
+                if operation_mode == "plan":
+                    return route_decision.get("provider") == self.name
                 if bool(understanding.get("read_only_requested")):
                     return False
                 if not bool(understanding.get("mutation_requested")):
@@ -508,10 +666,249 @@ class TargetDiscoveryEditProvider:
                 considered = []
                 for sym in symbols[:4]:
                     considered.append(f"{sym.get('kind')} `{sym.get('qualname') or sym.get('name')}` lines {sym.get('start_line')}-{sym.get('end_line')}")
-                lines.append("   Considered: " + "; ".join(considered))
+    def _synthesize_dynamic_sketch_and_plan(self, prompt: str, target_file: str) -> tuple[list[str], list[str]]:
+        import re
+        from pathlib import Path
+
+        raw_text = prompt or ""
+        lower_text = raw_text.lower()
+        target_name = Path(target_file).name if target_file else ""
+        target_stem = Path(target_file).stem if target_file else ""
+
+        id_matches = re.findall(r"\b([A-Z][a-zA-Z0-9]+|[a-z][a-z0-9_]{3,})\b", raw_text)
+        stopwords = {
+            "class", "function", "method", "strategy", "first", "adding", "create",
+            "make", "build", "file", "target", "edits", "prompt", "please", "with",
+            "from", "into", "that", "this", "have", "need", "want", "should", "could",
+            "before", "after", "about", "which", "where", "custom", "widgets", "tools",
+            "module", "package", "python", "script", "project", "code", "implementation",
+        }
+        candidates = [w for w in id_matches if w.lower() not in stopwords]
+
+        qt_match = re.search(r"\b(Q[A-Z][a-zA-Z0-9]+)\b", raw_text)
+        qt_class = qt_match.group(1) if qt_match else ""
+
+        entity_name = ""
+        if qt_class:
+            if qt_class in {"QTableWidget", "QTreeWidget", "QListWidget", "QComboBox", "QSpinBox", "QSlider", "QDialog"}:
+                entity_name = f"Custom{qt_class[1:]}"
+            else:
+                entity_name = qt_class
+        elif candidates:
+            entity_name = candidates[0]
+            if entity_name.islower():
+                entity_name = "".join(part.capitalize() for part in entity_name.split("_"))
+        else:
+            entity_name = "CustomComponent"
+
+        is_func = bool(re.search(r"\b(?:function|def|helper\s+function|utility\s+function)\b", lower_text))
+        is_enum = bool(re.search(r"\b(?:enum|enumeration)\b", lower_text))
+        is_dataclass = bool(re.search(r"\b(?:dataclass|struct|schema|record)\b", lower_text))
+
+        base_class = ""
+        if qt_class:
+            base_class = f"QtWidgets.{qt_class}"
+        elif "dialog" in lower_text:
+            base_class = "QtWidgets.QDialog"
+        elif "widget" in lower_text:
+            base_class = "QtWidgets.QWidget"
+        elif "thread" in lower_text:
+            base_class = "QtCore.QThread"
+        elif "exception" in lower_text or "error" in lower_text:
+            base_class = "Exception"
+        elif "dict" in lower_text:
+            base_class = "dict"
+
+        if is_enum:
+            sketch_lines = [
+                f"class {entity_name}(enum.Enum):",
+                f'    """Enum defining options for {entity_name.lower()} handling."""',
+                "    DEFAULT = 'default'",
+                "    ACTIVE = 'active'",
+                "    DISABLED = 'disabled'",
+            ]
+            plan_steps = [
+                f"1. Import standard `enum` module in `{target_name}` if not present.",
+                f"2. Define `{entity_name}` with type-safe enumeration variants.",
+                f"3. Integrate `{entity_name}` with surrounding functions and validation rules.",
+                f"4. Add unit test coverage for `{entity_name}` serialization and comparisons.",
+            ]
+        elif is_dataclass:
+            sketch_lines = [
+                "@dataclass",
+                f"class {entity_name}:",
+                f'    """Structured data container for {entity_name.lower()} payload."""',
+                "    id: str",
+                "    name: str",
+                "    enabled: bool = True",
+                "    metadata: dict = field(default_factory=dict)",
+            ]
+            plan_steps = [
+                f"1. Ensure `@dataclass` and `field` are imported from `dataclasses` in `{target_name}`.",
+                f"2. Define schema fields and default initializers for `{entity_name}`.",
+                f"3. Provide serialization / deserialization methods (`to_dict` / `from_dict`) if required.",
+                f"4. Add smoke tests for `{entity_name}` construction and field validation.",
+            ]
+        elif is_func:
+            func_name = candidates[0] if candidates else "process_data"
+            if not func_name.islower():
+                func_name = re.sub(r"(?<!^)(?=[A-Z])", "_", func_name).lower()
+            sketch_lines = [
+                f"def {func_name}(data: dict, options: dict | None = None) -> dict:",
+                f'    """Process and transform {func_name.replace("_", " ")} payload."""',
+                "    options = options or {}",
+                "    result = dict(data)",
+                "    # Perform requested operations and validations",
+                "    return result",
+            ]
+            plan_steps = [
+                f"1. Inspect `{target_name}` to confirm function placement and parameter naming standards.",
+                f"2. Implement `def {func_name}(...)` with clear type hints and docstring.",
+                "3. Implement core processing logic and error handling for edge cases.",
+                f"4. Execute local tests calling `{func_name}` to verify behavior.",
+            ]
+        elif qt_class == "QTableWidget" or ("table" in lower_text and "widget" in lower_text):
+            sketch_lines = [
+                f"class {entity_name}(QtWidgets.QTableWidget):",
+                f'    """Custom table widget providing structured item handling and column headers."""',
+                "",
+                "    def __init__(self, rows: int = 0, columns: int = 0, parent=None):",
+                "        super().__init__(rows, columns, parent)",
+                "        self.setAlternatingRowColors(True)",
+                "        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)",
+                "        self.horizontalHeader().setStretchLastSection(True)",
+                "",
+                "    def populate(self, headers: list[str], row_data: list[list[str]]) -> None:",
+                "        self.setColumnCount(len(headers))",
+                "        self.setHorizontalHeaderLabels(headers)",
+                "        self.setRowCount(len(row_data))",
+                "        for r, row in enumerate(row_data):",
+                "            for c, val in enumerate(row):",
+                "                self.setItem(r, c, QtWidgets.QTableWidgetItem(str(val)))",
+            ]
+            plan_steps = [
+                f"1. Confirm `QtWidgets.QTableWidget` and `QtWidgets.QTableWidgetItem` imports in `{target_name}`.",
+                f"2. Implement `{entity_name}` extending `QtWidgets.QTableWidget` with custom initialization and selection behavior.",
+                "3. Add helper methods (`populate`, item selection listeners) for managing table rows and headers.",
+                "4. Verify runtime construction, signal connections, and widget rendering.",
+            ]
+        elif qt_class or "widget" in lower_text or "dialog" in lower_text:
+            base = base_class or "QtWidgets.QWidget"
+            sketch_lines = [
+                f"class {entity_name}({base}):",
+                f'    """Custom UI component extending {base} for {entity_name.lower()}."""',
+                "",
+                "    def __init__(self, parent=None):",
+                "        super().__init__(parent)",
+                "        self._setup_ui()",
+                "",
+                "    def _setup_ui(self) -> None:",
+                "        layout = QtWidgets.QVBoxLayout(self)",
+                "        layout.setContentsMargins(8, 8, 8, 8)",
+                "        # Construct layout components and connect signals",
+            ]
+            plan_steps = [
+                f"1. Check PySide imports and layout conventions in `{target_name}`.",
+                f"2. Implement `{entity_name}` inheriting from `{base}` with layout initialization.",
+                "3. Wire internal child widgets, events, and signal connections.",
+                f"4. Add smoke test constructing `{entity_name}` in non-modal / application context.",
+            ]
+        else:
+            base_suffix = f"({base_class})" if base_class else ""
+            sketch_lines = [
+                f"class {entity_name}{base_suffix}:",
+                f'    """Implementation for {entity_name.lower()} in {target_stem or "target module"}."""',
+                "",
+                "    def __init__(self, config: dict | None = None):",
+                "        self.config = config or {}",
+                "        self.is_active = True",
+                "",
+                "    def execute(self, payload: dict) -> dict:",
+                "        # Process payload and return result state",
+                "        return {'status': 'success', 'data': payload}",
+            ]
+            plan_steps = [
+                f"1. Review existing module structure and patterns in `{target_name}`.",
+                f"2. Define `{entity_name}` class with initializers and configurable fields.",
+                "3. Implement core operational methods, parameter checking, and error handling.",
+                f"4. Add unit test suite verifying `{entity_name}` instantiation and method execution.",
+            ]
+
+        return sketch_lines, plan_steps
+
+    def _plan_text(self, context: RequestContext, discovery: dict, selected_candidate: dict, ordered_candidates: list[dict], resolution: dict) -> str:
+        selected = str(selected_candidate.get("path") or "")
+        reasons = list(resolution.get("reasons") or [])
+        symbols = selected_candidate.get("symbols") or []
+        symbol_names = []
+        for symbol in symbols[:6]:
+            if not isinstance(symbol, dict):
+                continue
+            name = symbol.get("qualname") or symbol.get("name")
+            if not name:
+                continue
+            symbol_names.append(f"{symbol.get('kind', 'symbol')} `{name}`")
+
+        sketch_lines, plan_steps = self._synthesize_dynamic_sketch_and_plan(context.text, selected)
+
+        clean_reasons = []
+        for r in reasons:
+            r_str = str(r or "").strip()
+            if not r_str or "provider score" in r_str.lower():
+                continue
+            if r_str == "Candidate is open in the editor.":
+                clean_reasons.append("Selected file is active in the workspace editor.")
+            elif r_str == "Candidate is editable source (.py).":
+                clean_reasons.append("Target is editable Python source file.")
+            elif "expected generated-code target" in r_str.lower():
+                clean_reasons.append("Target matches expected implementation module.")
+            else:
+                clean_reasons.append(r_str)
+
+        lines = [
+            "I mapped your request to the likely owning code target and can provide a concrete implementation plan before any edits.",
+            "",
+            "Requested scope:",
+            f"- Prompt: {str(context.text or '').strip().splitlines()[0][:220] or '(not provided)'}",
+            f"- Primary target: `{selected}`",
+        ]
+        if clean_reasons:
+            lines.extend([
+                "",
+                "Why this file is top candidate:",
+                *[f"- {reason}" for reason in clean_reasons[:3]],
+            ])
+        if symbol_names:
+            lines.extend([
+                "",
+                "Relevant symbols found:",
+                *[f"- {name}" for name in symbol_names],
+            ])
+
         lines.extend([
             "",
-            "Which file should I modify? Reply with a number, a path, or say `create a new file`.",
+            "Concrete sketch (adapt to existing patterns in this module):",
+            "```python",
+            *sketch_lines,
+            "```",
+            "",
+            "Plan (no edits yet):",
+            *plan_steps,
+            "",
+            "Top ranked targets:",
+        ])
+        for idx, candidate in enumerate(ordered_candidates[:5], 1):
+            path = str(candidate.get("path") or "")
+            if not path:
+                continue
+            tag = " (Primary target)" if idx == 1 else ""
+            lines.append(f"- #{idx}: `{path}`{tag}")
+        if not ordered_candidates:
+            lines.append("- No ranked candidates were found beyond file-level matches.")
+
+        lines.extend([
+            "",
+            "Reply with `approve` and I will proceed to generate the exact patch, or ask for a different target before I draft it.",
         ])
         return "\n".join(lines)
 
@@ -521,14 +918,24 @@ class TargetDiscoveryEditProvider:
             format_edit_target_context,
             build_project_edit_target_prompt,
         )
-        from tech_connector.services.target_resolution_service import resolve_target_candidates
+        from tech_connector.services.reasoning.target_resolution_service import resolve_target_candidates
 
         route_decision = _route_decision(context)
         understanding = dict(route_decision.get("request_understanding") or {})
         read_only_requested = bool(understanding.get("read_only_requested"))
         mutation_requested = bool(understanding.get("mutation_requested"))
+        operation_mode = str(route_decision.get("operation_mode") or "").lower()
+        from tech_connector.services.prompt.artifact_contract_service import (
+            requests_generated_code_artifact,
+        )
+        generated_code_artifact = requests_generated_code_artifact(route_decision)
 
-        if understanding and (read_only_requested or not mutation_requested):
+        if (
+            understanding
+            and not generated_code_artifact
+            and (read_only_requested or not mutation_requested)
+            and operation_mode != "plan"
+        ):
             _activity(
                 activity,
                 "route_guard",
@@ -586,6 +993,36 @@ class TargetDiscoveryEditProvider:
             context,
             list(discovery.get("candidates") or []),
         )
+        planned_candidates = _expected_file_candidates_from_route(context)
+        if generated_code_artifact and not planned_candidates and context.project_roots:
+            candidates.insert(0, {
+                "path": str(context.project_roots[0]),
+                "score": 0,
+                "symbols": [],
+                "chunks": [],
+                "candidate_source": "generated_artifact_scope",
+                "purpose": (
+                    "Project scope for a new generated artifact; discovered files "
+                    "are grounding patterns, not assumed edit owners."
+                ),
+            })
+        if planned_candidates:
+            merged_planned: list[dict] = []
+            planned_keys: set[str] = set()
+            for item in planned_candidates:
+                keys = _candidate_identity_keys(context, str(item.get("path") or ""))
+                if keys and not (keys & planned_keys):
+                    merged_planned.append(item)
+                    planned_keys.update(keys)
+            remaining_candidates: list[dict] = []
+            seen = set(planned_keys)
+            for item in candidates:
+                keys = _candidate_identity_keys(context, str(item.get("path") or ""))
+                if keys and keys & seen:
+                    continue
+                remaining_candidates.append(item)
+                seen.update(keys)
+            candidates = [*merged_planned, *remaining_candidates]
         resolution = resolve_target_candidates(
             context.text,
             candidates,
@@ -678,13 +1115,116 @@ class TargetDiscoveryEditProvider:
         discovery["best_target"] = selected_candidate
         discovery["confidence"] = "high"
         discovery["selected_path"] = selected_path
+        resolution_state = resolution.to_dict()
 
-        discovery_context = format_edit_target_context(discovery)
+        route_requires_confirmation = route_decision.get("requires_confirmation")
+        requires_confirmation = not (
+            route_requires_confirmation is False
+            or str(route_requires_confirmation).strip().lower() in {"0", "false", "no", "off"}
+        )
+        plan_binding = dict((context.extras or {}).get("clarification_binding") or {})
+        plan_approved = bool(
+            (
+                context.text
+                and (
+                    (route_decision.get("approved") and not requires_confirmation)
+                    or str(route_decision.get("approval_state") or "").strip().lower() == "approved"
+                    or str(route_decision.get("approval") or "").strip().lower() == "approved"
+                )
+            )
+            or str(plan_binding.get("action") or "").strip().lower() == "confirm"
+            or bool(plan_binding.get("route_decision", {}).get("approved"))
+            or str(plan_binding.get("route_decision", {}).get("approval_state") or "").strip().lower() == "approved"
+        )
+
+        if operation_mode == "plan" and not plan_approved:
+            _emit(emit, "prompt", "Read-only plan generated", 1, 1)
+            _activity(
+                activity,
+                "plan",
+                "Implementation plan prepared",
+                f"Providing ranked target evidence for {selected_path or selected_candidate.get('path') or ''} before any edit prompt generation.",
+                status="ok",
+                path=selected_path,
+                score=float(selected_candidate.get("score") or 0),
+                metadata={
+                    "target_confidence": resolution.confidence,
+                    "target_reasons": resolution.reasons,
+                    "generated_code_artifact": generated_code_artifact,
+                    "live_tree_mutation_allowed": False,
+                },
+            )
+            pending_route = dict(route_decision)
+            if selected_path:
+                selected_target = str(selected_path)
+                pending_route["resolved_target_file"] = selected_target
+                pending_route["target_file"] = selected_target
+                pending_route["target"] = selected_target
+                index_filters = dict(pending_route.get("index_filters") or {})
+                index_filters["target_file"] = selected_target
+                index_filters["scope"] = "active"
+                pending_route["index_filters"] = index_filters
+            return EngineResult(
+                action="clarify",
+                label="Project Edit Plan",
+                text=self._plan_text(
+                    context,
+                    discovery,
+                    selected_candidate,
+                    ordered_candidates,
+                    resolution_state,
+                ),
+                metadata={
+                    "engine_path": self.name,
+                "result_type": "target_discovery_plan",
+                "discovery": discovery,
+                "target_resolution": resolution_state,
+                "selected_target": selected_path,
+                "generated_code_artifact": generated_code_artifact,
+                "live_tree_mutation_allowed": False,
+                "pending_clarification": {
+                    "kind": "confirmation",
+                    "resumable": True,
+                    "target": str(selected_path or ""),
+                    "execution_environment": str(
+                        route_decision.get("execution_environment")
+                        or route_decision.get("host")
+                        or ""
+                    ),
+                        "route_decision": pending_route,
+                        "execution_request": {
+                            "operation_mode": "plan",
+                            "original_prompt": context.text,
+                            "target_file": str(selected_path or ""),
+                            "target_path": str(selected_path or ""),
+                            "resolved_target_file": str(selected_path or ""),
+                        },
+                    "unresolved_slots": [],
+                    "allow_text_approval": True,
+                },
+                "ui_controls": [
+                    {"type": "button", "value": "approve", "label": "Approve"},
+                    {"type": "button", "value": "cancel", "label": "Deny"},
+                ],
+            },
+            )
+
+        discovery_context = format_edit_target_context(
+            discovery,
+            max_source_lines=8 if generated_code_artifact else 45,
+            max_candidates=4 if generated_code_artifact else 8,
+        )
         _emit(emit, "prompt", "Building grounded edit prompt")
         prompt = build_project_edit_target_prompt(
             context.text,
             discovery_context,
-            active_path=selected_path or context.current_file_path,
+            active_path=(
+                context.current_file_path
+                if generated_code_artifact and not bool(mutation_requested and not read_only_requested)
+                else selected_path or context.current_file_path
+            ),
+            generated_artifact=generated_code_artifact,
+            live_tree_mutation_allowed=bool(mutation_requested and not read_only_requested),
         )
         _emit(emit, "prompt", "Edit prompt ready", 1, 1)
         _activity(
@@ -698,6 +1238,8 @@ class TargetDiscoveryEditProvider:
             metadata={
                 "target_confidence": resolution.confidence,
                 "target_reasons": resolution.reasons,
+                "generated_code_artifact": generated_code_artifact,
+                "live_tree_mutation_allowed": bool(mutation_requested and not read_only_requested),
             },
         )
         return EngineResult(
@@ -716,6 +1258,8 @@ class TargetDiscoveryEditProvider:
                 "discovery": discovery,
                 "target_resolution": resolution.to_dict(),
                 "selected_target": selected_path,
+                "generated_code_artifact": generated_code_artifact,
+                "live_tree_mutation_allowed": bool(mutation_requested and not read_only_requested),
             },
         )
 
@@ -745,7 +1289,7 @@ class ProjectSearchProvider:
         )
         _emit(emit, "project_search", "Searching project index")
         try:
-            from tech_connector.services.prompt_task_splitter_service import normalize_prompt_text
+            from tech_connector.services.prompt.prompt_task_splitter_service import normalize_prompt_text
             query_text = normalize_prompt_text(context.text)
         except Exception:
             query_text = context.text

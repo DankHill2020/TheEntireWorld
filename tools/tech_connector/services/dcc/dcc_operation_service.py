@@ -20,6 +20,19 @@ class DccOperation:
 
 
 MAYA_OPERATIONS: dict[str, DccOperation] = {
+    "pipeline.create_rigged_proxy": DccOperation(
+        key="pipeline.create_rigged_proxy",
+        label="Maya Create Rigged Transfer Proxy",
+        function="maya_tools.Rigging.validation_proxy.create_rigged_proxy",
+        optional={
+            "name_prefix": "AIStudio_Proxy",
+            "start_frame": 1,
+            "end_frame": 24,
+            "travel_distance": 100.0,
+        },
+        mutates_project=True,
+        description="Create a disposable skinned and animated proxy for validating skeletal FBX transfer pipelines.",
+    ),
     "navigation.frame_selection": DccOperation(
         key="navigation.frame_selection",
         label="Maya Frame Selection",
@@ -83,6 +96,22 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
         optional={"name": "control_ctrl", "shape": "circle", "position": None, "select": True, "if_missing": False},
         mutates_project=True,
         description="Create a simple Maya NURBS control curve and optionally position/select it.",
+    ),
+    "maya.adjust_facial_control_rig": DccOperation(
+        key="maya.adjust_facial_control_rig",
+        label="Maya Adjust Facial Control Rig",
+        function="ai_studio.maya.generated.maya_adjust_facial_control_rig",
+        optional={"controls": {}, "expression": "", "frame_range": [], "export_path": ""},
+        mutates_project=True,
+        description="Set/key facial control values for a MetaHuman-style Maya facial rig and optionally export animation.",
+    ),
+    "maya.scan_facial_rig": DccOperation(
+        key="maya.scan_facial_rig",
+        label="Maya Scan Facial Rig",
+        function="ai_studio.maya.generated.maya_scan_facial_rig",
+        optional={"control_patterns": ["*_ctrl", "*CTRL*", "*face*", "*jaw*", "*brow*", "*eye*", "*mouth*"], "include_selection": True},
+        mutates_project=False,
+        description="Read back Maya facial-control candidates, current selection, and playback range before facial animation edits.",
     ),
     "node.connect_attr": DccOperation(
         key="node.connect_attr",
@@ -205,6 +234,19 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
         optional={"mesh_path": "", "skeleton_path": "", "skeleton_type": "Humanoid"},
         mutates_project=True,
         description="Build a control rig for a character model in Maya.",
+    ),
+    "rigging.load_biped_template": DccOperation(
+        key="rigging.load_biped_template",
+        label="Maya Load Biped Rig Template",
+        function="maya_tools.Rigging.rig_template.load_biped_rig_template",
+        optional={
+            "template_path": "C:/depot/ArtSource/Rigs/rig_template.ma",
+            "namespace": "",
+            "reference": False,
+            "merge_namespaces_on_clash": False,
+        },
+        mutates_project=True,
+        description="Import or reference the studio biped rig template containing RFL joints, then report root and RFL joints.",
     ),
     "rigging.auto_skinner": DccOperation(
         key="rigging.auto_skinner",
@@ -345,6 +387,46 @@ BLENDER_OPERATIONS: dict[str, DccOperation] = {
         optional={"selected_only": True, "apply_unit_scale": True},
         mutates_project=False,
         description="Export current scene or selection as FBX.",
+    ),
+    "blender.clean_animation": DccOperation(
+        key="blender.clean_animation",
+        label="Blender Clean Animation",
+        function="ai_studio.blender.generated.blender_clean_animation",
+        optional={"armature": "", "action": "", "frame_range": [], "cleanup": []},
+        mutates_project=True,
+        description="Clean a Blender mocap/action clip by trimming range, simplifying curves, and preserving root-motion/export metadata.",
+    ),
+    "blender.scan_animation": DccOperation(
+        key="blender.scan_animation",
+        label="Blender Scan Animation",
+        function="ai_studio.blender.generated.blender_scan_animation",
+        optional={"include_actions": True, "include_selected": True},
+        mutates_project=False,
+        description="Read back Blender armatures, actions, selection, frame range, and scene scale before cleanup/export.",
+    ),
+    "blender.export_fbx": DccOperation(
+        key="blender.export_fbx",
+        label="Blender Export Unreal FBX",
+        function="ai_studio.blender.generated.blender_export_fbx",
+        required=("output_path",),
+        optional={"selection": "", "settings": {"axis_forward": "-Y", "axis_up": "Z", "apply_unit_scale": True, "bake_animation": True}},
+        mutates_project=False,
+        description="Export a cleaned Blender animation/armature as Unreal-compatible FBX with recorded export settings.",
+    ),
+    "pipeline.process_meshes_for_transfer": DccOperation(
+        key="pipeline.process_meshes_for_transfer",
+        label="Blender Prepare Meshes for Transfer",
+        function="blender_tools.pipeline_transfer.process_meshes_for_transfer",
+        optional={
+            "objects": [],
+            "clean_names": True,
+            "apply_transforms": True,
+            "lod_count": 0,
+            "ensure_material_slots": False,
+            "create_collision": False,
+        },
+        mutates_project=True,
+        description="Clean mesh names, apply transforms, generate LOD copies, ensure material slots, and create UCX collision meshes before export.",
     ),
     "io.import_fbx": DccOperation(
         key="io.import_fbx",
@@ -850,7 +932,7 @@ def is_dcc_prototype_request(text: str, host: str = "") -> bool:
     if not host:
         return False
     try:
-        from tech_connector.services.prompt_route_service import classify_prompt_route
+        from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
         if classify_prompt_route(text).route != "dcc_prototype":
             return False
     except Exception:
@@ -987,7 +1069,7 @@ def dcc_prompt_to_operation(
 
     if not formulation:
         try:
-            from tech_connector.services.problem_formulation_service import build_problem_formulation
+            from tech_connector.services.reasoning.problem_formulation_service import build_problem_formulation
             formulation = build_problem_formulation(
                 text,
                 decision,
@@ -1068,12 +1150,20 @@ def dcc_prompt_to_operation(
             (
                 "create_rig" in q
                 or re.search(r"\b(?:create|make|build)\s+(?:a\s+)?rig\b", q)
+                or re.search(r"\b(?:create|make|build)\s+(?:a\s+)?(?:full\s+)?(?:biped\s+)?control\s+rig\b", q)
+                or re.search(r"\b(?:rig|rigging)\s+(?:the\s+)?(?:current|open|selected|biped|template|skeleton)\b", q)
                 or "create control rig" in q
+                or "build control rig" in q
             )
             and re.search(r"\b(run|execute|call|create|build|make)\b", q)
             and not re.search(r"^\s*(what|which|where|find|show|list|identify|explain)\b", q)
         ):
             return "rigging.create_rig"
+        if (
+            re.search(r"\b(load|import|reference|bring in|add)\b", q)
+            and re.search(r"\b(biped|rig template|template rig|rfl|reverse foot|reverse-foot)\b", q)
+        ):
+            return "rigging.load_biped_template"
         if "auto_skinner" in q or "auto skin" in q or "skin weights" in q or "skinning" in q or "smooth skin" in q:
             return "rigging.auto_skinner"
         if re.search(r"\b(retarget|retargeting)\b", q) and re.search(r"\b(hik|human\s*ik|fbx|animation)\b", q):
@@ -1270,11 +1360,14 @@ def build_dcc_operation_params(host: str, operation: str, text: str) -> dict[str
         char_match = re.search(r"\b(?:character|model|rig)\s+([A-Za-z0-9_]+)\b", text, re.IGNORECASE)
         if char_match:
             val = char_match.group(1)
-            if val.lower() in {"for", "the", "a", "an", "in", "of", "to", "with", "at", "my"} or val.lower() == "character":
+            ignored_names = {"for", "the", "a", "an", "in", "of", "to", "with", "at", "my", "current", "currently", "open", "template", "skeleton", "mesh", "rig"}
+            if val.lower() in ignored_names or val.lower() == "character":
                 char_spec = re.search(r"\b(?:character|model)\s+([A-Za-z0-9_]+)\b", text, re.IGNORECASE)
-                if char_spec:
+                if char_spec and char_spec.group(1).lower() not in ignored_names:
                     val = char_spec.group(1)
-            if val.lower() not in {"mesh", "skeleton", "rig"}:
+                else:
+                    val = ""
+            if val and val.lower() not in ignored_names:
                 params["character_name"] = val
         # Suffix/naming heuristic
         name_match = re.search(r"\b(?:named|called|name)\s+['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", text, re.IGNORECASE)
@@ -1639,6 +1732,19 @@ def _build_maya_operation_params(operation: str, text: str) -> dict[str, Any]:
             if component_matches:
                 params["components"] = component_matches
 
+    elif operation == "rigging.load_biped_template":
+        path_match = re.search(r"([A-Za-z]:[\\/][^\"'\n\r]+?\.(?:ma|mb))", text or "", re.IGNORECASE)
+        if path_match:
+            params["template_path"] = path_match.group(1).replace("\\", "/")
+        namespace_match = re.search(r"\b(?:namespace|ns)\s+['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", text or "", re.IGNORECASE)
+        if namespace_match:
+            params["namespace"] = namespace_match.group(1)
+        lower = (text or "").lower()
+        if "reference" in lower:
+            params["reference"] = True
+        if "merge namespace" in lower or "merge namespaces" in lower:
+            params["merge_namespaces_on_clash"] = True
+
     elif operation == "script.run":
         code_match = re.search(r"\b(?:code|script)\s*[:=]\s*(.+)$", text or "", re.IGNORECASE | re.DOTALL)
         if code_match:
@@ -1856,6 +1962,57 @@ try:
             cmds.select(created, replace=True)
         print(json.dumps({{"created_or_reused": created, "position": cmds.xform(created, q=True, ws=True, t=True), "selection": cmds.ls(selection=True) or []}}))
 
+    elif operation == "maya.scan_facial_rig":
+        patterns = _as_list(params.get("control_patterns")) or ["*_ctrl", "*CTRL*", "*face*", "*jaw*", "*brow*", "*eye*", "*mouth*"]
+        controls = []
+        seen = set()
+        for pattern in patterns:
+            for node in cmds.ls(pattern, type="transform") or []:
+                if node in seen:
+                    continue
+                seen.add(node)
+                attrs = cmds.listAttr(node, keyable=True) or []
+                controls.append({{"name": node, "keyable_attrs": attrs[:40]}})
+        result = {{
+            "ok": True,
+            "controls": controls[:200],
+            "control_count": len(controls),
+            "selection": cmds.ls(selection=True) or [],
+            "playback_range": [cmds.playbackOptions(q=True, min=True), cmds.playbackOptions(q=True, max=True)],
+        }}
+        print(json.dumps(result))
+
+    elif operation == "maya.adjust_facial_control_rig":
+        controls = params.get("controls") or {{}}
+        expression = str(params.get("expression") or "")
+        frame_range = params.get("frame_range") or []
+        export_path = str(params.get("export_path") or "")
+        keyed = []
+        missing = []
+        if not controls and expression:
+            controls = {{}}
+        for plug, value in controls.items():
+            node = str(plug).split(".", 1)[0]
+            if not cmds.objExists(node):
+                missing.append(str(plug))
+                continue
+            try:
+                cmds.setAttr(str(plug), float(value))
+                cmds.setKeyframe(str(plug))
+                keyed.append({{"plug": str(plug), "value": value}})
+            except Exception as exc:
+                missing.append(str(plug) + ": " + str(exc))
+        exported = False
+        if export_path:
+            try:
+                selected = cmds.ls(selection=True) or []
+                kwargs = {{"force": True, "type": "FBX export", "exportSelected": bool(selected)}}
+                cmds.file(export_path, **kwargs)
+                exported = True
+            except Exception as exc:
+                missing.append("export: " + str(exc))
+        print(json.dumps({{"ok": not missing, "expression": expression, "frame_range": frame_range, "keyed": keyed, "export_path": export_path, "exported": exported, "warnings": missing}}))
+
     elif operation == "modeling.create_primitive":
         primitive = str(params.get("primitive_type") or "cube").lower()
         name = params.get("name") or primitive
@@ -1987,6 +2144,55 @@ try:
         components = _as_list(params.get("components")) or cmds.ls(selection=True, flatten=True) or [mesh]
         cmds.skinPercent(cluster, components, transformValue=[(influence, float(weight))])
         print("Set skin weight " + str(weight) + " for " + influence + " on " + str(components))
+
+    elif operation == "rigging.load_biped_template":
+        from maya_tools.Rigging import rig_template
+        result = rig_template.load_biped_rig_template(
+            template_path=str(params.get("template_path") or rig_template.DEFAULT_BIPED_RIG_TEMPLATE),
+            namespace=str(params.get("namespace") or ""),
+            reference=bool(params.get("reference", False)),
+            merge_namespaces_on_clash=bool(params.get("merge_namespaces_on_clash", False)),
+        )
+        print(json.dumps(result))
+
+    elif operation == "rigging.create_rig":
+        from maya_tools.Rigging.mocap import setup_hik
+        from maya_tools.Rigging import create_rig
+        root_joint = str(params.get("root_joint") or "")
+        before_controls = set(cmds.ls("*ctrl*", type="transform") or [])
+        before_nodes = set(cmds.ls() or [])
+        cmds.undoInfo(openChunk=True, chunkName="Prompt Create Rig")
+        try:
+            body_joint_map, face_joint_map = setup_hik.create_rig_mapping(root_joint or None)
+            if not body_joint_map:
+                raise RuntimeError("No body joint mapping could be resolved from the current Maya scene.")
+            result = create_rig.create_rig_from_mapping(body_joint_map, face_joint_map)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        after_controls = set(cmds.ls("*ctrl*", type="transform") or [])
+        after_nodes = set(cmds.ls() or [])
+        mapped_body = [
+            {{"slot": key, "joint": value.get("joint") if isinstance(value, dict) else value}}
+            for key, value in sorted((body_joint_map or {{}}).items())
+        ]
+        mapped_face_count = len(face_joint_map or {{}})
+        created_controls = sorted(after_controls - before_controls)
+        created_nodes = sorted(after_nodes - before_nodes)
+        print(json.dumps({{
+            "ok": True,
+            "result": result,
+            "root_joint": root_joint,
+            "body_mapping_count": len(body_joint_map or {{}}),
+            "face_mapping_count": mapped_face_count,
+            "mapped_body_sample": mapped_body[:40],
+            "created_control_count": len(created_controls),
+            "created_controls": created_controls[:120],
+            "created_node_count": len(created_nodes),
+            "created_node_sample": created_nodes[:120],
+        }}))
 
     elif operation == "script.run":
         code = str(params.get("code") or "")
@@ -2196,6 +2402,79 @@ try:
             obj.select_set(True)
         bpy.context.view_layer.objects.active = objects[-1]
         print("Selected Blender objects: " + str([obj.name for obj in objects]))
+
+    elif operation == "blender.scan_animation":
+        actions = []
+        if bool(params.get("include_actions", True)):
+            for action in bpy.data.actions:
+                actions.append({{"name": action.name, "frame_range": [float(action.frame_range[0]), float(action.frame_range[1])], "fcurve_count": len(action.fcurves)}})
+        armatures = []
+        for obj in bpy.data.objects:
+            if obj.type == "ARMATURE":
+                active_action = getattr(getattr(obj, "animation_data", None), "action", None)
+                armatures.append({{"name": obj.name, "action": active_action.name if active_action else "", "scale": list(obj.scale)}})
+        result = {{
+            "ok": True,
+            "armatures": armatures,
+            "actions": actions,
+            "selection": [obj.name for obj in bpy.context.selected_objects] if bool(params.get("include_selected", True)) else [],
+            "frame_range": [int(bpy.context.scene.frame_start), int(bpy.context.scene.frame_end)],
+            "unit_scale": float(bpy.context.scene.unit_settings.scale_length),
+        }}
+        print(json.dumps(result))
+
+    elif operation == "blender.clean_animation":
+        armature_name = str(params.get("armature") or "")
+        action_name = str(params.get("action") or "")
+        frame_range = params.get("frame_range") or []
+        cleanup = params.get("cleanup") or []
+        armature = bpy.data.objects.get(armature_name) if armature_name else bpy.context.object
+        if armature is None:
+            raise RuntimeError("No armature/object supplied or selected")
+        action = bpy.data.actions.get(action_name) if action_name else getattr(getattr(armature, "animation_data", None), "action", None)
+        if action is None:
+            raise RuntimeError("No action supplied or active on armature/object")
+        if frame_range and len(frame_range) >= 2:
+            start, end = int(frame_range[0]), int(frame_range[1])
+        else:
+            start, end = int(action.frame_range[0]), int(action.frame_range[1])
+        removed_keys = 0
+        for fcurve in action.fcurves:
+            points = list(fcurve.keyframe_points)
+            for key in points:
+                if key.co.x < start or key.co.x > end:
+                    fcurve.keyframe_points.remove(key)
+                    removed_keys += 1
+            try:
+                fcurve.update()
+            except Exception:
+                pass
+        bpy.context.scene.frame_start = start
+        bpy.context.scene.frame_end = end
+        print(json.dumps({{"ok": True, "armature": armature.name, "action": action.name, "frame_range": [start, end], "cleanup": cleanup, "removed_keys": removed_keys}}))
+
+    elif operation == "blender.export_fbx":
+        output_path = str(params.get("output_path") or params.get("filepath") or "")
+        if not output_path:
+            raise RuntimeError("output_path is required")
+        selection = params.get("selection")
+        settings = params.get("settings") or {{}}
+        if selection:
+            objects = _objects(selection)
+            bpy.ops.object.select_all(action="DESELECT")
+            for obj in objects:
+                obj.select_set(True)
+            bpy.context.view_layer.objects.active = objects[-1]
+        kwargs = {{
+            "filepath": output_path,
+            "use_selection": True,
+            "axis_forward": settings.get("axis_forward", "-Y"),
+            "axis_up": settings.get("axis_up", "Z"),
+            "apply_unit_scale": bool(settings.get("apply_unit_scale", True)),
+            "bake_anim": bool(settings.get("bake_animation", True)),
+        }}
+        bpy.ops.export_scene.fbx(**kwargs)
+        print(json.dumps({{"ok": True, "output_path": output_path, "settings": kwargs, "selected": [obj.name for obj in bpy.context.selected_objects]}}))
 
     elif operation == "modeling.create_primitive":
         primitive = str(params.get("primitive_type") or "cube").lower()

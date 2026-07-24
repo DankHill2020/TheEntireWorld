@@ -9,10 +9,10 @@ import os
 import sys
 import json
 
-from tech_connector.services.unreal_editor_status_service import UnrealEditorStatusService
+from tech_connector.services.unreal.unreal_editor_status_service import UnrealEditorStatusService
 from tech_connector.services.skeleton_compatibility_service import SkeletonCompatibilityService
-from tech_connector.services.unreal_animgraph_wiring_engine import UnrealAnimGraphWiringEngine
-from tech_connector.services.blueprint_graph_codegen_engine import BlueprintGraphCodegenEngine
+from tech_connector.services.unreal.unreal_animgraph_wiring_engine import UnrealAnimGraphWiringEngine
+from tech_connector.services.unreal.blueprint_graph_codegen_engine import BlueprintGraphCodegenEngine
 from tech_connector.services.system_impact_qa_reporter import SystemImpactQAReporter
 
 

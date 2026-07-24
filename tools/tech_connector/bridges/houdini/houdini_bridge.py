@@ -6,7 +6,7 @@ import os
 import socket
 from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
-from tech_connector.bridges.host_bridge import HostBridgeInfo
+from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
 
@@ -275,32 +275,7 @@ class HoudiniBridge(DCCBridgeDelegateMixin):
             return False, str(e)
 
     def call_function(self, function_path: str, args=None, kwargs=None) -> tuple[bool, str]:
-        args = args or []
-        kwargs = kwargs or {}
-        payload = {
-            "function": function_path,
-            "args": args,
-            "kwargs": kwargs,
-        }
-
-        paths_repr = repr(self.SYS_PATHS)
-        code = f"""
-import sys, importlib, traceback
-for p in {paths_repr}:
-    if p not in sys.path:
-        sys.path.append(p)
-
-payload = {repr(payload)}
-try:
-    module_path, func_name = payload["function"].rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    func = getattr(module, func_name)
-    result = func(*payload.get("args", []), **payload.get("kwargs", {{}}))
-    print(result)
-except Exception:
-    traceback.print_exc()
-"""
-        return self.execute(code)
+        return call_python_function_via_execute(self, function_path, args, kwargs, self.SYS_PATHS)
 
     def get_current_file_code(self) -> str:
         return "import hou\nprint(hou.hipFile.path())"

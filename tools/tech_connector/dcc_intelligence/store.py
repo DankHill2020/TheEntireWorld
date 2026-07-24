@@ -1,6 +1,7 @@
 """Persistence layer for DCC local intelligence."""
 from __future__ import annotations
 
+import difflib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -41,14 +42,22 @@ class IntelligenceStore:
         self.conn.close()
 
     def apply_schema(self) -> None:
+        needs_fts_rebuild = not self.conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE version=?",
+            (SCHEMA_VERSION,),
+        ).fetchone() if self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone() else True
         with self.conn:
             for statement in DDL:
                 self.conn.execute(statement)
             for statement in INDEXES:
                 self.conn.execute(statement)
+            if needs_fts_rebuild:
+                self.conn.execute("INSERT INTO python_api_fts(python_api_fts) VALUES ('rebuild')")
             self.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES (?, ?)",
-                (SCHEMA_VERSION, "initial dcc local intelligence schema"),
+                (SCHEMA_VERSION, "add full-text Python API search"),
             )
 
     def upsert_project(self, dcc: str, name: str, root_path: str | Path) -> ProjectRef:
@@ -464,6 +473,107 @@ class IntelligenceStore:
             (project_id, dcc, like, like, like, like, f"{q}%", limit),
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def search_python_api_names(
+        self,
+        project_id: int,
+        dcc: str,
+        query: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Fast API candidate retrieval over qualified names only."""
+        q = _norm_key(query)
+        if not q:
+            return []
+        like = f"%{q}%"
+        rows = self.conn.execute(
+            """
+            SELECT * FROM python_api
+            WHERE (project_id=? OR project_id IS NULL)
+              AND dcc=?
+              AND lower(qualified_name) LIKE ?
+            ORDER BY
+                CASE
+                    WHEN lower(qualified_name)=? THEN 0
+                    WHEN lower(qualified_name) LIKE ? THEN 1
+                    ELSE 2
+                END,
+                length(qualified_name) ASC
+            LIMIT ?
+            """,
+            (project_id, dcc, like, q, f"{q}%", limit),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def search_python_api_fts(
+        self,
+        project_id: int,
+        dcc: str,
+        terms: list[str],
+        limit: int = 50,
+        match_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        tokens = list(dict.fromkeys(
+            token
+            for term in terms
+            for token in str(term or "").replace("_", " ").split()
+            if len(token) > 2
+        ))
+        if not tokens:
+            return []
+        operator = " AND " if match_all else " OR "
+        match = operator.join(f'"{token.replace(chr(34), chr(34) * 2)}"*' for token in tokens[:12])
+        rows = self.conn.execute(
+            """
+            SELECT p.*, bm25(python_api_fts, 8.0, 1.0, 2.0, 1.0) AS search_rank
+            FROM python_api_fts
+            JOIN python_api AS p ON p.id=python_api_fts.rowid
+            WHERE python_api_fts MATCH ?
+              AND (p.project_id=? OR p.project_id IS NULL)
+              AND p.dcc=?
+            ORDER BY search_rank ASC, length(p.qualified_name) ASC
+            LIMIT ?
+            """,
+            (match, project_id, dcc, limit),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def python_api_term_frequencies(self, terms: list[str]) -> dict[str, int]:
+        normalized = list(dict.fromkeys(_norm_key(term) for term in terms if len(_norm_key(term)) > 2))
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        rows = self.conn.execute(
+            f"SELECT term, doc FROM python_api_fts_vocab WHERE term IN ({placeholders})",
+            normalized,
+        ).fetchall()
+        return {str(row["term"]): int(row["doc"]) for row in rows}
+
+    def suggest_python_api_terms(self, terms: list[str], cutoff: float = 0.78) -> list[str]:
+        suggestions = []
+        for raw in terms:
+            term = _norm_key(raw)
+            if len(term) < 5:
+                continue
+            rows = self.conn.execute(
+                """
+                SELECT term FROM python_api_fts_vocab
+                WHERE term GLOB ?
+                  AND length(term) BETWEEN ? AND ?
+                ORDER BY doc DESC
+                LIMIT 2000
+                """,
+                (f"{term[0]}*", max(3, len(term) - 2), len(term) + 2),
+            ).fetchall()
+            match = difflib.get_close_matches(
+                term,
+                [row["term"] for row in rows],
+                n=1,
+                cutoff=cutoff,
+            )
+            if match and match[0] != term:
+                suggestions.append(match[0])
+        return list(dict.fromkeys(suggestions))
 
     def get_symbol(self, project_id: int, dcc: str, key: str, limit: int = 20) -> list[dict[str, Any]]:
         key_norm = _norm_key(key)

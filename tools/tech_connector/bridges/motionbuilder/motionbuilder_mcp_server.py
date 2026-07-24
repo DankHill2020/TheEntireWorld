@@ -13,7 +13,10 @@ mcp = FastMCP("MotionBuilderMCP")
 
 
 def _detect_tools_root() -> Path:
-    configured = os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    configured = (
+        os.environ.get("TOOLSROOT", "").strip()
+        or os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    )
     if configured:
         return Path(configured).expanduser().resolve()
     source = Path(__file__).resolve()

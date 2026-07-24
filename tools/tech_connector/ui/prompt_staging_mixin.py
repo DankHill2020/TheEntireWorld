@@ -31,7 +31,7 @@ class PromptStagingUiMixin:
         """Tools menu action: gather context and insert into composer only."""
         text = self._current_prompt_text()
         try:
-            from tech_connector.services.prompt_dispatch_service import PromptStagingService
+            from tech_connector.services.prompt.prompt_dispatch_service import PromptStagingService
             draft = PromptStagingService().build_draft(
                 text,
                 project_root=str(getattr(self, "project_root", "") or "") or None,
@@ -53,7 +53,7 @@ class PromptStagingUiMixin:
     def stage_unreal_context_to_prompt(self) -> None:
         text = self._current_prompt_text()
         try:
-            from tech_connector.services.prompt_dispatch_service import PromptStagingService
+            from tech_connector.services.prompt.prompt_dispatch_service import PromptStagingService
             draft = PromptStagingService().build_draft(
                 text,
                 project_root=str(getattr(self, "project_root", "") or "") or None,
@@ -75,7 +75,7 @@ class PromptStagingUiMixin:
     def stage_cpp_wrapper_context_to_prompt(self) -> None:
         text = self._current_prompt_text()
         try:
-            from tech_connector.services.prompt_dispatch_service import PromptStagingService
+            from tech_connector.services.prompt.prompt_dispatch_service import PromptStagingService
             draft = PromptStagingService().build_draft(
                 text,
                 project_root=str(getattr(self, "project_root", "") or "") or None,

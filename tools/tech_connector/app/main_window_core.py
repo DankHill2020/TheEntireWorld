@@ -85,37 +85,82 @@ from tech_connector.ui.branding import application_stylesheet
 
 from tech_connector.ui.status_bar import format_status_card
 
-_PROCESS_STATUS_CACHE = {}
+_PROCESS_SNAPSHOT_CACHE = (0.0, frozenset())
+
+
+def _windows_process_names() -> frozenset[str]:
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_snapshot = kernel32.CreateToolhelp32Snapshot
+    create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    create_snapshot.restype = wintypes.HANDLE
+    process_first = kernel32.Process32FirstW
+    process_first.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+    process_first.restype = wintypes.BOOL
+    process_next = kernel32.Process32NextW
+    process_next.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+    process_next.restype = wintypes.BOOL
+
+    snapshot = create_snapshot(0x00000002, 0)
+    if snapshot == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    names = set()
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if process_first(snapshot, ctypes.byref(entry)):
+            while True:
+                names.add(entry.szExeFile.casefold())
+                if not process_next(snapshot, ctypes.byref(entry)):
+                    break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return frozenset(names)
+
+
+def _running_process_names() -> frozenset[str]:
+    global _PROCESS_SNAPSHOT_CACHE
+    now = time.monotonic()
+    cached_at, cached_names = _PROCESS_SNAPSHOT_CACHE
+    if now - cached_at < 2.0:
+        return cached_names
+
+    if os.name == "nt":
+        names = _windows_process_names()
+    else:
+        import subprocess
+
+        output = subprocess.check_output(
+            ["ps", "-A", "-o", "comm="],
+            stderr=subprocess.DEVNULL,
+            timeout=1.5,
+            text=True,
+        )
+        names = frozenset(Path(line.strip()).name.casefold() for line in output.splitlines() if line.strip())
+    _PROCESS_SNAPSHOT_CACHE = (now, names)
+    return names
 
 
 def is_process_running(process_name: str) -> bool:
-    import subprocess
-    cache_key = process_name.lower()
-    now = time.monotonic()
-    cached = _PROCESS_STATUS_CACHE.get(cache_key)
-    if cached and now - cached[0] < 2.0:
-        return bool(cached[1])
     try:
-        if os.name == "nt":
-            output = subprocess.check_output(
-                f'tasklist /NH /FI "IMAGENAME eq {process_name}"',
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                timeout=1.5,
-            ).decode("utf-8", errors="ignore")
-            running = process_name.lower() in output.lower()
-        else:
-            output = subprocess.check_output(
-                f'pgrep -f "{process_name}"',
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                timeout=1.5,
-            ).decode("utf-8", errors="ignore")
-            running = bool(output.strip())
-        _PROCESS_STATUS_CACHE[cache_key] = (now, running)
-        return running
+        return Path(process_name).name.casefold() in _running_process_names()
     except Exception:
-        _PROCESS_STATUS_CACHE[cache_key] = (now, False)
         return False
 
 
@@ -508,30 +553,41 @@ class MainWindowCoreMixin:
         import threading
         import time
 
-        from tech_connector.services.ollama_service import warm_ollama_model
+        from tech_connector.services.ollama_resource_service import ollama_keep_alive
+        from tech_connector.services.ollama_service import (
+            unload_all_ollama_models,
+            warm_ollama_model,
+        )
 
         # Resident planning models avoid a cold start on the first substantial
         # feature prompt. Resource-constrained users can opt into idle unloading.
         last_active = getattr(self, "last_chat_activity_time", 0.0)
-        unload_on_idle = bool(self.settings.get("ollama_unload_on_idle", False))
-        if unload_on_idle and time.time() - last_active > 15 * 60:
+        unload_on_idle = bool(self.settings.get("ollama_unload_on_idle", True))
+        try:
+            idle_minutes = max(
+                1,
+                int(self.settings.get("ollama_idle_unload_minutes", 15) or 15),
+            )
+        except (TypeError, ValueError):
+            idle_minutes = 15
+        if unload_on_idle and time.time() - last_active > idle_minutes * 60:
             if not getattr(self, "ollama_is_idle", False):
                 self.ollama_is_idle = True
-                print("[Ollama] Chat session inactive for 15m. Unloading local models to free VRAM.", flush=True)
+                print(
+                    f"[Ollama] Chat session inactive for {idle_minutes}m. "
+                    "Unloading all local models to free RAM and VRAM.",
+                    flush=True,
+                )
                 def unload():
                     try:
-                        model = self.selected_mcphost_model()
-                        if model:
-                            warm_ollama_model(model, keep_alive=0)
-                        from tech_connector.services.ollama_service import CODE_MODEL_PROFILES
-                        for m in CODE_MODEL_PROFILES.values():
-                            warm_ollama_model(m, keep_alive=0)
+                        unload_all_ollama_models()
                     except Exception:
                         pass
                 threading.Thread(target=unload, daemon=True).start()
             return
 
         models = list(self.settings.get("ollama_preload_models") or [])
+        configured_keep_alive = ollama_keep_alive(self.settings)
         for model in dict.fromkeys(models):
             if (
                     model
@@ -539,7 +595,9 @@ class MainWindowCoreMixin:
                     and should_use_local_runtime(model, self.settings)
             ):
                 threading.Thread(
-                    target=warm_ollama_model, args=(model, "24h"), daemon=True
+                    target=warm_ollama_model,
+                    args=(model, configured_keep_alive),
+                    daemon=True,
                 ).start()
 
     def dcc_bridge_setup_ids(self):
@@ -1288,7 +1346,7 @@ class MainWindowCoreMixin:
                 return label
         mode = self.settings.get("model_source_mode", "auto_with_local_fallback")
         return (
-            "Auto cloud -> local"
+            "Cloud locked / local if unset"
             if mode == "auto_with_local_fallback"
             else "Always local"
         )
@@ -1552,7 +1610,7 @@ class MainWindowCoreMixin:
                 )
             lines.extend(summary)
         try:
-            from tech_connector.services.engineering_reasoning_service import render_senior_prompt_analysis
+            from tech_connector.services.reasoning.engineering_reasoning_service import render_senior_prompt_analysis
 
             prompt_summary = render_senior_prompt_analysis(
                 metadata.get("senior_prompt_analysis") or {}
@@ -1563,7 +1621,7 @@ class MainWindowCoreMixin:
             pass
         if self.settings.get("show_activity_details", False):
             try:
-                from tech_connector.services.prompt_progress_service import render_prompt_progress_plan
+                from tech_connector.services.prompt.prompt_progress_service import render_prompt_progress_plan
 
                 visible_summary = render_prompt_progress_plan(
                     metadata.get("visible_progress") or {},
@@ -1574,7 +1632,7 @@ class MainWindowCoreMixin:
             except Exception:
                 pass
             try:
-                from tech_connector.services.goal_gap_planning_service import render_goal_gap_plan
+                from tech_connector.services.reasoning.goal_gap_planning_service import render_goal_gap_plan
 
                 gap_summary = render_goal_gap_plan(
                     metadata.get("capability_gap_plan") or {},
@@ -1656,6 +1714,29 @@ class MainWindowCoreMixin:
             except Exception:
                 pass
         self.stop_mcphost()
+        try:
+            if hasattr(self, "service") and self.service:
+                self.service.stop_mcphost()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "service") and self.service:
+                self.service.stop_remote_mobile_server()
+        except Exception:
+            pass
+        if bool(self.settings.get("ollama_unload_on_exit", True)):
+            try:
+                from tech_connector.services.ollama_service import unload_all_ollama_models
+
+                if bool(self.settings.get("ollama_unload_all_on_exit", False)):
+                    unload_all_ollama_models()
+                else:
+                    if hasattr(self, "mcphost_manager"):
+                        self.mcphost_manager.release_local_models()
+                    if hasattr(self, "service") and self.service:
+                        self.service.release_local_models()
+            except Exception:
+                pass
         event.accept()
 
     # ------------------------------------------------------------------

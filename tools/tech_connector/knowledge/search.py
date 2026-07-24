@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Local file and project search."""
 
+from contextlib import contextmanager
 from pathlib import Path
 import os
 import re
@@ -156,6 +157,9 @@ def query_ollama_text(
     think: bool | None = None,
     response_format: str | dict | None = None,
     temperature: float | None = None,
+    telemetry_callback=None,
+    progress_callback=None,
+    progress_interval_seconds: float = 5.0,
 ):
     import urllib.request
     import json
@@ -198,7 +202,7 @@ def query_ollama_text(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "stream": False,
+        "stream": bool(progress_callback),
         "keep_alive": keep_alive,
         "options": options,
     }
@@ -218,7 +222,44 @@ def query_ollama_text(
         proxy_handler = urllib.request.ProxyHandler({})
         opener = urllib.request.build_opener(proxy_handler)
         with opener.open(req, timeout=timeout) as response:
+            if progress_callback:
+                import time
+
+                chunks: list[str] = []
+                started = time.monotonic()
+                last_progress = started
+                for raw_line in response:
+                    if not raw_line.strip():
+                        continue
+                    event = json.loads(raw_line.decode("utf-8"))
+                    content = str((event.get("message") or {}).get("content") or "")
+                    if content:
+                        chunks.append(content)
+                    now = time.monotonic()
+                    if event.get("done") or now - last_progress >= progress_interval_seconds:
+                        progress_callback({
+                            "elapsed_seconds": round(now - started, 1),
+                            "characters_received": sum(len(chunk) for chunk in chunks),
+                            "done": bool(event.get("done")),
+                            "model": model,
+                        })
+                        last_progress = now
+                    if event.get("done"):
+                        if telemetry_callback:
+                            telemetry_callback({
+                                key: value
+                                for key, value in event.items()
+                                if key != "message"
+                            })
+                        break
+                return "".join(chunks)
             res = json.loads(response.read().decode("utf-8"))
+            if telemetry_callback:
+                telemetry_callback({
+                    key: value
+                    for key, value in res.items()
+                    if key != "message"
+                })
             return res["message"]["content"]
     except Exception as e:
         print(f"Error querying Ollama ({model}): {e}")
@@ -234,6 +275,10 @@ def query_ollama_json_until_complete(
     timeout: int = 1800,
     temperature: float = 0.0,
     progress_callback=None,
+    prefer_coder: bool = True,
+    coder_preference: str = "fast",
+    response_format: dict | str = "json",
+    max_wall_seconds: float | None = None,
 ):
     """Stream until one complete JSON value exists, then close the generation."""
 
@@ -262,8 +307,8 @@ def query_ollama_json_until_complete(
     model = resolve_installed_ollama_model(
         model,
         get_installed_ollama_models(),
-        prefer_coder=True,
-        coder_preference="fast",
+        prefer_coder=prefer_coder,
+        coder_preference=coder_preference,
     ).replace("ollama:", "", 1).strip()
     print(f"[Ollama Status] Active streaming JSON model: {model}", flush=True)
     payload = json.dumps(
@@ -275,7 +320,7 @@ def query_ollama_json_until_complete(
             ],
             "stream": True,
             "keep_alive": keep_alive,
-            "format": "json",
+            "format": response_format,
             "think": False,
             "options": options,
         }
@@ -289,12 +334,19 @@ def query_ollama_json_until_complete(
     decoder = json.JSONDecoder()
     accumulated = ""
     started = time.monotonic()
+    wall_limit = (
+        max(0.1, min(float(timeout), float(max_wall_seconds)))
+        if max_wall_seconds is not None
+        else float(timeout)
+    )
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=timeout) as response:
+        with opener.open(request, timeout=wall_limit) as response:
             for raw_line in response:
-                if time.monotonic() - started > timeout:
-                    raise TimeoutError(f"Streaming JSON generation exceeded {timeout} seconds.")
+                if time.monotonic() - started > wall_limit:
+                    raise TimeoutError(
+                        f"Streaming JSON generation exceeded {wall_limit:.1f} seconds."
+                    )
                 event = json.loads(raw_line.decode("utf-8"))
                 chunk = str(dict(event.get("message") or {}).get("content") or "")
                 if chunk:
@@ -315,6 +367,9 @@ def query_ollama_json_until_complete(
                         return candidate[:end]
                 if event.get("done"):
                     break
+    except TimeoutError as exc:
+        print(f"Error streaming Ollama JSON ({model}): {exc}", flush=True)
+        return accumulated.strip() or None
     except Exception as exc:
         print(f"Error streaming Ollama JSON ({model}): {exc}", flush=True)
         return None
@@ -1191,23 +1246,22 @@ def _index_db_path():
     return project_index_db_path()
 
 
+@contextmanager
 def _connect_index():
     import sqlite3
     db = _index_db_path()
     if not db.exists():
         raise FileNotFoundError(f"Knowledge index not found: {db}")
     uri = db.resolve().as_uri() + "?mode=ro&immutable=1"
-
-    class ClosingConnection(sqlite3.Connection):
-        def __exit__(self, exc_type, exc_value, traceback):
-            super().__exit__(exc_type, exc_value, traceback)
-            self.close()
-
-    conn = sqlite3.connect(uri, timeout=30, uri=True, factory=ClosingConnection)
-    conn.execute("PRAGMA busy_timeout = 30000")
-    conn.execute("PRAGMA query_only = ON")
-    conn.row_factory = sqlite3.Row
-    return conn
+    conn = sqlite3.connect(uri, timeout=30, uri=True)
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA query_only = ON")
+        conn.row_factory = sqlite3.Row
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _as_dict_rows(rows):
@@ -1392,6 +1446,11 @@ def _rank_scoped_rows(
         item["source_scope"] = source_scope
         if not _scope_allowed(source_scope, scope):
             continue
+        if source_scope in {SOURCE_PROJECT, SOURCE_EXTERNAL_TOOLS} and not _indexed_first_party_path_exists(
+            path,
+            resolved_roots,
+        ):
+            continue
         score = 0
         if source_scope == SOURCE_PROJECT:
             score += 100
@@ -1411,6 +1470,15 @@ def _rank_scoped_rows(
 
     scored.sort(key=lambda r: (-int(r.get("scope_score", 0)), str(r.get(path_key) or ""), int(r.get("start_line") or 0), int(r.get("chunk_index") or 0)))
     return scored[: max(1, int(limit))]
+
+
+def _indexed_first_party_path_exists(path: str, resolved_roots: list[str]) -> bool:
+    """Reject stale first-party index rows while retaining virtual API catalogs."""
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate.is_file()
+    return any((Path(root) / candidate).is_file() for root in resolved_roots)
 
 
 def extract_code_search_terms(query: str, include_qt_related: bool = True) -> list[str]:

@@ -316,7 +316,10 @@ class CustomizationPanel(QDialog):
 
         # Cloud model selector
         self.cloud_provider_model = QLineEdit()
-        self.cloud_provider_model.setToolTip("Cloud model name (e.g. gpt-4o, claude-3-5-sonnet, gemini-1.5-pro)")
+        self.cloud_provider_model.setToolTip(
+            "Cloud model name (for example gpt-5.6-sol, gpt-5.3-codex, "
+            "claude-sonnet-5, or gemini-2.5-flash)"
+        )
         form.addRow("Cloud Provider Model:", self.cloud_provider_model)
 
         # Keys

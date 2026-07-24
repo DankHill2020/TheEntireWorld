@@ -1,0 +1,6 @@
+Begin Object Class=/Script/AnimGraph.AnimGraphNode_StateResult Name="AnimGraphNode_StateResult_0"
+   Node=(Result=(Link=(Node=AnimGraphNode_StateMachine_0,Option=0)))
+End Object
+Begin Object Class=/Script/AnimGraph.AnimGraphNode_StateMachine Name="AnimGraphNode_StateMachine_0"
+   StateMachineName="TraversalStateMachine"
+End Object

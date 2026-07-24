@@ -30,6 +30,7 @@ import pathlib
 import sqlite3
 import hashlib
 import time
+from contextlib import closing
 from typing import Dict, List, Optional, Tuple
 
 APP_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -185,16 +186,14 @@ def export_blueprint(asset_path: pathlib.Path) -> str:
     # If cache exists and is up‑to‑date, read it.
     if cache_file.is_file():
         # Retrieve stored mtime from DB if present.
-        conn = _connect()
-        cur = conn.execute(
-            "SELECT mtime FROM assets WHERE path=?", (str(asset_path),)
-        )
-        row = cur.fetchone()
-        if row and row[0] == asset_mtime:
-            # Cache is fresh.
-            conn.close()
-            return cache_file.read_text(encoding="utf-8")
-        conn.close()
+        with closing(_connect()) as conn:
+            cur = conn.execute(
+                "SELECT mtime FROM assets WHERE path=?", (str(asset_path),)
+            )
+            row = cur.fetchone()
+            if row and row[0] == asset_mtime:
+                # Cache is fresh.
+                return cache_file.read_text(encoding="utf-8")
     # Cache miss or stale – re‑export.
     markdown = export_blueprint_to_markdown(str(asset_path))
     cache_file.write_text(markdown, encoding="utf-8")
@@ -204,53 +203,41 @@ def export_blueprint(asset_path: pathlib.Path) -> str:
 # Indexing functions
 # ---------------------------------------------------------------------------
 def index_asset(asset_path: str) -> Tuple[int, bool]:
-    """Index a single asset.
-
-    Returns a tuple ``(asset_id, updated)`` where ``updated`` is ``True`` when
-    the row or its embedding changed.
-    """
+    """Index one asset and report whether its stored representation changed."""
     path = pathlib.Path(asset_path).resolve()
     if not path.is_file():
         raise FileNotFoundError(f"Asset not found: {asset_path}")
 
     content = export_blueprint(path)
     mtime = path.stat().st_mtime
-    conn = _connect()
-    cur = conn.execute("SELECT id, mtime FROM assets WHERE path=?", (str(path),))
-    row = cur.fetchone()
-    if row:
-        asset_id, stored_mtime = row
-        if stored_mtime == mtime:
-            # No change – nothing to do.
-            conn.close()
-            return asset_id, False
-        # Update content and mtime.
-        conn.execute(
-            "UPDATE assets SET content=?, mtime=? WHERE id=?",
-            (content, mtime, asset_id),
-        )
-    else:
-        # Insert new asset.
-        conn.execute(
-            "INSERT INTO assets (path, type, content, mtime) VALUES (?,?,?,?)",
-            (str(path), "Blueprint", content, mtime),
-        )
-        asset_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    with closing(_connect()) as conn:
+        cur = conn.execute("SELECT id, mtime FROM assets WHERE path=?", (str(path),))
+        row = cur.fetchone()
+        if row:
+            asset_id, stored_mtime = row
+            if stored_mtime == mtime:
+                return asset_id, False
+            conn.execute(
+                "UPDATE assets SET content=?, mtime=? WHERE id=?",
+                (content, mtime, asset_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO assets (path, type, content, mtime) VALUES (?,?,?,?)",
+                (str(path), "Blueprint", content, mtime),
+            )
+            asset_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    # Compute embedding.
-    model = _get_model()
-    vector = model.encode([content])[0]  # returns list[float]
-    # Store as binary (float32 little‑endian).
-    import array
-    arr = array.array('f', vector)
-    blob = arr.tobytes()
-    conn.execute(
-        "INSERT OR REPLACE INTO embeddings (asset_id, vector) VALUES (?,?)",
-        (asset_id, blob),
-    )
-    conn.commit()
-    conn.close()
-    return asset_id, True
+        model = _get_model()
+        vector = model.encode([content])[0]
+        import array
+        blob = array.array("f", vector).tobytes()
+        conn.execute(
+            "INSERT OR REPLACE INTO embeddings (asset_id, vector) VALUES (?,?)",
+            (asset_id, blob),
+        )
+        conn.commit()
+        return asset_id, True
 
 def reindex_all(project_root: Optional[str] = None) -> int:
     """Walk the project and (re)index every ``.uasset`` file.
@@ -289,15 +276,14 @@ def search_similar(query: str, top_k: int = 10) -> List[Dict[str, any]]:
     import numpy as np
     q_arr = np.array(q_vec, dtype=np.float32)
 
-    conn = _connect()
-    cur = conn.execute("SELECT a.id, a.path, e.vector FROM assets a JOIN embeddings e ON a.id=e.asset_id")
-    results = []
-    for asset_id, path, vec_blob in cur:
-        vec = np.array(_vector_to_array(vec_blob), dtype=np.float32)
-        # Cosine similarity
-        sim = float(np.dot(q_arr, vec) / (np.linalg.norm(q_arr) * np.linalg.norm(vec) + 1e-9))
-        results.append({"id": asset_id, "path": path, "score": sim})
-    conn.close()
+    with closing(_connect()) as conn:
+        cur = conn.execute("SELECT a.id, a.path, e.vector FROM assets a JOIN embeddings e ON a.id=e.asset_id")
+        results = []
+        for asset_id, path, vec_blob in cur:
+            vec = np.array(_vector_to_array(vec_blob), dtype=np.float32)
+            # Cosine similarity
+            sim = float(np.dot(q_arr, vec) / (np.linalg.norm(q_arr) * np.linalg.norm(vec) + 1e-9))
+            results.append({"id": asset_id, "path": path, "score": sim})
     results.sort(key=lambda x: x["score"], reverse=True)
     return results[:top_k]
 

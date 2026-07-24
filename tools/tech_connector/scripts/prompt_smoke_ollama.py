@@ -23,7 +23,7 @@ from tech_connector.engine.request_engine import RequestEngine
 from tech_connector.knowledge.search import get_installed_ollama_models, resolve_installed_ollama_model
 from tech_connector.router.ai_router import AIRouter, ModelTiers
 from tech_connector.services.ollama_resource_service import build_ollama_options, choose_ollama_generation_budget, ollama_keep_alive
-from tech_connector.services.prompt_route_service import classify_prompt_route
+from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 from tech_connector.services.settings_service import load_settings
 
 
@@ -130,7 +130,9 @@ def _post_ollama_streamed(
     first_token_ms = 0
     content_parts: list[str] = []
     final_data: dict[str, Any] = {}
-    read_timeout = max(5, min(10, int(timeout)))
+    # Cold model activation can take longer than ten seconds even when token
+    # streaming is healthy. The loop below still enforces the total wall clock.
+    read_timeout = max(5, min(60, int(timeout)))
     try:
         with opener.open(req, timeout=read_timeout) as response:
             for raw_line in response:

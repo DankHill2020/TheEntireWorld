@@ -37,6 +37,8 @@ class WrapperPlan:
     files: list[dict[str, str]]
     next_steps: list[str]
     warnings: list[str]
+    progress_phases: list[dict[str, Any]]
+    functional_body_contract: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +52,8 @@ class WrapperPlan:
             "files": self.files,
             "next_steps": self.next_steps,
             "warnings": self.warnings,
+            "progress_phases": self.progress_phases,
+            "functional_body_contract": self.functional_body_contract,
         }
 
 
@@ -77,6 +81,50 @@ def _find_project_root(path: str | Path) -> Path:
 
 def _infer_capability(text: str) -> dict[str, str]:
     q = (text or "").lower()
+    if "add" in q and "state" in q and any(term in q for term in ("anim", "animation", "state machine")):
+        return {
+            "capability": "add_anim_graph_state",
+            "label": "Add Anim Graph State",
+            "function": "AddAnimGraphState",
+            "category": "Tech Connector|Animation",
+            "argument_type": "UAnimBlueprint*",
+            "argument_name": "AnimBlueprint",
+            "python_argument_hint": "anim_bp, state_machine, state_name, animation_asset",
+            "summary": "Create or update a state inside an AnimBlueprint state machine using editor-only C++ APIs.",
+        }
+    if "transition" in q and any(term in q for term in ("anim", "animation", "state machine")):
+        return {
+            "capability": "add_anim_graph_transition_rule",
+            "label": "Add Anim Graph Transition Rule",
+            "function": "AddAnimGraphTransitionRule",
+            "category": "Tech Connector|Animation",
+            "argument_type": "UAnimBlueprint*",
+            "argument_name": "AnimBlueprint",
+            "python_argument_hint": "anim_bp, state_machine, from_state, to_state, rule_expression",
+            "summary": "Create an AnimBlueprint state-machine transition and attach a guard expression using editor-only C++ APIs.",
+        }
+    if "wire" in q and any(term in q for term in ("output pose", "state machine")):
+        return {
+            "capability": "wire_anim_graph_output_pose",
+            "label": "Wire Anim Graph Output Pose",
+            "function": "WireAnimGraphOutputPose",
+            "category": "Tech Connector|Animation",
+            "argument_type": "UAnimBlueprint*",
+            "argument_name": "AnimBlueprint",
+            "python_argument_hint": "anim_bp, state_machine",
+            "summary": "Wire an AnimBlueprint state machine result into the AnimGraph output pose using editor-only C++ APIs.",
+        }
+    if "compile" in q and any(term in q for term in ("anim", "blueprint")):
+        return {
+            "capability": "compile_and_save_anim_blueprint",
+            "label": "Compile And Save Anim Blueprint",
+            "function": "CompileAndSaveAnimBlueprint",
+            "category": "Tech Connector|Animation",
+            "argument_type": "UAnimBlueprint*",
+            "argument_name": "AnimBlueprint",
+            "python_argument_hint": "anim_bp",
+            "summary": "Compile and save an AnimBlueprint, returning compiler status and asset-save evidence.",
+        }
     if "pie" in q and any(term in q for term in ("montage", "animation", "anim ")):
         return {
             "capability": "validate_character_montages_in_pie",
@@ -335,6 +383,49 @@ FString UAIStudioBridgeLibrary::InspectAnimBlueprintGraph(UAnimBlueprint* AnimBl
 """
 
 
+def _function_body_contract(cpp_text: str, spec: dict[str, str], python_call: str) -> dict[str, Any]:
+    function = spec.get("function") or ""
+    match = re.search(rf"FString\s+UAIStudioBridgeLibrary::{re.escape(function)}\s*\(", cpp_text)
+    if not match:
+        return {
+            "ok": False,
+            "status": "missing_cpp_body",
+            "function": function,
+            "required": [
+                "Define the reflected C++ function body.",
+                "Return structured JSON with ok/status/evidence fields.",
+                "Include the exact reflected Python call in the response.",
+                "Validate the function in live Unreal before registration.",
+            ],
+        }
+    next_match = re.search(r"\nFString\s+UAIStudioBridgeLibrary::\w+\s*\(", cpp_text[match.end():])
+    body_end = match.end() + next_match.start() if next_match else len(cpp_text)
+    body = cpp_text[match.start():body_end]
+    failures = []
+    if "cpp_body_required" in body:
+        failures.append("body_still_returns_cpp_body_required")
+    if "SetBoolField(TEXT(\"ok\")," not in body:
+        failures.append("does_not_set_ok_result")
+    expected_method = python_call.split("(", 1)[0]
+    if expected_method not in body:
+        failures.append("does_not_report_reflected_python_call")
+    if "implementation_hint" in body and "cpp_body_required" in body:
+        failures.append("placeholder_implementation_hint_present")
+    return {
+        "ok": not failures,
+        "status": "functional" if not failures else "non_functional_body",
+        "function": function,
+        "failures": failures,
+        "required": [
+            "No cpp_body_required placeholder status.",
+            "Sets ok from real editor/API work or readback evidence.",
+            "Returns structured JSON evidence.",
+            "Reports the exact reflected Python call.",
+            "Has a live Unreal validation phase before capability registration.",
+        ],
+    }
+
+
 def _manifest_text(spec: dict[str, str], python_call: str) -> str:
     canonical = _canonical_plugin_text("AIStudioBridgeCapabilities.json")
     if canonical:
@@ -363,6 +454,7 @@ def create_unreal_cpp_wrapper_plan(
 ) -> WrapperPlan:
     root = _find_project_root(project_root)
     spec = _infer_capability(request_text)
+    domain_coverage = _domain_operation_coverage_for_request(request_text)
     plugin_root = root / "Plugins" / PLUGIN_NAME
     source_root = plugin_root / "Source" / MODULE_NAME
     public_root = source_root / "Public"
@@ -378,15 +470,52 @@ def create_unreal_cpp_wrapper_plan(
         private_root / "AIStudioBridgeLibrary.cpp": _library_cpp_text(),
         plugin_root / "AIStudioBridgeCapabilities.json": _manifest_text(spec, python_call),
     }
+    body_contract = _function_body_contract(
+        file_map[private_root / "AIStudioBridgeLibrary.cpp"],
+        spec,
+        python_call,
+    )
 
-    files = [{"path": str(path), "action": "write" if apply else "preview"} for path in file_map]
+    blocked = not body_contract["ok"]
+    files = [
+        {
+            "path": str(path),
+            "action": "blocked" if apply and blocked else "write" if apply else "preview",
+        }
+        for path in file_map
+    ]
     warnings: list[str] = []
+    if domain_coverage and domain_coverage.get("decision") == "implement_python_first":
+        warnings.append(
+            f"{domain_coverage['operation']} has an existing Python wrapper "
+            f"({domain_coverage['python_implementation']}) and reflected Unreal API evidence; "
+            "implement and live-validate that Python wrapper before adding a redundant C++ bridge body."
+        )
+    elif domain_coverage and domain_coverage.get("decision") == "python_native":
+        warnings.append(
+            f"{domain_coverage['operation']} is already covered by a functional Python implementation "
+            f"({domain_coverage['python_implementation']}); do not generate C++ unless live validation proves Python is insufficient."
+        )
     if not root.exists():
         warnings.append(f"Project root does not exist yet: {root}")
     if not any(root.glob("*.uproject")):
         warnings.append("No .uproject file found at project root; select the Unreal project folder before applying.")
+    existing_plugin_status = _existing_plugin_function_status(spec["function"])
+    if existing_plugin_status == "cpp_body_required":
+        warnings.append(
+            f"{spec['function']} is already reflected in AIStudioBridge, but its C++ body still returns cpp_body_required; implement and live-validate the body instead of adding another wrapper."
+        )
+    elif existing_plugin_status == "implemented":
+        warnings.append(
+            f"{spec['function']} is already implemented in AIStudioBridge; validate the reflected Python call before treating it as a capability gap."
+        )
+    if blocked:
+        warnings.append(
+            f"{spec['function']} does not satisfy the functional body contract: "
+            + ", ".join(body_contract.get("failures") or [body_contract.get("status", "unknown")])
+        )
 
-    if apply:
+    if apply and not blocked:
         for path, content in file_map.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists() and path.read_text(encoding="utf-8", errors="replace") == content:
@@ -394,10 +523,12 @@ def create_unreal_cpp_wrapper_plan(
             path.write_text(content, encoding="utf-8")
 
     return WrapperPlan(
-        ok=not warnings or apply,
+        ok=not blocked,
         message=(
             "Generated Unreal reflected C++ bridge wrapper files."
-            if apply
+            if apply and not blocked
+            else "Blocked Unreal C++ wrapper write because the target body is not functional."
+            if apply and blocked
             else "Prepared Unreal reflected C++ bridge wrapper plan."
         ),
         project_root=str(root),
@@ -407,6 +538,15 @@ def create_unreal_cpp_wrapper_plan(
         python_call=python_call,
         files=files,
         next_steps=[
+            *(
+                [
+                    f"Implement the Python-first wrapper: {domain_coverage['python_implementation']}.",
+                    "Validate it against a disposable asset fixture and read back the mutation result.",
+                    "Only promote to AIStudioBridge C++ if Python validation cannot meet the minimum contract.",
+                ]
+                if domain_coverage and domain_coverage.get("decision") == "implement_python_first"
+                else []
+            ),
             "Enable/keep enabled the AIStudioBridge plugin in Unreal.",
             "Compile the project or use Live Coding from Unreal.",
             "Restart the editor if Unreal requests it.",
@@ -414,7 +554,172 @@ def create_unreal_cpp_wrapper_plan(
             "Register the capability so future prompts call the wrapper directly.",
         ],
         warnings=warnings,
-    )
+        progress_phases=_plugin_build_progress_phases(spec, python_call),
+        functional_body_contract=body_contract,
+)
+
+
+def _domain_operation_coverage_for_request(request_text: str) -> dict[str, Any] | None:
+    try:
+        from tech_connector.services.unreal.domain_operation_coverage_service import (
+            classify_domain_operation,
+        )
+        from tech_connector.services.unreal.unreal_operation_service import (
+            unreal_prompt_to_operation,
+        )
+    except Exception:
+        return None
+    text = request_text or ""
+    operation = unreal_prompt_to_operation(text) or ""
+    fallback = _fallback_domain_operation(text)
+    if fallback:
+        try:
+            from tech_connector.services.unreal.domain_operation_coverage_service import (
+                PYTHON_IMPLEMENTATIONS,
+            )
+            if operation not in PYTHON_IMPLEMENTATIONS:
+                operation = fallback
+        except Exception:
+            operation = operation or fallback
+    if not operation:
+        return None
+    coverage = classify_domain_operation(operation)
+    if coverage.get("decision") in {"python_native", "implement_python_first", "cpp_preferred", "cpp_required"}:
+        return coverage
+    return None
+
+
+def _fallback_domain_operation(request_text: str) -> str:
+    q = (request_text or "").lower()
+    if "niagara" in q or "niagra" in q or "emitter" in q:
+        if "delete" in q or "remove" in q:
+            return "niagara.delete_emitter"
+        if "module" in q and "input" in q:
+            return "niagara.set_module_input" if any(term in q for term in ("set", "write", "change")) else "niagara.list_module_inputs"
+        if "renderer" in q:
+            return "niagara.set_renderer_property"
+        if "user" in q and "parameter" in q:
+            return "niagara.set_user_parameter"
+        if "property" in q:
+            return "niagara.set_emitter_property"
+        if any(term in q for term in ("create", "make", "new", "spawn")):
+            return "niagara.create_emitter"
+    if "pose search" in q or "motion matching" in q:
+        if "schema" in q and "channel" in q:
+            return "motion_matching.add_schema_channel"
+        if "schema" in q:
+            return "motion_matching.create_schema"
+        if "remove" in q and "animation" in q:
+            return "motion_matching.remove_animation"
+        if "animation" in q and any(term in q for term in ("add", "insert")):
+            return "motion_matching.add_animation"
+        if "property" in q:
+            return "motion_matching.set_database_property"
+        return "motion_matching.create_database"
+    if "retarget" in q or "ik rig" in q or "ikrig" in q:
+        if "chain" in q and any(term in q for term in ("map", "mapping")):
+            return "retarget.set_chain_mapping"
+        if "chain" in q:
+            return "retarget.add_ik_chain"
+        if "root" in q:
+            return "retarget.set_root_settings"
+        if "profile" in q:
+            return "retarget.set_profile_property"
+        if "retargeter" in q:
+            return "retarget.create_ik_retargeter"
+        return "retarget.create_ik_rig"
+    if "physics" in q and "profile" in q:
+        return "physics.set_profile_property"
+    return ""
+
+
+def _plugin_build_progress_phases(spec: dict[str, str], python_call: str) -> list[dict[str, Any]]:
+    capability = spec.get("capability") or "unreal_cpp_wrapper"
+    return [
+        {
+            "id": "prepare_plugin_source",
+            "phase": "planning",
+            "status": "pending",
+            "progress": 5,
+            "percent": 5,
+            "label": "Prepare plugin source",
+            "message": f"Preparing AIStudioBridge source for {capability}.",
+            "evidence": ["wrapper spec", "target plugin paths"],
+        },
+        {
+            "id": "write_plugin_files",
+            "phase": "executing",
+            "status": "pending",
+            "progress": 20,
+            "percent": 20,
+            "label": "Write plugin files",
+            "message": "Writing or updating plugin source, Build.cs, descriptor, and capability manifest.",
+            "evidence": ["AIStudioBridge.uplugin", "AIStudioBridgeLibrary.h", "AIStudioBridgeLibrary.cpp"],
+        },
+        {
+            "id": "build_cpp_plugin",
+            "phase": "executing",
+            "status": "pending",
+            "progress": 45,
+            "percent": 45,
+            "label": "Build C++ plugin",
+            "message": "Building the C++ plugin with UnrealBuildTool or Live Coding.",
+            "evidence": ["compiled editor binary", "build log"],
+        },
+        {
+            "id": "enable_plugin",
+            "phase": "executing",
+            "status": "pending",
+            "progress": 60,
+            "percent": 60,
+            "label": "Enable plugin",
+            "message": "Enabling AIStudioBridge only after a compiled editor binary is present.",
+            "evidence": [".uproject Plugins entry", "build-environment diagnostic"],
+        },
+        {
+            "id": "restart_unreal_if_needed",
+            "phase": "executing",
+            "status": "pending",
+            "progress": 75,
+            "percent": 75,
+            "label": "Restart Unreal if needed",
+            "message": "Restarting or prompting for an Unreal restart if the editor cannot load the new module live.",
+            "evidence": ["editor module load status"],
+        },
+        {
+            "id": "validate_reflected_python_call",
+            "phase": "validating",
+            "status": "pending",
+            "progress": 90,
+            "percent": 90,
+            "label": "Validate reflected Python call",
+            "message": f"Validating reflected Python call: {python_call}",
+            "evidence": ["Unreal Python result JSON", "capability ok/status field"],
+        },
+        {
+            "id": "register_validated_capability",
+            "phase": "validating",
+            "status": "pending",
+            "progress": 100,
+            "percent": 100,
+            "label": "Register validated capability",
+            "message": "Registering the wrapper as a reusable capability after validation passes.",
+            "evidence": ["capability registry entry", "future route can resolve the operation"],
+        },
+    ]
+
+
+def _existing_plugin_function_status(function_name: str) -> str:
+    try:
+        from tech_connector.services.unreal.unreal_capability_audit_service import audit_unreal_capability_catalogs
+
+        audit = audit_unreal_capability_catalogs()
+    except Exception:
+        return ""
+    for row in audit.get("plugin_capabilities") or []:
+        if row.get("function") == function_name:
+            return str(row.get("cpp_status") or "")
+    return ""
 
 
 def _project_descriptor(root: Path) -> Path | None:

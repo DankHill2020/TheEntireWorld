@@ -36,6 +36,7 @@ TIER_CAPABILITIES = {
         "small_studio_commercial_grace",
         "official_api_access",
         "royalty_reporting",
+        "full_automation",
     },
     "enterprise": {
         "local_use",
@@ -46,6 +47,7 @@ TIER_CAPABILITIES = {
         "official_api_access",
         "team_seats",
         "royalty_reporting",
+        "full_automation",
     },
 }
 

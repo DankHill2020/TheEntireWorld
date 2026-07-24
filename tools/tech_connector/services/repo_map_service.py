@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 import sqlite3
@@ -43,7 +44,7 @@ def build_repo_map(
     if not project_index_db_path().exists():
         return RepoMap(root=str(root), directories=(), important_files=()).to_dict()
     try:
-        with sqlite3.connect(str(project_index_db_path()), timeout=5) as conn:
+        with closing(sqlite3.connect(str(project_index_db_path()), timeout=5)) as conn:
             conn.row_factory = sqlite3.Row
             scope_sql, scope_params = _scope_filter(scope)
             root_sql = ""

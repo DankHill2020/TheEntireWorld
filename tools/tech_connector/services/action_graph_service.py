@@ -216,7 +216,7 @@ class Action:
             data["title"] = data["type"].replace("_", " ").title()
         if not data["mutability"]:
             data["mutability"] = ACTION_MUTABILITY.get(self.type, MUTABILITY_READ_ONLY)
-        if data["requires_approval"] is None:
+        if data["requires_approval"] is None or data["mutability"] != MUTABILITY_READ_ONLY:
             data["requires_approval"] = data["mutability"] != MUTABILITY_READ_ONLY
         return data
 
@@ -258,6 +258,8 @@ def normalize_action(action: Action | dict[str, Any]) -> dict[str, Any]:
     if payload is None:
         payload = data.get("payload")
     if payload is None:
+        payload = data.get("arguments")
+    if payload is None:
         payload = data.get("args") or {}
     data["id"] = action_id
     data["action_id"] = action_id
@@ -273,7 +275,10 @@ def normalize_action(action: Action | dict[str, Any]) -> dict[str, Any]:
     data.setdefault("target_refs", [])
     data.setdefault("source_refs", [])
     data.setdefault("mutability", ACTION_MUTABILITY.get(str(action_type), MUTABILITY_READ_ONLY))
-    data.setdefault("requires_approval", data["mutability"] != MUTABILITY_READ_ONLY)
+    if data["mutability"] != MUTABILITY_READ_ONLY:
+        data["requires_approval"] = True
+    else:
+        data.setdefault("requires_approval", False)
     data.setdefault("status", "planned")
     data.setdefault("validation_status", "not_validated")
     data.setdefault("result", None)
@@ -337,6 +342,12 @@ def validate_action_graph(graph: ActionGraph | dict[str, Any]) -> dict[str, Any]
         if action_type == "bind_literal":
             if not (args.get("node") and args.get("parameter")):
                 errors.append(f"{action_id}: bind_literal requires node and parameter")
+        if action_type == "execute_dcc":
+            contract = args.get("operation_contract") or {}
+            operation = args.get("operation") or args.get("target_identifier") or contract.get("capability")
+            callable_name = args.get("callable") or args.get("callable_name") or contract.get("callable")
+            if not (operation or callable_name):
+                errors.append(f"{action_id}: execute_dcc action requires an operation or callable")
         if action_type == "github_ingest" and not (args.get("repo") or args.get("url")):
             warnings.append(f"{action_id}: github_ingest will need a selected repo/url before execution")
 

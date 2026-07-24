@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import os
 import sys
 from pathlib import Path
@@ -3605,7 +3607,8 @@ def gather_project_index_context(question, active_path=None, limit=40):
         kind_filter = None
 
     try:
-        with sqlite3.connect(str(project_index_db_path())) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(str(project_index_db_path()))) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
 
@@ -3731,11 +3734,82 @@ Response format:
 """
 
 
+def query_project_index_model_text(
+    provider_route,
+    *,
+    model,
+    system_prompt,
+    user_prompt,
+    response_format="",
+    num_predict=4096,
+    timeout=120,
+    temperature=0.0,
+    progress_callback=None,
+    local_query=None,
+    cloud_query=None,
+    **kwargs,
+):
+    """Run a UI project-index text stage without crossing provider boundaries."""
+    if local_query is None:
+        from tech_connector.knowledge.search import query_ollama_text
+
+        local_query = query_ollama_text
+    if cloud_query is None:
+        from tech_connector.services.llm_router_service import generate_llm_response
+
+        cloud_query = generate_llm_response
+
+    if provider_route.cloud_active:
+        started = time.monotonic()
+        result = cloud_query(
+            provider_route.model,
+            user_prompt,
+            system=system_prompt,
+            response_format=response_format or None,
+            options={
+                "temperature": temperature,
+                "num_predict": num_predict,
+            },
+            timeout=timeout,
+            provider_route=provider_route,
+            allow_cloud_fallback=False,
+        )
+        if callable(progress_callback):
+            progress_callback(
+                {
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "characters_received": len(result),
+                }
+            )
+        return result
+    return local_query(
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        num_predict=num_predict,
+        timeout=timeout,
+        temperature=temperature,
+        progress_callback=progress_callback,
+        **kwargs,
+    )
+
+
 def answer_project_index_request(path, question, intent, status_callback=None, approved_plan=None):
     """Answer project-wide/index-backed questions with the local coding model."""
     try:
         from tech_connector.services.settings_service import load_settings
-        from tech_connector.knowledge.search import query_ollama_text
+        from tech_connector.knowledge.search import (
+            query_ollama_text,
+        )
+        from tech_connector.services.llm_router_service import (
+            LLMCloudProviderError,
+            query_structured_llm_until_complete,
+            resolve_llm_provider_route,
+        )
+        from tech_connector.services.model_provider_service import (
+            cloud_provider_failure_notice,
+        )
     except Exception as exc:
         return f"Could not load project-index LLM helpers:\n\n{exc}", None
 
@@ -3757,29 +3831,80 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
         or settings.get("model")
         or model
     )
+    prompt_provider_route = resolve_llm_provider_route(plan_model, settings)
+
+    def query_prompt_text(
+        **kwargs,
+    ):
+        return query_project_index_model_text(
+            prompt_provider_route,
+            local_query=query_ollama_text,
+            **kwargs,
+        )
 
     if intent == "project_edit":
         try:
             from tech_connector.services.project_edit_agent_service import (
                 apply_project_edit_syntax_repair,
+                apply_project_edit_generated_symbol_repair,
+                apply_project_edit_missing_symbol,
+                build_project_edit_file_generation_stages,
+                build_project_edit_requirement_coverage,
+                build_project_edit_artifact_file_stages,
+                build_project_edit_artifact_manifest_stage,
+                build_project_edit_file_map_stage,
+                build_project_edit_cross_file_failure_notes,
+                build_project_edit_integration_contract_stage,
+                build_project_edit_function_repair_contract,
+                build_project_edit_function_repair_plan_stage,
+                build_project_edit_function_repair_stage,
                 build_project_edit_leaf_candidate,
                 build_project_edit_leaf_stage,
+                build_project_edit_multi_file_candidate,
+                build_project_edit_missing_symbol_stage,
                 build_project_edit_plan_from_leaf_work_units,
                 build_project_edit_repair_stage,
                 build_project_edit_agent_request,
                 build_project_edit_model_stages,
                 build_project_edit_syntax_repair_stage,
                 compile_project_edit_leaf_work_units,
+                complete_project_edit_integration_contract_response,
+                compose_project_edit_incremental_manifest_response,
+                ensure_project_edit_requested_docstrings,
+                enforce_project_edit_explicit_cleanup,
+                enforce_project_edit_requested_test_contracts,
+                extract_project_edit_artifact_requirements,
+                format_project_edit_generated_python,
                 inspect_project_edit_structured_syntax,
+                infer_project_edit_generated_dependencies,
+                isolate_project_edit_generated_test_fixture,
                 model_for_project_edit_stage,
+                normalize_project_edit_async_test_lifecycle,
+                parse_project_edit_generated_file,
+                parse_project_edit_artifact_manifest,
+                parse_project_edit_function_repair_plan,
                 parse_project_edit_leaf_source,
                 preview_project_edit_agent_response,
+                project_edit_artifact_architecture_requires_coder,
+                project_edit_file_worker_profile,
+                project_edit_file_worker_model_override,
                 project_edit_has_core_contract_failure,
                 project_edit_preview_error_score,
                 project_edit_plan_fingerprint,
                 project_edit_leaf_work_units_handoff,
+                project_edit_validation_failure_signature,
+                repair_project_edit_duplicate_dependency_symbols,
+                render_project_edit_artifact_architecture,
                 render_grounded_project_edit_handoff,
                 restore_project_edit_leaf_work_units,
+                resolve_project_edit_cross_file_symbols,
+                resolve_project_edit_failure_symbol,
+                resolve_project_edit_standard_library_symbols,
+                remove_project_edit_unused_imports,
+                stabilize_project_edit_import_cycles,
+                summarize_project_edit_generated_interface,
+                validate_project_edit_generated_module_graph,
+                validate_project_edit_integration_contract_response,
                 validate_project_edit_plan_output,
             )
 
@@ -3812,6 +3937,387 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
             project_context = edit_plan.discovery_context
             all_stages = build_project_edit_model_stages(edit_plan)
             patch_stage = next((stage for stage in all_stages if stage.key == "patch_generation"), None)
+            project_roots = list(edit_plan.discovery.get("project_roots") or [])
+            project_root = project_roots[0] if project_roots else str(Path(path).parent)
+            reasoning_gap_events = []
+            planning_trace_events = []
+
+            def model_heartbeat(label: str):
+                if not callable(status_callback):
+                    return None
+
+                def emit(event):
+                    status_callback(
+                        f"{label}: model active for {event.get('elapsed_seconds', 0)}s; "
+                        f"{event.get('characters_received', 0)} response characters received"
+                    )
+
+                return emit
+
+            def json_model_heartbeat(label: str):
+                if not callable(status_callback):
+                    return None
+                last_emitted = [0.0]
+
+                def emit(_chunk, accumulated):
+                    now = time.monotonic()
+                    if now - last_emitted[0] < 5.0:
+                        return
+                    last_emitted[0] = now
+                    status_callback(
+                        f"{label}: model is still producing the architecture; "
+                        f"{len(accumulated)} response characters received"
+                    )
+
+                return emit
+
+            def synthesize_artifact_architecture(approved_text: str = ""):
+                manifest_stage = build_project_edit_artifact_manifest_stage(
+                    edit_plan,
+                    approved_plan=approved_text,
+                )
+                if manifest_stage is None:
+                    return [], [], []
+                requirement_ledger = extract_project_edit_artifact_requirements(question)
+                architecture_deadline = time.monotonic() + 20.0
+                contract_stage = build_project_edit_integration_contract_stage(edit_plan)
+                if approved_text:
+                    contract_stage.user_prompt += (
+                        "\n\nPrior approved plan or integration feedback:\n"
+                        + approved_text[-6000:]
+                    )
+                contract_model = model_for_project_edit_stage(
+                    contract_stage,
+                    settings,
+                    selected_model=model,
+                )
+                contract_provider = (
+                    prompt_provider_route.provider
+                    if prompt_provider_route.cloud_active
+                    else "ollama"
+                )
+                contract_model_name = (
+                    prompt_provider_route.model
+                    if prompt_provider_route.cloud_active
+                    else str(contract_model).replace("ollama:", "", 1)
+                )
+                if callable(status_callback):
+                    status_callback(
+                        f"{contract_stage.label}; {contract_provider}:"
+                        f"{contract_model_name}; shared 20-second planning budget; "
+                        "provider locked for this run"
+                    )
+                contract_started = time.monotonic()
+                contract_response = query_structured_llm_until_complete(
+                    model=contract_model,
+                    system_prompt=contract_stage.system_prompt,
+                    user_prompt=contract_stage.user_prompt,
+                    num_ctx=contract_stage.num_ctx,
+                    timeout=contract_stage.timeout,
+                    prefer_coder=contract_stage.prefer_coder,
+                    coder_preference=contract_stage.coder_preference,
+                    response_format=contract_stage.response_format,
+                    temperature=0.0,
+                    progress_callback=json_model_heartbeat("Contract worker"),
+                    max_wall_seconds=max(
+                        0.1,
+                        architecture_deadline - time.monotonic(),
+                    ),
+                    provider_route=prompt_provider_route,
+                )
+                contract_response, deterministic_contract_fixes = (
+                    complete_project_edit_integration_contract_response(
+                        contract_response or "",
+                        requirement_ledger,
+                    )
+                )
+                if deterministic_contract_fixes and callable(status_callback):
+                    status_callback(
+                        "Completed implied coordination contracts: "
+                        + "; ".join(deterministic_contract_fixes)
+                    )
+                contract_errors = validate_project_edit_integration_contract_response(
+                    contract_response or "",
+                    requirement_ledger,
+                )
+                for contract_repair_attempt in range(1, 3):
+                    if (
+                        not contract_errors
+                        or architecture_deadline - time.monotonic() <= 3.0
+                    ):
+                        break
+                    planning_trace_events.append({
+                        "stage": "artifact_integration_contract",
+                        "attempt": contract_repair_attempt,
+                        "status": "rejected",
+                        "provider": contract_provider,
+                        "model": contract_model_name,
+                        "elapsed_seconds": round(
+                            time.monotonic() - contract_started,
+                            3,
+                        ),
+                        "response_characters": len(contract_response or ""),
+                        "validator_errors": list(contract_errors),
+                        "response": contract_response or "",
+                    })
+                    if callable(status_callback):
+                        status_callback(
+                            f"Repairing only the rejected shared contract "
+                            f"({contract_repair_attempt}/2): "
+                            + "; ".join(contract_errors[:3])
+                        )
+                    repair_started = time.monotonic()
+                    contract_response = query_structured_llm_until_complete(
+                        model=contract_model,
+                        system_prompt=contract_stage.system_prompt,
+                        user_prompt=(
+                            contract_stage.user_prompt
+                            + "\n\nThe prior contract is below. Preserve every working "
+                            "contract detail and return the complete corrected contract:\n"
+                            + str(contract_response or "")[-6000:]
+                            + "\n\nFix exactly these remaining validator errors. Include "
+                            "their required protocol words verbatim in executable signatures, "
+                            "state invariants, or data layout:\n- "
+                            + "\n- ".join(contract_errors[:4])
+                        ),
+                        num_ctx=contract_stage.num_ctx,
+                        timeout=contract_stage.timeout,
+                        prefer_coder=contract_stage.prefer_coder,
+                        coder_preference=contract_stage.coder_preference,
+                        response_format=contract_stage.response_format,
+                        temperature=0.0,
+                        progress_callback=json_model_heartbeat(
+                            "Contract repair worker"
+                        ),
+                        max_wall_seconds=max(
+                            0.1,
+                            architecture_deadline - time.monotonic(),
+                        ),
+                        provider_route=prompt_provider_route,
+                    )
+                    contract_started = repair_started
+                    contract_response, repair_contract_fixes = (
+                        complete_project_edit_integration_contract_response(
+                            contract_response or "",
+                            requirement_ledger,
+                        )
+                    )
+                    if repair_contract_fixes and callable(status_callback):
+                        status_callback(
+                            "Completed implied coordination contracts after repair: "
+                            + "; ".join(repair_contract_fixes)
+                        )
+                    contract_errors = (
+                        validate_project_edit_integration_contract_response(
+                            contract_response or "",
+                            requirement_ledger,
+                        )
+                    )
+                contract_valid = not contract_errors
+                if not contract_valid:
+                    errors = list(contract_errors) or [
+                        "Shared integration contract was incomplete or invalid within "
+                        "the 20-second planning budget."
+                    ]
+                    planning_trace_events.append({
+                        "stage": "artifact_integration_contract",
+                        "status": "rejected",
+                        "provider": contract_provider,
+                        "model": contract_model_name,
+                        "elapsed_seconds": round(
+                            time.monotonic() - contract_started,
+                            3,
+                        ),
+                        "response_characters": len(contract_response or ""),
+                        "response": contract_response or "",
+                    })
+                    reasoning_gap_events.append({
+                        "stage": "artifact_integration_contract",
+                        "attempt": 1,
+                        "provider": contract_provider,
+                        "model": contract_model_name,
+                        "elapsed_seconds": round(time.monotonic() - contract_started, 3),
+                        "response_characters": len(contract_response or ""),
+                        "validator_errors": errors,
+                        "fallback_action": "preserve partial contract and stop before file mapping",
+                    })
+                    return [], errors, requirement_ledger
+                planning_trace_events.append({
+                    "stage": "artifact_integration_contract",
+                    "status": "accepted",
+                    "provider": contract_provider,
+                    "model": contract_model_name,
+                    "elapsed_seconds": round(time.monotonic() - contract_started, 3),
+                    "response_characters": len(contract_response or ""),
+                    "response": contract_response or "",
+                })
+
+                remaining_thought_seconds = architecture_deadline - time.monotonic()
+                if remaining_thought_seconds <= 0:
+                    errors = [
+                        "Shared contract consumed the complete 20-second planning budget "
+                        "before file mapping."
+                    ]
+                    reasoning_gap_events.append({
+                        "stage": "artifact_file_map",
+                        "attempt": 0,
+                        "model": "",
+                        "elapsed_seconds": 0.0,
+                        "response_characters": 0,
+                        "validator_errors": errors,
+                        "fallback_action": "preserve accepted contract and defer file mapping",
+                    })
+                    return [], errors, requirement_ledger
+
+                file_map_stage = build_project_edit_file_map_stage(
+                    edit_plan,
+                    requirement_ledger=requirement_ledger,
+                    integration_contract_response=contract_response or "",
+                )
+                file_map_model = model_for_project_edit_stage(
+                    file_map_stage,
+                    settings,
+                    selected_model=model,
+                )
+                file_map_provider = (
+                    prompt_provider_route.provider
+                    if prompt_provider_route.cloud_active
+                    else "ollama"
+                )
+                file_map_model_name = (
+                    prompt_provider_route.model
+                    if prompt_provider_route.cloud_active
+                    else str(file_map_model).replace("ollama:", "", 1)
+                )
+                if callable(status_callback):
+                    status_callback(
+                        f"{file_map_stage.label}; {file_map_provider}:"
+                        f"{file_map_model_name}; "
+                        f"{remaining_thought_seconds:.1f}s planning budget remains"
+                    )
+                file_map_started = time.monotonic()
+                file_map_response = query_structured_llm_until_complete(
+                    model=file_map_model,
+                    system_prompt=file_map_stage.system_prompt,
+                    user_prompt=file_map_stage.user_prompt,
+                    num_ctx=file_map_stage.num_ctx,
+                    timeout=file_map_stage.timeout,
+                    prefer_coder=file_map_stage.prefer_coder,
+                    coder_preference=file_map_stage.coder_preference,
+                    response_format=file_map_stage.response_format,
+                    temperature=0.0,
+                    progress_callback=json_model_heartbeat("File-map worker"),
+                    max_wall_seconds=max(
+                        0.1,
+                        architecture_deadline - time.monotonic(),
+                    ),
+                    provider_route=prompt_provider_route,
+                )
+                combined_response, composition_errors = (
+                    compose_project_edit_incremental_manifest_response(
+                        contract_response or "",
+                        file_map_response or "",
+                        requirement_ledger,
+                    )
+                )
+                manifest, manifest_errors = parse_project_edit_artifact_manifest(
+                    combined_response,
+                    project_root=project_root,
+                    requirement_ledger=requirement_ledger,
+                    strict_architecture=True,
+                ) if not composition_errors else ([], composition_errors)
+                if (
+                    manifest_errors
+                    and architecture_deadline - time.monotonic() > 4.0
+                ):
+                    planning_trace_events.append({
+                        "stage": "artifact_file_map",
+                        "attempt": 1,
+                        "status": "rejected",
+                        "provider": file_map_provider,
+                        "model": file_map_model_name,
+                        "elapsed_seconds": round(
+                            time.monotonic() - file_map_started,
+                            3,
+                        ),
+                        "response_characters": len(file_map_response or ""),
+                        "validator_errors": list(manifest_errors),
+                        "response": file_map_response or "",
+                    })
+                    if callable(status_callback):
+                        status_callback(
+                            "Repairing only the rejected file map: "
+                            + "; ".join(manifest_errors[:3])
+                        )
+                    repair_started = time.monotonic()
+                    file_map_response = query_structured_llm_until_complete(
+                        model=file_map_model,
+                        system_prompt=file_map_stage.system_prompt,
+                        user_prompt=(
+                            file_map_stage.user_prompt
+                            + "\n\nThe prior file map is below. Preserve valid file "
+                            "ownership and return the complete corrected map:\n"
+                            + str(file_map_response or "")[-6000:]
+                            + "\n\nFix exactly these validator errors:\n- "
+                            + "\n- ".join(manifest_errors[:4])
+                        ),
+                        num_ctx=file_map_stage.num_ctx,
+                        timeout=file_map_stage.timeout,
+                        prefer_coder=file_map_stage.prefer_coder,
+                        coder_preference=file_map_stage.coder_preference,
+                        response_format=file_map_stage.response_format,
+                        temperature=0.0,
+                        progress_callback=json_model_heartbeat(
+                            "File-map repair worker"
+                        ),
+                        max_wall_seconds=max(
+                            0.1,
+                            architecture_deadline - time.monotonic(),
+                        ),
+                        provider_route=prompt_provider_route,
+                    )
+                    file_map_started = repair_started
+                    combined_response, composition_errors = (
+                        compose_project_edit_incremental_manifest_response(
+                            contract_response or "",
+                            file_map_response or "",
+                            requirement_ledger,
+                        )
+                    )
+                    manifest, manifest_errors = (
+                        parse_project_edit_artifact_manifest(
+                            combined_response,
+                            project_root=project_root,
+                            requirement_ledger=requirement_ledger,
+                            strict_architecture=True,
+                        )
+                        if not composition_errors
+                        else ([], composition_errors)
+                    )
+                planning_trace_events.append({
+                    "stage": "artifact_file_map",
+                    "status": "rejected" if manifest_errors else "accepted",
+                    "provider": file_map_provider,
+                    "model": file_map_model_name,
+                    "elapsed_seconds": round(time.monotonic() - file_map_started, 3),
+                    "response_characters": len(file_map_response or ""),
+                    "response": file_map_response or "",
+                })
+                if manifest_errors:
+                    reasoning_gap_events.append({
+                        "stage": "artifact_file_map",
+                        "attempt": 1,
+                        "provider": file_map_provider,
+                        "model": file_map_model_name,
+                        "elapsed_seconds": round(time.monotonic() - file_map_started, 3),
+                        "response_characters": len(file_map_response or ""),
+                        "validator_errors": list(manifest_errors),
+                        "fallback_action": (
+                            "preserve accepted contract and rejected file-map evidence"
+                        ),
+                    })
+                return manifest, manifest_errors, requirement_ledger
+
             approved_plan_text = ""
             if isinstance(approved_plan, dict):
                 approved_plan_text = str(approved_plan.get("plan") or "").strip()
@@ -3838,8 +4344,1307 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                 stages = [patch_stage]
             else:
                 stages = [stage for stage in all_stages if stage.key == "target_selection_plan"]
-            project_roots = list(edit_plan.discovery.get("project_roots") or [])
-            project_root = project_roots[0] if project_roots else str(Path(path).parent)
+                if build_project_edit_artifact_manifest_stage(edit_plan) is not None:
+                    deterministic_plan = render_grounded_project_edit_handoff(edit_plan)
+                    manifest, manifest_errors, requirement_ledger = (
+                        synthesize_artifact_architecture(deterministic_plan)
+                    )
+                    if manifest_errors:
+                        return (
+                            "## Implementation Plan\n\n"
+                            + deterministic_plan
+                            + "\n\n## Architecture Blocker\n\n"
+                            + "\n".join(f"- {item}" for item in manifest_errors),
+                            {
+                                "type": "project_edit_plan_blocked",
+                                "path": str(path or ""),
+                                "question": str(question or ""),
+                                "plan": deterministic_plan,
+                                "fingerprint": project_edit_plan_fingerprint(edit_plan),
+                                "architecture_errors": manifest_errors,
+                                "reasoning_gaps": list(reasoning_gap_events),
+                                "planning_trace": list(planning_trace_events),
+                            },
+                        )
+                    architecture_text = render_project_edit_artifact_architecture(
+                        manifest,
+                        requirement_ledger,
+                    )
+                    reviewable_plan = deterministic_plan + "\n\n" + architecture_text
+                    if callable(status_callback):
+                        status_callback(
+                            "Prepared reviewable disposable-artifact architecture with "
+                            "file, API, dependency, algorithm, and test ownership"
+                        )
+                    return (
+                        "## Implementation Plan\n\n"
+                        + reviewable_plan
+                        + "\n\nReview this plan, then use **Approve Plan** to generate a code preview. "
+                        "No code or files have been changed.",
+                        {
+                            "type": "project_edit_plan",
+                            "path": str(path or ""),
+                            "question": str(question or ""),
+                            "plan": reviewable_plan,
+                            "fingerprint": project_edit_plan_fingerprint(edit_plan),
+                            "artifact_manifest": manifest,
+                            "requirement_ledger": requirement_ledger,
+                            "reasoning_gaps": list(reasoning_gap_events),
+                            "planning_trace": list(planning_trace_events),
+                        },
+                    )
+            bounded_file_state = {
+                "generated_files": [],
+                "file_stages": [],
+                "reasoning_gaps": list(
+                    approved_plan.get("reasoning_gaps") or []
+                    if isinstance(approved_plan, dict)
+                    else reasoning_gap_events
+                ),
+            }
+            bounded_symbol_repair_attempts = {}
+
+            def build_from_bounded_file_workers():
+                file_stages = build_project_edit_file_generation_stages(edit_plan)
+                cached_manifest = list(
+                    bounded_file_state.get("override_manifest")
+                    or (
+                        approved_plan.get("artifact_manifest")
+                        if isinstance(approved_plan, dict)
+                        else []
+                    )
+                    or []
+                )
+                if not file_stages and cached_manifest:
+                    cached_ledger = list(
+                        bounded_file_state.get("override_requirement_ledger")
+                        or (
+                            approved_plan.get("requirement_ledger")
+                            if isinstance(approved_plan, dict)
+                            else []
+                        )
+                        or []
+                    )
+                    cached_manifest, cached_errors = parse_project_edit_artifact_manifest(
+                        json.dumps({"files": cached_manifest}),
+                        project_root=project_root,
+                        requirement_ledger=cached_ledger,
+                        strict_architecture=True,
+                    )
+                    if cached_errors:
+                        bounded_file_state["manifest_required"] = True
+                        bounded_file_state["manifest_errors"] = cached_errors
+                        return None, None
+                    bounded_file_state["manifest_required"] = True
+                    bounded_file_state["manifest"] = cached_manifest
+                    bounded_file_state["requirement_ledger"] = cached_ledger
+                    file_stages = build_project_edit_artifact_file_stages(
+                        edit_plan,
+                        cached_manifest,
+                    )
+                    if callable(status_callback):
+                        status_callback(
+                            f"Using approved artifact architecture: "
+                            f"{len(file_stages)} dependency-ordered file workers"
+                        )
+                if not file_stages:
+                    manifest_stage = build_project_edit_artifact_manifest_stage(
+                        edit_plan,
+                        approved_plan=approved_plan_text,
+                    )
+                    if manifest_stage is not None:
+                        bounded_file_state["manifest_required"] = True
+                        manifest = []
+                        manifest_errors = []
+                        manifest_feedback = ""
+                        requirement_ledger = extract_project_edit_artifact_requirements(question)
+                        requires_coder = project_edit_artifact_architecture_requires_coder(
+                            requirement_ledger
+                        )
+                        bounded_file_state["requirement_ledger"] = requirement_ledger
+                        architecture_deadline = time.monotonic() + 20.0
+                        for manifest_attempt in range(1, 4):
+                            remaining_thought_seconds = (
+                                architecture_deadline - time.monotonic()
+                            )
+                            if remaining_thought_seconds <= 0:
+                                manifest_errors = [
+                                    "Architecture reasoning reached the 20-second interaction limit."
+                                ]
+                                break
+                            if requires_coder:
+                                manifest_stage.model_tier = "local_code"
+                            else:
+                                manifest_stage.model_tier = (
+                                    "local_semantic"
+                                    if manifest_attempt == 1
+                                    else "local_semantic_verify"
+                                    if manifest_attempt == 2
+                                    else "local_code"
+                                )
+                            manifest_stage.prefer_coder = (
+                                requires_coder or manifest_attempt == 3
+                            )
+                            manifest_stage.coder_preference = (
+                                "standard"
+                                if requires_coder or manifest_attempt == 3
+                                else "small"
+                            )
+                            manifest_model = model_for_project_edit_stage(
+                                manifest_stage,
+                                settings,
+                                selected_model=model,
+                            )
+                            if callable(status_callback):
+                                status_callback(
+                                    f"{manifest_stage.label}; {manifest_model}; "
+                                    f"attempt {manifest_attempt}/3; validating paths and dependencies"
+                                )
+                            manifest_response = query_structured_llm_until_complete(
+                                model=manifest_model,
+                                system_prompt=manifest_stage.system_prompt,
+                                user_prompt=manifest_stage.user_prompt + manifest_feedback,
+                                num_ctx=manifest_stage.num_ctx,
+                                timeout=manifest_stage.timeout,
+                                prefer_coder=manifest_stage.prefer_coder,
+                                coder_preference=manifest_stage.coder_preference,
+                                response_format=manifest_stage.response_format,
+                                temperature=0.0,
+                                progress_callback=json_model_heartbeat("Architecture worker"),
+                                max_wall_seconds=remaining_thought_seconds,
+                                provider_route=prompt_provider_route,
+                            )
+                            manifest, manifest_errors = parse_project_edit_artifact_manifest(
+                                manifest_response or "",
+                                project_root=project_root,
+                                requirement_ledger=requirement_ledger,
+                                strict_architecture=True,
+                            )
+                            if not manifest_errors:
+                                break
+                            if callable(status_callback):
+                                status_callback(
+                                    f"Rejected artifact manifest attempt {manifest_attempt}/3: "
+                                    + "; ".join(manifest_errors[:3])
+                                )
+                            manifest_feedback = (
+                                "\n\nThe prior manifest was rejected. Return a fresh complete compact JSON "
+                                "manifest that fixes these exact errors:\n- "
+                                + "\n- ".join(manifest_errors[:4])
+                            )
+                        if manifest_errors:
+                            bounded_file_state["manifest_errors"] = list(manifest_errors)
+                            if callable(status_callback):
+                                status_callback(
+                                    "Rejected generated artifact manifest: "
+                                    + "; ".join(manifest_errors[:3])
+                                )
+                            return None, None
+                        file_stages = build_project_edit_artifact_file_stages(edit_plan, manifest)
+                        bounded_file_state["manifest"] = manifest
+                        if callable(status_callback):
+                            status_callback(
+                                f"Artifact contract accepted: {len(file_stages)} dependency-ordered files"
+                            )
+                if not file_stages:
+                    return None, None
+                generated_files = []
+                dependency_sources = []
+                for file_index, (target_path, original_source, file_stage) in enumerate(file_stages, start=1):
+                    expected_symbols = list(
+                        (file_stage.metadata or {}).get("expected_public_symbols")
+                        or []
+                    )
+                    prior_symbol_owners: dict[str, str] = {}
+                    for prior_path, _prior_original, prior_source in generated_files:
+                        try:
+                            prior_tree = ast.parse(prior_source, filename=prior_path)
+                        except SyntaxError:
+                            continue
+                        for node in prior_tree.body:
+                            if isinstance(
+                                node,
+                                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+                            ) and not node.name.startswith("_"):
+                                prior_symbol_owners.setdefault(node.name, prior_path)
+                    transferred_symbols = {
+                        str(symbol).split("(", 1)[0].rsplit(".", 1)[-1].strip(): owner
+                        for symbol in expected_symbols
+                        if (
+                            str(symbol).split("(", 1)[0].rsplit(".", 1)[-1].strip()
+                            in prior_symbol_owners
+                        )
+                        for owner in [
+                            prior_symbol_owners[
+                                str(symbol).split("(", 1)[0]
+                                .rsplit(".", 1)[-1].strip()
+                            ]
+                        ]
+                    }
+                    if transferred_symbols:
+                        file_stage.metadata["expected_public_symbols"] = [
+                            symbol
+                            for symbol in expected_symbols
+                            if (
+                                str(symbol).split("(", 1)[0]
+                                .rsplit(".", 1)[-1].strip()
+                                not in transferred_symbols
+                            )
+                        ]
+                        transferred_dependencies = []
+                        for owner_path in transferred_symbols.values():
+                            try:
+                                relative_owner = (
+                                    Path(owner_path).resolve()
+                                    .relative_to(Path(project_root).resolve())
+                                    .as_posix()
+                                )
+                            except ValueError:
+                                continue
+                            transferred_dependencies.append(relative_owner)
+                        file_stage.metadata["depends_on"] = list(dict.fromkeys([
+                            *((file_stage.metadata or {}).get("depends_on") or []),
+                            *transferred_dependencies,
+                        ]))
+                        file_stage.user_prompt += (
+                            "\n\nValidated ownership transfer from earlier completed files: "
+                            + "; ".join(
+                                f"{symbol} -> {Path(owner).name}"
+                                for symbol, owner in sorted(transferred_symbols.items())
+                            )
+                            + ". Import and reuse these canonical symbols; do not redefine them."
+                        )
+                        if callable(status_callback):
+                            status_callback(
+                                f"Transferred canonical public ownership before "
+                                f"{Path(target_path).name}: "
+                                + "; ".join(
+                                    f"{symbol} -> {Path(owner).name}"
+                                    for symbol, owner in sorted(transferred_symbols.items())
+                                )
+                            )
+                    output_source = ""
+                    errors = []
+                    rejected_source = ""
+                    previous_rejected_source = ""
+                    for attempt in range(1, 4):
+                        file_stage.coder_preference = project_edit_file_worker_profile(
+                            attempt
+                        )
+                        stage_model = model_for_project_edit_stage(
+                            file_stage,
+                            settings,
+                            selected_model=model,
+                        )
+                        stage_model = (
+                            project_edit_file_worker_model_override(attempt, settings)
+                            or stage_model
+                        )
+                        dependency_context = ""
+                        if dependency_sources:
+                            dependency_context = (
+                                "\n\nCompleted dependency/integration files from earlier bounded stages:\n"
+                                + "\n\n".join(dependency_sources)[-7000:]
+                            )
+                        if errors:
+                            dependency_context += (
+                                f"\n\nRevision attempt {attempt}/3. Deterministic parser failures "
+                                "from the prior attempt:\n- "
+                                + "\n- ".join(errors)
+                            )
+                        if rejected_source:
+                            dependency_context += (
+                                "\n\nRejected but parseable prior source. Preserve its working implementation and "
+                                "return the complete corrected file with only the reported omissions repaired:\n"
+                                "```python\n"
+                                + rejected_source[-12000:]
+                                + "\n```"
+                            )
+                        if callable(status_callback):
+                            status_callback(
+                                f"{file_stage.label} ({file_index}/{len(file_stages)}; "
+                                f"attempt {attempt}/3; {stage_model})"
+                            )
+                        response = query_prompt_text(
+                            model=stage_model,
+                            system_prompt=file_stage.system_prompt,
+                            user_prompt=file_stage.user_prompt + dependency_context,
+                            num_ctx=file_stage.num_ctx,
+                            num_predict=file_stage.num_predict,
+                            timeout=file_stage.timeout,
+                            prefer_coder=file_stage.prefer_coder,
+                            coder_preference=file_stage.coder_preference,
+                            think=False,
+                            response_format="",
+                            temperature=0.0,
+                            progress_callback=model_heartbeat(
+                                f"File worker {Path(target_path).name}"
+                            ),
+                        )
+                        output_source, errors = parse_project_edit_generated_file(
+                            response or "",
+                            path=target_path,
+                            expected_public_symbols=list(
+                                (file_stage.metadata or {}).get("expected_public_symbols") or []
+                            ),
+                        )
+                        if output_source:
+                            output_source, dependency_repairs = (
+                                repair_project_edit_duplicate_dependency_symbols(
+                                    output_source,
+                                    path=target_path,
+                                    project_root=project_root,
+                                    generated_files=generated_files,
+                                )
+                            )
+                            if dependency_repairs:
+                                if callable(status_callback):
+                                    status_callback(
+                                        "Reused canonical dependency APIs: "
+                                        + "; ".join(dependency_repairs)
+                                    )
+                                output_source, errors = (
+                                    parse_project_edit_generated_file(
+                                        output_source,
+                                        path=target_path,
+                                        expected_public_symbols=list(
+                                            (file_stage.metadata or {}).get(
+                                                "expected_public_symbols"
+                                            )
+                                            or []
+                                        ),
+                                    )
+                                )
+                        missing_match = next(
+                            (
+                                re.search(
+                                    r"omitted manifest-declared public symbols "
+                                    r"\([^)]+\):\s*(.+)$",
+                                    str(error),
+                                )
+                                for error in errors
+                                if "omitted manifest-declared public symbols" in str(error)
+                            ),
+                            None,
+                        )
+                        if output_source and missing_match:
+                            missing_symbols = [
+                                value.strip()
+                                for value in missing_match.group(1).split(",")
+                                if value.strip()
+                            ]
+                            insertion_errors: list[str] = []
+                            for missing_symbol in missing_symbols:
+                                insertion_stage = build_project_edit_missing_symbol_stage(
+                                    path=target_path,
+                                    symbol=missing_symbol,
+                                    source=output_source,
+                                    objective=question,
+                                    contracts=list(
+                                        (file_stage.metadata or {}).get("contracts") or []
+                                    ),
+                                    algorithm_steps=list(
+                                        (file_stage.metadata or {}).get(
+                                            "algorithm_steps"
+                                        )
+                                        or []
+                                    ),
+                                )
+                                insertion_model = model_for_project_edit_stage(
+                                    insertion_stage,
+                                    settings,
+                                    selected_model=model,
+                                )
+                                if callable(status_callback):
+                                    status_callback(
+                                        f"Implementing only missing public symbol "
+                                        f"{missing_symbol} in {Path(target_path).name}"
+                                    )
+                                insertion_response = query_prompt_text(
+                                    model=insertion_model,
+                                    system_prompt=insertion_stage.system_prompt,
+                                    user_prompt=insertion_stage.user_prompt,
+                                    num_ctx=insertion_stage.num_ctx,
+                                    num_predict=insertion_stage.num_predict,
+                                    timeout=insertion_stage.timeout,
+                                    prefer_coder=True,
+                                    coder_preference=insertion_stage.coder_preference,
+                                    think=False,
+                                    response_format="",
+                                    temperature=0.0,
+                                    progress_callback=model_heartbeat(
+                                        f"Missing symbol {missing_symbol}"
+                                    ),
+                                )
+                                output_source, insertion_errors = (
+                                    apply_project_edit_missing_symbol(
+                                        output_source,
+                                        path=target_path,
+                                        symbol=missing_symbol,
+                                        response=insertion_response or "",
+                                    )
+                                )
+                                bounded_file_state.setdefault(
+                                    "reasoning_gaps",
+                                    [],
+                                ).append({
+                                    "stage": "artifact_missing_symbol",
+                                    "file": str(target_path),
+                                    "symbol": missing_symbol,
+                                    "model": insertion_model,
+                                    "response_characters": len(
+                                        insertion_response or ""
+                                    ),
+                                    "validator_errors": list(insertion_errors),
+                                    "fallback_action": (
+                                        "insert declaration and revalidate file"
+                                        if not insertion_errors
+                                        else "return exact declaration failure"
+                                    ),
+                                })
+                                if insertion_errors:
+                                    break
+                            if not insertion_errors:
+                                output_source, errors = (
+                                    parse_project_edit_generated_file(
+                                        output_source,
+                                        path=target_path,
+                                        expected_public_symbols=list(
+                                            (file_stage.metadata or {}).get(
+                                                "expected_public_symbols"
+                                            )
+                                            or []
+                                        ),
+                                    )
+                                )
+                            else:
+                                errors = insertion_errors
+                        placeholder_match = next(
+                            (
+                                re.search(
+                                    r"placeholder callable bodies \([^)]+\):\s*(.+)$",
+                                    str(error),
+                                )
+                                for error in errors
+                                if "placeholder callable bodies" in str(error)
+                            ),
+                            None,
+                        )
+                        if output_source and placeholder_match:
+                            symbols = [
+                                value.strip()
+                                for value in placeholder_match.group(1).split(",")
+                                if value.strip()
+                            ]
+                            provisional_files = [
+                                *generated_files,
+                                (target_path, original_source, output_source),
+                            ]
+                            symbol_repair_errors: list[str] = []
+                            for symbol in symbols:
+                                repair_contract, repair_contract_errors = (
+                                    build_project_edit_function_repair_contract(
+                                        provisional_files,
+                                        target={
+                                            "path": target_path,
+                                            "symbol": symbol,
+                                            "source": "",
+                                        },
+                                        validation_errors=errors,
+                                        objective=question,
+                                        requirements=list(
+                                            (file_stage.metadata or {}).get(
+                                                "algorithm_steps"
+                                            )
+                                            or []
+                                        ),
+                                    )
+                                )
+                                if repair_contract_errors:
+                                    symbol_repair_errors.extend(
+                                        repair_contract_errors
+                                    )
+                                    break
+                                repair_errors = []
+                                repair_feedback = ""
+                                for callable_attempt in range(1, 3):
+                                    repair_stage = build_project_edit_function_repair_stage(
+                                        repair_contract,
+                                        attempt=callable_attempt,
+                                        repair_plan={
+                                            "root_cause": "placeholder callable body",
+                                            "algorithm_steps": list(
+                                                (file_stage.metadata or {}).get(
+                                                    "algorithm_steps"
+                                                )
+                                                or []
+                                            ),
+                                            "preserve": [
+                                                "exact signature",
+                                                "validated sibling callables",
+                                            ],
+                                            "postconditions": list(
+                                                (file_stage.metadata or {}).get(
+                                                    "validation_steps"
+                                                )
+                                                or []
+                                            ),
+                                        },
+                                    )
+                                    repair_model = model_for_project_edit_stage(
+                                        repair_stage,
+                                        settings,
+                                        selected_model=model,
+                                    )
+                                    if callable(status_callback):
+                                        status_callback(
+                                            f"Repairing only {symbol} in "
+                                            f"{Path(target_path).name}; callable attempt "
+                                            f"{callable_attempt}/2"
+                                        )
+                                    replacement = query_prompt_text(
+                                        model=repair_model,
+                                        system_prompt=repair_stage.system_prompt,
+                                        user_prompt=repair_stage.user_prompt + repair_feedback,
+                                        num_ctx=repair_stage.num_ctx,
+                                        num_predict=repair_stage.num_predict,
+                                        timeout=repair_stage.timeout,
+                                        prefer_coder=repair_stage.prefer_coder,
+                                        coder_preference=repair_stage.coder_preference,
+                                        think=False,
+                                        response_format="",
+                                        temperature=0.0,
+                                        progress_callback=model_heartbeat(
+                                            f"Function repair {symbol}"
+                                        ),
+                                    )
+                                    repaired_files, repair_errors = (
+                                        apply_project_edit_generated_symbol_repair(
+                                            provisional_files,
+                                            path=target_path,
+                                            symbol=symbol,
+                                            replacement_response=replacement or "",
+                                            forbidden_names=list(
+                                                repair_contract.get(
+                                                    "forbidden_names"
+                                                )
+                                                or []
+                                            ),
+                                        )
+                                    )
+                                    bounded_file_state.setdefault(
+                                        "reasoning_gaps",
+                                        [],
+                                    ).append({
+                                        "stage": "artifact_symbol_repair",
+                                        "file": str(target_path),
+                                        "symbol": symbol,
+                                        "attempt": callable_attempt,
+                                        "model": repair_model,
+                                        "response_characters": len(
+                                            replacement or ""
+                                        ),
+                                        "validator_errors": list(repair_errors),
+                                        "fallback_action": (
+                                            "splice repaired callable and revalidate file"
+                                            if not repair_errors
+                                            else "retry only the rejected callable"
+                                        ),
+                                    })
+                                    if not repair_errors:
+                                        provisional_files = repaired_files
+                                        break
+                                    repair_feedback = (
+                                        "\n\nThe prior callable was rejected. Return the "
+                                        "same exact signature with these failures corrected:\n- "
+                                        + "\n- ".join(repair_errors[:3])
+                                    )
+                                if repair_errors:
+                                    symbol_repair_errors.extend(repair_errors)
+                                    break
+                            if not symbol_repair_errors:
+                                output_source = next(
+                                    source
+                                    for path_text, _original, source in provisional_files
+                                    if Path(path_text).resolve()
+                                    == Path(target_path).resolve()
+                                )
+                                output_source, errors = (
+                                    parse_project_edit_generated_file(
+                                        output_source,
+                                        path=target_path,
+                                        expected_public_symbols=list(
+                                            (file_stage.metadata or {}).get(
+                                                "expected_public_symbols"
+                                            )
+                                            or []
+                                        ),
+                                    )
+                                )
+                            else:
+                                errors = symbol_repair_errors
+                        if not errors:
+                            inferred_dependencies = (
+                                infer_project_edit_generated_dependencies(
+                                    output_source,
+                                    path=target_path,
+                                    project_root=project_root,
+                                    generated_files=generated_files,
+                                )
+                            )
+                            declared_dependencies = list(
+                                (file_stage.metadata or {}).get("depends_on") or []
+                            )
+                            newly_inferred = [
+                                dependency
+                                for dependency in inferred_dependencies
+                                if dependency not in declared_dependencies
+                            ]
+                            if newly_inferred:
+                                declared_dependencies.extend(newly_inferred)
+                                file_stage.metadata["depends_on"] = declared_dependencies
+                                if callable(status_callback):
+                                    status_callback(
+                                        f"Added verified generated dependency edges for "
+                                        f"{Path(target_path).name}: "
+                                        + ", ".join(newly_inferred)
+                                    )
+                            integration_errors = validate_project_edit_generated_module_graph(
+                                output_source,
+                                path=target_path,
+                                project_root=project_root,
+                                generated_files=generated_files,
+                                declared_dependencies=declared_dependencies,
+                            )
+                            if integration_errors:
+                                errors = [
+                                    "Integration architect rejected the file: " + error
+                                    for error in integration_errors
+                                ]
+                        if not errors:
+                            if callable(status_callback):
+                                status_callback(
+                                    f"Integration architect accepted {Path(target_path).name}; "
+                                    "declared imports and exports remain closed"
+                                )
+                            break
+                        rejected_source = str(response or "").strip()
+                        rejected_source = re.sub(
+                            r"^```(?:python|py)?\s*|\s*```$",
+                            "",
+                            rejected_source,
+                            flags=re.IGNORECASE,
+                        )
+                        repeated_source = bool(
+                            previous_rejected_source
+                            and rejected_source == previous_rejected_source
+                        )
+                        previous_rejected_source = rejected_source
+                        file_stage.coder_preference = "standard"
+                        file_stage.num_ctx = max(file_stage.num_ctx, 8192)
+                        file_stage.num_predict = -1
+                        file_stage.timeout = max(file_stage.timeout, 180)
+                        if callable(status_callback):
+                            status_callback(
+                                f"Rejected {Path(target_path).name}; integration notes returned to its "
+                                "file worker: " + "; ".join(errors[:2])
+                            )
+                        bounded_file_state.setdefault("reasoning_gaps", []).append({
+                            "stage": "artifact_file_generation",
+                            "file": str(target_path),
+                            "attempt": attempt,
+                            "model": stage_model,
+                            "response_characters": len(response or ""),
+                            "validator_errors": list(errors),
+                            "fallback_action": (
+                                "retry the same bounded file with deterministic integration notes"
+                                if attempt < 3
+                                else "return the unresolved file contract to architecture"
+                            ),
+                        })
+                        if repeated_source:
+                            if callable(status_callback):
+                                status_callback(
+                                    f"Stopping identical full-file retries for "
+                                    f"{Path(target_path).name}; escalating the unchanged "
+                                    "contract failure"
+                                )
+                            break
+                    if errors:
+                        bounded_file_state["generation_errors"] = list(errors)
+                        return None, None
+                    generated_files.append((target_path, original_source, output_source))
+                    interface_readback = summarize_project_edit_generated_interface(
+                        target_path,
+                        output_source,
+                    )
+                    dependency_sources.append(
+                        f"Validated interface readback: {interface_readback}\n"
+                        f"File: {target_path}\n```python\n{output_source}\n```"
+                    )
+                    if callable(status_callback):
+                        status_callback(
+                            f"Checkpointed {Path(target_path).name}; {interface_readback}"
+                        )
+                generated_files, cycle_fixes = stabilize_project_edit_import_cycles(
+                    generated_files,
+                    project_root=project_root,
+                )
+                if cycle_fixes and callable(status_callback):
+                    status_callback(
+                        "Stabilized generated project-local import cycles: "
+                        + "; ".join(cycle_fixes)
+                    )
+                generated_files, symbol_fixes = resolve_project_edit_cross_file_symbols(
+                    generated_files,
+                    project_root=project_root,
+                )
+                if symbol_fixes and callable(status_callback):
+                    status_callback(
+                        "Wired uniquely owned generated symbols: " + "; ".join(symbol_fixes)
+                    )
+                generated_files, docstring_fixes = ensure_project_edit_requested_docstrings(
+                    generated_files,
+                    request_prompt=question,
+                    force=bool(bounded_file_state.get("manifest_required")),
+                )
+                if docstring_fixes and callable(status_callback):
+                    status_callback(
+                        "Completed requested public docstrings: " + "; ".join(docstring_fixes)
+                    )
+                generated_files, cleanup_fixes = enforce_project_edit_explicit_cleanup(
+                    generated_files,
+                    request_prompt=question,
+                )
+                if cleanup_fixes and callable(status_callback):
+                    status_callback("Applied explicit scoped cleanup: " + "; ".join(cleanup_fixes))
+                generated_files, lifecycle_fixes = normalize_project_edit_async_test_lifecycle(
+                    generated_files
+                )
+                if lifecycle_fixes and callable(status_callback):
+                    status_callback(
+                        "Normalized generated async test lifecycle: "
+                        + "; ".join(lifecycle_fixes)
+                    )
+                generated_files, standard_import_fixes = resolve_project_edit_standard_library_symbols(
+                    generated_files
+                )
+                if standard_import_fixes and callable(status_callback):
+                    status_callback(
+                        "Resolved generated standard-library symbols: "
+                        + "; ".join(standard_import_fixes)
+                    )
+                generated_files, unused_import_fixes = remove_project_edit_unused_imports(
+                    generated_files
+                )
+                if unused_import_fixes and callable(status_callback):
+                    status_callback(
+                        "Removed generated unused imports: " + "; ".join(unused_import_fixes)
+                    )
+                generated_files, test_contract_fixes = enforce_project_edit_requested_test_contracts(
+                    generated_files,
+                    request_prompt=question,
+                )
+                if test_contract_fixes and callable(status_callback):
+                    status_callback(
+                        "Materialized explicit generated-test contracts: "
+                        + "; ".join(test_contract_fixes)
+                    )
+                generated_files, format_fixes = format_project_edit_generated_python(
+                    generated_files
+                )
+                if format_fixes and callable(status_callback):
+                    status_callback("Normalized generated Python: " + "; ".join(format_fixes))
+                bounded_file_state["generated_files"] = generated_files
+                bounded_file_state["file_stages"] = file_stages
+                candidate = build_project_edit_multi_file_candidate(generated_files)
+                candidate_preview = preview_project_edit_agent_response(
+                    candidate,
+                    project_root=project_root,
+                    request_prompt=question,
+                )
+                return candidate, candidate_preview
+
+            def replan_bounded_architecture(validation_errors):
+                if bounded_file_state.get("architecture_replanned"):
+                    return None, None
+                bounded_file_state["architecture_replanned"] = True
+                failure_text = "\n".join(f"- {item}" for item in validation_errors)
+                if callable(status_callback):
+                    status_callback(
+                        "Returning unchanged or structural failures to the architecture worker; "
+                        "revising module ownership before further code repair"
+                    )
+                manifest, manifest_errors, requirement_ledger = synthesize_artifact_architecture(
+                    approved_plan_text
+                    + "\n\nThe prior approved architecture failed during isolated generation or "
+                    "integration. Revise file boundaries, API ownership, and validation steps to "
+                    "eliminate these failures:\n"
+                    + failure_text
+                )
+                if manifest_errors:
+                    bounded_file_state["manifest_errors"] = list(manifest_errors)
+                    return None, None
+                bounded_file_state["override_manifest"] = manifest
+                bounded_file_state["override_requirement_ledger"] = requirement_ledger
+                bounded_file_state["generated_files"] = []
+                bounded_file_state["file_stages"] = []
+                bounded_file_state["manifest"] = manifest
+                bounded_file_state["requirement_ledger"] = requirement_ledger
+                bounded_symbol_repair_attempts.clear()
+                return build_from_bounded_file_workers()
+
+            def repair_bounded_file_workers(validation_errors):
+                generated_files = list(bounded_file_state.get("generated_files") or [])
+                if not generated_files:
+                    return None, None
+                cross_file_notes = build_project_edit_cross_file_failure_notes(
+                    generated_files,
+                    validation_errors,
+                )
+                if cross_file_notes and not bounded_file_state.get("architecture_replanned"):
+                    if callable(status_callback):
+                        status_callback(
+                            "Integration coordinator found a shared cross-file contract failure; "
+                            "returning one ownership report to the architecture worker"
+                        )
+                    return replan_bounded_architecture([
+                        *validation_errors,
+                        *cross_file_notes,
+                    ])
+                exhausted_production = [
+                    symbol
+                    for symbol, attempts in bounded_symbol_repair_attempts.items()
+                    if attempts >= 2
+                    and not symbol.lower().startswith("test")
+                    and ".test_" not in symbol.lower()
+                ]
+                if (
+                    exhausted_production
+                    and not bounded_file_state.get("architecture_replanned")
+                ):
+                    if callable(status_callback):
+                        status_callback(
+                            "Production repair budget was exhausted while package validation "
+                            "still failed; escalating the shared contract to architecture"
+                        )
+                    return replan_bounded_architecture([
+                        *validation_errors,
+                        "Production callable repairs did not resolve the package contract: "
+                        + ", ".join(exhausted_production),
+                    ])
+                failure_text = "\n".join(f"- {item}" for item in validation_errors)
+                if (
+                    "permissionerror" in failure_text.lower()
+                    or "access is denied" in failure_text.lower()
+                ):
+                    isolated_files, isolation_fixes = isolate_project_edit_generated_test_fixture(
+                        generated_files
+                    )
+                    if isolation_fixes:
+                        isolated_files, _format_fixes = format_project_edit_generated_python(
+                            isolated_files
+                        )
+                        bounded_file_state["generated_files"] = isolated_files
+                        if callable(status_callback):
+                            status_callback(
+                                "Precisely isolated generated test fixture: "
+                                + "; ".join(isolation_fixes)
+                            )
+                        candidate = build_project_edit_multi_file_candidate(isolated_files)
+                        candidate_preview = preview_project_edit_agent_response(
+                            candidate,
+                            project_root=project_root,
+                            request_prompt=question,
+                        )
+                        return candidate, candidate_preview
+                failure_symbol = resolve_project_edit_failure_symbol(
+                    generated_files,
+                    validation_errors,
+                    deprioritized_symbols={
+                        symbol
+                        for symbol, attempts in bounded_symbol_repair_attempts.items()
+                        if attempts >= 2
+                    },
+                )
+                if failure_symbol and int(
+                    bounded_symbol_repair_attempts.get(failure_symbol["symbol"], 0)
+                ) >= 2:
+                    failure_symbol = {}
+                if failure_symbol:
+                    target_path = failure_symbol["path"]
+                    target_symbol = failure_symbol["symbol"]
+                    symbol_attempt = int(bounded_symbol_repair_attempts.get(target_symbol, 0)) + 1
+                    bounded_symbol_repair_attempts[target_symbol] = symbol_attempt
+                    manifest_item = next(
+                        (
+                            item
+                            for item in bounded_file_state.get("manifest") or []
+                            if Path(str(item.get("absolute_path") or "")).resolve()
+                            == Path(target_path).resolve()
+                        ),
+                        {},
+                    )
+                    repair_contract, contract_errors = build_project_edit_function_repair_contract(
+                        generated_files,
+                        target=failure_symbol,
+                        validation_errors=validation_errors,
+                        objective=question,
+                        requirements=list(manifest_item.get("requirements") or []),
+                    )
+                    if contract_errors:
+                        if callable(status_callback):
+                            status_callback(
+                                f"Could not isolate {target_symbol}: "
+                                + "; ".join(contract_errors[:2])
+                            )
+                        candidate = build_project_edit_multi_file_candidate(generated_files)
+                        return candidate, preview_project_edit_agent_response(
+                            candidate,
+                            project_root=project_root,
+                            request_prompt=question,
+                        )
+                    diagnosis_stage = build_project_edit_function_repair_plan_stage(
+                        repair_contract
+                    )
+                    diagnosis_stage.model_tier = "local_code"
+                    diagnosis_stage.prefer_coder = True
+                    diagnosis_stage.coder_preference = "standard"
+                    repair_plan = {}
+                    repair_plan_errors = []
+                    diagnosis_feedback = ""
+                    for diagnosis_attempt in range(1, 3):
+                        if diagnosis_attempt >= 2:
+                            diagnosis_stage.model_tier = "local_code"
+                            diagnosis_stage.prefer_coder = True
+                            diagnosis_stage.coder_preference = "standard"
+                        diagnosis_model = model_for_project_edit_stage(
+                            diagnosis_stage,
+                            settings,
+                            selected_model=model,
+                        )
+                        if callable(status_callback):
+                            status_callback(
+                                f"Diagnosing {target_symbol}; {diagnosis_model}; "
+                                f"attempt {diagnosis_attempt}/2; deriving root cause, algorithm, "
+                                "and postconditions before coding"
+                            )
+                        diagnosis_response = query_prompt_text(
+                            model=diagnosis_model,
+                            system_prompt=diagnosis_stage.system_prompt,
+                            user_prompt=diagnosis_stage.user_prompt + diagnosis_feedback,
+                            num_ctx=diagnosis_stage.num_ctx,
+                            num_predict=diagnosis_stage.num_predict,
+                            timeout=diagnosis_stage.timeout,
+                            prefer_coder=diagnosis_stage.prefer_coder,
+                            coder_preference=diagnosis_stage.coder_preference,
+                            think=False,
+                            response_format=diagnosis_stage.response_format,
+                            temperature=0.0,
+                            progress_callback=model_heartbeat(
+                                f"Repair diagnosis {target_symbol}"
+                            ),
+                        )
+                        repair_plan, repair_plan_errors = (
+                            parse_project_edit_function_repair_plan(
+                                diagnosis_response or "",
+                                contract=repair_contract,
+                            )
+                        )
+                        if not repair_plan_errors:
+                            break
+                        if callable(status_callback):
+                            status_callback(
+                                f"Rejected repair diagnosis for {target_symbol}: "
+                                + "; ".join(repair_plan_errors[:2])
+                            )
+                        diagnosis_feedback = (
+                            "\n\nThe prior diagnosis was rejected. Return a corrected concise JSON "
+                            "micro-plan that fixes these exact contract violations:\n- "
+                            + "\n- ".join(repair_plan_errors[:3])
+                        )
+                    if repair_plan_errors:
+                        repair_plan = dict(repair_plan or {})
+                        repair_plan["root_cause"] = str(
+                            repair_plan.get("root_cause")
+                            or repair_contract.get("failure")
+                            or ""
+                        )
+                        repair_plan["algorithm_steps"] = list(
+                            repair_plan.get("algorithm_steps") or []
+                        ) + [
+                            "Mandatory rejected-plan correction: " + error
+                            for error in repair_plan_errors
+                        ]
+                        repair_plan["preserve"] = list(
+                            repair_plan.get("preserve") or []
+                        ) + ["exact callable signature"]
+                        repair_plan["postconditions"] = list(
+                            repair_plan.get("postconditions") or []
+                        ) + ["the reported disposable failure no longer occurs"]
+                    repair_stage = build_project_edit_function_repair_stage(
+                        repair_contract,
+                        attempt=symbol_attempt,
+                        repair_plan=repair_plan,
+                    )
+                    repair_model = model_for_project_edit_stage(
+                        repair_stage,
+                        settings,
+                        selected_model=model,
+                    )
+                    if callable(status_callback):
+                        status_callback(
+                            f"Function contract isolated {target_symbol}; {repair_model}; "
+                            f"attempt {min(symbol_attempt, 2)}/2; preserving exact signature, "
+                            f"{len(repair_contract.get('sibling_symbols') or [])} sibling callables, "
+                            f"and {len(generated_files) - 1} other files"
+                        )
+                    response = query_prompt_text(
+                        model=repair_model,
+                        system_prompt=repair_stage.system_prompt,
+                        user_prompt=repair_stage.user_prompt,
+                        num_ctx=repair_stage.num_ctx,
+                        num_predict=repair_stage.num_predict,
+                        timeout=repair_stage.timeout,
+                        prefer_coder=True,
+                        coder_preference=repair_stage.coder_preference,
+                        think=False,
+                        response_format="",
+                        temperature=0.0,
+                        progress_callback=model_heartbeat(
+                            f"Callable repair {target_symbol}"
+                        ),
+                    )
+                    repaired_files, repair_errors = apply_project_edit_generated_symbol_repair(
+                        generated_files,
+                        path=target_path,
+                        symbol=target_symbol,
+                        replacement_response=response or "",
+                        forbidden_names=list(repair_contract.get("forbidden_names") or []),
+                    )
+                    if repair_errors:
+                        if callable(status_callback):
+                            status_callback(
+                                f"Rejected precise repair for {target_symbol}: "
+                                + "; ".join(repair_errors[:2])
+                            )
+                        candidate = build_project_edit_multi_file_candidate(generated_files)
+                        candidate_preview = preview_project_edit_agent_response(
+                            candidate,
+                            project_root=project_root,
+                            request_prompt=question,
+                        )
+                        return candidate, candidate_preview
+                    repaired_files, _symbol_fixes = resolve_project_edit_cross_file_symbols(
+                        repaired_files,
+                        project_root=project_root,
+                    )
+                    repaired_files, _cleanup_fixes = enforce_project_edit_explicit_cleanup(
+                        repaired_files,
+                        request_prompt=question,
+                    )
+                    repaired_files, _standard_import_fixes = resolve_project_edit_standard_library_symbols(
+                        repaired_files
+                    )
+                    repaired_files, _unused_import_fixes = remove_project_edit_unused_imports(
+                        repaired_files
+                    )
+                    repaired_files, _test_contract_fixes = enforce_project_edit_requested_test_contracts(
+                        repaired_files,
+                        request_prompt=question,
+                    )
+                    repaired_files, _format_fixes = format_project_edit_generated_python(
+                        repaired_files
+                    )
+                    bounded_file_state["generated_files"] = repaired_files
+                    candidate = build_project_edit_multi_file_candidate(repaired_files)
+                    candidate_preview = preview_project_edit_agent_response(
+                        candidate,
+                        project_root=project_root,
+                        request_prompt=question,
+                    )
+                    return candidate, candidate_preview
+                mentioned = [
+                    index
+                    for index, (target_path, _original, _generated) in enumerate(generated_files)
+                    if Path(target_path).name.lower() in failure_text.lower()
+                ]
+                placeholder_methods = re.findall(
+                    r"Generated test methods (?:are placeholders|need stronger behavioral proof):\s*"
+                    r"([A-Za-z0-9_., ]+)",
+                    failure_text,
+                )
+                placeholder_names = {
+                    name.rsplit(".", 1)[-1].strip()
+                    for group in placeholder_methods
+                    for name in group.split(",")
+                    if name.strip()
+                }
+                if placeholder_names:
+                    mentioned.extend(
+                        index
+                        for index, (target_path, _original, generated) in enumerate(generated_files)
+                        if (
+                            Path(target_path).name.startswith("test_")
+                            or "tests" in {part.lower() for part in Path(target_path).parts}
+                        )
+                        and any(f"def {name}(" in generated for name in placeholder_names)
+                        and index not in mentioned
+                    )
+                test_indexes = [
+                    index
+                    for index in mentioned
+                    if Path(generated_files[index][0]).name.startswith("test_")
+                ]
+                isolated_test_failure = (
+                    "permissionerror" in failure_text.lower()
+                    or "access is denied" in failure_text.lower()
+                )
+                structural_failure = any(
+                    marker in failure_text.lower()
+                    for marker in (
+                        "new import could not be resolved",
+                        "missing its manifest dependency edge",
+                        "project-local import does not expose",
+                        "generated production callables are placeholders",
+                        "executes behavior at import time",
+                    )
+                )
+                production_indexes = [
+                    index
+                    for index in mentioned
+                    if not _is_test_path(Path(generated_files[index][0]))
+                ]
+                target_index = (
+                    production_indexes[0]
+                    if structural_failure and production_indexes
+                    else test_indexes[0]
+                    if test_indexes and (
+                        isolated_test_failure
+                        or "failed to import test module" in failure_text.lower()
+                        or "disposable generated-patch validation failed" in failure_text.lower()
+                    )
+                    else mentioned[0]
+                    if mentioned
+                    else 0
+                )
+                target_path, original_source, current_source = generated_files[target_index]
+                sibling_context = "\n\n".join(
+                    f"File: {path_text}\n```python\n{generated}\n```"
+                    for path_text, _original, generated in generated_files
+                )
+                repair_stage = list(bounded_file_state.get("file_stages") or [])[target_index][2]
+                repair_stage.label = f"Repairing {Path(target_path).name} from disposable validation"
+                repair_stage.coder_preference = "small"
+                repair_stage.num_ctx = 6144
+                repair_stage.num_predict = 1100
+                repair_stage.timeout = 90
+                repair_stage.user_prompt = f"""User objective:
+{question}
+
+File owned by this repair:
+{target_path}
+
+Current generated source:
+```python
+{current_source}
+```
+
+Complete generated multi-file candidate:
+{sibling_context[-6000:]}
+
+Disposable validation failures:
+{failure_text}
+
+Return the complete corrected source for the owned file only. Fix the reported failure at its cause while preserving
+the passing behavior in all sibling files. For circular imports, move project-local imports inside the function that
+uses them. Tests must use disposable temporary paths and may never write to a user's real home directory.
+Return raw Python only, without Markdown, JSON, or commentary.
+"""
+                repair_model = model_for_project_edit_stage(
+                    repair_stage,
+                    settings,
+                    selected_model=model,
+                )
+                if callable(status_callback):
+                    status_callback(
+                        f"{repair_stage.label}; {repair_model}; preserving "
+                        f"{len(generated_files) - 1} passing file(s)"
+                    )
+                response = query_prompt_text(
+                    model=repair_model,
+                    system_prompt=repair_stage.system_prompt,
+                    user_prompt=repair_stage.user_prompt,
+                    num_ctx=repair_stage.num_ctx,
+                    num_predict=repair_stage.num_predict,
+                    timeout=repair_stage.timeout,
+                    prefer_coder=True,
+                    coder_preference=repair_stage.coder_preference,
+                    think=False,
+                    response_format="",
+                    temperature=0.0,
+                    progress_callback=model_heartbeat(
+                        f"Integration file repair {Path(target_path).name}"
+                    ),
+                )
+                corrected, parse_errors = parse_project_edit_generated_file(
+                    response or "",
+                    path=target_path,
+                    expected_public_symbols=list(
+                        (repair_stage.metadata or {}).get("expected_public_symbols") or []
+                    ),
+                )
+                if not parse_errors:
+                    parse_errors = validate_project_edit_generated_module_graph(
+                        corrected,
+                        path=target_path,
+                        project_root=project_root,
+                        generated_files=[
+                            item for item in generated_files
+                            if Path(item[0]).resolve() != Path(target_path).resolve()
+                        ],
+                        declared_dependencies=list(
+                            (repair_stage.metadata or {}).get("depends_on") or []
+                        ),
+                    )
+                if parse_errors:
+                    if callable(status_callback):
+                        status_callback(
+                            f"Rejected bounded repair for {Path(target_path).name}: "
+                            + "; ".join(parse_errors[:2])
+                        )
+                    return None, None
+                generated_files[target_index] = (target_path, original_source, corrected)
+                generated_files, cycle_fixes = stabilize_project_edit_import_cycles(
+                    generated_files,
+                    project_root=project_root,
+                )
+                if cycle_fixes and callable(status_callback):
+                    status_callback(
+                        "Stabilized repaired project-local import cycles: "
+                        + "; ".join(cycle_fixes)
+                    )
+                generated_files, symbol_fixes = resolve_project_edit_cross_file_symbols(
+                    generated_files,
+                    project_root=project_root,
+                )
+                if symbol_fixes and callable(status_callback):
+                    status_callback(
+                        "Wired repaired generated symbols: " + "; ".join(symbol_fixes)
+                    )
+                generated_files, docstring_fixes = ensure_project_edit_requested_docstrings(
+                    generated_files,
+                    request_prompt=question,
+                    force=bool(bounded_file_state.get("manifest_required")),
+                )
+                bounded_file_state["generated_files"] = generated_files
+                candidate = build_project_edit_multi_file_candidate(generated_files)
+                candidate_preview = preview_project_edit_agent_response(
+                    candidate,
+                    project_root=project_root,
+                    request_prompt=question,
+                )
+                return candidate, candidate_preview
 
             def build_from_bounded_leaf_workers(work_units=None):
                 work_units = work_units or compile_project_edit_leaf_work_units(
@@ -3872,7 +5677,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                             f"{leaf_stage.label}; unit 1/3; {leaf_model}; "
                             "source-only subagent"
                         )
-                    leaf_response = query_ollama_text(
+                    leaf_response = query_prompt_text(
                         model=leaf_model,
                         system_prompt=leaf_stage.system_prompt,
                         user_prompt=leaf_stage.user_prompt,
@@ -3938,7 +5743,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                 f"{leaf_stage.label}; unit {leaf_index}/3; {leaf_model}; "
                                 "source-only subagent"
                             )
-                        leaf_response = query_ollama_text(
+                        leaf_response = query_prompt_text(
                             model=leaf_model,
                             system_prompt=leaf_stage.system_prompt,
                             user_prompt=leaf_stage.user_prompt,
@@ -4014,6 +5819,53 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                     )
                 output = None
                 bounded_attempted = bool(approved_work_units and stage.key == "patch_generation")
+                bounded_files_attempted = False
+                if stage.key == "patch_generation":
+                    bounded_files_attempted = bool(
+                        build_project_edit_file_generation_stages(edit_plan)
+                        or build_project_edit_artifact_manifest_stage(
+                            edit_plan,
+                            approved_plan=approved_plan_text,
+                        )
+                    )
+                    if bounded_files_attempted:
+                        if callable(status_callback):
+                            status_callback(
+                                "Using bounded multi-file workers; generating dependency files, "
+                                "consumers, then focused tests"
+                            )
+                        output, _bounded_preview = build_from_bounded_file_workers()
+                        if output is None and bounded_file_state.get("generation_errors"):
+                            output, _bounded_preview = replan_bounded_architecture(
+                                list(bounded_file_state.get("generation_errors") or [])
+                            )
+                        if output is None and bounded_file_state.get("manifest_required"):
+                            errors = list(
+                                bounded_file_state.get("manifest_errors")
+                                or bounded_file_state.get("generation_errors")
+                                or []
+                            )
+                            output = json.dumps({
+                                "changes": [],
+                                "report": {
+                                    "changed": [],
+                                    "reused": [],
+                                    "verification": [],
+                                    "remaining_gaps": errors or ["Bounded artifact generation was incomplete."],
+                                    "requirement_coverage": [],
+                                },
+                                "blocked_reason": (
+                                    "The validated artifact manifest or one of its bounded file workers failed."
+                                ),
+                            })
+                            if callable(status_callback):
+                                status_callback(
+                                    "Bounded artifact generation stopped safely; whole-patch fallback is disabled"
+                                )
+                        elif output is None and callable(status_callback):
+                            status_callback(
+                                "Bounded multi-file generation was incomplete; falling back to the whole-patch coder"
+                            )
                 if bounded_attempted:
                     if callable(status_callback):
                         status_callback("Using approved indexed boundaries; skipping speculative whole-patch generation")
@@ -4029,7 +5881,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                         status_callback(
                             f"Waiting on {stage_model} for {stage.label}; UI should remain responsive"
                         )
-                    output = query_ollama_text(
+                    output = query_prompt_text(
                         model=stage_model,
                         system_prompt=stage.system_prompt,
                         user_prompt=stage_user_prompt,
@@ -4040,6 +5892,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                         coder_preference=stage.coder_preference,
                         think=False,
                         response_format=stage.response_format or None,
+                        progress_callback=model_heartbeat(stage.label),
                     )
                 if output:
                     output = output.strip()
@@ -4079,7 +5932,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                         f"{syntax_stage.label}; {syntax_model}; "
                                         f"{issue.get('target_symbol') or Path(str(issue.get('path') or '')).name}"
                                     )
-                                syntax_response = query_ollama_text(
+                                syntax_response = query_prompt_text(
                                     model=syntax_model,
                                     system_prompt=syntax_stage.system_prompt,
                                     user_prompt=syntax_stage.user_prompt,
@@ -4090,6 +5943,9 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                     coder_preference=syntax_stage.coder_preference,
                                     think=False,
                                     response_format=syntax_stage.response_format,
+                                    progress_callback=model_heartbeat(
+                                        f"Syntax repair {issue.get('target_symbol') or 'file'}"
+                                    ),
                                 )
                                 if not syntax_response:
                                     break
@@ -4143,8 +5999,63 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                 best_output = output
                                 best_preview = preview
                                 best_preview_score = preview_score
+                        if bounded_files_attempted:
+                            prior_bounded_error_signature = ()
+                            for bounded_repair_attempt in range(1, 9):
+                                if preview.ok:
+                                    break
+                                current_error_signature = (
+                                    project_edit_validation_failure_signature(
+                                        list(preview.errors)
+                                    )
+                                )
+                                if current_error_signature == prior_bounded_error_signature:
+                                    replanned_output, replanned_preview = replan_bounded_architecture(
+                                        list(preview.errors)
+                                    )
+                                    if replanned_output is not None and replanned_preview is not None:
+                                        output = replanned_output
+                                        preview = replanned_preview
+                                        prior_bounded_error_signature = ()
+                                        if callable(status_callback):
+                                            status_callback(
+                                                "Architecture replan completed; resumed validation "
+                                                "from the revised generated package"
+                                            )
+                                        continue
+                                    if callable(status_callback):
+                                        status_callback(
+                                            "Stopping precise repair because validation failures did not "
+                                            "change and the architecture replan was exhausted"
+                                        )
+                                    break
+                                prior_bounded_error_signature = current_error_signature
+                                repaired_output, repaired_preview = repair_bounded_file_workers(
+                                    list(preview.errors)
+                                )
+                                if repaired_output is None or repaired_preview is None:
+                                    break
+                                output = repaired_output
+                                preview = repaired_preview
+                                if callable(status_callback):
+                                    status_callback(
+                                        "Precise repair validation "
+                                        f"({bounded_repair_attempt}/8): "
+                                        + (
+                                            "passed"
+                                            if preview.ok
+                                            else "; ".join(str(item) for item in preview.errors[:3])
+                                        )
+                                    )
+                                preview_score = project_edit_preview_error_score(list(preview.errors))
+                                if preview_score < best_preview_score:
+                                    best_output = output
+                                    best_preview = preview
+                                    best_preview_score = preview_score
                         for repair_attempt in range(1, 6):
                             if preview.ok:
+                                break
+                            if bounded_files_attempted:
                                 break
                             if callable(status_callback):
                                 status_callback(
@@ -4164,7 +6075,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                 settings,
                                 selected_model=model,
                             )
-                            repaired = query_ollama_text(
+                            repaired = query_prompt_text(
                                 model=repair_model,
                                 system_prompt=repair_stage.system_prompt,
                                 user_prompt=repair_stage.user_prompt,
@@ -4175,6 +6086,9 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                                 coder_preference=repair_stage.coder_preference,
                                 think=False,
                                 response_format=repair_stage.response_format or None,
+                                progress_callback=model_heartbeat(
+                                    f"Whole-patch repair {repair_attempt}/5"
+                                ),
                             )
                             if not repaired:
                                 break
@@ -4203,11 +6117,51 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                         if not preview.ok:
                             output = best_output
                             preview = best_preview
+                            requirement_coverage = (
+                                build_project_edit_requirement_coverage(
+                                    list(bounded_file_state.get("manifest") or []),
+                                    list(bounded_file_state.get("requirement_ledger") or []),
+                                    validation_errors=list(preview.errors),
+                                )
+                                if bounded_file_state.get("manifest")
+                                else []
+                            )
+                            bounded_file_state["requirement_coverage"] = requirement_coverage
                             output = (
                                 "BLOCKED: The generated patch did not pass the implementation quality gate.\n\n"
                                 + "\n".join(f"- {item}" for item in preview.errors)
                             )
+                            if requirement_coverage:
+                                output += "\n\nRequirement coverage:\n" + "\n".join(
+                                    f"- {item['id']} [{item['status']}]: "
+                                    f"{item['requirement']} | "
+                                    + (
+                                        "workflow="
+                                        f"{', '.join(item.get('system_owners') or []) or 'missing'}"
+                                        if item.get("scope") == "workflow"
+                                        else (
+                                            "production="
+                                            f"{', '.join(item['production_owners']) or 'missing'} | tests="
+                                            f"{', '.join(item['test_owners']) or 'missing'}"
+                                        )
+                                    )
+                                    for item in requirement_coverage
+                                )
                         else:
+                            if bounded_file_state.get("manifest"):
+                                requirement_coverage = build_project_edit_requirement_coverage(
+                                    list(bounded_file_state.get("manifest") or []),
+                                    list(bounded_file_state.get("requirement_ledger") or []),
+                                )
+                                bounded_file_state["requirement_coverage"] = requirement_coverage
+                                try:
+                                    structured_output = json.loads(output)
+                                    structured_output.setdefault("report", {})[
+                                        "requirement_coverage"
+                                    ] = requirement_coverage
+                                    output = json.dumps(structured_output, ensure_ascii=True)
+                                except (TypeError, ValueError):
+                                    pass
                             approved_preview = preview
                     stage_outputs.append((stage, output))
                     if callable(status_callback):
@@ -4257,6 +6211,32 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                             }
                             for item in approved_preview.changes
                         ],
+                        "requirement_coverage": list(
+                            bounded_file_state.get("requirement_coverage") or []
+                        ),
+                        "reasoning_gaps": list(
+                            bounded_file_state.get("reasoning_gaps") or []
+                        ),
+                    }
+                elif "preview" in locals() and preview is not None:
+                    patch_payload = {
+                        "type": "project_changes_rejected",
+                        "changes": [
+                            {
+                                "action": item.get("action"),
+                                "path": item.get("path"),
+                                "original_content": item.get("before", ""),
+                                "new_content": item.get("after", ""),
+                            }
+                            for item in preview.changes
+                        ],
+                        "validation_errors": list(preview.errors),
+                        "requirement_coverage": list(
+                            bounded_file_state.get("requirement_coverage") or []
+                        ),
+                        "reasoning_gaps": list(
+                            bounded_file_state.get("reasoning_gaps") or []
+                        ),
                     }
                 return "\n\n".join(sections).strip(), patch_payload
             return (
@@ -4265,6 +6245,19 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                 "Deterministic discovery still completed:\n\n"
                 f"{project_context}"
             ), None
+        except LLMCloudProviderError as exc:
+            notice = cloud_provider_failure_notice(
+                str(exc),
+                f"{prompt_provider_route.provider}:{prompt_provider_route.model}",
+            )
+            if callable(status_callback):
+                status_callback("Cloud provider unavailable; request stopped without fallback")
+            return notice, {
+                "type": "cloud_provider_unavailable",
+                "provider": prompt_provider_route.provider,
+                "model": prompt_provider_route.model,
+                "fallback_used": False,
+            }
         except Exception:
             project_context = gather_project_search_context(question, active_path=path)
             system_prompt = (
@@ -4278,7 +6271,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
                 project_context=project_context,
                 intent=intent,
             )
-            content = query_ollama_text(
+            content = query_prompt_text(
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -4296,7 +6289,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
     else:
         project_context = gather_project_search_context(question, active_path=path)
         try:
-            from tech_connector.services.rag_sufficiency_service import (
+            from tech_connector.services.reasoning.rag_sufficiency_service import (
                 build_rag_evidence_packet,
                 evaluate_project_rag_sufficiency,
                 render_rag_sufficiency_summary,
@@ -4346,15 +6339,26 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
         status_callback(
             f"Asking local model with compact RAG evidence ({len(user_prompt)} chars)"
         )
-    content = query_ollama_text(
-        model=plan_model,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        num_ctx=4096,
-        num_predict=900,
-        timeout=120,
-        prefer_coder=False,
-    )
+    try:
+        content = query_prompt_text(
+            model=plan_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            num_ctx=4096,
+            num_predict=900,
+            timeout=120,
+            prefer_coder=False,
+        )
+    except LLMCloudProviderError as exc:
+        return cloud_provider_failure_notice(
+            str(exc),
+            f"{prompt_provider_route.provider}:{prompt_provider_route.model}",
+        ), {
+            "type": "cloud_provider_unavailable",
+            "provider": prompt_provider_route.provider,
+            "model": prompt_provider_route.model,
+            "fallback_used": False,
+        }
 
     if not content:
         return (
@@ -4458,6 +6462,13 @@ def answer_editor_code_request(path, question, file_text, local_context, intent)
     try:
         from tech_connector.services.settings_service import load_settings
         from tech_connector.knowledge.search import query_ollama_text
+        from tech_connector.services.llm_router_service import (
+            LLMCloudProviderError,
+            resolve_llm_provider_route,
+        )
+        from tech_connector.services.model_provider_service import (
+            cloud_provider_failure_notice,
+        )
     except Exception as exc:
         return (
             "I gathered local file context, but could not load the coding-model "
@@ -4475,6 +6486,7 @@ def answer_editor_code_request(path, question, file_text, local_context, intent)
         or settings.get("general_model")
         or "qwen3-coder:30b"
     )
+    provider_route = resolve_llm_provider_route(model, settings)
 
     system_prompt = (
         "You are a senior Python/PySide tools engineer. "
@@ -4489,15 +6501,28 @@ def answer_editor_code_request(path, question, file_text, local_context, intent)
         intent=intent,
     )
 
-    content = query_ollama_text(
-        model=model,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        num_ctx=16384,
-        num_predict=2200,
-        timeout=180,
-        prefer_coder=True,
-    )
+    try:
+        content = query_project_index_model_text(
+            provider_route,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            num_ctx=16384,
+            num_predict=2200,
+            timeout=180,
+            prefer_coder=True,
+            local_query=query_ollama_text,
+        )
+    except LLMCloudProviderError as exc:
+        return cloud_provider_failure_notice(
+            str(exc),
+            f"{provider_route.provider}:{provider_route.model}",
+        ), {
+            "type": "cloud_provider_unavailable",
+            "provider": provider_route.provider,
+            "model": provider_route.model,
+            "fallback_used": False,
+        }
 
     if not content:
         fallback = _clean_editor_local_context(local_context)

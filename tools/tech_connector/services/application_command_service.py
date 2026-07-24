@@ -67,6 +67,11 @@ class ApplicationCommandService:
             return self.monitor_application(payload)
         if command == "inspect_windows":
             return self.inspect_windows(payload)
+        if command == "list_knowledge_credits":
+            from tech_connector.services.knowledge_credits_service import list_knowledge_credits, load_knowledge_credits
+            credits = list_knowledge_credits(query=str(payload.get("query") or ""))
+            policy = load_knowledge_credits().get("policy", "open_information_only")
+            return {"ok": True, "policy": policy, "credits": credits}
         if command in {"continue_conversation", "approve_job", "launch_application", "execute_workflow"}:
             return self.create_deferred_job(command, payload)
         return {"ok": False, "error": f"Unsupported command: {command}"}

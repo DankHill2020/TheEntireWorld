@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -39,30 +40,29 @@ class AutonomousKnowledgeRetrievalEngine:
             return []
         results: list[dict[str, Any]] = []
         try:
-            connection = sqlite3.connect(str(self.index_db_path), timeout=3.0)
-            for term in list(query_terms)[:12]:
-                safe_term = re.sub(r"[^A-Za-z0-9_]", " ", str(term)).strip()
-                if not safe_term:
-                    continue
-                rows = connection.execute(
-                    "SELECT path, rel_path, text FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT 8",
-                    ('"' + safe_term.replace('"', '') + '"',),
-                ).fetchall()
-                for path, relative_path, text in rows:
-                    results.append(
-                        {
-                            "file_path": path,
-                            "relative_path": relative_path,
-                            "snippet": str(text or "")[:500],
-                            "matched_term": term,
-                            "source_kind": "local_index",
-                        }
-                    )
+            with closing(sqlite3.connect(str(self.index_db_path), timeout=3.0)) as connection:
+                for term in list(query_terms)[:12]:
+                    safe_term = re.sub(r"[^A-Za-z0-9_]", " ", str(term)).strip()
+                    if not safe_term:
+                        continue
+                    rows = connection.execute(
+                        "SELECT path, rel_path, text FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT 8",
+                        ('"' + safe_term.replace('"', '') + '"',),
+                    ).fetchall()
+                    for path, relative_path, text in rows:
+                        results.append(
+                            {
+                                "file_path": path,
+                                "relative_path": relative_path,
+                                "snippet": str(text or "")[:500],
+                                "matched_term": term,
+                                "source_kind": "local_index",
+                            }
+                        )
+                        if len(results) >= limit:
+                            break
                     if len(results) >= limit:
                         break
-                if len(results) >= limit:
-                    break
-            connection.close()
         except (sqlite3.Error, OSError):
             return []
         return results

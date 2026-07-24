@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
 CapabilityMode = Literal["context_call", "operation", "function", "python"]
@@ -289,6 +289,117 @@ _register_many(
             recommended_model="strong_reasoning",
             tags=("blueprint", "graphs"),
         ),
+        UnrealCapabilitySpec(
+            name="anim_bp.inspect_graph_cpp",
+            domain="anim_blueprint",
+            phase="inspect",
+            mode="function",
+            function="unreal.AIStudioBridgeLibrary.inspect_anim_blueprint_graph",
+            description="Inspect AnimBlueprint graph topology through the AIStudioBridge reflected C++ wrapper.",
+            expects=(_arg("anim_bp", "AnimBlueprint_asset_or_object"),),
+            produces=("anim_graph_snapshot",),
+            timeout=15.0,
+            requires_asset_types=("AnimBlueprint",),
+            fallback_capabilities=("blueprint.inspect", "blueprint.list_graphs"),
+            aliases=("blueprint.scan",),
+            tags=("anim_blueprint", "anim_graph", "cpp_wrapper", "inspection"),
+        ),
+        UnrealCapabilitySpec(
+            name="anim_graph.add_state_cpp",
+            domain="anim_blueprint",
+            phase="mutate",
+            mode="function",
+            function="unreal.AIStudioBridgeLibrary.add_anim_graph_state",
+            description="Create or update an AnimBlueprint state-machine state through a reflected C++ editor wrapper.",
+            read_only=False,
+            risk="high",
+            expects=(
+                _arg("anim_bp", "AnimBlueprint_asset_or_object"),
+                _arg("state_machine", "state_machine_name"),
+                _arg("state_name", "state_name"),
+                _arg("animation_asset", "animation_asset_path", required=False, default=""),
+            ),
+            produces=("anim_state_handle",),
+            preflight=("anim_bp.inspect_graph_cpp",),
+            validate=("anim_bp.inspect_graph_cpp", "anim_bp.compile"),
+            rollback=("animation.delete_state",),
+            permissions=("editor_asset_mutation", "anim_graph_mutation"),
+            requires_asset_types=("AnimBlueprint",),
+            aliases=("anim_graph.add_state",),
+            tags=("anim_blueprint", "anim_graph", "cpp_wrapper", "state", "mutation"),
+        ),
+        UnrealCapabilitySpec(
+            name="anim_graph.add_transition_rule_cpp",
+            domain="anim_blueprint",
+            phase="mutate",
+            mode="function",
+            function="unreal.AIStudioBridgeLibrary.add_anim_graph_transition_rule",
+            description="Create an AnimBlueprint state-machine transition and assign a guard expression through a reflected C++ editor wrapper.",
+            read_only=False,
+            risk="high",
+            expects=(
+                _arg("anim_bp", "AnimBlueprint_asset_or_object"),
+                _arg("state_machine", "state_machine_name"),
+                _arg("from_state", "state_name"),
+                _arg("to_state", "state_name"),
+                _arg("rule_expression", "blueprint_boolean_expression"),
+            ),
+            produces=("anim_transition_handle",),
+            preflight=("anim_bp.inspect_graph_cpp",),
+            validate=("anim_bp.inspect_graph_cpp", "anim_bp.compile"),
+            rollback=("animation.delete_transition",),
+            permissions=("editor_asset_mutation", "anim_graph_mutation"),
+            requires_asset_types=("AnimBlueprint",),
+            aliases=("anim_graph.add_transition_rule",),
+            tags=("anim_blueprint", "anim_graph", "cpp_wrapper", "transition", "mutation"),
+        ),
+        UnrealCapabilitySpec(
+            name="anim_graph.synthesize_transition_rule_expression_cpp",
+            domain="anim_blueprint",
+            phase="mutate",
+            mode="function",
+            function="unreal.AIStudioBridgeLibrary.synthesize_anim_graph_transition_rule_expression",
+            description="Synthesize bounded Blueprint transition-rule nodes from a boolean expression and wire the final bool into bCanEnterTransition through a reflected C++ editor wrapper.",
+            read_only=False,
+            risk="high",
+            expects=(
+                _arg("anim_bp", "AnimBlueprint_asset_or_object"),
+                _arg("state_machine", "state_machine_name"),
+                _arg("from_state", "state_name"),
+                _arg("to_state", "state_name"),
+                _arg("rule_expression", "blueprint_boolean_expression"),
+            ),
+            produces=("transition_rule_graph_mutation",),
+            preflight=("anim_bp.inspect_graph_cpp",),
+            validate=("anim_bp.inspect_graph_cpp", "anim_bp.compile"),
+            rollback=("backup_asset.restore",),
+            permissions=("editor_asset_mutation", "anim_graph_mutation", "blueprint_graph_mutation"),
+            requires_asset_types=("AnimBlueprint",),
+            aliases=("anim_graph.synthesize_transition_rule_expression",),
+            tags=("anim_blueprint", "anim_graph", "blueprint_graph", "cpp_wrapper", "transition", "mutation"),
+        ),
+        UnrealCapabilitySpec(
+            name="anim_graph.wire_output_pose_cpp",
+            domain="anim_blueprint",
+            phase="mutate",
+            mode="function",
+            function="unreal.AIStudioBridgeLibrary.wire_anim_graph_output_pose",
+            description="Wire an AnimBlueprint state machine output into the AnimGraph output pose through a reflected C++ editor wrapper.",
+            read_only=False,
+            risk="high",
+            expects=(
+                _arg("anim_bp", "AnimBlueprint_asset_or_object"),
+                _arg("state_machine", "state_machine_name"),
+            ),
+            produces=("pose_link_result",),
+            preflight=("anim_bp.inspect_graph_cpp",),
+            validate=("anim_bp.inspect_graph_cpp", "anim_bp.compile"),
+            rollback=("backup_asset.restore",),
+            permissions=("editor_asset_mutation", "anim_graph_mutation"),
+            requires_asset_types=("AnimBlueprint",),
+            aliases=("anim_graph.wire_state_machine_to_output_pose",),
+            tags=("anim_blueprint", "anim_graph", "cpp_wrapper", "pose", "mutation"),
+        ),
     ]
 )
 
@@ -398,6 +509,7 @@ UNREAL_CAPABILITY_PACKS: dict[str, dict[str, Any]] = {
     "anim_blueprint": {
         "inspect": [
             "anim_bp.inspect",
+            "anim_bp.inspect_graph_cpp",
             "anim_bp.list_graphs",
             "anim_bp.list_state_machines",
             "anim_bp.list_anim_layers",
@@ -405,6 +517,10 @@ UNREAL_CAPABILITY_PACKS: dict[str, dict[str, Any]] = {
             "animation.get_state_machine_graph",
         ],
         "mutate": [
+            "anim_graph.add_state_cpp",
+            "anim_graph.add_transition_rule_cpp",
+            "anim_graph.synthesize_transition_rule_expression_cpp",
+            "anim_graph.wire_output_pose_cpp",
             "anim_bp.set_default_property",
             "anim_bp.add_slot",
             "anim_bp.set_class_reference", "animation.set_slot_animation",
@@ -468,6 +584,20 @@ UNREAL_CAPABILITY_PACKS: dict[str, dict[str, Any]] = {
 
 def get_unreal_capability_pack(asset_category: str) -> Dict[str, Any]:
     return dict(UNREAL_CAPABILITY_PACKS.get(asset_category or "", {}))
+
+
+def _disable_capabilities_with_missing_operations() -> None:
+    try:
+        from tech_connector.services.unreal.unreal_operation_service import UNREAL_OPERATIONS
+    except Exception:
+        return
+    for name, spec in list(UNREAL_CAPABILITIES.items()):
+        if spec.mode == "operation" and spec.operation and spec.operation not in UNREAL_OPERATIONS:
+            UNREAL_CAPABILITIES[name] = replace(
+                spec,
+                enabled=False,
+                tags=tuple(dict.fromkeys([*spec.tags, "operation_not_active"])),
+            )
 
 
 def list_unreal_capabilities(asset_category: str) -> List[str]:
@@ -668,3 +798,5 @@ for _pack_name, _pack in UNREAL_CAPABILITY_PACKS.items():
                         rollback=_rollback,
                     )
                 )
+
+_disable_capabilities_with_missing_operations()

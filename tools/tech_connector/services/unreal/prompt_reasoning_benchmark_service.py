@@ -28,6 +28,10 @@ def evaluate_unreal_prompt_plan(plan: dict[str, Any]) -> dict[str, Any]:
     architecture = dict(plan.get("architecture_decision") or {})
     candidates = list(evidence.get("related_animation_candidates") or [])
     techniques = list(dict(plan.get("expert_technique_selection") or {}).get("techniques") or [])
+    fulfillment = list(plan.get("requirement_fulfillment") or [])
+    operation_status = list(plan.get("operation_status") or [])
+    generated_artifacts = list(plan.get("generated_artifacts") or plan.get("artifacts") or [])
+    validation_evidence = list(plan.get("validation_evidence") or [])
 
     explicit_count = sum(bool(explicit.get(key)) for key in ("activation", "inputs", "timing", "scope"))
     rows = [
@@ -74,6 +78,44 @@ def evaluate_unreal_prompt_plan(plan: dict[str, Any]) -> dict[str, Any]:
             2 if set(range(1, 7)).issubset(levels) else 1 if levels else 0,
             "Covered evidence levels: " + ", ".join(str(value) for value in sorted(levels)),
         )
+    )
+    fulfilled = [
+        row for row in fulfillment
+        if str(dict(row or {}).get("status") or "") in {"planned", "implemented", "validated"}
+    ]
+    validated = [
+        row for row in fulfillment
+        if str(dict(row or {}).get("status") or "") == "validated"
+    ]
+    rows.extend(
+        [
+            _row(
+                "requirement_fulfillment_trace",
+                2 if fulfillment and len(fulfilled) == len(fulfillment) else 1 if fulfillment else 0,
+                f"{len(fulfilled)}/{len(fulfillment)} requirements link to plan, implementation, or proof evidence.",
+            ),
+            _row(
+                "requirement_validation_trace",
+                2 if fulfillment and len(validated) == len(fulfillment) else 1 if validated else 0,
+                f"{len(validated)}/{len(fulfillment)} requirements have validation evidence.",
+            ),
+            _row(
+                "callable_chain_readiness",
+                (
+                    2
+                    if operation_status and all(dict(row or {}).get("callable_found") for row in operation_status)
+                    else 1
+                    if operation_status
+                    else 0
+                ),
+                f"{sum(bool(dict(row or {}).get('callable_found')) for row in operation_status)}/{len(operation_status)} operations resolve to callables.",
+            ),
+            _row(
+                "generated_artifact_proof",
+                2 if generated_artifacts and validation_evidence else 1 if generated_artifacts else 0,
+                f"Artifacts={len(generated_artifacts)}, validation evidence rows={len(validation_evidence)}.",
+            ),
+        ]
     )
 
     def evidence_score(levels_wanted: set[int]) -> tuple[int, str]:

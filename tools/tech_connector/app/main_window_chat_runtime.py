@@ -54,6 +54,34 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+
+def unreal_prompt_requires_project_selection(text: str, detected_host: str = "") -> bool:
+    """Return True only for project-backed Unreal work, not general Unreal discussion."""
+    value = str(text or "").strip()
+    lower = value.lower()
+    mentions_unreal = detected_host == "unreal" or bool(
+        re.search(r"\b(?:unreal|ue5|ue4|uproject)\b", lower)
+    )
+    if not mentions_unreal:
+        return False
+    if re.match(
+        r"^(?:what is|what are|why does|how does|can unreal|does unreal|explain|tell me about)\b",
+        lower,
+    ) and not re.search(
+        r"\b(?:in my project|for my project|via my tool|do it|make it|implement it|connect|launch|open)\b",
+        lower,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:connect|launch|open|run|execute|import|export|create|build|implement|"
+            r"make|add|modify|edit|wire|compile|save|spawn|duplicate|delete|inspect|scan|"
+            r"validate|test|blueprint|niagara|anim\s*bp|asset|level|sequencer|control\s*rig|"
+            r"metahuman|retarget|material|widget|replicat\w*|pie)\b",
+            lower,
+        )
+    )
+
 from tech_connector.models.constants import (
     ANSI_RE,
     HISTORY_DIR,
@@ -1160,21 +1188,20 @@ class MainWindowChatRuntimeMixin:
                 is_credit_or_quota_failure(raw)
                 and self.settings.get("model_source_mode") == "auto_with_local_fallback"
         ):
-            self.settings["cloud_model_unavailable"] = True
-            self.service.save_settings(self.settings)
-            self.mcphost_manager.settings = self.settings
             metadata = self._pending_response_metadata_by_role.get("main")
             if metadata:
-                metadata["fallback_used"] = True
-                metadata["fallback_error"] = "Cloud provider quota/credit issue"
+                metadata["fallback_used"] = False
+                metadata["provider_error"] = "Cloud provider quota/credit issue"
                 self.update_active_response_model_label(
                     metadata.get("active_raw_model"),
                     metadata.get("routing_mode"),
-                    True,
+                    False,
                     metadata.get("active_raw_model"),
                 )
             self.append(
-                "\n[Model Provider] Cloud provider quota/credit issue detected. Fallback will use local models for new sessions.\n"
+                "\n[Model Provider] Cloud provider quota/credit issue detected. "
+                "The request stopped on the selected cloud model; no local fallback was used. "
+                "Add credits, choose another cloud provider, or explicitly switch Source Mode to Always local.\n"
             )
 
         if "subprocess pipe active" in raw:
@@ -1372,7 +1399,7 @@ class MainWindowChatRuntimeMixin:
             return
 
         try:
-            from tech_connector.services.prompt_progress_service import narrate_progress_message
+            from tech_connector.services.prompt.prompt_progress_service import narrate_progress_message
             message = narrate_progress_message(
                 raw_message,
                 getattr(self, "_active_reasoning_narration", None),
@@ -1493,7 +1520,7 @@ class MainWindowChatRuntimeMixin:
     def handle_engine_activity(self, event):
         """Keep engine objects out of chat; surface only human milestones and errors."""
         try:
-            from tech_connector.services.prompt_progress_service import narrate_activity_event
+            from tech_connector.services.prompt.prompt_progress_service import narrate_activity_event
 
             narrated = narrate_activity_event(
                 event,
@@ -1605,17 +1632,38 @@ class MainWindowChatRuntimeMixin:
             threading.Thread(target=run_custom_chatbot, daemon=True).start()
             return
 
-        if self.bridge.write(text):
-            if self.mcphost_use_pty:
-                self.append(
-                    "[Sent to LLM via PTY. Waiting for assistant/tool output...]\n"
+        def send_main_prompt_background() -> None:
+            started = time.perf_counter()
+            try:
+                running = bool(getattr(self.bridge, "running", False))
+                mode = getattr(self.bridge, "mode", "") if running else ""
+                if running and self.bridge.write(text):
+                    if str(mode).lower() == "pty":
+                        self.thread_log_message.emit("[Sent to LLM via PTY. Waiting for assistant/tool output...]\n")
+                    else:
+                        self.thread_log_message.emit("[Sent to LLM. Waiting for assistant/tool output...]\n")
+                    self.response_started.emit("main")
+                    self.live_process_update.emit("Waiting for model response")
+                    self._log_ui_diagnostic(
+                        "raw_prompt_send_complete",
+                        prompt_chars=len(text or ""),
+                        route_label=str(label),
+                        mode=str(mode),
+                        elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                else:
+                    self.thread_log_message.emit(
+                        "\n[Send failed: MCPHost is not running or input stream is unavailable.]\n"
+                    )
+            except Exception as exc:
+                self.thread_log_message.emit(
+                    f"\n[Send failed: MCPHost stream write failed: {exc}]\n"
                 )
-            else:
-                self.append("[Sent to LLM. Waiting for assistant/tool output...]\n")
-        else:
-            self.append(
-                "\n[Send failed: MCPHost is not running or input stream is unavailable.]\n"
-            )
+                self.live_process_update.emit("Prompt send failed")
+
+        import threading
+
+        threading.Thread(target=send_main_prompt_background, daemon=True).start()
 
 
     def _emit_unreal_milestone(self, message: str):
@@ -1989,7 +2037,7 @@ class MainWindowChatRuntimeMixin:
         self.set_live_process("Preparing prompt for LLM")
         original_text = text or ""
         try:
-            from tech_connector.services.prompt_task_splitter_service import staged_prompt_for_llm
+            from tech_connector.services.prompt.prompt_task_splitter_service import staged_prompt_for_llm
 
             staged_text, staged_contract = staged_prompt_for_llm(
                 original_text,
@@ -2048,7 +2096,7 @@ class MainWindowChatRuntimeMixin:
 
         try:
             self.set_live_process("Planning capability gaps")
-            from tech_connector.services.goal_gap_planning_service import goal_gap_planning_context
+            from tech_connector.services.reasoning.goal_gap_planning_service import goal_gap_planning_context
 
             gap_context = goal_gap_planning_context(
                 text or "",
@@ -2351,7 +2399,7 @@ class MainWindowChatRuntimeMixin:
         through the same background preparation path so the UI does not freeze.
         """
         try:
-            from tech_connector.services.prompt_route_service import ENGINE_PROVIDERS
+            from tech_connector.services.prompt.prompt_route_service import ENGINE_PROVIDERS
             decision = self._classify_prompt_route_decision(text)
             if decision.provider in ENGINE_PROVIDERS:
                 return True
@@ -2361,8 +2409,8 @@ class MainWindowChatRuntimeMixin:
 
     def _classify_prompt_route_decision(self, text: str):
         """Build canonical request state once, then route the understood request."""
-        from tech_connector.services.prompt_execution_context_service import build_prompt_execution_context
-        from tech_connector.services.prompt_route_service import classify_prompt_route
+        from tech_connector.services.prompt.prompt_execution_context_service import build_prompt_execution_context
+        from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
         from tech_connector.engine.request_context import should_prioritize_open_file_context
 
         roots = self.project_roots() if hasattr(self, "project_roots") else []
@@ -2414,7 +2462,7 @@ class MainWindowChatRuntimeMixin:
         if not self.show_activity_details_enabled():
             return
         try:
-            from tech_connector.services.engineering_reasoning_service import (
+            from tech_connector.services.reasoning.engineering_reasoning_service import (
                 render_senior_prompt_analysis,
             )
 
@@ -2437,7 +2485,7 @@ class MainWindowChatRuntimeMixin:
     ) -> None:
         """Show the interpreted outcome and high-level reasoning approach."""
         try:
-            from tech_connector.services.prompt_progress_service import (
+            from tech_connector.services.prompt.prompt_progress_service import (
                 build_prompt_progress_plan,
                 first_progress_status,
                 render_prompt_progress_plan,
@@ -2614,6 +2662,20 @@ class MainWindowChatRuntimeMixin:
             self._last_prompt_route_decision = route_decision
             self._last_prompt_execution_context = dict(metadata.get("prompt_execution_context") or {})
             self._append_prompt_understanding(route_decision)
+
+        if (
+            str(route_decision.get("operation_mode") or "") == "acquire_then_resume"
+            and getattr(self, "_active_capability_coordinator", None) is None
+        ):
+            original = str(
+                (metadata.get("prompt_execution_context") or {}).get("prompt")
+                or metadata.get("original_query")
+                or route_decision.get("user_text")
+                or getattr(self, "last_user_prompt", "")
+                or ""
+            )
+            self._begin_route_capability_acquisition(original, route_decision)
+            return
 
         if action == "answer":
             self.set_live_process(f"{label} ready")
@@ -2981,6 +3043,15 @@ class MainWindowChatRuntimeMixin:
             combo.setToolTip(label)
             for choice in choices:
                 combo.addItem(self._chat_clarification_choice_label(choice), choice)
+            if control_type in {"searchable_select", "asset_picker", "file_picker"} or control.get("editable"):
+                combo.setEditable(True)
+                combo.setInsertPolicy(QComboBox.NoInsert)
+                combo.setMaxVisibleItems(12)
+                completer = combo.completer()
+                if completer is not None:
+                    completer.setCaseSensitivity(Qt.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
+                    completer.setCompletionMode(completer.PopupCompletion)
             recommended = control.get("recommended_choice") or control.get("default_value") or control.get("inferred_value")
             if recommended:
                 idx = combo.findData(recommended)
@@ -2990,13 +3061,37 @@ class MainWindowChatRuntimeMixin:
                     idx = combo.findText(self._chat_clarification_choice_label(recommended))
                     if idx >= 0:
                         combo.setCurrentIndex(idx)
+                    elif combo.isEditable():
+                        combo.setEditText(str(recommended))
+            evidence = str(control.get("why_default") or "")
+            expected_type = str(control.get("expected_type") or "")
+            confidence = float(control.get("confidence") or 0.0)
+            if evidence or expected_type:
+                details = QLabel(
+                    " | ".join(
+                        part
+                        for part in (
+                            expected_type,
+                            f"{round(confidence * 100)}% confidence" if confidence else "",
+                            evidence,
+                        )
+                        if part
+                    )
+                )
+                details.setStyleSheet("color:#8fa6ba; border:0px; background:transparent;")
+                details.setWordWrap(True)
+                layout.addWidget(details)
             layout.addWidget(combo, 1)
             if slot:
                 widgets[slot] = ("combo", combo)
             if multi_control:
                 return
             use_btn = QPushButton("Use")
-            use_btn.clicked.connect(lambda checked=False, c=combo: self._submit_chat_clarification_value(c.currentData() or c.currentText()))
+            use_btn.clicked.connect(
+                lambda checked=False, c=combo: self._submit_chat_clarification_value(
+                    self._chat_clarification_combo_value(c)
+                )
+            )
             layout.addWidget(use_btn)
             return
         if control_type == "toggle":
@@ -3032,11 +3127,23 @@ class MainWindowChatRuntimeMixin:
         if isinstance(value, dict) and value.get("label"):
             return str(value.get("label"))
         try:
-            from tech_connector.services.clarification_service import choice_label
+            from tech_connector.services.reasoning.clarification_service import choice_label
 
             return choice_label(value)
         except Exception:
             return str(value)
+
+    @staticmethod
+    def _chat_clarification_combo_value(combo):
+        text = combo.currentText().strip()
+        index = combo.currentIndex()
+        if index >= 0 and combo.itemText(index) == text:
+            value = combo.itemData(index)
+            if isinstance(value, dict) and "value" in value:
+                return value.get("value")
+            if value is not None:
+                return value
+        return text
 
     def _submit_chat_clarification_value(self, value, display_value: str = "") -> None:
         self._handle_pending_chat_continuation(
@@ -3055,9 +3162,7 @@ class MainWindowChatRuntimeMixin:
         for slot, item in widgets.items():
             kind, widget = item
             if kind == "combo":
-                value = widget.currentData()
-                if value is None:
-                    value = widget.currentText()
+                value = self._chat_clarification_combo_value(widget)
             elif kind == "toggle":
                 value = "true" if widget.isChecked() else "false"
             elif kind == "value":
@@ -3263,13 +3368,17 @@ class MainWindowChatRuntimeMixin:
                 classify_continuation_reply,
                 validate_continuation_context,
             )
-            from tech_connector.services.clarification_service import bind_clarification_response
-            from tech_connector.services.prompt_dispatch_service import PromptDispatchService
+            from tech_connector.services.reasoning.clarification_service import bind_clarification_response
+            from tech_connector.services.prompt.prompt_dispatch_service import PromptDispatchService
 
             reply = str(display_value or text or "").strip()
             binding_text = str(text or "").strip() if from_control else reply
             pending_state = dict(pending.get("pending_clarification") or {})
-            if pending_state.get("kind") == "confirmation" and not from_control:
+            if (
+                pending_state.get("kind") == "confirmation"
+                and not from_control
+                and not bool(pending_state.get("allow_text_approval"))
+            ):
                 self.append("\nASSISTANT [Approval]:\nUse the Approve or Deny button for this operation. If you want to change the request, cancel it and send a new follow-up.\n")
                 self.set_live_process("Waiting for approval button")
                 return True
@@ -3328,11 +3437,41 @@ class MainWindowChatRuntimeMixin:
                 route_decision["approved"] = True
                 route_decision["requires_confirmation"] = False
 
+            pending_execution = dict(pending_state.get("execution_request") or {})
+            resolved_target = str(
+                pending_execution.get("resolved_target_file")
+                or pending_execution.get("target_file")
+                or pending_execution.get("target_path")
+                or pending_execution.get("file")
+                or route_decision.get("resolved_target_file")
+                or route_decision.get("target_file")
+                or ""
+            ).strip()
+
             original_prompt = str((pending_state.get("execution_request") or {}).get("original_prompt") or "")
             clarified_prompt = original_prompt
             if reply:
                 clarified_prompt = f"{original_prompt}\n\nClarification answer: {reply}".strip()
             base_context = snapshot_from_window(self, clarified_prompt)
+            if resolved_target and str(pending_execution.get("operation_mode") or "").strip().lower() == "plan":
+                if not str(base_context.current_file_path or "").strip() or (
+                    str(base_context.current_file_path).strip() != resolved_target
+                ):
+                    base_context = replace(base_context, current_file_path=resolved_target)
+                open_files = list(base_context.open_file_paths or [])
+                norm_open = [str(path).replace("\\", "/").lower() for path in open_files if path]
+                normalized_target = resolved_target.replace("\\", "/").lower()
+                if normalized_target and normalized_target not in norm_open:
+                    open_files = [resolved_target] + open_files
+                    base_context = replace(base_context, open_file_paths=tuple(open_files[:12]))
+            if resolved_target:
+                route_decision.setdefault("resolved_target_file", resolved_target)
+                route_decision.setdefault("target_file", resolved_target)
+                index_filters = dict(route_decision.get("index_filters") or {})
+                index_filters["target_file"] = resolved_target
+                if str(route_decision.get("operation_mode") or "").strip().lower() == "plan":
+                    index_filters["scope"] = "active"
+                route_decision["index_filters"] = index_filters
             stale = validate_continuation_context(
                 SimpleNamespace(**pending),
                 base_context,
@@ -3626,6 +3765,206 @@ class MainWindowChatRuntimeMixin:
             self.input.setText(original)
             self.send_message()
 
+    def _begin_route_capability_acquisition(self, text: str, decision: dict) -> None:
+        """Create a resumable acquisition job from the canonical route decision."""
+        from tech_connector.services.capability_acquisition_coordinator import (
+            CapabilityAcquisitionCoordinator,
+        )
+        from tech_connector.services.capability_implementation_provider import (
+            ModelBackedCapabilityImplementationProvider,
+        )
+        from tech_connector.models.constants import TOOLS_ROOT
+
+        plan = dict(decision.get("capability_gap_plan") or {})
+        if not plan:
+            self.append("\n[Capability Acquisition] The route did not include an executable gap plan.\n")
+            return
+
+        self._capability_job_events = []
+
+        def event_callback(event: str, payload: dict) -> None:
+            self._capability_job_events.append((event, payload))
+
+        root = Path(str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))()))
+        if root.name.lower() == "tech_connector" and (root.parent / "unreal_tools").exists():
+            root = root.parent
+        if not (root / "tech_connector").exists():
+            root = Path(TOOLS_ROOT)
+        provider = ModelBackedCapabilityImplementationProvider(
+            root,
+            active_path=str(getattr(self, "current_file_path", "") or ""),
+            settings=dict(getattr(self, "settings", {}) or {}),
+            progress_callback=lambda phase, detail: event_callback(
+                "substep_progress",
+                {
+                    "job": (
+                        self._active_capability_coordinator.snapshot()
+                        if getattr(self, "_active_capability_coordinator", None) is not None
+                        else {}
+                    ),
+                    "substep": {"phase": phase, **dict(detail or {})},
+                },
+            ),
+        )
+        self._active_capability_implementation_provider = provider
+        self._active_capability_coordinator = CapabilityAcquisitionCoordinator(
+            plan,
+            original_request=text,
+            stage_runner=provider.run_stage,
+            event_callback=event_callback,
+        )
+        self._active_capability_route_decision = dict(decision)
+        timer = getattr(self, "_capability_job_event_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(75)
+            timer.timeout.connect(self._drain_capability_job_events)
+            self._capability_job_event_timer = timer
+        timer.start()
+        missing = list(plan.get("all_missing_operations") or [plan.get("requested_operation")])
+        missing = [str(item) for item in missing if item]
+        self.append(
+            "\nASSISTANT [Capability Acquisition]:\n"
+            f"I found {len(missing)} missing callable(s): {', '.join(missing)}\n"
+            "Research and design can proceed in the background. File or plugin changes must return concrete implementation and validation evidence.\n"
+        )
+        self._render_active_capability_job_controls()
+        self.set_live_process("Capability acquisition ready")
+
+    def _drain_capability_job_events(self) -> None:
+        events = list(getattr(self, "_capability_job_events", []) or [])
+        if not events:
+            return
+        del self._capability_job_events[: len(events)]
+        for event, payload in events:
+            self._handle_capability_job_event(event, payload)
+        if events[-1][0] in {"completed", "cancelled", "failed"}:
+            timer = getattr(self, "_capability_job_event_timer", None)
+            if timer is not None:
+                timer.stop()
+
+    def _render_active_capability_job_controls(self) -> None:
+        coordinator = getattr(self, "_active_capability_coordinator", None)
+        layout = getattr(self, "clarification_controls_layout", None)
+        widget = getattr(self, "clarification_controls_widget", None)
+        if coordinator is None or layout is None or widget is None:
+            return
+        self._clear_chat_clarification_controls()
+        layout = getattr(self, "clarification_controls_layout", None)
+        snapshot = coordinator.snapshot()
+        status = str(snapshot.get("status") or "queued")
+        title = QLabel(str(snapshot.get("current_step_label") or "Capability acquisition"))
+        title.setStyleSheet("color:#b9dcff; font-weight:bold; border:0px; background:transparent;")
+        layout.addWidget(title)
+
+        if status == "queued":
+            start_btn = QPushButton("Approve & Start")
+            start_btn.setToolTip("Approve grounded code changes after disposable validation and start acquisition")
+            start_btn.clicked.connect(lambda checked=False: coordinator.start())
+            layout.addWidget(start_btn)
+        elif status == "paused":
+            resume_btn = QPushButton("Resume")
+            resume_btn.setToolTip("Continue from the last completed checkpoint")
+            resume_btn.clicked.connect(lambda checked=False: coordinator.resume())
+            layout.addWidget(resume_btn)
+        elif status not in {"completed", "cancelled", "failed"}:
+            pause_btn = QPushButton("Pause")
+            pause_btn.setToolTip("Pause after the current safe step")
+            pause_btn.setEnabled(status != "pausing")
+            pause_btn.clicked.connect(lambda checked=False: coordinator.request_pause())
+            layout.addWidget(pause_btn)
+
+        if status not in {"completed", "cancelled", "failed"}:
+            context_btn = QPushButton("Add Context")
+            context_btn.setToolTip("Add guidance and pause at the next safe checkpoint")
+            context_btn.clicked.connect(lambda checked=False: self._add_context_to_capability_job())
+            layout.addWidget(context_btn)
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setToolTip("Cancel at the next safe checkpoint")
+            cancel_btn.clicked.connect(lambda checked=False: coordinator.cancel())
+            layout.addWidget(cancel_btn)
+        layout.addStretch(1)
+        widget.setVisible(status not in {"completed", "cancelled", "failed"})
+
+    def _add_context_to_capability_job(self) -> None:
+        coordinator = getattr(self, "_active_capability_coordinator", None)
+        if coordinator is None:
+            return
+        text, accepted = QInputDialog.getMultiLineText(
+            self,
+            "Add Context",
+            "Additional context for the remaining work:",
+        )
+        if accepted and str(text or "").strip():
+            coordinator.add_context(text)
+
+    def _handle_capability_job_event(self, event: str, payload: dict) -> None:
+        job = dict(payload.get("job") or {})
+        label = str(job.get("current_step_label") or event.replace("_", " ").title())
+        progress = int(job.get("progress") or 0)
+        self.set_live_process(label)
+        if hasattr(self, "download_status") and hasattr(self, "download_progress"):
+            self.download_status.setText(label)
+            self.download_status.setVisible(event not in {"completed", "cancelled", "failed"})
+            self.download_progress.setRange(0, 100)
+            self.download_progress.setValue(progress)
+            self.download_progress.setVisible(event not in {"completed", "cancelled", "failed"})
+
+        if event == "step_started":
+            step = dict(payload.get("step") or {})
+            self.append(f"[Capability] {step.get('objective') or label}\n")
+        elif event == "step_completed":
+            step = dict(payload.get("step") or {})
+            self.append(f"[Checkpoint] {step.get('step_id') or 'step'} completed ({progress}%).\n")
+        elif event == "substep_progress":
+            substep = dict(payload.get("substep") or {})
+            detail_label = str(substep.get("label") or label)
+            self.set_live_process(detail_label)
+            if hasattr(self, "download_status"):
+                self.download_status.setText(detail_label)
+            self.append(f"[Capability] {detail_label}\n")
+        elif event == "pause_requested":
+            self.append("[Capability] Pause requested; finishing the current safe step.\n")
+        elif event == "paused":
+            self.append("[Capability] Paused. Completed checkpoints and evidence were preserved.\n")
+        elif event == "input_required":
+            self.append(f"[Capability] {label}\n")
+        elif event == "context_added":
+            self.append("[Capability] Added context will be applied to unfinished work on resume.\n")
+        elif event == "resumed":
+            self.append("[Capability] Resuming from the last completed checkpoint.\n")
+        elif event == "failed":
+            self.append(f"[Capability Failed] {label}\n")
+            self._last_capability_acquisition_job = job
+            self._active_capability_coordinator = None
+            self._active_capability_route_decision = None
+            self._active_capability_implementation_provider = None
+            self._clear_chat_clarification_controls()
+            return
+        elif event == "cancelled":
+            self.append("[Capability] Cancelled at a safe checkpoint.\n")
+            self._last_capability_acquisition_job = job
+            self._active_capability_coordinator = None
+            self._active_capability_route_decision = None
+            self._active_capability_implementation_provider = None
+            self._clear_chat_clarification_controls()
+            return
+        elif event == "completed":
+            self.append("[Capability] Acquisition validated. Resuming the original request.\n")
+            original = str(job.get("original_request") or "")
+            addenda = list(job.get("context_addenda") or [])
+            self._active_capability_coordinator = None
+            self._active_capability_route_decision = None
+            self._active_capability_implementation_provider = None
+            self._clear_chat_clarification_controls()
+            if original:
+                if addenda:
+                    original += "\n\nAdditional context supplied during execution:\n- " + "\n- ".join(addenda)
+                self.input.setText(original)
+                QTimer.singleShot(0, self.send_message)
+            return
+        self._render_active_capability_job_controls()
+
     def _approve_capability_acquisition_legacy_unused(self) -> None:
         """Legacy blocking capability acquisition path retained for reference."""
         plan = getattr(self, "_pending_capability_plan", None)
@@ -3799,6 +4138,14 @@ class MainWindowChatRuntimeMixin:
             self.attached_files = []
         if not text and not self.attached_images and not self.attached_files:
             return
+        active_acquisition = getattr(self, "_active_capability_coordinator", None)
+        if active_acquisition is not None:
+            acquisition_status = str(active_acquisition.snapshot().get("status") or "")
+            if acquisition_status not in {"completed", "cancelled", "failed"}:
+                if text:
+                    self.input.clear()
+                    active_acquisition.add_context(text)
+                return
         # --- Capability plan approval interceptor ---
         if getattr(self, "_pending_capability_plan", None):
             self.input.clear()
@@ -3823,6 +4170,25 @@ class MainWindowChatRuntimeMixin:
             )
             self.input.clear()
             return
+
+        if not prepared_resume and text:
+            try:
+                prompt_host = str(self.command_router.detect_prompt_host(text) or "")
+            except Exception:
+                prompt_host = ""
+            needs_unreal_project = unreal_prompt_requires_project_selection(
+                text,
+                prompt_host,
+            )
+            if needs_unreal_project and hasattr(self, "_ensure_unreal_project_ready"):
+                saved_uproject = str(
+                    getattr(self, "settings", {}).get("unreal_uproject_path", "") or ""
+                )
+                if not saved_uproject or not Path(saved_uproject).is_file():
+                    selected_uproject = self._ensure_unreal_project_ready()
+                    if not selected_uproject:
+                        self.set_live_process("Waiting for Unreal project selection")
+                        return
 
         if self._active_response_roles():
             if self.attached_images:
@@ -3883,7 +4249,7 @@ class MainWindowChatRuntimeMixin:
             self.start_intelligence_engine_request(text)
             return
 
-        from tech_connector.services.prompt_route_service import ENGINE_PROVIDERS
+        from tech_connector.services.prompt.prompt_route_service import ENGINE_PROVIDERS
         prompt_route_decision = dict(prepared_resume.get("route_decision") or {})
         self._last_prompt_route_decision = dict(prompt_route_decision)
         self._last_prompt_execution_context = dict(prepared_resume.get("prompt_execution_context") or {})
@@ -4282,21 +4648,20 @@ class MainWindowChatRuntimeMixin:
                 is_credit_or_quota_failure(raw)
                 and self.settings.get("model_source_mode") == "auto_with_local_fallback"
         ):
-            self.settings["cloud_model_unavailable"] = True
-            self.service.save_settings(self.settings)
-            self.mcphost_manager.settings = self.settings
             metadata = self._pending_response_metadata_by_role.get(role)
             if metadata:
-                metadata["fallback_used"] = True
-                metadata["fallback_error"] = "Cloud provider quota/credit issue"
+                metadata["fallback_used"] = False
+                metadata["provider_error"] = "Cloud provider quota/credit issue"
                 self.update_active_response_model_label(
                     metadata.get("active_raw_model"),
                     metadata.get("routing_mode"),
-                    True,
+                    False,
                     metadata.get("active_raw_model"),
                 )
             self.append(
-                "\n[Model Provider] Cloud provider quota/credit issue detected. Fallback will use local models for new sessions.\n"
+                "\n[Model Provider] Cloud provider quota/credit issue detected. "
+                "The request stopped on the selected cloud model; no local fallback was used. "
+                "Add credits, choose another cloud provider, or explicitly switch Source Mode to Always local.\n"
             )
 
         if (
@@ -4332,75 +4697,6 @@ class MainWindowChatRuntimeMixin:
         session.ready = False
         self._clear_active_response_addendum_state(role)
         self._flush_stream_output(role)
-        self._stream_header_written.discard(role)
-        self._stream_buffer_by_role.pop(role, None)
-        self._stream_flush_pending.discard(role)
-        self.append(f"\n=== {role} session exited: {msg} ===\n")
-
-
-    # ------------------------------------------------------------------
-    # Interactive Terminal integration
-    # ------------------------------------------------------------------
-    def active_project_root_path(self) -> str:
-        for attr in ("project_root", "active_project_root", "current_project_root"):
-            value = getattr(self, attr, None)
-            if value:
-                return str(value)
-        try:
-            label = getattr(self, "project_root_label", None)
-            if label is not None:
-                text = label.text()
-                if text and "No active project" not in text:
-                    return text.strip()
-        except Exception:
-            pass
-        return str(Path.cwd())
-
-    def open_terminal_dialog(self, command: str = "", cwd: str = ""):
-        """Open a persistent interactive PowerShell-style terminal."""
-        try:
-            from tech_connector.ui.interactive_terminal_dialog import InteractiveTerminalDialog
-            dialog = getattr(self, "_interactive_terminal_dialog", None)
-            if dialog is None:
-                dialog = InteractiveTerminalDialog(
-                    self,
-                    cwd=cwd or self.active_project_root_path(),
-                    shell="powershell",
-                )
-                self._interactive_terminal_dialog = dialog
-            if command:
-                dialog.stage_command(command)
-            dialog.show()
-            dialog.raise_()
-            dialog.activateWindow()
-            return dialog
-        except Exception as exc:
-            try:
-                QMessageBox.warning(self, "Terminal unavailable", str(exc))
-            except Exception:
-                self.append(f"\n[Terminal] unavailable: {exc}\n")
-            return None
-
-    def _current_editor_text_selection(self) -> tuple[str, str]:
-        file_path = str(getattr(self, "current_file_path", "") or "")
-        selected = ""
-        try:
-            editor = None
-            if hasattr(self, "current_editor"):
-                editor = self.current_editor()
-            if editor is None:
-                editor = getattr(self, "editor", None)
-            if editor is None and hasattr(self, "open_editors") and file_path:
-                editor = self.open_editors.get(file_path)
-            if editor is not None:
-                selected = editor.textCursor().selectedText().replace("\u2029", "\n")
-        except Exception:
-            selected = ""
-        return selected, file_path
-
-    def send_to_terminal(self, command: str = ""):
-        return self.open_terminal_dialog(command=command or "", cwd=self.active_project_root_path())
-
         self._stream_header_written.discard(role)
         self._stream_buffer_by_role.pop(role, None)
         self._stream_flush_pending.discard(role)
@@ -4765,7 +5061,7 @@ class MainWindowChatRuntimeMixin:
 
         self._autocomplete_active_at_idx = at_idx
         self._autocomplete_active_cursor_pos = cursor_pos
-        max_rows = 8
+        max_rows = 5
         max_label_chars = 150
         for candidate in suggestions[:max_rows]:
             label = candidate.display() if hasattr(candidate, "display") else str(candidate)

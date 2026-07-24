@@ -192,3 +192,126 @@ def resolve_asset(file_name, expected_class="", directory="/Game"):
         indent=2,
         default=str,
     )
+
+
+def delete_assets(asset_paths, dry_run=False):
+    import unreal
+
+    paths = asset_paths if isinstance(asset_paths, list) else [asset_paths]
+    rows = []
+    ok = True
+    for path in paths:
+        path = str(path or "")
+        exists_before = bool(unreal.EditorAssetLibrary.does_asset_exist(path))
+        deleted = False
+        if exists_before and not dry_run:
+            deleted = bool(unreal.EditorAssetLibrary.delete_asset(path))
+        exists_after = bool(unreal.EditorAssetLibrary.does_asset_exist(path))
+        row_ok = exists_before and (dry_run or deleted) and (dry_run or not exists_after)
+        ok = ok and row_ok
+        rows.append({"asset_path": path, "exists_before": exists_before, "deleted": deleted, "exists_after": exists_after, "ok": row_ok})
+    return json.dumps({"ok": ok, "dry_run": bool(dry_run), "results": rows}, indent=2, default=str)
+
+
+def rename_asset(asset_path, new_asset_path, dry_run=False):
+    import unreal
+
+    exists_before = bool(unreal.EditorAssetLibrary.does_asset_exist(asset_path))
+    renamed = False
+    if exists_before and not dry_run:
+        renamed = bool(unreal.EditorAssetLibrary.rename_asset(asset_path, new_asset_path))
+    return json.dumps({
+        "ok": bool(exists_before and (dry_run or renamed) and (dry_run or unreal.EditorAssetLibrary.does_asset_exist(new_asset_path))),
+        "asset_path": asset_path,
+        "new_asset_path": new_asset_path,
+        "exists_before": exists_before,
+        "renamed": renamed,
+        "dry_run": bool(dry_run),
+    }, indent=2, default=str)
+
+
+def duplicate_asset(source_asset_path, target_asset_path, dry_run=False):
+    import unreal
+
+    exists_before = bool(unreal.EditorAssetLibrary.does_asset_exist(source_asset_path))
+    duplicated = False
+    if exists_before and not dry_run:
+        duplicated = bool(unreal.EditorAssetLibrary.duplicate_asset(source_asset_path, target_asset_path))
+    return json.dumps({
+        "ok": bool(exists_before and (dry_run or duplicated) and (dry_run or unreal.EditorAssetLibrary.does_asset_exist(target_asset_path))),
+        "source_asset_path": source_asset_path,
+        "target_asset_path": target_asset_path,
+        "source_exists": exists_before,
+        "duplicated": duplicated,
+        "dry_run": bool(dry_run),
+    }, indent=2, default=str)
+
+
+def save_assets(asset_paths, only_if_is_dirty=False):
+    import unreal
+
+    paths = asset_paths if isinstance(asset_paths, list) else [asset_paths]
+    rows = []
+    ok = True
+    for path in paths:
+        asset = load_asset(unreal, path)
+        saved = bool(asset and unreal.EditorAssetLibrary.save_loaded_asset(asset, bool(only_if_is_dirty)))
+        ok = ok and saved
+        rows.append({"asset_path": str(path), "loaded": bool(asset), "saved": saved})
+    return json.dumps({"ok": ok, "results": rows}, indent=2, default=str)
+
+
+def create_by_class_path(asset_path, class_path, initial_properties=None):
+    import unreal
+
+    if not hasattr(unreal, "AIStudioBridgeLibrary"):
+        return json.dumps({"ok": False, "status": "AIStudioBridgeLibrary_unavailable"}, indent=2)
+    return unreal.AIStudioBridgeLibrary.create_known_asset_by_class_path(
+        asset_path,
+        class_path,
+        json.dumps(initial_properties or {}),
+    )
+
+
+def inspect_reflected(asset_path, property_names=None):
+    import unreal
+
+    if not hasattr(unreal, "AIStudioBridgeLibrary"):
+        return json.dumps({"ok": False, "status": "AIStudioBridgeLibrary_unavailable"}, indent=2)
+    return unreal.AIStudioBridgeLibrary.inspect_reflected_asset(asset_path, property_names or [])
+
+
+def set_reflected_property(asset_path, property_name, value):
+    import unreal
+
+    if not hasattr(unreal, "AIStudioBridgeLibrary"):
+        return json.dumps({"ok": False, "status": "AIStudioBridgeLibrary_unavailable"}, indent=2)
+    return unreal.AIStudioBridgeLibrary.set_reflected_asset_property(
+        asset_path,
+        property_name,
+        json.dumps(value),
+    )
+
+
+def array_add_object_reference(asset_path, property_name, object_path):
+    import unreal
+
+    if not hasattr(unreal, "AIStudioBridgeLibrary"):
+        return json.dumps({"ok": False, "status": "AIStudioBridgeLibrary_unavailable"}, indent=2)
+    return unreal.AIStudioBridgeLibrary.add_object_reference_to_reflected_array(
+        asset_path,
+        property_name,
+        object_path,
+    )
+
+
+def array_remove_object_reference(asset_path, property_name, object_path):
+    import unreal
+
+    if not hasattr(unreal, "AIStudioBridgeLibrary"):
+        return json.dumps({"ok": False, "status": "AIStudioBridgeLibrary_unavailable"}, indent=2)
+    return unreal.AIStudioBridgeLibrary.remove_object_reference_from_reflected_array(
+        asset_path,
+        property_name,
+        object_path,
+    )

@@ -337,11 +337,43 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         '"""',
         "",
         "import importlib",
+        "import json",
+        "import time",
         "import traceback",
         "",
+        "def _tc_bridge_payload(response):",
+        "    ok, payload = response if isinstance(response, tuple) and len(response) == 2 else (True, response)",
+        "    if not ok:",
+        "        raise RuntimeError(str(payload))",
+        "    if isinstance(payload, dict):",
+        "        if payload.get('ok') is False:",
+        "            detail = '\\n'.join(str(value) for value in (payload.get('error'), payload.get('traceback'), payload.get('python_stderr')) if value) or str(payload)",
+        "            raise RuntimeError(str(detail))",
+        "        for key in ('python_result', 'result', 'data'):",
+        "            nested = payload.get(key)",
+        "            if isinstance(nested, dict):",
+        "                return nested",
+        "        text = payload.get('python_stdout') or payload.get('stdout') or payload.get('raw')",
+        "        if text:",
+        "            payload = text",
+        "        else:",
+        "            return payload",
+        "    if isinstance(payload, str):",
+        "        for line in reversed([line.strip() for line in payload.splitlines() if line.strip()]):",
+        "            try:",
+        "                parsed = json.loads(line)",
+        "                if isinstance(parsed, dict):",
+        "                    return parsed",
+        "            except (TypeError, ValueError):",
+        "                continue",
+        "    return {'result': payload}",
+        "",
         f"def {fn_name}({', '.join(function_params)}):",
+        "    global _TC_PIPELINE_LAST_TRACE",
         "    results = {}",
         "    outputs = {}",
+        "    trace = []",
+        "    _TC_PIPELINE_LAST_TRACE = trace",
     ]
     if flow_links:
         lines.append(f"    flow_links = {flow_links!r}")
@@ -356,7 +388,13 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         literal_values = step.get("literal_values") or {}
         utility_kind = symbol.get("utility_kind")
 
-        lines += ["", f"    # Step {idx}: {symbol.get('name', 'unknown')} ({symbol.get('kind', 'function')})", "    try:"]
+        lines += [
+            "",
+            f"    # Step {idx}: {symbol.get('name', 'unknown')} ({symbol.get('kind', 'function')})",
+            f"    print('[Pipeline {idx}/{len(ordered_steps)}] START {str(symbol.get('provider_id') or symbol.get('host') or 'local').upper()}: {symbol.get('name', 'unknown')}')",
+            "    try:",
+            f"        _step{idx}_started = time.perf_counter()",
+        ]
         call_args = []
         call_args_by_name = {}
         for param_name in params:
@@ -377,11 +415,14 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             host_name = str(symbol.get("provider_id") or symbol.get("host") or "").lower()
             code_expr = call_args_by_name.get("code", "''")
             output_names = output_names or ["result"]
-            bridge_import = (
-                "from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge as _DccBridge"
-                if host_name == "unreal"
-                else "from tech_connector.bridges.maya.maya_bridge import MayaBridge as _DccBridge"
-            )
+            bridge_imports = {
+                "maya": "from tech_connector.bridges.maya.maya_bridge import MayaBridge as _DccBridge",
+                "blender": "from tech_connector.bridges.blender.blender_bridge import BlenderBridge as _DccBridge",
+                "unreal": "from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge as _DccBridge",
+            }
+            bridge_import = bridge_imports.get(host_name)
+            if not bridge_import:
+                raise RuntimeError(f"Unsupported DCC pipeline host: {host_name or 'unknown'}")
             runtime_pairs = [
                 (param_name, expr)
                 for param_name, expr in call_args_by_name.items()
@@ -397,15 +438,26 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             lines += [
                 "        _prefix = ''.join(f'{key} = {value!r}\\n' for key, value in _script_vars.items())",
                 "        _bridge = _DccBridge()",
-                "        step{0}_result = _bridge.execute_python(_prefix + _script_source, timeout=120.0)".format(idx),
+                (
+                    "        _bridge_response = _bridge.execute_python(_prefix + _script_source, timeout=120.0, reset_globals=True)"
+                    if host_name == "unreal"
+                    else "        _bridge_response = _bridge.execute(_prefix + _script_source, timeout=120.0)"
+                ),
+                f"        step{idx}_result = _tc_bridge_payload(_bridge_response)",
                 f"        step{idx}_outputs = {{}}",
             ]
             for out_name in output_names:
                 fallback_param = "fbx_path" if out_name == "fbx_path" else out_name
-                if fallback_param in call_args_by_name and fallback_param != "code":
-                    lines.append(f"        step{idx}_outputs[{out_name!r}] = _script_vars.get({fallback_param!r})")
-                else:
-                    lines.append(f"        step{idx}_outputs[{out_name!r}] = step{idx}_result")
+                lines.append(
+                    f"        step{idx}_outputs[{out_name!r}] = "
+                    f"step{idx}_result.get({out_name!r}, _script_vars.get({fallback_param!r}))"
+                )
+                lines.append(
+                    f"        if step{idx}_outputs[{out_name!r}] is None:"
+                )
+                lines.append(
+                    f"            raise RuntimeError('DCC stage did not return required output: {out_name}')"
+                )
         elif symbol.get("pipeline_operation") == "dcc_operation" and symbol.get("operation") == "scene.find_joint":
             name_expr = call_args_by_name.get("name", "None")
             output_names = output_names or ["result"]
@@ -417,6 +469,37 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
                 f"        step{idx}_result = _joint_name",
                 f"        step{idx}_outputs = {{{output_names[0]!r}: step{idx}_result}}",
             ]
+        elif symbol.get("pipeline_operation") == "dcc_operation":
+            host_name = str(symbol.get("provider_id") or symbol.get("host") or "").lower()
+            operation_name = str(symbol.get("operation") or "")
+            callable_path = str(symbol.get("function_path") or "")
+            lines += [
+                "        from tech_connector.services.dcc.pipeline_operation_runtime_service import execute_pipeline_operation",
+                f"        _operation_params = {{{', '.join(f'{name!r}: {expr}' for name, expr in call_args_by_name.items())}}}",
+                f"        step{idx}_result = execute_pipeline_operation(",
+                f"            {host_name!r}, {operation_name!r}, {callable_path!r}, _operation_params",
+                "        )",
+                f"        step{idx}_outputs = {{}}",
+            ]
+            for out_name in output_names:
+                fallback_params = {
+                    "fbx_path": ("export_path", "output_path", "filepath"),
+                    "usd_path": ("export_path", "output_path", "filepath"),
+                    "abc_path": ("export_path", "output_path", "filepath"),
+                }.get(out_name, ())
+                fallback_expression = "None"
+                for param_name in fallback_params:
+                    if param_name in call_args_by_name:
+                        fallback_expression = f"_operation_params.get({param_name!r})"
+                        break
+                lines.append(
+                    f"        step{idx}_outputs[{out_name!r}] = "
+                    f"step{idx}_result.get({out_name!r}, {fallback_expression})"
+                )
+                lines.append(f"        if step{idx}_outputs[{out_name!r}] is None:")
+                lines.append(
+                    f"            raise RuntimeError('DCC stage did not return required output: {out_name}')"
+                )
         else:
             file_path = (symbol.get("file_path") or "").replace("\\", "/")
             module, attr = _module_and_attr(symbol)
@@ -466,10 +549,18 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         lines += [
             f"        outputs['step{idx}'] = step{idx}_outputs",
             f"        results['step{idx}'] = step{idx}_result",
+            f"        print(f'[Pipeline {idx}/{len(ordered_steps)}] COMPLETE {str(symbol.get('provider_id') or symbol.get('host') or 'local').upper()}: {symbol.get('name', 'unknown')} ({{(time.perf_counter() - _step{idx}_started) * 1000.0:.1f}} ms)')",
+            f"        trace.append({{'step': {idx}, 'name': {symbol.get('name', 'unknown')!r}, 'host': {str(symbol.get('provider_id') or symbol.get('host') or '')!r}, 'ok': True, 'elapsed_ms': round((time.perf_counter() - _step{idx}_started) * 1000.0, 3), 'rollback': step{idx}_result.get('rollback') if isinstance(step{idx}_result, dict) else None, 'outputs': step{idx}_outputs, 'result': step{idx}_result}})",
             "    except Exception as e:",
+            f"        print(f'[Pipeline {idx}/{len(ordered_steps)}] FAILED {str(symbol.get('provider_id') or symbol.get('host') or 'local').upper()}: {symbol.get('name', 'unknown')} - {{e}}')",
+            f"        trace.append({{'step': {idx}, 'name': {symbol.get('name', 'unknown')!r}, 'host': {str(symbol.get('provider_id') or symbol.get('host') or '')!r}, 'ok': False, 'elapsed_ms': round((time.perf_counter() - _step{idx}_started) * 1000.0, 3), 'rollback': getattr(e, 'rollback', None), 'error': str(e)}})",
             f"        print(f'Step {idx} failed: {{e}}')",
             "        traceback.print_exc()",
             "        raise",
         ]
-    lines += ["", f"    return results.get('step{len(ordered_steps)}')"]
+    lines += [
+        "",
+        f"    print('[Pipeline] COMPLETE: {len(ordered_steps)} stage(s) succeeded')",
+        f"    return results.get('step{len(ordered_steps)}')",
+    ]
     return "\n".join(lines)

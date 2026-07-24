@@ -1,0 +1,166 @@
+```xml
+<create_file path="tech_connector/services/execution/dag_executor.py">
+import jsonlines
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from .dependency_graph import DependencyGraph
+from .journal_manager import JournalManager
+
+class DAGExecutor:
+    def __init__(self, graph: DependencyGraph, journal_path: str):
+        self.graph = graph
+        self.journal = JournalManager(journal_path)
+        self.executor = ThreadPoolExecutor(max_workers=5)
+
+    def execute(self):
+        for task in self.graph.topological_sort():
+            if not self.journal.is_task_completed(task.name):
+                try:
+                    result = self.executor.submit(self._run_task, task)
+                    result.add_done_callback(self._handle_result)
+                except Exception as e:
+                    self.journal.log_error(task.name, str(e))
+                    self._handle_failure(task)
+
+    def _run_task(self, task):
+        observer = WorkerObserver()
+        try:
+            task.run(observer=observer)
+            return (task, True)
+        except Exception as e:
+            raise e
+
+    def _handle_result(self, future):
+        task, success = future.result()
+        if success:
+            self.journal.log_completion(task.name)
+        else:
+            self._handle_failure(task)
+
+    def _handle_failure(self, task_name):
+        self.journal.log_error(task_name, "Task failed")
+        self.retry_task(task_name)
+
+    def retry_task(self, task_name):
+        time.sleep(2 ** (self.journal.get_retry_count(task_name) + 1))
+        self.executor.submit(self._run_task, task_name)
+</create_file>
+
+<create_file path="tech_connector/services/execution/journal_manager.py">
+import jsonlines
+from datetime import datetime
+
+class JournalManager:
+    def __init__(self, journal_path: str):
+        self.journal_path = journal_path
+
+    def log_completion(self, task_name):
+        with jsonlines.open(self.journal_path, mode='a') as writer:
+            writer.write({'task': task_name, 'status': 'completed', 'timestamp': datetime.now().isoformat()})
+
+    def log_error(self, task_name, error_message):
+        with jsonlines.open(self.journal_path, mode='a') as writer:
+            writer.write({'task': task_name, 'status': 'error', 'message': error_message, 'timestamp': datetime.now().isoformat()})
+
+    def is_task_completed(self, task_name):
+        with jsonlines.open(self.journal_path) as reader:
+            for entry in reader:
+                if entry['task'] == task_name and entry['status'] == 'completed':
+                    return True
+        return False
+
+    def get_retry_count(self, task_name):
+        count = 0
+        with jsonlines.open(self.journal_path) as reader:
+            for entry in reader:
+                if entry['task'] == task_name and entry['status'] == 'error':
+                    count += 1
+        return count
+</create_file>
+
+<create_file path="tech_connector/services/execution/dependency_graph.py">
+from collections import defaultdict
+
+class Task:
+    def __init__(self, name):
+        self.name = name
+        self.dependencies = []
+
+    def add_dependency(self, task):
+        self.dependencies.append(task)
+
+    def run(self, observer=None):
+        if observer:
+            observer.update(f"Running {self.name}")
+        # Simulate task execution
+        time.sleep(1)
+        return True
+
+class DependencyGraph:
+    def __init__(self):
+        self.tasks = {}
+        self.graph = defaultdict(list)
+
+    def add_task(self, task: Task):
+        self.tasks[task.name] = task
+
+    def add_dependency(self, task_name, dependency_name):
+        if task_name in self.tasks and dependency_name in self.tasks:
+            self.graph[dependency_name].append(task_name)
+            self.tasks[task_name].add_dependency(self.tasks[dependency_name])
+
+    def topological_sort(self):
+        visited = set()
+        result = []
+
+        def dfs(node):
+            if node not in visited:
+                visited.add(node)
+                for neighbor in self.graph[node]:
+                    dfs(neighbor)
+                result.append(node)
+
+        for task in self.tasks.values():
+            dfs(task.name)
+
+        return result[::-1]
+</create_file>
+
+<create_file path="tech_connector/services/execution/worker_observer.py">
+class WorkerObserver:
+    def update(self, message):
+        print(message)
+</create_file>
+
+<create_file path="examples/tech_connector/tests/test_dag_executor.py">
+import unittest
+from tech_connector.services.execution.dag_executor import DAGExecutor, JournalManager
+from tech_connector.services.execution.dependency_graph import Task, DependencyGraph
+
+class TestDAGExecutor(unittest.TestCase):
+    def test_execute(self):
+        graph = DependencyGraph()
+        task1 = Task("task1")
+        task2 = Task("task2")
+        task3 = Task("task3")
+        task1.add_dependency(task2)
+        task2.add_dependency(task3)
+        graph.add_task(task1)
+        graph.add_task(task2)
+        graph.add_task(task3)
+
+        journal_manager = JournalManager("test_journal.jsonl")
+        executor = DAGExecutor(graph, "test_journal.jsonl")
+
+        executor.execute()
+
+        with open("test_journal.jsonl") as f:
+            entries = list(jsonlines.Reader(f))
+            self.assertEqual(len(entries), 3)
+            for entry in entries:
+                self.assertIn(entry['status'], ['completed', 'error'])
+
+if __name__ == '__main__':
+    unittest.main()
+</create_file>
+```

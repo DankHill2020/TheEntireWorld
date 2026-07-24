@@ -20,6 +20,68 @@ request_queue = queue.Queue()
 PORT = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
 
 
+def _write_bridge_status(status):
+    paths = []
+    try:
+        paths.append(
+            os.path.join(
+                unreal.Paths.project_saved_dir(),
+                "AIStudioBridge",
+                "startup_status.json",
+            )
+        )
+    except Exception:
+        pass
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        paths.append(
+            os.path.join(
+                local_appdata,
+                "TA_Tech_Connector_MCPHost",
+                "unreal_plugin_status.json",
+            )
+        )
+    for path in paths:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(status, handle, indent=2)
+        except Exception:
+            pass
+
+
+def verify_ai_studio_bridge():
+    library = getattr(unreal, "AIStudioBridgeLibrary", None)
+    required = [
+        "inspect_anim_blueprint_graph",
+        "configure_blueprint_replication",
+        "bind_niagara_user_parameters_on_begin_play",
+    ]
+    available = bool(library)
+    methods = {
+        name: bool(library and hasattr(library, name))
+        for name in required
+    }
+    status = {
+        "ok": available and all(methods.values()),
+        "plugin": "AIStudioBridge",
+        "library_available": available,
+        "required_methods": methods,
+        "restart_required": not available,
+        "message": (
+            "AIStudioBridge is loaded and its required reflected methods are available."
+            if available and all(methods.values())
+            else "AIStudioBridge is missing or stale. Install/build the project plugin, then restart Unreal."
+        ),
+    }
+    _write_bridge_status(status)
+    if status["ok"]:
+        unreal.log(status["message"])
+    else:
+        unreal.log_error(status["message"])
+    return status
+
+
 def _write_port_files(port):
     paths = [
         os.path.join(
@@ -159,4 +221,5 @@ def start_http_server_in_thread():
 
 
 if __name__ == "__main__":
+    verify_ai_studio_bridge()
     start_http_server_in_thread()

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+import ast
+import json
 from pathlib import Path
 import time
 from typing import Any, Protocol
@@ -289,6 +291,104 @@ class UnrealPresetChoiceProvider:
         )
 
 
+class UnrealAssetChoiceProvider:
+    """Search live Unreal assets while preserving the requested asset type."""
+
+    provider_id = "unreal.assets"
+    refresh_policy = "host_reconnect_or_manual"
+
+    def __init__(
+        self,
+        provider_id: str = "unreal.assets",
+        asset_classes: tuple[str, ...] = (),
+        group: str = "Unreal assets",
+    ):
+        self.provider_id = provider_id
+        self.asset_classes = asset_classes
+        self.group = group
+
+    def choices(self, request: ChoiceProviderRequest) -> ChoiceProviderResult:
+        window = request.context_snapshot.get("window")
+        router = getattr(window, "command_router", None) if window is not None else None
+        bridge = getattr(router, "unreal", None) if router is not None else None
+        call = getattr(bridge, "call", None)
+        if not callable(call):
+            return ChoiceProviderResult(
+                status="disconnected",
+                provider_id=self.provider_id,
+                error="Unreal is not connected, so live asset choices are unavailable.",
+                recovery_options=[
+                    RecoveryOption(
+                        "reconnect_unreal",
+                        "Reconnect Unreal",
+                        resolves_capability="unreal_connection",
+                        requires_reconnect=True,
+                    ),
+                    RecoveryOption("enter_manually", "Enter asset path manually"),
+                ],
+                refresh_policy=self.refresh_policy,
+            )
+
+        classes = tuple(request.filters.get("asset_classes") or self.asset_classes or ("Object",))
+        root_path = str(request.filters.get("root_path") or "/Game/")
+        query = str(request.query or request.filters.get("query") or "").strip().lower()
+        limit = max(1, int(request.filters.get("limit") or 80))
+        recommended = request.filters.get("recommended_value")
+        choices: list[ChoiceItem] = []
+        errors: list[str] = []
+        for asset_class in classes:
+            try:
+                _label, ok, raw = (
+                    str(asset_class),
+                    *call(
+                        "unreal_tools.get_skeletons.get_all_assets_of_type",
+                        args=[str(asset_class), root_path],
+                        kwargs={},
+                    ),
+                )
+            except Exception as exc:
+                errors.append(f"{asset_class}: {exc}")
+                continue
+            if not ok:
+                errors.append(f"{asset_class}: {raw}")
+                continue
+            for value in _values_from_raw(raw):
+                path = _unreal_asset_path(value)
+                if not path:
+                    continue
+                label = _label_for_value(path)
+                if query and query not in path.lower() and query not in label.lower():
+                    continue
+                choices.append(
+                    ChoiceItem(
+                        value=path,
+                        label=label,
+                        detail=path,
+                        icon_key="unreal_asset",
+                        group=self.group,
+                        search_terms=(label, path, str(asset_class)),
+                        metadata={
+                            "source": "unreal_asset_registry",
+                            "asset_class": str(asset_class),
+                            "root_path": root_path,
+                        },
+                        is_recommended=_matches_recommended_asset(path, recommended),
+                        confidence=1.0 if _matches_recommended_asset(path, recommended) else None,
+                    )
+                )
+        choices = _dedupe_choices(choices)
+        choices.sort(key=lambda item: (not item.is_recommended, item.label.lower(), str(item.value).lower()))
+        if choices:
+            return _result(self.provider_id, choices[:limit], refresh_policy=self.refresh_policy)
+        return ChoiceProviderResult(
+            status="failed" if errors else "empty",
+            provider_id=self.provider_id,
+            error="; ".join(errors[:3]) if errors else None,
+            recovery_options=[RecoveryOption("retry", "Refresh assets", requires_refresh=True)],
+            refresh_policy=self.refresh_policy,
+        )
+
+
 class RegisteredUnrealOperationProvider:
     provider_id = "unreal.operations"
     refresh_policy = "manual"
@@ -322,9 +422,46 @@ def default_choice_providers() -> dict[str, ChoiceProvider]:
         "project.files": ProjectFileChoiceProvider(),
         "project.symbol_search": ProjectSymbolChoiceProvider(),
         "project.callables": ProjectSymbolChoiceProvider(),
-        "unreal.skeletons": UnrealPresetChoiceProvider("unreal.skeletons", "skeletons", "Unreal skeletons"),
-        "unreal.meshes": UnrealPresetChoiceProvider("unreal.meshes", "meshes", "Unreal meshes"),
-        "unreal.assets": UnrealPresetChoiceProvider("unreal.assets", "assets", "Unreal assets"),
+        "unreal.assets": UnrealAssetChoiceProvider(),
+        "unreal.blueprints": UnrealAssetChoiceProvider(
+            "unreal.blueprints", ("Blueprint",), "Unreal Blueprints"
+        ),
+        "unreal.anim_blueprints": UnrealAssetChoiceProvider(
+            "unreal.anim_blueprints", ("AnimBlueprint",), "Animation Blueprints"
+        ),
+        "unreal.skeletons": UnrealAssetChoiceProvider(
+            "unreal.skeletons", ("Skeleton",), "Unreal skeletons"
+        ),
+        "unreal.meshes": UnrealAssetChoiceProvider(
+            "unreal.meshes", ("SkeletalMesh", "StaticMesh"), "Unreal meshes"
+        ),
+        "unreal.skeletal_meshes": UnrealAssetChoiceProvider(
+            "unreal.skeletal_meshes", ("SkeletalMesh",), "Skeletal meshes"
+        ),
+        "unreal.static_meshes": UnrealAssetChoiceProvider(
+            "unreal.static_meshes", ("StaticMesh",), "Static meshes"
+        ),
+        "unreal.physics_assets": UnrealAssetChoiceProvider(
+            "unreal.physics_assets", ("PhysicsAsset",), "Physics Assets"
+        ),
+        "unreal.niagara_systems": UnrealAssetChoiceProvider(
+            "unreal.niagara_systems", ("NiagaraSystem",), "Niagara Systems"
+        ),
+        "unreal.niagara_emitters": UnrealAssetChoiceProvider(
+            "unreal.niagara_emitters", ("NiagaraEmitter",), "Niagara Emitters"
+        ),
+        "unreal.input_mapping_contexts": UnrealAssetChoiceProvider(
+            "unreal.input_mapping_contexts", ("InputMappingContext",), "Input Mapping Contexts"
+        ),
+        "unreal.ik_rigs": UnrealAssetChoiceProvider(
+            "unreal.ik_rigs", ("IKRigDefinition",), "IK Rigs"
+        ),
+        "unreal.ik_retargeters": UnrealAssetChoiceProvider(
+            "unreal.ik_retargeters", ("IKRetargeter",), "IK Retargeters"
+        ),
+        "unreal.pose_search_databases": UnrealAssetChoiceProvider(
+            "unreal.pose_search_databases", ("PoseSearchDatabase",), "Pose Search Databases"
+        ),
         "unreal.operations": RegisteredUnrealOperationProvider(),
     }
 
@@ -512,6 +649,65 @@ def _lines_from_raw(raw: Any) -> list[str]:
         return [str(item).strip() for item in raw if str(item).strip()]
     text = str(raw or "")
     return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _values_from_raw(raw: Any) -> list[Any]:
+    if isinstance(raw, (list, tuple, set)):
+        return list(raw)
+    if isinstance(raw, dict):
+        for key in ("assets", "results", "items", "value"):
+            value = raw.get(key)
+            if isinstance(value, (list, tuple, set)):
+                return list(value)
+        values = []
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                row = dict(value)
+                row.setdefault("object_path", key)
+                values.append(row)
+            else:
+                values.append(value)
+        return values
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    for loader in (json.loads, ast.literal_eval):
+        try:
+            parsed = loader(text)
+        except Exception:
+            continue
+        if parsed is not raw:
+            return _values_from_raw(parsed)
+    return _lines_from_raw(text)
+
+
+def _unreal_asset_path(value: Any) -> str:
+    if isinstance(value, dict):
+        value = (
+            value.get("object_path")
+            or value.get("package_name")
+            or value.get("asset_path")
+            or value.get("path")
+            or value.get("value")
+        )
+    path = str(value or "").strip().strip("'\"")
+    if not path:
+        return ""
+    if path.startswith("/Script/"):
+        return ""
+    return path
+
+
+def _matches_recommended_asset(candidate: Any, recommended: Any) -> bool:
+    if recommended in (None, ""):
+        return False
+    candidate_text = str(candidate or "").strip().lower()
+    recommended_text = str(recommended or "").strip().lower()
+    if candidate_text == recommended_text:
+        return True
+    candidate_name = _label_for_value(candidate_text).lower()
+    recommended_name = _label_for_value(recommended_text).lower()
+    return bool(candidate_name and candidate_name == recommended_name)
 
 
 def _dedupe_choices(choices: list[ChoiceItem]) -> list[ChoiceItem]:

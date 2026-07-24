@@ -35,7 +35,9 @@ def build_compact_toolbar(window) -> QWidget:
 
     controls.addWidget(QLabel("Source:"))
     window.model_source_mode_box = QComboBox()
-    window.model_source_mode_box.addItem("Auto cloud → local", "auto_with_local_fallback")
+    window.model_source_mode_box.addItem(
+        "Cloud locked / local if unset", "auto_with_local_fallback"
+    )
     window.model_source_mode_box.addItem("Always local", "local_only")
     mode = window.settings.get("model_source_mode", "auto_with_local_fallback")
     idx = window.model_source_mode_box.findData(mode)
