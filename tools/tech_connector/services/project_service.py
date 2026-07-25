@@ -1327,6 +1327,129 @@ def _path_allowed_for_edit_scope(path: str, scope: str | None) -> bool:
     return True
 
 
+def _target_trigger_matches(lower: str, trigger: str) -> bool:
+    trigger = (trigger or "").lower().strip()
+    if not trigger:
+        return False
+    if " " in trigger or "-" in trigger:
+        return bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(trigger)}(?![A-Za-z0-9_])", lower))
+    return bool(re.search(rf"\b{re.escape(trigger)}\b", lower))
+
+
+def _extend_terms_for_subsystems(terms: list[str], hints: list[dict[str, Any]], limit: int = 32) -> list[str]:
+    expanded = list(terms)
+    for hint in hints:
+        for term in hint.get("terms") or ():
+            if term not in expanded:
+                expanded.append(term)
+    return expanded[:limit]
+
+
+def _resolve_hint_path(path_text: str) -> str:
+    path = Path(path_text)
+    if not path.is_absolute():
+        resolved = (_PACKAGE_ROOT / path_text).resolve()
+        if not resolved.exists() and path_text.startswith("../"):
+            resolved = (_PACKAGE_ROOT / path_text.replace("../", "", 1)).resolve()
+        path = resolved
+    return str(path)
+
+
+def _subsystem_hint_score(path: str, hints: list[dict[str, Any]]) -> int:
+    normalized = str(path or "").replace("\\", "/").lower()
+    score = 0
+    for hint in hints:
+        for hint_path in hint.get("paths") or ():
+            resolved = _resolve_hint_path(str(hint_path)).replace("\\", "/").lower()
+            if normalized == resolved:
+                score += 80
+            elif resolved and (resolved in normalized or normalized.endswith(resolved.split("/")[-1])):
+                score += 25
+    return score
+
+
+def _active_path_matches_terms(active_path: str | None, terms: list[str], hints: list[dict[str, Any]]) -> bool:
+    if not active_path:
+        return False
+    normalized = str(active_path).replace("\\", "/").lower()
+    if _subsystem_hint_score(normalized, hints) > 0:
+        return True
+    meaningful = [term for term in terms if len(term) >= 4]
+    return sum(1 for term in meaningful if term in normalized) >= 2
+
+
+def is_target_discovery_edit_request(text: str) -> bool:
+    """True when a prompt asks the system to locate the right file and edit/add there."""
+    lower = (text or "").lower()
+    wants_target = bool(
+        re.search(r"\b(find|locate|choose|pick|identify|where|best place)\b", lower)
+        and re.search(r"\b(file|module|place|location|where)\b", lower)
+    )
+    wants_change = bool(
+        re.search(r"\b(add|create|write|generate|implement|insert|modify|improve|refactor|fix|update)\b", lower)
+    )
+    names_project_object = bool(
+        re.search(r"\b(project|repo|codebase|tool|function|class|method|module|file|existing|current|ui|pipeline|workflow|editor|service|bridge)\b", lower)
+    )
+    mentions_existing_code = bool(
+        re.search(r"\b(in|inside|to|for)\s+(?:our|the|this|my)?\s*[A-Za-z_][A-Za-z0-9_./\\-]*\.py\b", text or "")
+        or re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(", text or "")
+    )
+    return wants_change and (wants_target or names_project_object or mentions_existing_code)
+
+
+def _path_score(path: str, terms: list[str], active_path: str | None = None) -> int:
+    p = str(path or "").replace("\\", "/").lower()
+    name = Path(p).name.lower()
+    score = 0
+    for term in terms:
+        if term in name:
+            score += 12
+        if term in p:
+            score += 5
+        if term == name or term + ".py" == name or term == Path(p).stem.lower():
+            score += 500
+    if active_path:
+        try:
+            active_parent = str(Path(active_path).resolve().parent).replace("\\", "/").lower()
+            if active_parent and p.startswith(active_parent):
+                score += 8
+        except Exception:
+            pass
+    if any(marker in p for marker in ("test", "example", "archive", "backup", "deprecated")):
+        score -= 10
+    if p.endswith("__init__.py"):
+        score -= 15
+    return score
+
+
+def _add_hint_candidates(file_scores: dict[str, dict[str, Any]], hints: list[dict[str, Any]]) -> None:
+    for hint in hints:
+        for hint_path in hint.get("paths") or ():
+            path = _resolve_hint_path(str(hint_path))
+            if not Path(path).exists():
+                continue
+            if not _is_project_edit_candidate_path(path):
+                continue
+            entry = file_scores.setdefault(path, {"path": path, "score": 0, "symbols": [], "chunks": []})
+            entry["score"] += _subsystem_hint_score(path, [hint])
+
+
+def _is_project_edit_candidate_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").lower()
+    if not normalized:
+        return False
+    excluded_parts = (
+        "/.venv/",
+        "/venv/",
+        "/site-packages/",
+        "/dist-packages/",
+        ".dist-info/",
+        "/__pycache__/",
+        "/.git/",
+        "/.mypy_cache/",
+        "/.pytest_cache/",
+    )
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
     out = []
@@ -1385,6 +1508,27 @@ def discover_edit_targets(
 
     file_scores: dict[str, dict[str, Any]] = {}
     _add_hint_candidates(file_scores, hints)
+
+    # Inject explicit dotted module paths named in question (e.g. custom_qt.shader_manager_dialog -> custom_qt/shader_manager_dialog.py)
+    import re
+    dotted_matches = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)\b", question or "")
+    for mod in dotted_matches:
+        rel_mod_path = mod.replace(".", "/")
+        for root in roots:
+            root_path = Path(root).resolve()
+            mod_file_path = str(root_path / (rel_mod_path + ".py"))
+            mod_dir_path = str(root_path / rel_mod_path / (rel_mod_path.split("/")[-1] + ".py"))
+            
+            p_file = Path(mod_file_path)
+            ancestor_exists = any(p.exists() and root_path in p.parents or p == root_path for p in p_file.parents)
+            
+            if p_file.exists() or ancestor_exists:
+                entry = file_scores.setdefault(mod_file_path, {"path": mod_file_path, "score": 2500, "symbols": [], "chunks": []})
+                entry["score"] += 2500
+            elif Path(mod_dir_path).exists():
+                entry = file_scores.setdefault(mod_dir_path, {"path": mod_dir_path, "score": 2500, "symbols": [], "chunks": []})
+                entry["score"] += 2500
+
     for row in symbol_rows:
         path = row.get("path") or ""
         if not path or not _is_project_edit_candidate_path(path) or not _path_allowed_for_edit_scope(path, scope):

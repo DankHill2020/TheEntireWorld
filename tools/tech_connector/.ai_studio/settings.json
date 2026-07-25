@@ -6,6 +6,8 @@
   "model": "ollama:qwen2.5-coder:14b",
   "config": "C:\\depot\\tools\\tech_connector\\knowledge\\mcp_unreal_maya_knowledge_config.json",
   "auto_index_on_first_run": true,
+  "auto_approve_edit_plans": false,
+  "full_automation_mode": false,
   "enable_live_sources": false,
   "research_project_snapshot": true,
   "research_unreal_capabilities": true,
@@ -27,9 +29,10 @@
   "expert_memory_max_experts": 4,
   "expert_memory_max_playbooks": 2,
   "expert_memory_max_work_items": 4,
-  "active_project": "C:\\depot\\tools",
-  "unreal_uproject_path": "",
+  "active_project": "C:\\depot\\Time_Fighters 5.8",
+  "unreal_uproject_path": "C:\\depot\\Time_Fighters 5.8\\Time_Fighters.uproject",
   "recent_projects": [
+    "C:\\depot\\Time_Fighters 5.8",
     "C:\\depot\\tools"
   ],
   "model_source_mode": "local_only",
@@ -162,7 +165,7 @@
   "semantic_verifier_model": "qwen2.5:3b",
   "semantic_alignment_model": "qwen3:8b",
   "warm_semantic_alignment_model": true,
-  "show_system_status": false,
+  "show_system_status": true,
   "open_files": [
     "C:\\depot\\tools\\custom_qt\\custom_widgets.py",
     "C:\\depot\\tools\\maya_tools\\Rigging\\mocap\\setup_hik.py"

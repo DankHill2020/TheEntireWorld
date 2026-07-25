@@ -20,7 +20,7 @@
       "type": "stdio",
       "command": "python",
       "args": [
-        "C:\\Desktop\\UnrealGenAISupport\\Content\\Python\\motionbuilder_mcp_server.py"
+        "C:\\depot\\tools\\tech_connector\\bridges\\motionbuilder\\motionbuilder_mcp_server.py"
       ]
     },
     "unreal": {

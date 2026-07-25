@@ -413,6 +413,8 @@ def compact_prompt_progress_plan(plan: dict[str, Any] | None, *, max_stages: int
             if isinstance(stage, dict)
         ],
         "missing_info": list(plan.get("missing_info") or [])[:4],
+    }
+
 
 def render_prompt_progress_plan(
     plan: dict[str, Any] | None,

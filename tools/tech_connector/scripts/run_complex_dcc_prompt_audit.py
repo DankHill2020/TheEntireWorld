@@ -183,6 +183,7 @@ def _audit_prompt(case: dict[str, Any], project_roots: list[str], availability: 
         host_hint=str(case.get("host") or ""),
         expected_routes=case.get("expected_routes") or [],
         require_quality_bar=bool(re.search(r"\b(tool|ui|user interface|panel|window|widget|operator)\b", prompt, re.IGNORECASE)),
+        require_plan_match=True,
     )
     timings["stage_quality_ms"] = round((perf_counter() - phase_started) * 1000.0, 2)
     timings["total_ms"] = round((perf_counter() - started) * 1000.0, 2)

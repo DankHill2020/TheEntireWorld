@@ -58,6 +58,8 @@ def load_settings() -> dict:
         "model": DEFAULT_MODEL,
         "config": best_config(),
         "auto_index_on_first_run": True,
+        "auto_approve_edit_plans": False,
+        "full_automation_mode": False,
         "enable_live_sources": False,
         "research_project_snapshot": True,
         "research_unreal_capabilities": True,

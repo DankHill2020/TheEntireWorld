@@ -74,6 +74,7 @@ def audit_prompt_stage_quality(
     required_callables: Iterable[str] = (),
     require_quality_bar: bool = False,
     require_temp_workspace_validation: bool = False,
+    require_plan_match: bool = False,
     include_engine_dispatch: bool = False,
     expected_engine_actions: Iterable[str] = (),
     expected_selected_target_suffix: str = "",
@@ -154,6 +155,46 @@ def audit_prompt_stage_quality(
 
     if require_temp_workspace_validation:
         add("quality_bar", "temp_workspace_validation_planned", "code.validate_patch_in_temp_workspace" in actions, actual=actions)
+
+    if require_plan_match:
+        plan_verification = _extract_plan_verification(decision.get("request_plan_verification"))
+        if not plan_verification:
+            plan_verification = _extract_plan_verification(task_graph)
+        if not plan_verification:
+            plan_verification = _extract_plan_verification(context.planning_result or {})
+        if not plan_verification:
+            add("capability_plan", "request_plan_verification_present", False, detail="No plan verification payload found.")
+        else:
+            matches_request = plan_verification.get("matches_request")
+            if isinstance(matches_request, str):
+                raw_match = matches_request.strip().lower()
+                matches_request = raw_match not in {"false", "0", "no", "off"}
+            add(
+                "capability_plan",
+                "request_plan_verification_matches",
+                matches_request is not False,
+                expected=True,
+                actual=matches_request,
+                detail=(
+                    str(plan_verification.get("reason") or "")
+                    if matches_request is False else ""
+                ),
+            )
+            if matches_request is False:
+                missing = plan_verification.get("missing") or plan_verification.get("missing_requirements") or []
+                distorted = plan_verification.get("distorted") or plan_verification.get("wrong") or plan_verification.get("distortions") or []
+                unsupported = plan_verification.get("unsupported_claims") or plan_verification.get("unsupported_features") or []
+                add(
+                    "capability_plan",
+                    "plan_verification_gap_details",
+                    False,
+                    actual={
+                        "missing": missing,
+                        "distorted": distorted,
+                        "unsupported": unsupported,
+                    },
+                    detail="Plan verification reports gaps.",
+                )
 
     engine_action = ""
     selected_target = ""
@@ -252,3 +293,28 @@ def _collect_key(value: Any, key: str) -> list[Any]:
         for nested in value:
             found.extend(_collect_key(nested, key))
     return found
+
+
+def _extract_plan_verification(value: Any) -> dict[str, Any]:
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            found = _extract_plan_verification(nested)
+            if found:
+                return found
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    direct = value.get("request_plan_verification")
+    if isinstance(direct, dict) and direct:
+        return direct
+    for key in ("request_plan_verification", "plan_verification"):
+        nested = value.get(key)
+        if isinstance(nested, dict) and nested:
+            return nested
+    for nested in value.values():
+        if not isinstance(nested, (dict, list, tuple)):
+            continue
+        found = _extract_plan_verification(nested)
+        if found:
+            return found
+    return {}

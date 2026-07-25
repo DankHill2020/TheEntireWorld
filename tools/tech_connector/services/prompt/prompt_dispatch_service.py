@@ -816,11 +816,25 @@ class PromptDispatchService:
         # may forbid live-tree mutation while still requesting complete code in
         # a disposable validation workspace.
         generated_code_artifact = requests_generated_code_artifact(decision)
+        explicit_source_mutation = bool(
+            str(decision.get("target_identifier") or "").strip()
+            or str(decision.get("intent_category") or "").startswith("explicit_source")
+            or str(decision.get("intent_category") or "").endswith("_code_edit")
+        )
         target_discovery_has_mutation_goal = bool(mutation_requested and graph_has_mutation)
+        # Preserve target_discovery for explicit code-generation requests (add a class/function in module).
+        # These have file_mutation or file_modification scope and do not need a goal graph mutation marker.
+        _td_is_explicit_code_gen = (
+            str(decision.get("route") or "") == "target_discovery"
+            and str(decision.get("mutation_scope") or "").lower() in {"file_mutation", "file_modification"}
+            and str(decision.get("operation_mode") or "").lower() in {"generate", "edit", "write"}
+        )
         if (
             str(decision.get("route") or "") == "target_discovery"
+            and not _td_is_explicit_code_gen
             and not generated_code_artifact
             and str(decision.get("operation_mode") or "").lower() != "plan"
+            and not explicit_source_mutation
             and (
                 read_only_requested
                 or not mutation_requested
@@ -926,6 +940,42 @@ class PromptDispatchService:
             self._record_metric(decision, result, started)
             return result
 
+        route = str(decision.get("route") or "").lower()
+        route_guard_enabled = route not in {"chat", "project_search"}
+        if route_guard_enabled:
+            plan_verification = self._extract_plan_verification(decision)
+            matches_request = plan_verification.get("matches_request")
+            if isinstance(matches_request, str):
+                raw_match = matches_request.strip().lower()
+                matches_request = raw_match not in {"false", "0", "no", "off"}
+            if bool(plan_verification) and matches_request is False:
+                blocker = self._build_plan_mismatch_clarification(decision, route, plan_verification)
+                result = EngineResult(
+                    action="clarify",
+                    label="Plan contract mismatch",
+                    text=blocker,
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "result_type": "plan_contract_verification_failed",
+                        "route_decision": dict(decision),
+                        "request_plan_verification": plan_verification,
+                        "execution_route": execution_route,
+                        "route": route,
+                    },
+                )
+                if activity:
+                    activity(
+                        ActivityEvent(
+                            "clarification",
+                            "Plan contract mismatch",
+                            "The planner reported that the route does not match the user request.",
+                            status="warn",
+                            metadata={"route": route, "execution_route": execution_route},
+                        )
+                    )
+                self._record_metric(decision, result, started)
+                return result
+
         missing = self._missing_capabilities(handler.requires, decision, context)
         if missing:
             from tech_connector.services.reasoning.clarification_service import build_slot_clarification
@@ -1006,10 +1056,77 @@ class PromptDispatchService:
             "target_discovery": "I'm resolving the exact code target before making changes.",
             "dcc_query": "I'm checking the current host state.",
             "dcc_execute": "I'm validating the operation before running it.",
+            "llm.chat": "I'm preparing the answer from the available context.",
             "pipeline_graph": "I'm validating the workflow and its dependencies.",
             "action_graph": "I'm validating the requested action sequence.",
             "chat": "I'm preparing the answer from the available context.",
         }.get(route, "I'm continuing with the next required step.")
+
+    @staticmethod
+    def _extract_plan_verification(payload: object) -> dict:
+        if isinstance(payload, (list, tuple)):
+            for value in payload:
+                nested = PromptDispatchService._extract_plan_verification(value)
+                if nested:
+                    return nested
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        direct = payload.get("request_plan_verification")
+        if isinstance(direct, dict) and direct:
+            return dict(direct)
+        for key in ("plan_verification", "capability_gap_plan"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                nested = PromptDispatchService._extract_plan_verification(value)
+                if nested:
+                    return nested
+        for value in payload.values():
+            nested = PromptDispatchService._extract_plan_verification(value)
+            if nested:
+                return nested
+        return {}
+
+    def _build_plan_mismatch_clarification(self, decision: dict, route: str, plan_verification: dict) -> str:
+        missing = plan_verification.get("missing") or plan_verification.get("missing_requirements") or []
+        distorted = plan_verification.get("distorted") or plan_verification.get("wrong") or plan_verification.get("distortions") or []
+        unsupported = plan_verification.get("unsupported_claims") or plan_verification.get("unsupported_features") or []
+        if not (missing or distorted or unsupported):
+            return (
+                "I cannot proceed because the planner contract is marked as not matching the original request.\n"
+                "The plan verification payload does not include explicit gap details yet."
+            )
+        lines = [
+            "Plan contract mismatch detected before execution.",
+            f"Route: `{route}`",
+            "Blocking issues:",
+        ]
+        for entry in list(missing)[:6]:
+            row = dict(entry or {})
+            fragment = str(row.get("request_fragment") or row.get("text") or "").strip()
+            reason = str(row.get("reason") or "").strip()
+            if not fragment:
+                fragment = str(entry)
+            lines.append(f"- Missing: {fragment}" + (f" ({reason})" if reason else ""))
+        for entry in list(distorted)[:6]:
+            row = dict(entry or {})
+            fragment = str(row.get("plan_claim") or row.get("claim") or "").strip()
+            reason = str(row.get("reason") or "").strip()
+            if fragment or reason:
+                lines.append(f"- Distortion: {fragment or 'requested behavior'} ({reason})")
+        for entry in list(unsupported)[:6]:
+            if isinstance(entry, dict):
+                fragment = str(
+                    entry.get("plan_claim")
+                    or entry.get("claim")
+                    or entry.get("request_fragment")
+                    or ""
+                ).strip()
+            else:
+                fragment = str(entry)
+            lines.append(f"- Unsupported: {fragment}")
+        lines.append("Please clarify the intended scope before I draft route handlers.")
+        return "\n".join(lines)
 
     def _missing_capabilities(self, requires: set[str], decision: dict, context: RequestContext) -> set[str]:
         missing: set[str] = set()

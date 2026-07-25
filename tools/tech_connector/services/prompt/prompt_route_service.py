@@ -2600,6 +2600,36 @@ def classify_prompt_route(
     host = _detect_host(text)
     hosts = _detect_hosts(text)
     no_execute = _has_no_execute_guard(lower)
+
+    # Matches: 'add a/an X class in pkg.mod', 'add X and Y functions in pkg.mod',
+    # 'add a ProceduralX class and MaterialY dataclass in pkg.sub.mod', etc.
+    _ADD_CODE_PATTERN = re.compile(
+        r"\badd\s+(?:a\s+|an\s+)?"
+        r"[A-Za-z0-9_]+(?:\s+(?:and|&)\s+[A-Za-z0-9_]+)*"
+        r"\s+(?:class(?:es)?|functions?|dataclass(?:es)?|enums?|widgets?|dialogs?|methods?)"
+        r"(?:\s+and\s+[A-Za-z0-9_]+\s+(?:class(?:es)?|functions?|dataclass(?:es)?|enums?|widgets?|dialogs?|methods?))?"
+        r"\s+in\s+[A-Za-z0-9_.]+"
+    )
+    if _ADD_CODE_PATTERN.search(lower):
+        return _finalize_decision(PromptRouteDecision(
+            route="target_discovery",
+            provider="target_discovery",
+            intent_category="project_target_edit",
+            host=host or "project_code",
+            execution_route="engine.target_discovery",
+            handler_id="TargetDiscoveryEditProvider",
+            operation_mode="generate",
+            target_type="code",
+            execution_environment="project_index",
+            mutation_scope="file_mutation",
+            confidence=0.98,
+            requires_confirmation=False,
+            requires_dcc_connection=False,
+            model_tier="local_code",
+            reasons=[
+                "Prompt explicitly requests writing or adding a Python class/function into a named target module.",
+            ],
+        ), lower)
     if (
         _is_unreal_animation_blueprint_feature_request(lower)
         and not _is_explicit_pipeline_build_request(lower)
@@ -2632,10 +2662,8 @@ def classify_prompt_route(
                 {"route": "target_discovery", "reason": "Use if the user meant local code edits rather than live Unreal asset work."},
             ],
         ), lower)
-    try:
-        from tech_connector.services.prompt.prompt_intent_service import RequestTask, RequestUnderstanding
-        from tech_connector.services.prompt.prompt_task_splitter_service import task_graph_route
 
+    try:
         # Routing consumes one already-built canonical context. Compatibility
         # callers receive a bounded deterministic understanding and task graph;
         # semantic/model planning remains owned by the request engine.

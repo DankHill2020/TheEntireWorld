@@ -49,6 +49,16 @@ class RankedTarget:
     path: str
     score: float
     confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RankedTarget:
+    path: str
+    score: float
+    confidence: float
     signals: list[EvidenceSignal] = field(default_factory=list)
     attributions: list[AttributionPath] = field(default_factory=list)
     excluded: bool = False
@@ -125,6 +135,22 @@ def rank_target_candidates(
                 score += 320.0
                 signals.append(EvidenceSignal("explicit_partial_path", 320.0, f"Path contains explicit target phrase: {entity.value}"))
 
+        # Dotted module notation matching (e.g. maya_tools.Animation.anim_export -> maya_tools/Animation/anim_export)
+        import re
+        dotted_modules = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)\b", prompt or "")
+        for mod in dotted_modules:
+            mod_as_path = mod.replace(".", "/").casefold()
+            mod_stem = mod.split(".")[-1].casefold()
+            pkg_root = mod.split(".")[0].casefold()
+            if (
+                norm_lower.endswith(mod_as_path + ".py")
+                or norm_lower.endswith(mod_as_path)
+                or mod_as_path in norm_lower
+                or (p.stem.casefold() == mod_stem and pkg_root in norm_lower)
+            ):
+                score += 1500.0
+                signals.append(EvidenceSignal("dotted_module_target", 1500.0, f"Dotted module explicitly named: {mod}"))
+
         if active_norm and norm_lower == active_norm:
             score += 360.0
             signals.append(EvidenceSignal("active_file", 360.0, "Candidate is the active editor file."))
@@ -134,22 +160,9 @@ def rank_target_candidates(
         if norm_lower in open_set:
             score += 240.0
             signals.append(EvidenceSignal("open_file", 240.0, "Candidate is open in the editor."))
-
-        momentum_bonus, momentum_reasons = momentum.score_bonus(path, "file")
-        if momentum_bonus:
-            score += momentum_bonus
-            signals.append(EvidenceSignal("context_momentum", momentum_bonus, "; ".join(momentum_reasons)))
-
-        if p.suffix.lower() in SOURCE_SUFFIXES:
-            score += 110.0
-            signals.append(EvidenceSignal("source_file", 110.0, f"Candidate is editable source ({p.suffix.lower()})."))
-        elif p.suffix.lower() in {".json", ".sqlite", ".db", ".log", ".txt"}:
-            score -= 180.0
-            signals.append(EvidenceSignal("metadata_penalty", -180.0, f"Candidate is usually metadata/data ({p.suffix.lower()})."))
-
-        if p.name.casefold() in METADATA_FILENAMES:
-            score -= 800.0
-            signals.append(EvidenceSignal("index_metadata_penalty", -800.0, "Known generated/index metadata filename."))
+        if p.name == "__init__.py":
+            score -= 600.0
+            signals.append(EvidenceSignal("init_file_penalty", -600.0, "__init__.py is rarely the target module implementation."))
 
         if roots and not any(norm_lower == root or norm_lower.startswith(root + "/") for root in roots):
             score -= 250.0

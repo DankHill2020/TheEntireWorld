@@ -1119,6 +1119,24 @@ class RequestEngine:
                     deterministic_route,
                     routed_context,
                 )
+            # Fast-path: explicit 'add a <class/function> in <module>' requests
+            # route directly to TargetDiscoveryEditProvider — no planning needed.
+            if (
+                deterministic_route.get("route") == "target_discovery"
+                and str(deterministic_route.get("mutation_scope") or "").lower() in {"file_mutation", "file_modification"}
+                and str(deterministic_route.get("operation_mode") or "").lower() in {"generate", "edit", "write"}
+            ):
+                routed_context = replace(
+                    context,
+                    extras={
+                        **dict(context.extras or {}),
+                        "prompt_route_decision": deterministic_route,
+                    },
+                )
+                return self._dispatch_preclassified(
+                    deterministic_route,
+                    routed_context,
+                )
         except Exception:
             pass
         extras = dict(context.extras or {})

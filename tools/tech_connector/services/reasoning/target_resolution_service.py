@@ -59,7 +59,7 @@ def resolve_target_candidates(
     runner_up = ranked[1] if len(ranked) > 1 else None
     margin = top.confidence - (runner_up.confidence if runner_up else 0.0)
     explicit_filename = any(item.kind in {"filename", "path"} for item in entities)
-    exact_explicit_signal = any(signal.key in {"explicit_exact_path", "explicit_filename"} for signal in top.signals)
+    exact_explicit_signal = any(signal.key in {"explicit_exact_path", "explicit_filename", "dotted_module_target"} for signal in top.signals)
     can_select = (
         not top.excluded
         and top.confidence >= auto_select_confidence
