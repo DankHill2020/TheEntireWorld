@@ -3,11 +3,13 @@ from __future__ import annotations
 """Evidence-backed target choice and clarification policy."""
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+import re
 from typing import Any, Iterable
 
 from tech_connector.services.context_momentum_service import ContextMomentum, momentum_from_operation_memory
 from tech_connector.services.reasoning.evidence_ranking_service import AttributionPath, RankedTarget, rank_target_candidates, target_resolution_summary
-from tech_connector.services.reasoning.target_entity_service import extract_target_entities
+from reasoning_runtime.reasoning.target_entity_service import extract_target_entities
 
 
 @dataclass
@@ -37,15 +39,31 @@ def resolve_target_candidates(
     minimum_margin: float = 0.18,
 ) -> TargetResolution:
     momentum = momentum_from_operation_memory(operation_memory)
+    entities = extract_target_entities(prompt)
+    candidate_items = list(candidates)
     ranked = rank_target_candidates(
         prompt,
-        candidates,
+        candidate_items,
         active_file=active_file,
         open_files=open_files,
         momentum=momentum,
         allowed_roots=allowed_roots,
     )
-    entities = extract_target_entities(prompt)
+    if not ranked:
+        candidate_items = _explicit_missing_file_candidates(
+            prompt,
+            entities,
+            allowed_roots=allowed_roots,
+        )
+        if candidate_items:
+            ranked = rank_target_candidates(
+                prompt,
+                candidate_items,
+                active_file=active_file,
+                open_files=open_files,
+                momentum=momentum,
+                allowed_roots=allowed_roots,
+            )
     if not ranked:
         return TargetResolution(
             status="no_candidates",
@@ -60,10 +78,21 @@ def resolve_target_candidates(
     margin = top.confidence - (runner_up.confidence if runner_up else 0.0)
     explicit_filename = any(item.kind in {"filename", "path"} for item in entities)
     exact_explicit_signal = any(signal.key in {"explicit_exact_path", "explicit_filename", "dotted_module_target"} for signal in top.signals)
+    single_explicit_missing_file = (
+        len(ranked) == 1
+        and str(top.original.get("candidate_source") or "")
+        == "explicit_missing_file"
+        and exact_explicit_signal
+    )
     can_select = (
         not top.excluded
-        and top.confidence >= auto_select_confidence
-        and (margin >= minimum_margin or exact_explicit_signal)
+        and (
+            single_explicit_missing_file
+            or (
+                top.confidence >= auto_select_confidence
+                and (margin >= minimum_margin or exact_explicit_signal)
+            )
+        )
     )
     reasons = [signal.reason for signal in sorted(top.signals, key=lambda item: abs(item.score), reverse=True)[:6]]
 
@@ -88,6 +117,71 @@ def resolve_target_candidates(
         clarification_prompt=clarification,
         reasons=reasons + [f"Top-to-runner-up confidence margin={margin:.3f}."],
     )
+
+
+def _explicit_missing_file_candidates(
+    prompt: str,
+    entities: Iterable[Any],
+    *,
+    allowed_roots: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Create one safe candidate for an explicitly named missing code target."""
+    if not re.search(
+        r"\b(?:add|build|create|generate|implement|make|modify|patch|write)\b",
+        prompt or "",
+        flags=re.I,
+    ):
+        return []
+
+    roots: list[Path] = []
+    for value in allowed_roots:
+        try:
+            root = Path(value).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if root.exists() and root.is_dir() and root not in roots:
+            roots.append(root)
+    if not roots:
+        return []
+
+    resolved_targets: list[Path] = []
+    for entity in entities:
+        kind = str(getattr(entity, "kind", "") or "")
+        value = str(getattr(entity, "normalized", "") or getattr(entity, "value", "") or "").strip()
+        metadata = dict(getattr(entity, "metadata", {}) or {})
+        if metadata.get("relation") != "explicit_target":
+            continue
+
+        candidate: Path | None = None
+        if kind == "module":
+            parts = value.split(".")
+            if len(parts) >= 2 and all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+                candidate = roots[0].joinpath(*parts).with_suffix(".py")
+        elif kind in {"filename", "path"}:
+            raw_path = Path(value)
+            candidate = raw_path if raw_path.is_absolute() else roots[0] / raw_path
+
+        if candidate is None:
+            continue
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not any(resolved == root or root in resolved.parents for root in roots):
+            continue
+        if resolved not in resolved_targets:
+            resolved_targets.append(resolved)
+
+    if len(resolved_targets) != 1:
+        return []
+    return [{
+        "path": str(resolved_targets[0]),
+        "score": 0,
+        "symbols": [],
+        "chunks": [],
+        "candidate_source": "explicit_missing_file",
+        "purpose": "Explicitly named missing file requested by a write operation.",
+    }]
 
 
 def apply_resolution_to_state(state: Any, resolution: TargetResolution) -> Any:

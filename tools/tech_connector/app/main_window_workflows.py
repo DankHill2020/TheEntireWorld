@@ -5,9 +5,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 import re
 import time
@@ -962,6 +962,10 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             "function", ""
         )
 
+        self._pipeline_auto_name = ""
+        self._pipeline_auto_goal = ""
+        self._pipeline_name_user_edited = bool(str(function_name or "").strip())
+        self._pipeline_goal_user_edited = bool(str(goal or "").strip())
         self.wf_build_name.setText(function_name)
         self.wf_build_goal.setText(goal)
 
@@ -1173,6 +1177,104 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         except Exception as e:
             QMessageBox.critical(self, "Append Failed", str(e))
 
+    def _ordered_pipeline_symbols(self) -> list[dict]:
+        steps = list(getattr(self, "wf_builder_steps", []) or [])
+        if not steps:
+            return []
+        by_step_id = {
+            str(step.get("graph_step_id") or ""): step
+            for step in steps
+            if step.get("graph_step_id")
+        }
+        ordered_steps = []
+        seen = set()
+        view = getattr(self, "wf_node_view", None)
+        if view is not None and hasattr(view, "execution_order"):
+            try:
+                for step_id in view.execution_order() or []:
+                    step = by_step_id.get(str(step_id))
+                    if step is not None and id(step) not in seen:
+                        ordered_steps.append(step)
+                        seen.add(id(step))
+            except Exception:
+                pass
+        ordered_steps.extend(step for step in steps if id(step) not in seen)
+        return [
+            step.get("symbol") or {}
+            for step in ordered_steps
+            if isinstance(step.get("symbol") or {}, dict)
+        ]
+
+    def _automatic_pipeline_metadata(self) -> tuple[str, str]:
+        import re
+
+        symbols = self._ordered_pipeline_symbols()
+        names = [
+            str(
+                symbol.get("function_display_name")
+                or symbol.get("display_name")
+                or symbol.get("name")
+                or ""
+            ).strip()
+            for symbol in symbols
+        ]
+        names = [name for name in names if name]
+        if not names:
+            return "", ""
+
+        slugs = [self._pipeline_safe_slug(name, "step") for name in names]
+        if len(slugs) <= 3:
+            generated_name = "_to_".join(slugs)
+        else:
+            generated_name = f"{slugs[0]}_through_{len(slugs) - 2}_steps_to_{slugs[-1]}"
+        if not generated_name.endswith(("_pipeline", "_workflow")):
+            generated_name = f"{generated_name}_pipeline"
+
+        def humanize(value: str) -> str:
+            text = re.sub(r"[_\-\s]+", " ", value).strip()
+            return text[:1].upper() + text[1:] if text else "Run step"
+
+        actions = [humanize(name) for name in names]
+        if len(actions) == 1:
+            generated_goal = f"Run {actions[0]}."
+        else:
+            generated_goal = f"Run {', then '.join(actions)} in pipeline order."
+        return generated_name, generated_goal
+
+    def _mark_pipeline_metadata_user_edited(self, field: str, text: str):
+        field = str(field or "").strip().lower()
+        if field not in {"name", "goal"}:
+            return
+        setattr(self, f"_pipeline_{field}_user_edited", bool(str(text or "").strip()))
+        if not str(text or "").strip():
+            self._refresh_pipeline_auto_metadata()
+
+    def _refresh_pipeline_auto_metadata(self):
+        name_widget = getattr(self, "wf_build_name", None)
+        goal_widget = getattr(self, "wf_build_goal", None)
+        if name_widget is None or goal_widget is None:
+            return
+        generated_name, generated_goal = self._automatic_pipeline_metadata()
+        if not generated_name:
+            name_widget.setPlaceholderText("e.g. character_exporter")
+            goal_widget.setPlaceholderText("Describe the goal of this pipeline...")
+            return
+
+        name_widget.setPlaceholderText(generated_name)
+        goal_widget.setPlaceholderText(generated_goal)
+        for field, widget, generated in (
+            ("name", name_widget, generated_name),
+            ("goal", goal_widget, generated_goal),
+        ):
+            previous = str(getattr(self, f"_pipeline_auto_{field}", "") or "")
+            current = widget.text().strip()
+            user_edited = bool(getattr(self, f"_pipeline_{field}_user_edited", False))
+            if user_edited or (current and current != previous):
+                continue
+            setattr(self, f"_pipeline_auto_{field}", generated)
+            if current != generated:
+                widget.setText(generated)
+
     def start_new_workflow_builder(self):
         try:
             if hasattr(self, "workflows_list"):
@@ -1188,6 +1290,10 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             self.wf_node_view.setFocus()
         except Exception:
             pass
+        self._pipeline_auto_name = ""
+        self._pipeline_auto_goal = ""
+        self._pipeline_name_user_edited = False
+        self._pipeline_goal_user_edited = False
         self.wf_build_name.clear()
         self.wf_build_goal.clear()
 
@@ -1203,6 +1309,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         self.wf_steps_layout.addStretch(1)
         self.wf_builder_steps = []
         self._rebuild_pipeline_graph_from_steps()
+        self._refresh_pipeline_auto_metadata()
 
         self._ensure_pipeline_symbols_available_nonblocking()
 
@@ -1212,8 +1319,38 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
         self.wf_stack.setCurrentIndex(1)
 
+    def _pipeline_symbol_inventory(self) -> list[dict]:
+        """Return one live inventory shared by the selector and graph menu."""
+
+        merged: list[dict] = []
+        seen: set[tuple[str, ...]] = set()
+        for collection in (
+            getattr(self, "all_discovered_symbols", []) or [],
+            getattr(self, "_cached_discovered_symbols", []) or [],
+        ):
+            for symbol in collection:
+                if not isinstance(symbol, dict):
+                    continue
+                identity = tuple(
+                    str(symbol.get(key) or "").replace("\\", "/").casefold()
+                    for key in (
+                        "provider_id",
+                        "host",
+                        "package",
+                        "module",
+                        "function_path",
+                        "file_path",
+                        "name",
+                    )
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                merged.append(symbol)
+        return merged
+
     def _ensure_pipeline_symbols_available_nonblocking(self) -> bool:
-        symbols = getattr(self, "_cached_discovered_symbols", []) or getattr(self, "all_discovered_symbols", []) or []
+        symbols = self._pipeline_symbol_inventory()
         if symbols:
             self.all_discovered_symbols = symbols
             self._refresh_pipeline_node_view_tool_symbols()
@@ -1267,7 +1404,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             self._pipeline_graph_interaction_bootstrap_active = False
 
     def _poll_pipeline_symbol_cache_for_graph(self, attempts: int = 0):
-        symbols = getattr(self, "_cached_discovered_symbols", []) or []
+        symbols = self._pipeline_symbol_inventory()
         if symbols:
             self.all_discovered_symbols = symbols
             self._refresh_pipeline_node_view_tool_symbols()
@@ -1614,9 +1751,11 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         view = getattr(self, "wf_node_view", None)
         if view is not None and hasattr(view, "set_tool_symbols"):
             try:
-                view.set_tool_symbols(getattr(self, "all_discovered_symbols", []) or [])
-            except Exception:
-                pass
+                view.set_tool_symbols(self._pipeline_symbol_inventory())
+            except Exception as exc:
+                self._report_workflow_builder_event(
+                    f"Could not refresh graph tool inventory: {exc}"
+                )
 
     def _current_pipeline_dcc_filter(self) -> str:
         box = getattr(self, "wf_build_dcc_filter", None)
@@ -3057,6 +3196,8 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
     def _handle_pipeline_graph_changed(self, *args, **kwargs):
         if getattr(self, "_syncing_workflow_python_to_graph", False):
             return
+        self._refresh_pipeline_attribute_connection_state()
+        self._refresh_pipeline_auto_metadata()
         self.update_builder_code_preview()
         self._refresh_pipeline_data_flow_warnings()
 
@@ -3077,6 +3218,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             else:
                 kept.append(step)
         self.wf_builder_steps = kept
+        self._refresh_pipeline_auto_metadata()
         self.update_builder_code_preview()
         self._refresh_pipeline_data_flow_warnings()
 
@@ -3340,7 +3482,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             return
         self._pipeline_attribute_editor_wired = True
         try:
-            view.nodeSelected.connect(editor.set_node)
+            view.nodeSelected.connect(self._handle_pipeline_node_selected)
         except Exception:
             pass
         try:
@@ -3351,6 +3493,45 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             editor.openFileRequested.connect(self._handle_pipeline_attribute_open_file)
         except Exception:
             pass
+        try:
+            editor.disconnectInputRequested.connect(
+                self._handle_pipeline_attribute_disconnect_input
+            )
+        except Exception:
+            pass
+
+    def _handle_pipeline_node_selected(self, step_data: dict):
+        editor = getattr(self, "wf_attribute_editor", None)
+        view = getattr(self, "wf_node_view", None)
+        if editor is None:
+            return
+        if not isinstance(step_data, dict):
+            editor.set_node(None)
+            return
+        connected_inputs = {}
+        if view is not None and hasattr(view, "connected_input_sources"):
+            try:
+                connected_inputs = view.connected_input_sources(step_data)
+            except Exception:
+                connected_inputs = {}
+        step_data["_connected_inputs"] = connected_inputs
+        editor.set_node(step_data)
+
+    def _refresh_pipeline_attribute_connection_state(self):
+        editor = getattr(self, "wf_attribute_editor", None)
+        step_data = getattr(editor, "step_data", None) if editor is not None else None
+        if isinstance(step_data, dict):
+            self._handle_pipeline_node_selected(step_data)
+
+    def _handle_pipeline_attribute_disconnect_input(self, payload: dict):
+        step_data = (payload or {}).get("step_data") or {}
+        step_id = str(step_data.get("graph_step_id") or "")
+        input_name = str((payload or {}).get("input") or "")
+        view = getattr(self, "wf_node_view", None)
+        if not step_id or not input_name or view is None:
+            return
+        if hasattr(view, "disconnect_input") and view.disconnect_input(step_id, input_name):
+            self._handle_pipeline_node_selected(step_data)
 
     def _handle_pipeline_attribute_literal_changed(self, payload: dict):
         step_data = payload.get("step_data") or {}
@@ -4128,6 +4309,33 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                 except Exception:
                     pass
 
+    def _activate_editor_workspace(self):
+        """Bring the real Editor workspace and normal code view to the front."""
+        workspace_tabs = getattr(self, "workspace_tabs", None)
+        if workspace_tabs is not None:
+            editor_index = -1
+            try:
+                for index in range(workspace_tabs.count()):
+                    if workspace_tabs.tabText(index).strip().casefold() == "editor":
+                        editor_index = index
+                        break
+                if editor_index >= 0:
+                    workspace_tabs.setCurrentIndex(editor_index)
+            except Exception:
+                pass
+        normal_editor = getattr(self, "normal_editor_widget", None)
+        if normal_editor is not None:
+            try:
+                normal_editor.setVisible(True)
+            except Exception:
+                pass
+        diff_editor = getattr(self, "editor_diff_widget", None)
+        if diff_editor is not None:
+            try:
+                diff_editor.setVisible(False)
+            except Exception:
+                pass
+
     def _open_file_in_real_editor(self, path, line_number=1, preview=False):
         """Open through the real app editor, reuse existing tab, and apply syntax.
 
@@ -4139,6 +4347,9 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             editor = self._current_editor_widget()
             self._goto_line_in_editor(editor, line_number)
             return editor
+
+        if not preview:
+            self._activate_editor_workspace()
 
         tabs = getattr(self, "editor_tabs", None)
         existing_index, existing_editor = self._find_open_editor_tab_for_path(path)
@@ -4669,6 +4880,14 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             self.shortcut_trim_spaces.setContext(Qt.ApplicationShortcut)
             self.shortcut_trim_spaces.activated.connect(self.trim_trailing_spaces)
 
+            self.shortcut_reformat_file = QShortcut(QKeySequence("Ctrl+Alt+L"), self)
+            self.shortcut_reformat_file.setContext(Qt.ApplicationShortcut)
+            self.shortcut_reformat_file.activated.connect(self.reformat_current_editor_file)
+
+            self.shortcut_fix_issues = QShortcut(QKeySequence("Alt+Enter"), self)
+            self.shortcut_fix_issues.setContext(Qt.ApplicationShortcut)
+            self.shortcut_fix_issues.activated.connect(self.fix_current_editor_quality_issues)
+
             self.shortcut_file_uses = QShortcut(QKeySequence("Ctrl+B"), self)
             self.shortcut_file_uses.setContext(Qt.ApplicationShortcut)
             self.shortcut_file_uses.activated.connect(self.find_uses_in_current_file_from_shortcut)
@@ -4717,10 +4936,18 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                     self.trim_trailing_spaces()
                     event.accept()
                     return
+                if event.key() == Qt.Key_L and event.modifiers() & Qt.AltModifier:
+                    self.reformat_current_editor_file()
+                    event.accept()
+                    return
                 if event.key() == Qt.Key_F:
                     self.find_in_current_file_from_shortcut()
                     event.accept()
                     return
+            if event.modifiers() & Qt.AltModifier and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self.fix_current_editor_quality_issues()
+                event.accept()
+                return
         except Exception:
             pass
         try:

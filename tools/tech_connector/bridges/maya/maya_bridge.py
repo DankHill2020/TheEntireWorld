@@ -21,6 +21,8 @@ import sys
 import traceback
 
 import maya.cmds as cmds
+import maya.api.OpenMaya as om
+import maya.api.OpenMayaUI as omui
 
 
 def maya_execute_and_capture(encoded_payload):
@@ -77,6 +79,14 @@ class MayaBridge(DCCBridgeDelegateMixin):
 
     def __init__(self):
         self.init_delegate("maya")
+        self._auto_install_livelink_plugin()
+
+    def _auto_install_livelink_plugin(self):
+        try:
+            from tech_connector.bridges.maya.maya_livelink_plugin import install_maya_livelink_plugin
+            install_maya_livelink_plugin()
+        except Exception:
+            pass
 
     PORT_FILE = Path(
         os.environ.get(
@@ -278,6 +288,380 @@ except Exception:
 
     def get_scene_objects_code(self) -> str:
         return "import maya.cmds as cmds\nprint(cmds.ls(type='transform')[:500])"
+
+    def get_scene_snapshot_code(
+        self,
+        *,
+        selected_only: bool = False,
+        meshes_only: bool = False,
+        include_geometry: bool = True,
+        limit: int = 500,
+        max_vertices_per_object: int = 50000,
+        max_faces_per_object: int = 50000,
+    ) -> str:
+        """Return Maya Python that prints isolated scene elements as JSON."""
+        return f"""
+import json
+import maya.cmds as cmds
+
+selected_only = {bool(selected_only)!r}
+meshes_only = {bool(meshes_only)!r}
+include_geometry = {bool(include_geometry)!r}
+limit = int({int(limit)!r})
+max_vertices_per_object = int({int(max_vertices_per_object)!r})
+max_faces_per_object = int({int(max_faces_per_object)!r})
+
+def _safe_float_list(values, fallback=None):
+    try:
+        return [float(v) for v in values]
+    except Exception:
+        return list(fallback or [])
+
+def _node_visible(node):
+    try:
+        if not cmds.getAttr(node + ".visibility"):
+            return False
+    except Exception:
+        pass
+    try:
+        parents = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        for parent in parents:
+            if not _node_visible(parent):
+                return False
+    except Exception:
+        pass
+    return True
+
+def _transform_from_shape(shape):
+    parents = cmds.listRelatives(shape, parent=True, fullPath=True) or []
+    return parents[0] if parents else shape
+
+def _shape_types(transform):
+    result = []
+    for shape in cmds.listRelatives(transform, shapes=True, fullPath=True) or []:
+        try:
+            if cmds.getAttr(shape + ".intermediateObject"):
+                continue
+        except Exception:
+            pass
+        try:
+            result.append(cmds.nodeType(shape))
+        except Exception:
+            pass
+    return sorted(set(result))
+
+def _mesh_shapes(transform):
+    result = []
+    for shape in cmds.listRelatives(transform, shapes=True, fullPath=True, type="mesh") or []:
+        try:
+            if cmds.getAttr(shape + ".intermediateObject"):
+                continue
+        except Exception:
+            pass
+        result.append(shape)
+    return result
+
+def _fallback_bbox(transform, size=1.0):
+    try:
+        t = _safe_float_list(cmds.xform(transform, q=True, ws=True, translation=True), [0, 0, 0])
+    except Exception:
+        t = [0, 0, 0]
+    half = float(size) * 0.5
+    return [t[0] - half, t[1] - half, t[2] - half, t[0] + half, t[1] + half, t[2] + half]
+
+def _bbox_payload(transform, shape_types):
+    try:
+        bbox = _safe_float_list(cmds.exactWorldBoundingBox(transform), [])
+    except Exception:
+        bbox = []
+    if len(bbox) == 6:
+        extent = max(abs(bbox[3] - bbox[0]), abs(bbox[4] - bbox[1]), abs(bbox[5] - bbox[2]))
+        if extent > 1.0e-5:
+            return bbox
+    node_type = cmds.nodeType(transform)
+    lowered = " ".join([node_type] + list(shape_types)).lower()
+    if any(token in lowered for token in ("joint", "follicle", "locator", "constraint", "ikhandle", "rigidbody", "light")):
+        return _fallback_bbox(transform, 1.0)
+    if any(token in lowered for token in ("nurbssurface", "nurbscurve")):
+        return _fallback_bbox(transform, 2.0)
+    return bbox
+
+def _mesh_geometry_payload(transform):
+    if not include_geometry:
+        return None
+    vertices = []
+    faces = []
+    shape_names = []
+    for shape in _mesh_shapes(transform):
+        try:
+            vertex_count = int(cmds.polyEvaluate(shape, vertex=True) or 0)
+            face_count = int(cmds.polyEvaluate(shape, face=True) or 0)
+        except Exception:
+            continue
+        if vertex_count <= 0 or face_count <= 0:
+            continue
+        if vertex_count > max_vertices_per_object or face_count > max_faces_per_object:
+            return {{
+                "representation": "bounds",
+                "reason": "mesh_too_large",
+                "vertex_count": vertex_count,
+                "face_count": face_count,
+            }}
+        try:
+            flat_points = cmds.xform(shape + ".vtx[*]", q=True, ws=True, translation=True) or []
+        except Exception:
+            flat_points = []
+        if len(flat_points) < vertex_count * 3:
+            continue
+        vertex_offset = len(vertices)
+        for i in range(0, len(flat_points), 3):
+            vertices.append([float(flat_points[i]), float(flat_points[i + 1]), float(flat_points[i + 2])])
+        for face_index in range(face_count):
+            try:
+                lines = cmds.polyInfo(shape + ".f[%d]" % face_index, faceToVertex=True) or []
+            except Exception:
+                lines = []
+            if not lines:
+                continue
+            text = str(lines[0])
+            if ":" in text:
+                text = text.split(":", 1)[1]
+            indices = []
+            for token in text.replace("\\n", " ").split():
+                try:
+                    indices.append(vertex_offset + int(token))
+                except Exception:
+                    pass
+            if len(indices) >= 3:
+                faces.append(indices)
+        shape_names.append(shape)
+    if not vertices or not faces:
+        return None
+    return {{
+        "representation": "mesh",
+        "vertices": vertices,
+        "faces": faces,
+        "shape_names": shape_names,
+    }}
+
+def _material_payload(transform):
+    for shape in _mesh_shapes(transform):
+        try:
+            shading_groups = cmds.listConnections(shape, type="shadingEngine") or []
+        except Exception:
+            shading_groups = []
+        for shading_group in shading_groups:
+            try:
+                materials = cmds.listConnections(shading_group + ".surfaceShader", source=True, destination=False) or []
+            except Exception:
+                materials = []
+            for material in materials:
+                for attr in ("baseColor", "color", "diffuseColor"):
+                    try:
+                        if cmds.attributeQuery(attr, node=material, exists=True):
+                            value = cmds.getAttr(material + "." + attr)
+                            if isinstance(value, list) and value:
+                                value = value[0]
+                            if isinstance(value, tuple) and len(value) >= 3:
+                                return {{
+                                    "name": material,
+                                    "color": [float(value[0]), float(value[1]), float(value[2]), 1.0],
+                                }}
+                    except Exception:
+                        pass
+    return None
+
+def _light_payload(transform, shape_types):
+    light_shapes = []
+    for shape in cmds.listRelatives(transform, shapes=True, fullPath=True) or []:
+        try:
+            if cmds.nodeType(shape) in ("pointLight", "spotLight", "directionalLight", "areaLight", "volumeLight", "ambientLight"):
+                light_shapes.append(shape)
+        except Exception:
+            pass
+    if not light_shapes:
+        return None
+    shape = light_shapes[0]
+    try:
+        color = cmds.getAttr(shape + ".color")[0]
+    except Exception:
+        color = (1.0, 1.0, 1.0)
+    try:
+        intensity = float(cmds.getAttr(shape + ".intensity"))
+    except Exception:
+        intensity = 1.0
+    try:
+        cone_angle = float(cmds.getAttr(shape + ".coneAngle")) if cmds.attributeQuery("coneAngle", node=shape, exists=True) else 40.0
+    except Exception:
+        cone_angle = 40.0
+    return {{
+        "kind": cmds.nodeType(shape),
+        "shape": shape,
+        "color": [float(color[0]), float(color[1]), float(color[2])],
+        "intensity": intensity,
+        "cone_angle": cone_angle,
+    }}
+
+def _camera_payload(camera_shape):
+    transform = _transform_from_shape(camera_shape)
+    try:
+        matrix = _safe_float_list(cmds.xform(transform, q=True, ws=True, matrix=True), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+    except Exception:
+        matrix = []
+    try:
+        translation = _safe_float_list(cmds.xform(transform, q=True, ws=True, translation=True), [0, 0, 0])
+    except Exception:
+        translation = [0, 0, 0]
+    try:
+        rotation = _safe_float_list(cmds.xform(transform, q=True, ws=True, rotation=True), [0, 0, 0])
+    except Exception:
+        rotation = [0, 0, 0]
+    return {{
+        "native_id": transform,
+        "name": transform.split("|")[-1],
+        "type": "camera",
+        "shape": camera_shape,
+        "translation": translation,
+        "rotation": rotation,
+        "world_matrix": matrix,
+        "focal_length_mm": float(cmds.getAttr(camera_shape + ".focalLength")),
+        "near_clip": float(cmds.getAttr(camera_shape + ".nearClipPlane")),
+        "far_clip": float(cmds.getAttr(camera_shape + ".farClipPlane")),
+        "visible": _node_visible(transform),
+    }}
+
+if selected_only:
+    selected = cmds.ls(selection=True, long=True) or []
+    source_transforms = []
+    for node in selected:
+        if cmds.nodeType(node) in ("transform", "joint"):
+            source_transforms.append(node)
+        else:
+            parent = _transform_from_shape(node)
+            if parent:
+                source_transforms.append(parent)
+else:
+    if meshes_only:
+        source_transforms = sorted(set(_transform_from_shape(shape) for shape in (cmds.ls(type="mesh", long=True) or [])))
+    else:
+        source_transforms = []
+        for node_type in ("transform", "joint"):
+            source_transforms.extend(cmds.ls(type=node_type, long=True) or [])
+        for shape_type in ("follicle", "nurbsSurface", "nurbsCurve", "locator", "pointLight", "spotLight", "directionalLight", "areaLight", "volumeLight", "ambientLight"):
+            source_transforms.extend(_transform_from_shape(shape) for shape in (cmds.ls(type=shape_type, long=True) or []))
+source_transforms = sorted(set(source_transforms))
+
+objects = []
+for transform in source_transforms[:limit]:
+    try:
+        shape_types = _shape_types(transform)
+        if "camera" in shape_types:
+            continue
+        if meshes_only and "mesh" not in shape_types:
+            continue
+        if not _node_visible(transform):
+            continue
+        bbox = _bbox_payload(transform, shape_types)
+        if len(bbox) != 6:
+            continue
+        translation = _safe_float_list(cmds.xform(transform, q=True, ws=True, translation=True), [0, 0, 0])
+        rotation = _safe_float_list(cmds.xform(transform, q=True, ws=True, rotation=True), [0, 0, 0])
+        scale = _safe_float_list(cmds.xform(transform, q=True, relative=True, scale=True), [1, 1, 1])
+        item = {{
+            "native_id": transform,
+            "name": transform.split("|")[-1],
+            "type": "mesh" if "mesh" in shape_types else (shape_types[0] if shape_types else cmds.nodeType(transform)),
+            "shape_types": shape_types,
+            "bbox": bbox,
+            "translation": translation,
+            "rotation": rotation,
+            "scale": scale,
+            "visible": True,
+        }}
+        if "mesh" in shape_types:
+            material = _material_payload(transform)
+            if material:
+                item["material"] = material
+            geometry = _mesh_geometry_payload(transform)
+            if geometry:
+                item["geometry"] = geometry
+        light = _light_payload(transform, shape_types)
+        if light:
+            item["light"] = light
+        objects.append(item)
+    except Exception as exc:
+        objects.append({{
+            "native_id": transform,
+            "name": transform.split("|")[-1],
+            "type": "error",
+            "error": str(exc),
+        }})
+
+cameras = []
+for camera_shape in (cmds.ls(type="camera", long=True) or [])[:100]:
+    try:
+        cameras.append(_camera_payload(camera_shape))
+    except Exception:
+        pass
+
+active_camera = ""
+try:
+    panel = cmds.getPanel(withFocus=True)
+    if panel and cmds.getPanel(typeOf=panel) == "modelPanel":
+        active_camera = cmds.modelPanel(panel, q=True, camera=True) or ""
+except Exception:
+    pass
+
+payload = {{
+    "schema": "tech_connector.maya.scene_snapshot.v1",
+    "provider_id": "maya",
+    "scene": cmds.file(q=True, sceneName=True) or "",
+    "unit_linear": cmds.currentUnit(q=True, linear=True),
+    "up_axis": cmds.upAxis(q=True, axis=True),
+    "current_time": float(cmds.currentTime(q=True)),
+    "objects": objects,
+    "cameras": cameras,
+    "active_camera": active_camera,
+    "isolation": {{
+        "selected_only": selected_only,
+        "meshes_only": meshes_only,
+        "include_geometry": include_geometry,
+        "transparent_background": True,
+        "excluded_categories": ["background", "grid", "hud", "manipulators"],
+    }},
+}}
+print(json.dumps(payload))
+"""
+
+    def get_scene_snapshot(
+        self,
+        *,
+        selected_only: bool = False,
+        meshes_only: bool = False,
+        include_geometry: bool = True,
+        limit: int = 500,
+        max_vertices_per_object: int = 50000,
+        max_faces_per_object: int = 50000,
+        timeout: float = 10.0,
+    ) -> tuple[bool, dict | str]:
+        """Query Maya for isolated scene objects, cameras, units, and bounds."""
+        ok, raw = self.execute(
+            self.get_scene_snapshot_code(
+                selected_only=selected_only,
+                meshes_only=meshes_only,
+                include_geometry=include_geometry,
+                limit=limit,
+                max_vertices_per_object=max_vertices_per_object,
+                max_faces_per_object=max_faces_per_object,
+            ),
+            timeout=timeout,
+        )
+        if not ok:
+            return False, raw
+        try:
+            return True, json.loads(str(raw or "{}"))
+        except Exception as exc:
+            return False, f"Could not parse Maya scene snapshot JSON: {exc}\n{raw}"
 
     def parse_input(self, text: str):
         """

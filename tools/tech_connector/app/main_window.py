@@ -32,7 +32,9 @@ class MainWindow(
     response_started = Signal(str)
     dcc_statuses_ready = Signal(dict)
     vcs_status_ready = Signal(object)
+    integrations_status_ready = Signal(object)
     autocomplete_suggestions_ready = Signal(int, int, int, object)
+    startup_warmup_finished = Signal()
 
 
 # Backward-compatible alias for any external references to App
@@ -52,7 +54,8 @@ def show_main_window(win):
         pass
 
 if __name__ == "__main__":
-    # Immediately kick off model warming in the background while GUI is initializing
+    # Optional model warming for users who prefer cold-start avoidance over
+    # lowest background resource pressure. Default startup is lazy.
     try:
         import threading
 
@@ -62,30 +65,31 @@ if __name__ == "__main__":
         from tech_connector.services.settings_service import load_settings
 
         settings = load_settings()
-        keep_alive = ollama_keep_alive(settings)
-        warmed = set()
-        for m in settings.get("ollama_preload_models") or ["qwen3:14b"]:
+        if bool(settings.get("ollama_preload_on_startup", False)):
+            keep_alive = ollama_keep_alive(settings)
+            warmed = set()
+            for m in settings.get("ollama_preload_models") or []:
+                if (
+                        m
+                        and m not in warmed
+                        and provider_for_model(m) == "ollama"
+                        and should_use_local_runtime(m, settings)
+                ):
+                    warmed.add(m)
+                    t = threading.Thread(
+                        target=warm_ollama_model, args=(m, keep_alive), daemon=True
+                    )
+                    t.start()
+            selected_for_policy = settings.get("model") or "ollama:qwen3:4b-instruct"
             if (
-                    m
-                    and m not in warmed
-                    and provider_for_model(m) == "ollama"
-                    and should_use_local_runtime(m, settings)
+                    not warmed
+                    and provider_for_model(selected_for_policy) == "ollama"
+                    and should_use_local_runtime(selected_for_policy, settings)
             ):
-                warmed.add(m)
                 t = threading.Thread(
-                    target=warm_ollama_model, args=(m, keep_alive), daemon=True
+                    target=warm_ollama_model, args=("qwen3:4b-instruct", keep_alive), daemon=True
                 )
                 t.start()
-        selected_for_policy = settings.get("model") or "ollama:qwen3:14b"
-        if (
-                not warmed
-                and provider_for_model(selected_for_policy) == "ollama"
-                and should_use_local_runtime(selected_for_policy, settings)
-        ):
-            t = threading.Thread(
-                target=warm_ollama_model, args=("qwen3:14b", keep_alive), daemon=True
-            )
-            t.start()
     except Exception:
         pass
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Direct Adobe Photoshop UXP plugin bridge."""
 
 import base64

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from tech_connector.services.action_graph_service import ActionGraph, validate_action_graph
+from reasoning_runtime.action.action_graph_service import ActionGraph, validate_action_graph
 from tech_connector.services.dcc.operation_contract_service import (
     OperationContract,
     operation_contracts,

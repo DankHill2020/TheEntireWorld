@@ -11,6 +11,8 @@ import threading
 import traceback
 from pathlib import Path
 
+from tech_connector.models.constants import TOOLS_ROOT
+
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("SUBSTANCE_PAINTER_COMMAND_PORT", "7031"))
@@ -27,7 +29,7 @@ def _port_files():
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         files.append(Path(local_app_data) / "TA_AI_Studio_MCPHost" / "substance_painter_port.txt")
-    files.append(Path(r"C:\depot\tools\substance_painter_port.txt"))
+    files.append(TOOLS_ROOT / "substance_painter_port.txt")
     return files
 
 

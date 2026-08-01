@@ -12,7 +12,7 @@ import re
 import time
 from typing import Any
 
-from tech_connector.services.action_graph_service import ActionGraph, validate_action_graph
+from reasoning_runtime.action.action_graph_service import ActionGraph, validate_action_graph
 from tech_connector.services.workflow_service import resolve_workflow_intent
 
 

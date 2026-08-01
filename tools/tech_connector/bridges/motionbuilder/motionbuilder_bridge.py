@@ -51,7 +51,10 @@ def _port_files():
         from pathlib import Path
         files.append(Path(local_app_data) / "TA_AI_Studio_MCPHost" / "motionbuilder_port.txt")
     from pathlib import Path
-    files.append(Path(r"C:\\depot\\tools\\motionbuilder_port.txt"))
+    tools_root = Path(os.environ["TOOLSROOT"]).expanduser() if os.environ.get("TOOLSROOT") else Path(__file__).resolve().parents[3] if "__file__" in globals() else Path.cwd()
+    if not tools_root.exists():
+        tools_root = Path.cwd()
+    files.append(tools_root / "motionbuilder_port.txt")
     return files
 
 
@@ -358,6 +361,41 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
             "scene = pyfbsdk.FBSystem().Scene\n"
             "print([c.Name for c in scene.Components][:200])"
         )
+
+    def get_scene_snapshot_code(
+        self,
+        *,
+        selected_only: bool = False,
+        include_geometry: bool = False,
+        limit: int = 500,
+        **_kwargs,
+    ) -> str:
+        from tech_connector.services.dcc.scene_snapshot_provider import motionbuilder_scene_snapshot_code
+
+        return motionbuilder_scene_snapshot_code(selected_only=selected_only, limit=limit)
+
+    def get_scene_snapshot(
+        self,
+        *,
+        selected_only: bool = False,
+        include_geometry: bool = False,
+        limit: int = 500,
+        timeout: float = 10.0,
+        **_kwargs,
+    ) -> tuple:
+        from tech_connector.services.dcc.scene_snapshot_provider import parse_scene_snapshot_output
+
+        ok, raw = self.execute(
+            self.get_scene_snapshot_code(
+                selected_only=selected_only,
+                include_geometry=include_geometry,
+                limit=limit,
+            ),
+            timeout=timeout,
+        )
+        if not ok:
+            return False, raw
+        return parse_scene_snapshot_output(raw, "motionbuilder")
 
     def get_takes_code(self) -> str:
         return (

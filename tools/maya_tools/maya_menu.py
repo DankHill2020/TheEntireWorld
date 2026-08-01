@@ -414,6 +414,8 @@ def _show_sequence_ui(*args):
 def _show_hik_ui(*args):
     try:
         from maya_tools.Rigging.mocap import hik_ui
+        import importlib
+        importlib.reload(hik_ui)
         hik_ui.launch_hik_ui()
     except Exception:
         log_exception("Failed to launch Human IK UI.")

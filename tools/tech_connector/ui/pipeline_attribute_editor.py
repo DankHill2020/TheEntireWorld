@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 def is_file_path_arg(name: str, annotation: str = "") -> bool:
     text = f"{name} {annotation}".lower()
@@ -41,6 +41,7 @@ def is_folder_path_arg(name: str, annotation: str = "") -> bool:
 class PipelineAttributeEditor(QWidget):
     literalChanged = Signal(dict)
     openFileRequested = Signal(dict)
+    disconnectInputRequested = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -78,6 +79,7 @@ class PipelineAttributeEditor(QWidget):
         self._add_context_details(step_data)
         params = step_data.get("params") or symbol.get("params") or []
         literals = step_data.setdefault("literal_values", {})
+        connected_inputs = step_data.get("_connected_inputs") or {}
         if not params:
             self.form.addRow(QLabel("No editable inputs."), QLabel(""))
             return
@@ -91,22 +93,56 @@ class PipelineAttributeEditor(QWidget):
             layout.setContentsMargins(0,0,0,0)
             layout.setSpacing(4)
             edit = QLineEdit()
-            edit.setText(str(literals.get(name, "")))
-            edit.setPlaceholderText(ann or "value")
-            edit.textChanged.connect(lambda value, n=name: self._set_literal(n, value))
+            connection_source = str(connected_inputs.get(name) or "").strip()
+            if connection_source:
+                edit.setText(f"Connected: {connection_source}")
+                edit.setReadOnly(True)
+                edit.setToolTip(
+                    f"This input is driven by {connection_source}. "
+                    "Right-click to unlock this input and disconnect the graph link."
+                )
+                edit.setContextMenuPolicy(Qt.CustomContextMenu)
+                edit.customContextMenuRequested.connect(
+                    lambda position, e=edit, n=name, source=connection_source:
+                    self._show_connected_input_menu(e, n, source, position)
+                )
+            else:
+                edit.setText(str(literals.get(name, "")))
+                edit.setPlaceholderText(ann or "value")
+                edit.textChanged.connect(lambda value, n=name: self._set_literal(n, value))
             layout.addWidget(edit, 1)
             self.param_widgets[name] = edit
             if is_file_path_arg(name, ann):
                 file_btn = QPushButton("File")
                 file_btn.clicked.connect(lambda _=False, n=name, e=edit: self._browse_file(n, e))
+                file_btn.setEnabled(not connection_source)
                 layout.addWidget(file_btn)
             elif is_folder_path_arg(name, ann):
                 folder_btn = QPushButton("Folder")
                 folder_btn.clicked.connect(lambda _=False, n=name, e=edit: self._browse_folder(n, e))
+                folder_btn.setEnabled(not connection_source)
                 layout.addWidget(folder_btn)
             label = QLabel(f"{name}: {ann or 'Any'}")
             label.setToolTip(ann)
             self.form.addRow(label, row)
+
+    def _show_connected_input_menu(
+        self,
+        edit: QLineEdit,
+        input_name: str,
+        connection_source: str,
+        position,
+    ):
+        menu = QMenu(edit)
+        unlock_action = menu.addAction("Unlock Input (Disconnect Link)")
+        unlock_action.setToolTip(f"Disconnect {connection_source} from {input_name}.")
+        selected = menu.exec(edit.mapToGlobal(position))
+        if selected == unlock_action and self.step_data:
+            self.disconnectInputRequested.emit({
+                "step_data": self.step_data,
+                "input": input_name,
+                "connection": connection_source,
+            })
 
     def _add_file_location(self, symbol: dict):
         path = self._symbol_file_location(symbol)

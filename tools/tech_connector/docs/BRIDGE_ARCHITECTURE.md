@@ -113,12 +113,51 @@ Adapters should listen on `127.0.0.1` by default and write their active port to
 
 ## Adding A New Bridge
 
-1. Add `bridges/{host}_bridge.py`.
-2. Add or reuse an in-app adapter script.
-3. Add the host to `plugins/plugin_registry.json`.
-4. Add direct UI actions only for the common verbs first.
-5. Add MCP support after direct calls are proven.
-6. Add docs and tests that do not require the host app to be installed.
+Adding a new 3D app should be progressive. A user should not need to implement
+every bridge feature before Tech Connector can understand that the app exists.
+
+Minimum viable 3D app:
+
+1. App name / id.
+2. Executable path.
+3. One or more API docs, SDK references, local stubs, or internal notes.
+
+With only those fields, Tech Connector can:
+
+- launch or locate the app;
+- index the app's API documentation;
+- answer app-aware questions;
+- draft bridge code, menu actions, and smoke tests;
+- show the app as "docs-aware / launchable" rather than "fully connected."
+
+Optional upgrades:
+
+| Optional field | Unlocks |
+| --- | --- |
+| In-app bridge script or adapter module | live command execution, selection reads, status checks |
+| Internal tool folders/modules | smart-menu capability indexing and workflow nodes |
+| Scene snapshot method | outliner and federated viewport participation |
+| Camera query/set methods | shared-camera viewport sync |
+| Geometry extraction | true mesh display instead of bounds fallback |
+| Menu contribution manifest | app-specific menu under Apps / Connected Applications |
+| Icon and branding | polished app identity in menus and status cards |
+| Health checks and smoke prompts | trusted/validated setup state |
+| MCP server | richer model-planned tool use after direct calls are proven |
+
+The helper module `services/dcc/three_d_app_provider_manifest.py` defines this
+progressive manifest shape. Required fields stay small; optional fields upgrade
+the provider from `minimum_viable` to `connected_app_ready`, `viewport_ready`, or
+`smart_menu_ready`.
+
+For a fully connected app, add or generate:
+
+1. `bridges/{host}_bridge.py`.
+2. An in-app adapter script or plugin.
+3. Registry metadata in `plugins/plugin_registry.json` or an integration package.
+4. Common direct UI verbs first.
+5. App-specific smart-menu actions from the provider manifest.
+6. MCP support after direct calls are proven.
+7. Docs and tests that do not require the host app to be installed.
 
 Keep host-specific logic inside the bridge or adapter. The UI should call common
 verbs whenever possible.

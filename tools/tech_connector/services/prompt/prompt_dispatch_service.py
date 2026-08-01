@@ -16,8 +16,9 @@ import re
 import time
 from typing import Any, Callable, Protocol
 
-from tech_connector.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
+from reasoning_runtime.engine.request_context import RequestContext
+from reasoning_runtime.prompt import extract_plan_verification
 from tech_connector.services.context_providers import ContextItem, ContextProviderRegistry
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -943,7 +944,7 @@ class PromptDispatchService:
         route = str(decision.get("route") or "").lower()
         route_guard_enabled = route not in {"chat", "project_search"}
         if route_guard_enabled:
-            plan_verification = self._extract_plan_verification(decision)
+            plan_verification = extract_plan_verification(decision)
             matches_request = plan_verification.get("matches_request")
             if isinstance(matches_request, str):
                 raw_match = matches_request.strip().lower()
@@ -1061,31 +1062,6 @@ class PromptDispatchService:
             "action_graph": "I'm validating the requested action sequence.",
             "chat": "I'm preparing the answer from the available context.",
         }.get(route, "I'm continuing with the next required step.")
-
-    @staticmethod
-    def _extract_plan_verification(payload: object) -> dict:
-        if isinstance(payload, (list, tuple)):
-            for value in payload:
-                nested = PromptDispatchService._extract_plan_verification(value)
-                if nested:
-                    return nested
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        direct = payload.get("request_plan_verification")
-        if isinstance(direct, dict) and direct:
-            return dict(direct)
-        for key in ("plan_verification", "capability_gap_plan"):
-            value = payload.get(key)
-            if isinstance(value, dict):
-                nested = PromptDispatchService._extract_plan_verification(value)
-                if nested:
-                    return nested
-        for value in payload.values():
-            nested = PromptDispatchService._extract_plan_verification(value)
-            if nested:
-                return nested
-        return {}
 
     def _build_plan_mismatch_clarification(self, decision: dict, route: str, plan_verification: dict) -> str:
         missing = plan_verification.get("missing") or plan_verification.get("missing_requirements") or []

@@ -12,7 +12,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtWidgets import QMenuBar, QMessageBox
+from PySide6.QtWidgets import QMenu, QMenuBar, QMessageBox
 
 from tech_connector.models.constants import APP_ROOT, LOGO_PATH
 
@@ -33,7 +33,25 @@ def _call_if_present(window, method_name: str) -> Callable:
 
 
 def _add_if_present(menu, label: str, window, method_name: str):
-    return menu.addAction(label, _call_if_present(window, method_name))
+    fn = getattr(window, method_name, None)
+    if not callable(fn):
+        return None
+    return menu.addAction(label, fn)
+
+
+def _add_checkable_attr_action(menu, label: str, window, attr: str):
+    widget = getattr(window, attr, None)
+    if widget is None:
+        return None
+    action = QAction(label, menu)
+    action.setCheckable(True)
+    try:
+        action.setChecked(bool(widget.isChecked()))
+    except Exception:
+        action.setChecked(False)
+    action.toggled.connect(lambda checked: widget.setChecked(bool(checked)))
+    menu.addAction(action)
+    return action
 
 
 def _app_icon(app_id: str) -> QIcon:
@@ -50,6 +68,12 @@ def _add_app_menu(parent, label: str, app_id: str):
     icon = _app_icon(app_id)
     if not icon.isNull():
         menu.setIcon(icon)
+    return menu
+
+
+def _add_top_menu(menu_bar: QMenuBar, title: str) -> QMenu:
+    menu = QMenu(title, menu_bar)
+    menu_bar.addMenu(menu)
     return menu
 
 
@@ -88,6 +112,67 @@ def _install_menu_bar_timing(menu_bar: QMenuBar, window) -> None:
             if child_menu:
                 _install_menu_timing(child_menu, window, f"{label} > {child_action.text().replace('&', '')}")
 
+
+def _retain_menu_tree(window, menu_bar: QMenuBar) -> None:
+    retained = getattr(window, "_tc_retained_menus", None)
+    if retained is None:
+        retained = []
+        window._tc_retained_menus = retained
+
+    def retain(menu):
+        if menu is None or menu in retained:
+            return
+        retained.append(menu)
+        for action in menu.actions():
+            retain(action.menu())
+
+    for action in menu_bar.actions():
+        retain(action.menu())
+
+
+
+def _open_image_editor_window(window, image_path: str = ""):
+    try:
+        from tech_connector.ui.image_editor_widget import ImageEditorWindow
+        return ImageEditorWindow.open_for_image(image_path, window)
+    except Exception as exc:
+        QMessageBox.warning(window, "Image Editor unavailable", str(exc))
+        return None
+
+
+def _open_mesh_painter_window(window):
+    try:
+        from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
+    except Exception as exc:
+        QMessageBox.warning(window, "3D Mesh Painter unavailable", str(exc))
+        return None
+    mesh_window = getattr(window, "_mesh_painter_window", None)
+    try:
+        if mesh_window is None or not mesh_window.isVisible():
+            mesh_window = ThreeDMeshPainterViewport(window)
+            mesh_window.setWindowFlags(Qt.Window)
+            mesh_window.setWindowTitle("3D Mesh / FBX Viewer & Painter")
+            mesh_window.resize(1180, 760)
+            window._mesh_painter_window = mesh_window
+        mesh_window.show()
+        mesh_window.raise_()
+        mesh_window.activateWindow()
+        return mesh_window
+    except Exception as exc:
+        QMessageBox.warning(window, "3D Mesh Painter unavailable", str(exc))
+        return None
+
+
+def _open_dcc_driver(window, host: str = ""):
+    fn = getattr(window, "show_dcc_driver_dialog", None)
+    if callable(fn):
+        return fn(host)
+    try:
+        from tech_connector.ui.dcc_driver_widget import open_dcc_driver_dialog
+    except Exception as exc:
+        QMessageBox.warning(window, "DCC Driver unavailable", str(exc))
+        return None
+    return open_dcc_driver_dialog(window, initial_host=host)
 
 
 def _open_prompt_assistant(window):
@@ -198,23 +283,28 @@ def _install_deferred_menu(menu, builder, window, label: str) -> None:
     if getattr(menu, "_tc_deferred_installed", False):
         return
     menu._tc_deferred_installed = True
+    retained = getattr(window, "_tc_retained_menus", None)
+    if retained is None:
+        retained = []
+        window._tc_retained_menus = retained
+    retained.append(menu)
     menu.addAction("Loading...").setEnabled(False)
     menu.aboutToShow.connect(lambda: _populate_deferred_menu(menu, builder, window, label))
 
 
 def _populate_connected_applications_menu(menu, window) -> None:
+    _add_if_present(menu, "Capability Status...", window, "show_connected_application_status_dialog")
+    menu.addAction("DCC Driver / Second Screen...", lambda: _open_dcc_driver(window))
+    menu.addSeparator()
     dcc_group = menu.addMenu("DCC")
     engine_group = menu.addMenu("Engine")
-    ops_group = menu.addMenu("Ops")
+    services_group = menu.addMenu("Services")
     messaging_group = menu.addMenu("Messaging")
-    _add_if_present(ops_group, "Add Integration Package...", window, "show_add_integration_package_dialog")
-    _add_if_present(ops_group, "GitHub Login...", window, "show_github_login_dialog")
-    _add_if_present(ops_group, "Notification Outputs...", window, "show_notification_outputs_dialog")
-    _add_if_present(ops_group, "Atlassian Settings...", window, "show_atlassian_settings_dialog")
-    _add_if_present(ops_group, "Create Jira Task from Prompt...", window, "show_create_jira_task_from_prompt_dialog")
-    _add_if_present(ops_group, "Upload to Confluence...", window, "show_upload_to_confluence_dialog")
-    _add_if_present(ops_group, "Backend Operation Log...", window, "show_backend_log_dialog")
-    _add_if_present(messaging_group, "Add Messaging Integration...", window, "show_add_integration_package_dialog")
+    _add_if_present(services_group, "Add Integration Package...", window, "show_add_integration_package_dialog")
+    _add_if_present(services_group, "GitHub Login...", window, "show_github_login_dialog")
+    _add_if_present(services_group, "Atlassian Settings...", window, "show_atlassian_settings_dialog")
+    _add_if_present(services_group, "Create Jira Task from Prompt...", window, "show_create_jira_task_from_prompt_dialog")
+    _add_if_present(services_group, "Upload to Confluence...", window, "show_upload_to_confluence_dialog")
     _add_if_present(messaging_group, "Slack Login...", window, "show_slack_login_dialog")
     _add_if_present(messaging_group, "Discord Login...", window, "show_discord_login_dialog")
     _add_if_present(messaging_group, "Notification Outputs...", window, "show_notification_outputs_dialog")
@@ -222,18 +312,33 @@ def _populate_connected_applications_menu(menu, window) -> None:
     unreal_menu = _add_app_menu(engine_group, "Unreal Engine", "unreal")
     _add_if_present(unreal_menu, "Open Unreal Engine", window, "launch_unreal")
     unreal_menu.addSeparator()
-    _add_if_present(unreal_menu, "Start / Stop Unreal Indexer", window, "toggle_unreal_daemon")
-    _add_if_present(unreal_menu, "Scan Project", window, "trigger_daemon_scan")
-    _add_if_present(unreal_menu, "Index Unreal Docs", window, "refresh_unreal_docs_cache")
-    _add_if_present(unreal_menu, "Snapshot Project", window, "maybe_auto_snapshot_unreal")
-    _add_if_present(unreal_menu, "Capability Validation", window, "show_unreal_capability_validation")
+    setup_menu = unreal_menu.addMenu("Setup")
+    inspect_menu = unreal_menu.addMenu("Inspect")
+    actions_menu = unreal_menu.addMenu("Actions")
+    _add_if_present(setup_menu, "Start / Stop Indexer", window, "toggle_unreal_daemon")
+    _add_if_present(setup_menu, "Index Unreal Docs", window, "refresh_unreal_docs_cache")
+    _add_if_present(setup_menu, "Capability Validation", window, "show_unreal_capability_validation")
+    _add_if_present(inspect_menu, "Scan Project", window, "trigger_daemon_scan")
+    _add_if_present(inspect_menu, "Snapshot Project", window, "direct_unreal_project_snapshot")
+    _add_if_present(inspect_menu, "Project Asset Scan", window, "direct_unreal_project_scan")
+    _add_if_present(inspect_menu, "Loaded Level Scan", window, "direct_unreal_level_scan")
+    _add_if_present(inspect_menu, "Inspect Asset / Blueprint", window, "direct_unreal_inspect_asset_from_text")
+    _add_if_present(inspect_menu, "Skeletons", window, "direct_unreal_get_skeletons")
+    _add_if_present(inspect_menu, "Meshes", window, "direct_unreal_get_static_meshes")
+    _add_if_present(actions_menu, "Run Function", window, "direct_unreal_call_from_text")
+    _add_if_present(actions_menu, "Undo Last Command", window, "direct_unreal_undo")
+    advanced_unreal = unreal_menu.addMenu("Advanced")
+    _add_if_present(advanced_unreal, "Create Python Wrapper from C++", window, "direct_unreal_create_cpp_wrapper_from_text")
+    _add_if_present(advanced_unreal, "Safe Operation Catalog", window, "show_unreal_operation_catalog")
 
     maya_menu = _add_app_menu(dcc_group, "Maya", "maya")
     _add_if_present(maya_menu, "Open Maya", window, "launch_maya")
     maya_menu.addSeparator()
-    _add_if_present(maya_menu, "Selection", window, "direct_maya_selection")
-    _add_if_present(maya_menu, "Current File", window, "direct_maya_file")
-    _add_if_present(maya_menu, "Scene Objects", window, "direct_maya_scene_objects")
+    _add_if_present(maya_menu, "Get Selection", window, "direct_maya_selection")
+    _add_if_present(maya_menu, "Get Current File", window, "direct_maya_file")
+    _add_if_present(maya_menu, "Get Scene Objects", window, "direct_maya_scene_objects")
+    _add_if_present(maya_menu, "Run Command", window, "direct_maya_call_from_text")
+    _add_if_present(maya_menu, "Undo Last Command", window, "direct_maya_undo")
 
     blender_menu = _add_app_menu(dcc_group, "Blender", "blender")
     _add_if_present(blender_menu, "Open Blender", window, "launch_blender")
@@ -243,6 +348,7 @@ def _populate_connected_applications_menu(menu, window) -> None:
 
     substance_menu = _add_app_menu(dcc_group, "Substance Painter", "substance_painter")
     _add_if_present(substance_menu, "Open Substance Painter", window, "launch_substance_painter")
+    substance_menu.addAction("Open Driver / Second Screen", lambda: _open_dcc_driver(window, "substance_painter"))
     substance_menu.addSeparator()
     _add_if_present(substance_menu, "Install Bridge Plugin", window, "install_substance_painter_bridge_from_menu")
     _add_if_present(substance_menu, "Copy Setup Snippet", window, "copy_substance_painter_script_editor_setup")
@@ -250,16 +356,18 @@ def _populate_connected_applications_menu(menu, window) -> None:
     unity_menu = _add_app_menu(engine_group, "Unity", "unity")
     _add_if_present(unity_menu, "Open Unity", window, "launch_unity")
     unity_menu.addSeparator()
-    _add_if_present(unity_menu, "Selection", window, "direct_unity_selection")
-    _add_if_present(unity_menu, "Current Scene", window, "direct_unity_scene")
-    _add_if_present(unity_menu, "Scene GameObjects", window, "direct_unity_scene_objects")
+    _add_if_present(unity_menu, "Get Selection", window, "direct_unity_selection")
+    _add_if_present(unity_menu, "Get Current Scene", window, "direct_unity_scene")
+    _add_if_present(unity_menu, "Get Scene GameObjects", window, "direct_unity_scene_objects")
+    _add_if_present(unity_menu, "Run Command", window, "direct_unity_call_from_text")
+    _add_if_present(unity_menu, "Undo Last Command", window, "direct_unity_undo")
 
     houdini_menu = _add_app_menu(dcc_group, "Houdini", "houdini")
     _add_if_present(houdini_menu, "Open Houdini", window, "launch_houdini")
     houdini_menu.addSeparator()
-    _add_if_present(houdini_menu, "Selection", window, "direct_houdini_selection")
-    _add_if_present(houdini_menu, "Current File", window, "direct_houdini_file")
-    _add_if_present(houdini_menu, "Scene Nodes", window, "direct_houdini_scene_objects")
+    _add_if_present(houdini_menu, "Get Selection", window, "direct_houdini_selection")
+    _add_if_present(houdini_menu, "Get Current File", window, "direct_houdini_file")
+    _add_if_present(houdini_menu, "Get Scene Nodes", window, "direct_houdini_scene_objects")
     _add_if_present(houdini_menu, "Context Summary", window, "direct_houdini_context_summary")
     _add_if_present(houdini_menu, "Call / Execute", window, "direct_houdini_call_from_text")
     _add_if_present(houdini_menu, "Undo Last Command", window, "direct_houdini_undo")
@@ -267,9 +375,9 @@ def _populate_connected_applications_menu(menu, window) -> None:
     mobu_menu = _add_app_menu(dcc_group, "MotionBuilder", "motionbuilder")
     _add_if_present(mobu_menu, "Open MotionBuilder", window, "launch_motionbuilder")
     mobu_menu.addSeparator()
-    _add_if_present(mobu_menu, "Selection", window, "direct_motionbuilder_selection")
-    _add_if_present(mobu_menu, "Current File", window, "direct_motionbuilder_file")
-    _add_if_present(mobu_menu, "Scene Objects", window, "direct_motionbuilder_scene_objects")
+    _add_if_present(mobu_menu, "Get Selection", window, "direct_motionbuilder_selection")
+    _add_if_present(mobu_menu, "Get Current File", window, "direct_motionbuilder_file")
+    _add_if_present(mobu_menu, "Get Scene Objects", window, "direct_motionbuilder_scene_objects")
     _add_if_present(mobu_menu, "Takes", window, "direct_motionbuilder_takes")
     _add_if_present(mobu_menu, "Characters", window, "direct_motionbuilder_characters")
 
@@ -319,19 +427,18 @@ def build_main_menu_bar(window) -> QMenuBar:
 
     menu_bar = QMenuBar(window)
 
-    file_menu = menu_bar.addMenu("File")
+    file_menu = _add_top_menu(menu_bar, "File")
     _add_if_present(file_menu, "New Chat", window, "new_chat")
     _add_if_present(file_menu, "Save Chat", window, "save_history")
     file_menu.addSeparator()
     file_menu.addAction("Prompt Assistant...", lambda: _open_prompt_assistant(window))
-    file_menu.addAction("Open Terminal...", lambda: _open_terminal(window))
     file_menu.addSeparator()
     _add_if_present(file_menu, "Settings...", window, "show_settings_dialog")
     _add_if_present(file_menu, "Customization Panel...", window, "show_customization_panel_dialog")
     file_menu.addSeparator()
     file_menu.addAction("Exit", window.close)
 
-    project_menu = menu_bar.addMenu("Project")
+    project_menu = _add_top_menu(menu_bar, "Project")
     _add_if_present(project_menu, "Load Project", window, "choose_project")
     _add_if_present(project_menu, "Update Project", window, "update_project")
     _add_if_present(project_menu, "Project Directories...", window, "show_first_run")
@@ -339,10 +446,9 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_if_present(project_menu, "Refresh Project Tree", window, "refresh_project_tree_fast")
     _add_if_present(project_menu, "Open Project Folder", window, "open_active_project_folder")
 
-    ai_menu = menu_bar.addMenu("AI")
+    ai_menu = _add_top_menu(menu_bar, "AI")
     _add_if_present(ai_menu, "Local Model Configuration...", window, "show_customization_panel_models")
     _add_if_present(ai_menu, "Cloud AI Setup...", window, "show_customization_panel_cloud")
-    _add_if_present(ai_menu, "Health Check", window, "health_check")
     activity_action = QAction("Show Activity Details", ai_menu)
     activity_action.setCheckable(True)
     activity_action.setChecked(bool(getattr(window, "settings", {}).get("show_activity_details", True)))
@@ -355,45 +461,59 @@ def build_main_menu_bar(window) -> QMenuBar:
     ai_menu.addSeparator()
     _add_if_present(ai_menu, "Start MCPHost", window, "start_mcphost")
     _add_if_present(ai_menu, "Stop MCPHost", window, "stop_mcphost")
-    ai_menu.addAction(
-        "Prime Models",
-        lambda: window.send_raw(window.prime_editor.toPlainText(), "Prime")
-        if hasattr(window, "prime_editor")
-        else None,
-    )
 
     safety_menu = ai_menu.addMenu("Model & Safety")
-    safety_menu.addAction("Open Settings...", _call_if_present(window, "show_settings_dialog"))
+    _add_if_present(safety_menu, "Open Settings...", window, "show_settings_dialog")
     safety_menu.addSeparator()
-    safety_menu.addAction("Toggle Local-Only Model", lambda: _toggle_attr("_chk_local_only")(window))
-    safety_menu.addAction("Toggle Project Modifications", lambda: _toggle_attr("_chk_allow_modifications")(window))
-    safety_menu.addAction("Toggle Confirmation Before Changes", lambda: _toggle_attr("_chk_require_confirm")(window))
-    safety_menu.addAction("Toggle GitHub / Tool Search", lambda: _toggle_attr("_chk_github_search")(window))
+    _add_checkable_attr_action(safety_menu, "Local-Only Model", window, "_chk_local_only")
+    _add_checkable_attr_action(safety_menu, "Allow Project Modifications", window, "_chk_allow_modifications")
+    _add_checkable_attr_action(safety_menu, "Require Confirmation Before Changes", window, "_chk_require_confirm")
+    _add_checkable_attr_action(safety_menu, "Allow GitHub / Tool Search", window, "_chk_github_search")
 
-
-    terminal_menu = menu_bar.addMenu("Terminal")
-    terminal_menu.addAction("Open Terminal...", lambda: _open_terminal(window))
-    terminal_menu.addAction("Stage Prompt in Terminal", _call_if_present(window, "run_prompt_in_terminal"))
-    terminal_menu.addAction("Stage Selection in Terminal", _call_if_present(window, "run_selection_in_terminal"))
-    terminal_menu.addAction("Stage Current File Command", _call_if_present(window, "run_current_file_in_terminal"))
-
-    knowledge_menu = menu_bar.addMenu("Knowledge")
+    knowledge_menu = _add_top_menu(menu_bar, "Knowledge")
     _add_if_present(knowledge_menu, "Quick Index", window, "build_index")
     _add_if_present(knowledge_menu, "Rebuild Dependency Graph", window, "build_dependency_graph_only")
     knowledge_menu.addSeparator()
     _add_if_present(knowledge_menu, "Knowledge Summary", window, "show_ai_knowledge_summary")
     _add_if_present(knowledge_menu, "Lock Current Knowledge", window, "lock_ai_knowledge_snapshot")
 
-    pipelines_menu = menu_bar.addMenu("Pipelines")
+    pipelines_menu = _add_top_menu(menu_bar, "Pipelines")
     pipelines_menu.addAction("Open Pipelines Tab", lambda: _switch_to_tab(window, "Pipelines"))
     _add_if_present(pipelines_menu, "Create New Pipeline", window, "start_new_workflow_builder")
     _add_if_present(pipelines_menu, "Refresh Pipelines", window, "refresh_workflows_list")
     _add_if_present(pipelines_menu, "Upload Documentation to Confluence...", window, "show_upload_to_confluence_dialog")
     pipelines_menu.addSeparator()
-    pipelines_menu.addAction("Pipeline Settings...", _call_if_present(window, "show_settings_dialog"))
+    _add_if_present(pipelines_menu, "Pipeline Settings...", window, "show_settings_dialog")
 
-    tools_menu = menu_bar.addMenu("Tools")
+    apps_menu = _add_top_menu(menu_bar, "Apps")
+    apps_menu.setToolTip(
+        "Connect to creative and development applications that Tech Connector can inspect, control, or automate."
+    )
+    _install_deferred_menu(
+        apps_menu,
+        lambda menu: _populate_connected_applications_menu(menu, window),
+        window,
+        "Apps",
+    )
 
+    tools_menu = _add_top_menu(menu_bar, "Tools")
+
+    img_editor_action = QAction("🎨 Image & Texture Editor...", window)
+    img_editor_action.setShortcut("Ctrl+Shift+I")
+    img_editor_action.setToolTip("Open the standalone Image & Texture Editor window (Photoshop, Substance, GIMP, PBR inspection).")
+    img_editor_action.triggered.connect(lambda: _open_image_editor_window(window))
+    tools_menu.addAction(img_editor_action)
+
+    mesh_painter_action = QAction("3D Mesh / FBX Viewer & Painter...", window)
+    mesh_painter_action.setToolTip("Open the standalone 3D Mesh Painter viewport for FBX, OBJ, glTF, GLB, and USD assets.")
+    mesh_painter_action.triggered.connect(lambda: _open_mesh_painter_window(window))
+    tools_menu.addAction(mesh_painter_action)
+
+    dcc_driver_action = QAction("DCC Driver / Second Screen...", window)
+    dcc_driver_action.setToolTip("Open a bridge-powered control surface for Maya, Blender, Substance Painter, Unreal, Unity, Houdini, and MotionBuilder.")
+    dcc_driver_action.triggered.connect(lambda: _open_dcc_driver(window))
+    tools_menu.addAction(dcc_driver_action)
+    tools_menu.addSeparator()
 
     terminal_tools_menu = tools_menu.addMenu("Terminal Tools")
     terminal_tools_menu.addAction("Open Terminal...", lambda: _open_terminal(window))
@@ -425,38 +545,23 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_if_present(studio_menu, "Create Changelist from Updated Files...", window, "create_vcs_changelist_dialog")
     _add_if_present(studio_menu, "View Current Changelists...", window, "show_vcs_changelists_dialog")
 
-    connected_apps_menu = tools_menu.addMenu("Connected Applications")
-    connected_apps_menu.setToolTip(
-        "Direct connections to external creative and development applications that Tech Connector can inspect, control, or automate."
-    )
-    _install_deferred_menu(
-        connected_apps_menu,
-        lambda menu: _populate_connected_applications_menu(menu, window),
-        window,
-        "Tools > Connected Applications",
-    )
-
     updates_menu = tools_menu.addMenu("App Updates")
     _add_if_present(updates_menu, "Check App Git Status", window, "check_app_update_status")
     _add_if_present(updates_menu, "Update from Latest", window, "update_app_from_latest")
     _add_if_present(updates_menu, "Update from Git Ref...", window, "update_app_from_git_ref")
 
-    community_menu = menu_bar.addMenu("Community")
+    community_menu = _add_top_menu(menu_bar, "Community")
     community_tools = community_menu.addMenu("Community Tools")
     community_tools.setToolTip(
         "Discover, install, share, and launch tools created outside the Tech Connector core. "
         "Community Tools can come from GitHub, local folders, or other developers and can be used in your projects and pipelines."
     )
     _add_if_present(community_tools, "Browse / Import from GitHub...", window, "trigger_web_import")
-    _add_if_present(community_tools, "Install Local Tool...", window, "trigger_web_import")
     _add_if_present(community_tools, "Add Integration Package...", window, "show_add_integration_package_dialog")
-    _add_if_present(community_tools, "Installed Community Tools", window, "trigger_web_import")
-    community_tools.addSeparator()
-    _add_if_present(community_tools, "Publish Tool...", window, "trigger_web_import")
     community_menu.addSeparator()
     _add_if_present(community_menu, "Custom Integrations & Bridges...", window, "show_customization_panel_ext")
 
-    window_menu = menu_bar.addMenu("Window")
+    window_menu = _add_top_menu(menu_bar, "Window")
     window_menu.addAction("Prompt Assistant...", lambda: _open_prompt_assistant(window))
     window_menu.addSeparator()
     _add_if_present(window_menu, "Show / Hide System Status", window, "toggle_system_status_panel")
@@ -480,12 +585,7 @@ def build_main_menu_bar(window) -> QMenuBar:
         else None,
     )
 
-    # Keep View as a light alias for users who expect display controls there.
-    view_menu = menu_bar.addMenu("View")
-    view_menu.addAction("Window / Layout Options", lambda: window_menu.exec(window.mapToGlobal(window.rect().topLeft())))
-    _add_if_present(view_menu, "Show / Hide System Status", window, "toggle_system_status_panel")
-
-    help_menu = menu_bar.addMenu("Help")
+    help_menu = _add_top_menu(menu_bar, "Help")
     _add_if_present(help_menu, "Health Check", window, "health_check")
     _add_if_present(help_menu, "Model Provider Setup", window, "show_model_provider_setup")
     help_menu.addSeparator()
@@ -494,6 +594,7 @@ def build_main_menu_bar(window) -> QMenuBar:
         lambda: _show_about_dialog(window),
     )
 
+    _retain_menu_tree(window, menu_bar)
     _install_menu_bar_timing(menu_bar, window)
     return menu_bar
 
@@ -501,6 +602,7 @@ def build_main_menu_bar(window) -> QMenuBar:
 def install_main_menu(window) -> QMenuBar:
     """Install a menu bar into the current QWidget-based layout."""
     menu_bar = build_main_menu_bar(window)
+    window._tc_main_menu_bar = menu_bar
     layout = window.layout()
     if layout is not None:
         layout.setMenuBar(menu_bar)

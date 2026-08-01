@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import math
+import re
 import socket
 import sys
 import time
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +20,14 @@ TOOLS_ROOT = next(
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.request_context import RequestContext
 from tech_connector.engine.request_engine import RequestEngine
 from tech_connector.knowledge.search import get_installed_ollama_models, resolve_installed_ollama_model
 from tech_connector.router.ai_router import AIRouter, ModelTiers
 from tech_connector.services.ollama_resource_service import build_ollama_options, choose_ollama_generation_budget, ollama_keep_alive
 from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 from tech_connector.services.settings_service import load_settings
+from tech_connector.models.constants import temp_output_path
 
 
 DEFAULT_PROMPTS = [
@@ -176,11 +179,11 @@ def _choose_installed_synthesis_model(
         return installed_lower[requested.lower()]
 
     if model_tier == "strong":
-        preferred = ("qwen3:14b", "qwen2.5-coder:14b", "qwen3:8b", "qwen2.5-coder:7b")
+        preferred = ("qwen3:4b-instruct", "qwen2.5-coder:7b", "qwen3:4b-instruct", "qwen2.5-coder:7b")
     elif model_tier == "standard":
-        preferred = ("qwen2.5-coder:7b", "qwen3:8b", "qwen2.5-coder:14b", "qwen3:14b")
+        preferred = ("qwen2.5-coder:7b", "qwen3:4b-instruct", "qwen2.5-coder:7b", "qwen3:4b-instruct")
     else:
-        preferred = ("qwen2.5-coder:7b", "qwen3:8b", "qwen2.5-coder:14b", "qwen3:14b")
+        preferred = ("qwen2.5-coder:7b", "qwen3:4b-instruct", "qwen2.5-coder:7b", "qwen3:4b-instruct")
     for candidate in preferred:
         if candidate.lower() in installed_lower:
             return installed_lower[candidate.lower()]
@@ -198,6 +201,11 @@ def _assess_output(text: str, prompt: str) -> tuple[str, list[str]]:
         return "poor", ["empty_or_too_short"]
     if "[project search error]" in lower or "unable to open database" in lower:
         return "poor", ["project_index_error"]
+    if _is_code_generation_request(prompt):
+        contract_failures = _requested_code_contract_failures(prompt, text)
+        if not contract_failures:
+            return "good", ["complete_code_contract"]
+        return "needs_review", contract_failures
     if "i don't know" in lower or "cannot" in lower and "project" in lower:
         notes.append("uncertain_or_blocked")
     if "source:" in lower or "best match" in lower or "plan" in lower or "steps" in lower:
@@ -215,6 +223,140 @@ def _assess_output(text: str, prompt: str) -> tuple[str, list[str]]:
     if notes:
         return "mixed", notes
     return "needs_review", notes
+
+
+def _is_code_generation_request(prompt: str) -> bool:
+    lower = (prompt or "").lower()
+    has_generation_verb = bool(
+        re.search(r"\b(add|build|create|generate|implement|make|provide|return|write)\b", lower)
+    )
+    has_code_artifact = bool(
+        re.search(r"\b(class|code|dialog|function|method|script|ui|widget)\b", lower)
+    )
+    return has_generation_verb and has_code_artifact
+
+
+def _requested_code_contract_failures(prompt: str, output_text: str) -> list[str]:
+    if not _is_code_generation_request(prompt):
+        return []
+
+    prompt_lower = (prompt or "").lower()
+    output = output_text or ""
+    output_lower = output.lower()
+    failures: list[str] = []
+    code_blocks = re.findall(r"```(?:python)?\s*(.*?)```", output, flags=re.IGNORECASE | re.DOTALL)
+    code = "\n\n".join(code_blocks).strip() if code_blocks else output.strip()
+
+    if not re.search(r"(?m)^\s*(class|def)\s+\w+", code):
+        failures.append("code_request_returned_no_declarations")
+
+    requested_classes = set(
+        re.findall(r"\b([A-Z][A-Za-z0-9_]*)\s+(?:[A-Z][A-Za-z0-9_]*\s+)?class\b", prompt)
+    )
+    requested_classes.update(
+        re.findall(r"\bclass\s+named\s+([A-Za-z_]\w*)", prompt, flags=re.IGNORECASE)
+    )
+    requested_classes.update(
+        re.findall(r"\bclass\s+([A-Z][A-Za-z0-9_]*)\b", prompt)
+    )
+    requested_callables = set(
+        re.findall(
+            r"\b(?:function|method|callable)\s+named\s+([A-Za-z_]\w*)",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+    requested_callables.update(
+        re.findall(r"\b([A-Za-z_]\w*)\s+(?:function|method|callable)\b", prompt)
+    )
+    requested_callables = {
+        name
+        for name in requested_callables
+        if name[:1].islower()
+        and name.lower() not in {"a", "an", "the", "this", "that", "real", "requested"}
+    }
+    requested_callables = {
+        name
+        for name in requested_callables
+        if name[:1].islower()
+        and name.lower() not in {"a", "an", "the", "this", "that", "real", "requested"}
+    }
+    for class_name in sorted(requested_classes):
+        if not re.search(rf"(?m)^\s*class\s+{re.escape(class_name)}\b", code):
+            failures.append(f"missing_requested_class_{class_name}")
+    for callable_name in sorted(requested_callables):
+        if not re.search(rf"(?m)^\s*(?:async\s+)?def\s+{re.escape(callable_name)}\b", code):
+            failures.append(f"missing_requested_callable_{callable_name}")
+
+    requested_identifiers = {
+        name
+        for name in re.findall(r"\b(?:Q[A-Z]\w+|[A-Za-z_]\w*_(?:btn|button|combo|dialog|input|label|spinbox|widget))\b", prompt)
+    }
+    for identifier in sorted(requested_identifiers):
+        if re.search(rf"\b{re.escape(identifier)}\b", code) is None:
+            failures.append(f"missing_requested_identifier_{identifier}")
+
+    if ("clicked" in prompt_lower or "signal" in prompt_lower) and ".connect(" not in code:
+        failures.append("missing_requested_signal_connection")
+    if "clicked" in prompt_lower and ".clicked.connect(" not in code.replace(" ", ""):
+        failures.append("missing_requested_clicked_connection")
+    if any(token in prompt_lower for token in ("import", "pyside", "unreal", "maya.cmds")):
+        if not re.search(r"(?m)^\s*(?:from\s+\S+\s+import|import\s+\S+)", code):
+            failures.append("missing_requested_imports")
+    if "__main__" in prompt or "launch block" in prompt_lower or "entry point" in prompt_lower:
+        if not re.search(r"if\s+__name__\s*==\s*['\"]__main__['\"]\s*:", code):
+            failures.append("missing_requested_main_block")
+        if "ui" in prompt_lower and ".show(" not in code:
+            failures.append("missing_requested_ui_show")
+
+    refusal_markers = (
+        "no actionable route",
+        "no execution plan",
+        "cannot derive",
+        "could not find a confident edit target",
+        "clarification needed",
+    )
+    if any(marker in output_lower for marker in refusal_markers):
+        failures.append("self_contained_code_request_was_refused")
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        failures.append(f"generated_code_syntax_error_line_{exc.lineno or 0}")
+        return failures
+
+    placeholder_names: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        meaningful = [
+            statement
+            for statement in node.body
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            )
+        ]
+        is_placeholder = not meaningful or all(
+            isinstance(statement, ast.Pass)
+            or isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and statement.value.value is Ellipsis
+            or isinstance(statement, ast.Raise)
+            and isinstance(statement.exc, ast.Call)
+            and isinstance(statement.exc.func, ast.Name)
+            and statement.exc.func.id == "NotImplementedError"
+            for statement in meaningful
+        )
+        if is_placeholder:
+            placeholder_names.append(node.name)
+    for callable_name in sorted(set(placeholder_names) & requested_callables):
+        failures.append(f"placeholder_requested_callable_{callable_name}")
+    if re.search(r"\b(no placeholder|non[- ]?empty|real body|complete(?:ly)? runnable)\b", prompt_lower):
+        for callable_name in sorted(set(placeholder_names)):
+            failures.append(f"placeholder_callable_{callable_name}")
+    return list(dict.fromkeys(failures))
 
 
 def _case_from_prompt(prompt: str, index: int = 0) -> PromptEvalCase:
@@ -290,6 +432,7 @@ def _score_result(
     for required in case.must_include or []:
         if str(required).lower() not in lower:
             failures.append(f"missing_required_text_{required}")
+    failures.extend(_requested_code_contract_failures(case.prompt, output_text))
     return not failures, failures
 
 
@@ -489,9 +632,9 @@ def run_prompt(
             confidence=getattr(decision, "confidence", None),
             settings=settings,
         )
-        if budget.model_tier == "strong":
+        if use_router_model and budget.model_tier == "strong":
             requested_model = str(settings.get("router_local_deep") or requested_model).replace("ollama:", "", 1)
-        elif budget.model_tier == "standard":
+        elif use_router_model and budget.model_tier == "standard":
             requested_model = str(settings.get("router_local_plan") or requested_model).replace("ollama:", "", 1)
         installed_models = get_installed_ollama_models()
         ollama_model = _choose_installed_synthesis_model(
@@ -499,13 +642,35 @@ def run_prompt(
             installed_models,
             model_tier=budget.model_tier,
         )
-        system_prompt = (
-            "You are the Tech Connector local prompt evaluator. Answer from the provided project/route facts. "
-            "Be concise, concrete, and do not invent files or APIs. "
-            "If a Best target path is provided, treat it as the primary candidate unless the user explicitly asked for a different layer. "
-            "If Indexed symbols are provided, treat the first symbol under the Best target as the primary callable unless it is clearly unsuitable."
-        )
+        standalone_code_request = _is_code_generation_request(prompt)
+        if standalone_code_request:
+            system_prompt = (
+                "You are the Tech Connector local coding evaluator. Return complete, runnable code that fulfills every explicit request. "
+                "A self-contained code request does not require project-index evidence. Do not refuse merely because no target file was found. "
+                "Do not invent project-local functions or APIs. Use only language or library APIs requested by the user and APIs supported by supplied evidence. "
+                "Include every requested import, declaration, widget, signal hookup, non-placeholder callable body, and entry point."
+            )
+        else:
+            system_prompt = (
+                "You are the Tech Connector local prompt evaluator. Answer from the provided project/route facts. "
+                "Be concise, concrete, and do not invent files or APIs. "
+                "If a Best target path is provided, treat it as the primary candidate unless the user explicitly asked for a different layer. "
+                "If Indexed symbols are provided, treat the first symbol under the Best target as the primary callable unless it is clearly unsuitable."
+            )
         grounding = _grounding_packet(engine_result, prompt)
+        response_contract = (
+            "Return only the complete runnable code in one Python fenced code block. Do not return a plan, refusal, TODO, pass, or ellipsis."
+            if standalone_code_request
+            else
+            "Return the useful answer the user should see with these sections when applicable:\n"
+            "1. Evidence used\n"
+            "2. Recommended plan\n"
+            "3. Exact files/assets involved\n"
+            "4. Tests or validation to run\n"
+            "5. Missing facts or approval needed\n"
+            "Use the deterministic evidence above as ground truth. If the evidence is insufficient, say what is missing instead of inventing files, commands, or APIs. "
+            "The Active file is only UI context; do not list it as an involved file/asset unless it also appears in the grounded target paths or the user explicitly asked about the active file."
+        )
         user_prompt = (
             f"Route: {decision.route}\n"
             f"Execution route: {decision.execution_route}\n"
@@ -515,14 +680,7 @@ def run_prompt(
             "Deterministic project evidence/result:\n"
             f"{_compact_model_evidence(engine_result)}\n\n"
             f"User prompt:\n{prompt}\n\n"
-            "Return the useful answer the user should see with these sections when applicable:\n"
-            "1. Evidence used\n"
-            "2. Recommended plan\n"
-            "3. Exact files/assets involved\n"
-            "4. Tests or validation to run\n"
-            "5. Missing facts or approval needed\n"
-            "Use the deterministic evidence above as ground truth. If the evidence is insufficient, say what is missing instead of inventing files, commands, or APIs. "
-            "The Active file is only UI context; do not list it as an involved file/asset unless it also appears in the grounded target paths or the user explicitly asked about the active file."
+            f"{response_contract}"
         )
         prompt_build_ms = int((time.perf_counter() - prompt_build_started) * 1000)
         model_started = time.perf_counter()
@@ -588,7 +746,7 @@ def run_prompt(
         total_ms=total_ms,
         prompt_eval_count=prompt_eval_count,
         eval_count=eval_count,
-        output_excerpt="\n".join(output_text.splitlines()[:12]),
+        output_excerpt=output_text,
         usability=usability,
         passed=passed,
         notes=notes,
@@ -718,6 +876,11 @@ def main() -> int:
     args = parser.parse_args()
 
     cases = _load_cases(args.cases, args.prompts)
+    if args.require_synthesis:
+        cases = [
+            replace(case, llm_mode="required", suite="synthesis")
+            for case in cases
+        ]
     if args.suite != "all":
         cases = [case for case in cases if (case.suite or "deterministic") == args.suite]
     results: list[PromptSmokeResult] = []
@@ -737,7 +900,8 @@ def main() -> int:
             )
 
     if args.jsonl:
-        out_path = Path(args.jsonl)
+        requested_path = Path(args.jsonl)
+        out_path = requested_path if requested_path.is_absolute() else temp_output_path(requested_path.name, subdir="prompt_smoke")
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with out_path.open("w", encoding="utf-8") as handle:
@@ -747,7 +911,12 @@ def main() -> int:
             print(f"[prompt-smoke] Could not write JSONL report {out_path}: {exc}", file=sys.stderr)
     summary = summarize_results(results)
     if args.summary_json:
-        summary_path = Path(args.summary_json)
+        requested_summary_path = Path(args.summary_json)
+        summary_path = (
+            requested_summary_path
+            if requested_summary_path.is_absolute()
+            else temp_output_path(requested_summary_path.name, subdir="prompt_smoke")
+        )
         try:
             summary_path.parent.mkdir(parents=True, exist_ok=True)
             summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -790,7 +959,7 @@ def main() -> int:
             f"first_token_avg={suite_summary['first_token_ms']['avg']}ms "
             f"ollama_avg={suite_summary['ollama_ms']['avg']}ms total_avg={suite_summary['total_ms']['avg']}ms"
         )
-    return 0
+    return 0 if summary["failed"] == 0 else 1
 
 
 if __name__ == "__main__":

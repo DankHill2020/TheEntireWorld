@@ -6,6 +6,92 @@ import sys
 from typing import Any, Callable, Optional
 
 
+def discover_module_callables(module_path: Optional[str]) -> dict[str, str]:
+    """Return public callable names and human-readable signatures for a module."""
+    path_str = str(module_path or "").strip()
+    if not path_str or path_str == "default":
+        return {}
+    module = importlib.import_module(path_str)
+    callables: dict[str, str] = {}
+    for name in sorted(dir(module)):
+        if name.startswith("_"):
+            continue
+        value = getattr(module, name, None)
+        if not callable(value):
+            continue
+        try:
+            signature = str(inspect.signature(value))
+        except Exception:
+            signature = "(...)"
+        callables[name] = f"{name}{signature}"
+    return callables
+
+
+def resolve_custom_provider_binding(
+    topic: str,
+    module_path: Optional[str],
+    default_callable: str,
+    settings: Optional[dict[str, Any]] = None,
+) -> str:
+    """Resolve a Tech Connector provider port to the user's selected function."""
+    path_str = str(module_path or "").strip()
+    if not path_str or path_str == "default":
+        return "default"
+    if settings is None:
+        try:
+            from tech_connector.services.settings_service import load_settings
+            settings = load_settings()
+        except Exception:
+            settings = {}
+    bindings = settings.get("custom_provider_function_bindings") or {}
+    topic_bindings = bindings.get(topic) if isinstance(bindings, dict) else {}
+    selected = default_callable
+    if isinstance(topic_bindings, dict):
+        selected = str(topic_bindings.get(default_callable) or default_callable).strip() or default_callable
+    return f"{path_str}.{selected}"
+
+
+def signature_accepts_expected(candidate: Callable[..., Any], expected: Callable[..., Any]) -> tuple[bool, str]:
+    """Best-effort check that a candidate can accept the expected function inputs."""
+    try:
+        candidate_sig = inspect.signature(candidate)
+        expected_sig = inspect.signature(expected)
+    except Exception:
+        return True, "signature unavailable"
+
+    candidate_params = list(candidate_sig.parameters.values())
+    expected_params = list(expected_sig.parameters.values())
+    has_var_positional = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in candidate_params)
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in candidate_params)
+    candidate_names = {
+        p.name
+        for p in candidate_params
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    positional_capacity = sum(
+        1
+        for p in candidate_params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    required_positional = [
+        p for p in expected_params
+        if p.default is inspect.Parameter.empty
+        and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    missing_names = [
+        p.name for p in expected_params
+        if p.kind == inspect.Parameter.KEYWORD_ONLY
+        and p.default is inspect.Parameter.empty
+        and not has_var_keyword
+        and p.name not in candidate_names
+    ]
+    if missing_names:
+        return False, "missing keyword input(s): " + ", ".join(missing_names)
+    if not has_var_positional and positional_capacity < len(required_positional):
+        return False, f"accepts {positional_capacity} positional input(s), expected at least {len(required_positional)}"
+    return True, "signature compatible"
+
+
 def invoke_custom_provider(
     provider_path: Optional[str],
     fallback_fn: Callable[..., Any],

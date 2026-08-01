@@ -124,13 +124,16 @@ Active file, if relevant:
 Target discovery evidence:
 {target_context[:18000]}
 
-Answer requirements:
-- Use the discovered project evidence instead of guessing the target file.
-- If one file is clearly the best target, say why and propose the edit there.
-- If several files are plausible, rank them and ask for confirmation unless the user requested the best guess.
-- For implementation requests, output patch-style XML tags for exact file changes.
-- Update imports and call sites if needed.
+Answer requirements & Universal Code Contracts:
+- ZERO HALLUCINATION: Never invent non-existent APIs, functions, or DCC commands (`unreal`, `maya.cmds`, `PySide6`). Only use APIs verified by indexed evidence.
+- DYNAMIC INPUTS (NO HARDCODED MOCK VALUES): Do not hardcode arbitrary paths, IPs, or ports (e.g. 'path/to/...', '127.0.0.1', 8888). Retrieve values dynamically from UI widgets (`BrowseDirectory`, `QFileDialog`, `QLineEdit`, `QSpinBox`) or method arguments.
+- NO DEAD CODE: Connect every function and method on a UI class to interactive UI widget signals (`QPushButton.clicked.connect(...)`).
+- EXACT PROJECT IMPORTS: Import existing project base classes directly (e.g. `from custom_qt.custom_widgets import ModelessContinueDialog, BrowseDirectory`). Never create duplicate dummy base classes.
+- AUDIT BEFORE RE-INVENTING (REUSE EXISTING PROJECT HELPERS): Inspect discovery evidence for pre-existing project functions matching the domain request (e.g. `create_auto_joints_for_selected_mesh` in `maya_tools.Rigging.joint_placer`). Import and call existing project helpers inside handlers instead of rewriting duplicate logic from scratch.
+- CROSS-DCC BRIDGE MANDATE: Multi-DCC tools spanning multiple applications (e.g. Unreal + Maya) MUST NOT mix direct inline imports of mutually exclusive DCC modules (`unreal` and `maya.cmds`) in the same execution thread. Cross-DCC workflows MUST use project DCC bridges (`HostBridge` from `tech_connector.bridges.host_bridge`) to dispatch commands safely across host processes.
+- DEFENSIVE ERROR HANDLING: Wrap I/O, DCC API calls, and socket operations in try/except blocks with user-visible feedback.
+- HONEST CHUNKING STATUS: Report status as "IN PROGRESS (Chunk X/N)" if any `# TODO` stub remains for future phases. Never declare a task "Done" or "Completed" if placeholders remain.
+- For implementation requests, output patch-style XML tags (`<modify_file>` / `<create_file>`) for exact file changes.
 - Keep the project functional, importable, and testable.
-- Include a verification command or manual test.
 """
 

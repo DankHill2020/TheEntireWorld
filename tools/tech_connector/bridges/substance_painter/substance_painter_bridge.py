@@ -42,7 +42,10 @@ def _port_files():
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         files.append(Path(local_app_data) / "TA_AI_Studio_MCPHost" / "substance_painter_port.txt")
-    files.append(Path(r"C:\\depot\\tools\\substance_painter_port.txt"))
+    tools_root = Path(os.environ["TOOLSROOT"]).expanduser() if os.environ.get("TOOLSROOT") else Path(__file__).resolve().parents[3] if "__file__" in globals() else Path.cwd()
+    if not tools_root.exists():
+        tools_root = Path.cwd()
+    files.append(tools_root / "substance_painter_port.txt")
     return files
 
 

@@ -80,6 +80,25 @@ def extract_target_entities(prompt: str) -> list[TargetEntity]:
     ):
         add(match.group(1), "module", 0.985, mention=True, qualified=True)
 
+    # A dotted name governed by an explicit location relation is a module
+    # target even when the user does not prefix it with ``@``. Restricting the
+    # match to target relations avoids treating API calls elsewhere in the
+    # request as files to edit.
+    for match in re.finditer(
+        r"\b(?:in|into|inside|within|module)\s+"
+        r"`?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)`?"
+        r"(?![\w.])",
+        text,
+        flags=re.I,
+    ):
+        add(
+            match.group(1),
+            "module",
+            0.995,
+            relation="explicit_target",
+            qualified=True,
+        )
+
     # Python-like function/class references, including foo() and Class.method.
     for match in re.finditer(r"(?<![\w])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\(\s*\)", text):
         add(match.group(1), "symbol", 0.97, callable=True)

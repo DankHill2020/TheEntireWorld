@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 import re
 from typing import Any
+from tech_connector.models.constants import TOOLS_ROOT
 
 
 @dataclass(frozen=True)
@@ -240,7 +241,7 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
         label="Maya Load Biped Rig Template",
         function="maya_tools.Rigging.rig_template.load_biped_rig_template",
         optional={
-            "template_path": "C:/depot/ArtSource/Rigs/rig_template.ma",
+            "template_path": str((TOOLS_ROOT / "ArtSource" / "Rigs" / "rig_template.ma").resolve()),
             "namespace": "",
             "reference": False,
             "merge_namespaces_on_clash": False,

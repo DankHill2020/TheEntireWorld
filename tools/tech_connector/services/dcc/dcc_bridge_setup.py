@@ -1,7 +1,9 @@
 """Setup helpers for direct DCC app bridges."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from tech_connector.models.constants import TOOLS_ROOT
 
@@ -142,3 +144,65 @@ except Exception as exc:
     traceback.print_exc()
     print("Tech Connector Substance Painter bridge setup failed:", exc)
 '''
+
+
+
+def install_gimp_bridge() -> DCCSetupResult:
+    """Install Tech Connector Python-Fu plugin into local GIMP plug-ins folder."""
+    try:
+        app_data = Path(os.environ.get("APPDATA", r"C:/Users/Aaron/AppData/Roaming"))
+        gimp_plugins = app_data / "GIMP" / "2.10" / "plug-ins"
+        gimp_plugins.mkdir(parents=True, exist_ok=True)
+
+        from tech_connector.bridges.gimp.gimp_bridge import PLUGIN_FILENAME, PLUGIN_SOURCE_CODE
+        target_file = gimp_plugins / PLUGIN_FILENAME
+        target_file.write_text(PLUGIN_SOURCE_CODE, encoding="utf-8")
+
+        return DCCSetupResult(
+            host="GIMP",
+            ok=True,
+            message=f"Successfully installed GIMP bridge plugin to {target_file}",
+            restart_required=True,
+        )
+    except Exception as exc:
+        return DCCSetupResult(host="GIMP", ok=False, message=str(exc))
+
+
+def install_photoshop_uxp_bridge() -> DCCSetupResult:
+    """Install Tech Connector UXP plugin into Adobe Photoshop plugin folder."""
+    try:
+        app_data = Path(os.environ.get("APPDATA", r"C:/Users/Aaron/AppData/Roaming"))
+        ps_plugins = app_data / "Adobe" / "UXP" / "Plugins" / "TechConnectorBridge"
+        ps_plugins.mkdir(parents=True, exist_ok=True)
+
+        from tech_connector.bridges.photoshop.photoshop_bridge import PLUGIN_JS_SOURCE, PLUGIN_MANIFEST
+        (ps_plugins / "manifest.json").write_text(PLUGIN_MANIFEST, encoding="utf-8")
+        (ps_plugins / "index.js").write_text(PLUGIN_JS_SOURCE, encoding="utf-8")
+
+        return DCCSetupResult(
+            host="Photoshop",
+            ok=True,
+            message=f"Successfully installed Photoshop UXP bridge to {ps_plugins}",
+            restart_required=True,
+        )
+    except Exception as exc:
+        return DCCSetupResult(host="Photoshop", ok=False, message=str(exc))
+
+
+def auto_reconnect_dcc_bridges() -> dict[str, Any]:
+    """Preflight check across all 2D and 3D DCC bridges, auto-reconnecting active sockets."""
+    results = {}
+    from tech_connector.bridges.maya.maya_bridge import MayaBridge
+    from tech_connector.bridges.substance_painter.substance_painter_bridge import SubstancePainterBridge
+    from tech_connector.bridges.photoshop.photoshop_bridge import PhotoshopBridge
+    from tech_connector.bridges.gimp.gimp_bridge import GimpBridge
+
+    for name, bridge_cls in [("maya", MayaBridge), ("substance_painter", SubstancePainterBridge), ("photoshop", PhotoshopBridge), ("gimp", GimpBridge)]:
+        try:
+            b = bridge_cls()
+            port = b.find_port()
+            results[name] = {"connected": port is not None, "port": port}
+        except Exception as exc:
+            results[name] = {"connected": False, "error": str(exc)}
+
+    return results

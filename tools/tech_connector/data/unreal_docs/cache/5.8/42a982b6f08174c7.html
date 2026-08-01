@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.AssetRegistryHelpers &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.AssetTagsSubsystem" href="AssetTagsSubsystem.html" />
+    <link rel="prev" title="unreal.AssetRegistry" href="AssetRegistry.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="AssetTagsSubsystem.html" title="unreal.AssetTagsSubsystem"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="AssetRegistry.html" title="unreal.AssetRegistry"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistryHelpers</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-assetregistryhelpers">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistryHelpers</span></code><a class="headerlink" href="#unreal-assetregistryhelpers" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">AssetRegistryHelpers</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetRegistryHelpers" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><code class="xref py py-class docutils literal notranslate"><span class="pre">Object</span></code></a></p>
+<p>Asset Registry Helpers</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: AssetRegistry</p></li>
+<li><p><strong>File</strong>: AssetRegistryHelpers.h</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.asset_has_editor_only_data">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">asset_has_editor_only_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.asset_has_editor_only_data" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if the asset has its editor-only data</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.create_asset_data">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">create_asset_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allow_blueprint_class</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.create_asset_data" title="Link to this definition">¶</a></dt>
+<dd><p>Creates asset data from a UObject.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The asset to create asset data for</p></li>
+<li><p><strong>allow_blueprint_class</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – By default trying to create asset data for a blueprint class will create one for the UBlueprint instead</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.find_asset_native_class">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">find_asset_native_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetRegistryHelpers.find_asset_native_class" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the first native class of the asset type that can be found.  Normally this is just the FAssetData::GetClass(),
+however if the class is a blueprint generated class it may not be loaded.  In which case GetAncestorClassNames will
+be used to find the first native super class.  This can be slow if temporary caching mode is not on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type">type</a>(<a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class">Class</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_asset">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the asset UObject if it is loaded or loads the asset if it is unloaded then returns the result</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_asset_registry">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_asset_registry</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AssetRegistry.html#unreal.AssetRegistry" title="unreal.AssetRegistry"><span class="pre">AssetRegistry</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_asset_registry" title="Link to this definition">¶</a></dt>
+<dd><p>Get Asset Registry</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AssetRegistry.html#unreal.AssetRegistry" title="unreal.AssetRegistry">AssetRegistry</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_blueprint_assets">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_blueprint_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filter</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_blueprint_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Gets asset data for all blueprint assets that match the filter. ClassPaths in the filter specify the blueprint’s parent class.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filter</strong> (<a class="reference internal" href="ARFilter.html#unreal.ARFilter" title="unreal.ARFilter"><em>ARFilter</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>out_asset_data (Array[AssetData]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_class">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_class" title="Link to this definition">¶</a></dt>
+<dd><p>Get Class</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type">type</a>(<a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class">Class</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_derived_class_asset_data">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_derived_class_asset_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_classes</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_derived_class_asset_data" title="Link to this definition">¶</a></dt>
+<dd><p>Gets a list of FAssetData for all child classes, loaded or unloaded, if you have a native UClass* convert it
+to a FTopLevelAssetPath using UClass::GetClassPathName. The list of derived types can be quite large, but
+this function attempts to be as efficient as possible for large asset sets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>base_classes</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="TopLevelAssetPath.html#unreal.TopLevelAssetPath" title="unreal.TopLevelAssetPath"><em>TopLevelAssetPath</em></a><em>]</em>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>out_derived_class_asset_data (Array[AssetData]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_export_text_name">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_export_text_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_export_text_name" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the name for the asset in the form: Class’ObjectPath’</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_full_name">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_full_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_full_name" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the full name for the asset in the form: Class ObjectPath</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.get_tag_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_tag_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.get_tag_value" title="Link to this definition">¶</a></dt>
+<dd><p>Gets the value associated with the given tag as a string</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p></li>
+<li><p><strong>tag_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>out_tag_value (str):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.is_asset_cooked">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_asset_cooked</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.is_asset_cooked" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if the asset is cooked</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.is_asset_loaded">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_asset_loaded</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.is_asset_loaded" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if the asset is loaded</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.is_redirector">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_redirector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.is_redirector" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if the this asset is a redirector.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.is_u_asset">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_u_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.is_u_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if this is the primary asset in a package, true for maps and assets but false for secondary objects like class redirectors</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.is_valid">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_valid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.is_valid" title="Link to this definition">¶</a></dt>
+<dd><p>Checks to see if this AssetData refers to an asset or is NULL</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.set_filter_tags_and_values">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_filter_tags_and_values</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filter</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tags_and_values</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="ARFilter.html#unreal.ARFilter" title="unreal.ARFilter"><span class="pre">ARFilter</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.set_filter_tags_and_values" title="Link to this definition">¶</a></dt>
+<dd><p>Populates the FARFilters tags and values map with the passed in tags and values</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filter</strong> (<a class="reference internal" href="ARFilter.html#unreal.ARFilter" title="unreal.ARFilter"><em>ARFilter</em></a>)</p></li>
+<li><p><strong>tags_and_values</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="TagAndValue.html#unreal.TagAndValue" title="unreal.TagAndValue"><em>TagAndValue</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="ARFilter.html#unreal.ARFilter" title="unreal.ARFilter">ARFilter</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.sort_by_asset_name">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">sort_by_asset_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sort_order</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.sort_by_asset_name" title="Link to this definition">¶</a></dt>
+<dd><p>Sorts the assets by their asset name.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a><em>]</em>) – The assets to sort</p></li>
+<li><p><strong>sort_order</strong> (<a class="reference internal" href="AssetRegistrySortOrder.html#unreal.AssetRegistrySortOrder" title="unreal.AssetRegistrySortOrder"><em>AssetRegistrySortOrder</em></a>) – Whether to sort ascending or descending</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>assets (Array[AssetData]): The assets to sort</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.sort_by_predicate">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">sort_by_predicate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sorting_predicate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sort_order</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.sort_by_predicate" title="Link to this definition">¶</a></dt>
+<dd><p>Sorts the assets based on a custom Blueprint delegate.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a><em>]</em>) – The assets to sort</p></li>
+<li><p><strong>sorting_predicate</strong> (<em>SortingPredicate</em>) – Implements a Left &lt;= Right relation</p></li>
+<li><p><strong>sort_order</strong> (<a class="reference internal" href="AssetRegistrySortOrder.html#unreal.AssetRegistrySortOrder" title="unreal.AssetRegistrySortOrder"><em>AssetRegistrySortOrder</em></a>) – Whether to sort ascending or descending</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>assets (Array[AssetData]): The assets to sort</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetRegistryHelpers.to_soft_object_path">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">to_soft_object_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><span class="pre">SoftObjectPath</span></a></span></span><a class="headerlink" href="#unreal.AssetRegistryHelpers.to_soft_object_path" title="Link to this definition">¶</a></dt>
+<dd><p>Convert to a SoftObjectPath for loading</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath">SoftObjectPath</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistryHelpers</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.asset_has_editor_only_data"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.asset_has_editor_only_data()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.create_asset_data"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.create_asset_data()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.find_asset_native_class"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.find_asset_native_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_asset"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_asset_registry"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_asset_registry()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_blueprint_assets"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_blueprint_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_class"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_derived_class_asset_data"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_derived_class_asset_data()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_export_text_name"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_export_text_name()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_full_name"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_full_name()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.get_tag_value"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.get_tag_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.is_asset_cooked"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.is_asset_cooked()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.is_asset_loaded"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.is_asset_loaded()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.is_redirector"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.is_redirector()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.is_u_asset"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.is_u_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.is_valid"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.is_valid()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.set_filter_tags_and_values"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.set_filter_tags_and_values()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.sort_by_asset_name"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.sort_by_asset_name()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.sort_by_predicate"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.sort_by_predicate()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetRegistryHelpers.to_soft_object_path"><code class="docutils literal notranslate"><span class="pre">AssetRegistryHelpers.to_soft_object_path()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="AssetRegistry.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistry</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="AssetTagsSubsystem.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetTagsSubsystem</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="AssetTagsSubsystem.html" title="unreal.AssetTagsSubsystem"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="AssetRegistry.html" title="unreal.AssetRegistry"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistryHelpers</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a224240e4f9be912',t:'MTc4NTI0NDQwMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

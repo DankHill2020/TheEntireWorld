@@ -19,14 +19,15 @@ class ModelProvider:
     setup_kind: str = "api_key"
     credential_hint: str = ""
     can_auto_import_key: bool = False
+    account_transport: str = ""
 
 
 PROVIDERS = {
     "ollama": ModelProvider(
         id="ollama",
-        display_name="Ollama Local",
+        display_name="Local",
         env_vars=(),
-        example_models=("ollama:qwen2.5-coder:1.5b", "ollama:qwen3:8b"),
+        example_models=("ollama:qwen2.5-coder:3b", "ollama:qwen3:4b-instruct"),
         setup_url="https://ollama.com/download",
         setup_kind="local",
         credential_hint="Install Ollama locally. No cloud login is required.",
@@ -43,8 +44,19 @@ PROVIDERS = {
             "openai:gpt-5.3-codex",
         ),
         setup_url="https://platform.openai.com/api-keys",
-        setup_kind="official_console_api_key",
-        credential_hint="Open the official OpenAI API keys page, create a key, then set OPENAI_API_KEY.",
+        setup_kind="account_login_or_api_key",
+        credential_hint="Sign in keylessly with ChatGPT through the official Codex client (API key is an optional fallback).",
+        account_transport="codex",
+    ),
+    "x": ModelProvider(
+        id="x",
+        display_name="X",
+        env_vars=("XAI_API_KEY",),
+        example_models=("x:grok-4.5", "x:grok-build-0.1"),
+        setup_url="https://x.ai/cli",
+        setup_kind="account_login_or_api_key",
+        credential_hint="Sign in keylessly with your X or Grok account through Grok Build (API key is an optional fallback).",
+        account_transport="grok",
     ),
     "google": ModelProvider(
         id="google",
@@ -55,8 +67,9 @@ PROVIDERS = {
             "google:gemini-2.5-pro",
         ),
         setup_url="https://aistudio.google.com/apikey",
-        setup_kind="official_console_api_key_or_oauth",
-        credential_hint="Open Google AI Studio to create a Gemini key. Google also supports OAuth flows for some Google APIs.",
+        setup_kind="account_login_or_api_key",
+        credential_hint="Sign in keylessly with Google through the official Antigravity CLI (API key is an optional fallback).",
+        account_transport="antigravity",
     ),
     "anthropic": ModelProvider(
         id="anthropic",
@@ -67,10 +80,19 @@ PROVIDERS = {
             "anthropic:claude-haiku-4-5",
         ),
         setup_url="https://console.anthropic.com/settings/keys",
-        setup_kind="official_console_api_key",
-        credential_hint="Open the official Anthropic Console keys page, create a key, then set ANTHROPIC_API_KEY.",
+        setup_kind="account_login_or_api_key",
+        credential_hint="Sign in keylessly with your Claude account through the official Claude client (API key is an optional fallback).",
+        account_transport="claude",
     ),
 }
+
+PROVIDER_ORDER = ("ollama", "openai", "x", "google", "anthropic")
+
+
+def models_for_provider(provider_id: str) -> tuple[str, ...]:
+    """Return only models belonging to one UI provider category."""
+    provider = PROVIDERS.get(provider_id)
+    return provider.example_models if provider else ()
 
 
 def provider_for_model(model: str) -> str:
@@ -89,6 +111,13 @@ def provider_has_credentials(provider_id: str) -> bool:
         return False
     if not provider.env_vars:
         return True
+    if provider.account_transport:
+        from tech_connector.services.authenticated_provider_service import (
+            account_provider_is_connected,
+        )
+
+        if account_provider_is_connected(provider_id):
+            return True
     return any(bool(os.environ.get(name)) for name in provider.env_vars)
 
 
@@ -98,8 +127,7 @@ def provider_status_lines() -> list[str]:
         if provider.id == "ollama":
             lines.append(f"{provider.display_name}: local")
             continue
-        keys = ", ".join(provider.env_vars)
-        state = "configured" if provider_has_credentials(provider.id) else f"missing env ({keys})"
+        state = "connected" if provider_has_credentials(provider.id) else "not connected"
         lines.append(f"{provider.display_name}: {state}")
     return lines
 
@@ -120,6 +148,10 @@ def provider_setup_notes(provider_id: str) -> str:
         provider.credential_hint,
     ]
 
+    if provider.account_transport:
+        lines.append("")
+        lines.append("Preferred authentication: official account login")
+
     if provider.env_vars:
         lines.append("")
         lines.append("Credential environment variable(s):")
@@ -132,9 +164,8 @@ def provider_setup_notes(provider_id: str) -> str:
     if not provider.can_auto_import_key and provider.env_vars:
         lines.append("")
         lines.append(
-            "Security note: the Studio will not scrape or auto-transfer API keys from provider web pages. "
-            "Those pages intentionally show secrets only to the signed-in user. Use the official page, then "
-            "paste/store the key through a deliberate local credential flow."
+            "Security note: Tech Connector does not read browser cookies or provider token files. "
+            "API keys are an advanced fallback for direct API and unattended workflows."
         )
 
     return "\n".join(lines)
@@ -161,7 +192,19 @@ def credential_requirement_for_model(model: str, settings: Optional[dict]) -> di
             "action": "",
         }
 
-    if provider_has_credentials(provider_id):
+    settings = settings or {}
+    advanced_key = str(
+        settings.get(
+            "xai_api_key" if provider_id == "x" else f"{provider_id}_api_key",
+            "",
+        )
+        or (
+            settings.get("gemini_api_key", "")
+            if provider_id == "google"
+            else ""
+        )
+    ).strip()
+    if provider_has_credentials(provider_id) or advanced_key:
         return {
             "provider": provider_id,
             "required": False,
@@ -169,12 +212,11 @@ def credential_requirement_for_model(model: str, settings: Optional[dict]) -> di
             "action": "",
         }
 
-    envs = " or ".join(provider.env_vars)
     return {
         "provider": provider_id,
         "required": True,
         "status": f"{provider.display_name} requires setup before this model can be used.",
-        "action": f"Open Settings -> Model Providers and configure {envs}.",
+        "action": "Open Settings -> Model Providers and sign in, or use an advanced API key.",
     }
 
 
@@ -237,7 +279,7 @@ def cloud_provider_failure_notice(text: str, model: str = "") -> str:
         recovery = "Wait for the quota window to reset, select another cloud provider, or explicitly switch Source Mode to **Always local**."
     elif any(marker in lowered for marker in ("unauthorized", "forbidden", "invalid api key", "authentication", "401", "403")):
         reason = "The provider rejected the configured credentials."
-        recovery = "Verify the API key in Settings or select another configured provider."
+        recovery = "Refresh the provider login, verify the advanced API key, or select another configured provider."
     else:
         reason = "The provider could not complete the request."
         recovery = "Check the provider status and configuration, then retry or explicitly select another model."

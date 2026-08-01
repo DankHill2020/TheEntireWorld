@@ -1,0 +1,47 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Local IDE, agent, environment, and runtime state.
+.tech_connector/
+.venv/
+.vscode/
+.ai_studio/
+.git/
+.idea/
+.project_ai/
+tech_connector/.continue/
+tech_connector/.idea/
+tech_connector/.project_ai/
+tech_connector/.pytest_cache/
+tech_connector/__pycache__/
+tech_connector/.agents/
+tech_connector/.ai_studio/
+
+# Local package/freeze outputs. These are rebuildable and can be very large.
+dist/
+.release_iter_test/
+.release_stage_test/
+.release_stage_test_full/
+
+# Generated indices/caches that exceed normal GitHub blob limits.
+tech_connector/data/capability_registry.json
+tech_connector/project_analysis/*.db
+
+# Large local source art and third-party binary payloads should stay local or use LFS.
+../ArtSource/Rigs/*.ma
+../ArtSource/Rigs/*.mb
+../ArtSource/Rigs/**/*.fbx
+external_tools/MetaHumanDNA/**/*.zip
+external_tools/MetaHumanDNA/**/*.lib
+external_tools/MetaHumanDNA/**/*.pdb
+external_tools/MetaHumanDNA/**/*.ilk
+external_tools/MetaHumanDNA/**/*.dna
+external_tools/MetaHumanDNA/**/*.mll
+
+# Runtime bridge discovery files should live under package-owned bridge ports
+# or local app data, not the tools root.
+*_port.txt
+
+# Local scratch/output folders.
+scratch/

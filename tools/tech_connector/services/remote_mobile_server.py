@@ -31,6 +31,7 @@ CONTENT_TYPES = {
     ".json": "application/json",
     ".png": "image/png",
     ".svg": "image/svg+xml",
+    ".mp4": "video/mp4",
     ".ico": "image/x-icon",
 }
 
@@ -288,7 +289,7 @@ class RemoteMobileServer:
                 if parsed.path == "/":
                     self._send_mobile_asset("index.html")
                     return
-                if parsed.path in {"/app.css", "/app.js", "/manifest.webmanifest", "/sw.js", "/tech_connector_logo.png"}:
+                if parsed.path in {"/app.css", "/app.js", "/manifest.webmanifest", "/sw.js", "/tech_connector_logo.png", "/tech_connector_logo.mp4", "/qr_code.svg", "/pairing_qr.svg"}:
                     self._send_mobile_asset(parsed.path.lstrip("/"))
                     return
                 if parsed.path == "/pair.svg":
@@ -327,6 +328,50 @@ class RemoteMobileServer:
                     query = parse_qs(parsed.query)
                     self._send_json(command_service.execute("list_pipelines", {"query": query.get("query", [""])[0]}))
                     return
+                if parsed.path == "/api/pipeline-graph":
+                    query = parse_qs(parsed.query)
+                    self._send_json(command_service.execute("get_pipeline_graph", {"pipeline_id": query.get("pipeline_id", [""])[0]}))
+                    return
+                if parsed.path == "/api/node-catalog":
+                    query = parse_qs(parsed.query)
+                    self._send_json(command_service.execute("list_node_catalog", {"query": query.get("query", [""])[0], "package": query.get("package", [""])[0]}))
+                    return
+                
+                if parsed.path in {"/api/auth/slack/callback", "/api/auth/discord/callback", "/api/auth/atlassian/callback", "/api/auth/clickup/callback"}:
+                    provider = "slack" if "slack" in parsed.path else "discord"
+                    query = parse_qs(parsed.query)
+                    code = query.get("code", [""])[0]
+                    from tech_connector.services.connected_account_service import handle_oauth_callback
+                    settings = getattr(command_service.app_service, "settings", {}) if hasattr(command_service, "app_service") and command_service.app_service else {}
+                    ok, msg = handle_oauth_callback(provider, code, settings)
+                    
+                    html_resp = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{provider.capitalize()} Connected!</title>
+  <style>
+    body {{ background: #080d14; color: #ecfff3; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }}
+    .card {{ background: rgba(18, 50, 74, 0.6); padding: 40px; border-radius: 16px; border: 1px solid #16f26a; box-shadow: 0 0 30px rgba(22, 242, 106, 0.3); max-width: 480px; }}
+    h1 {{ color: #16f26a; margin-bottom: 12px; }}
+    p {{ color: #8fd6a5; font-size: 15px; line-height: 1.5; }}
+    .badge {{ display: inline-block; padding: 6px 16px; background: rgba(30, 155, 255, 0.2); border: 1px solid #1e9bff; border-radius: 20px; font-weight: bold; color: #ffffff; margin-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎉 {provider.capitalize()} Connected!</h1>
+    <p>Zero-Configuration Setup Complete.<br><b>/techconnector</b> slash commands and automated bot responses are now active on your workspace.</p>
+    <div class="badge">You can close this window and start using Slack/Discord!</div>
+  </div>
+</body>
+</html>"""
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(html_resp.encode("utf-8"))
+                    return
+
                 if parsed.path == "/api/applications":
                     self._send_json(command_service.execute("list_applications"))
                     return
@@ -347,7 +392,40 @@ class RemoteMobileServer:
                     return
                 self._send_json({"ok": False, "error": "Not found"}, 404)
 
+            
             def do_POST(self) -> None:
+                parsed = urlparse(self.path)
+                if parsed.path == "/api/slack/events":
+                    body = self._read_json()
+                    if isinstance(body, dict) and body.get("type") == "url_verification":
+                        self._send_json({"challenge": body.get("challenge")})
+                        return
+                    event = body.get("event") or {}
+                    text = str(event.get("text") or "")
+                    res = command_service.execute("handle_slack_inbound", {"text": text, "user_name": event.get("user")})
+                    self._send_json(res)
+                    return
+                if parsed.path == "/api/slack/slash":
+                    length = int(self.headers.get("Content-Length", 0))
+                    raw_data = self.rfile.read(length).decode("utf-8")
+                    from urllib.parse import parse_qs
+                    data = parse_qs(raw_data)
+                    text = data.get("text", [""])[0]
+                    user_name = data.get("user_name", ["slack_user"])[0]
+                    channel_name = data.get("channel_name", ["general"])[0]
+                    response_url = data.get("response_url", [""])[0]
+                    res = command_service.execute("handle_slack_inbound", {
+                        "text": text,
+                        "user_name": user_name,
+                        "channel_name": channel_name,
+                        "response_url": response_url,
+                    })
+                    self._send_json({
+                        "response_type": "in_channel",
+                        "text": f"[Tech Connector] Processing prompt from @{user_name}: {text}",
+                    })
+                    return
+
                 parsed = urlparse(self.path)
                 if not self._authorized(parsed):
                     self._send_json({"ok": False, "error": "Unauthorized"}, 401)
@@ -359,6 +437,9 @@ class RemoteMobileServer:
                 self._send_json(command_service.execute(str(payload.get("command") or ""), payload.get("payload") or {}))
 
             def _authorized(self, parsed) -> bool:
+                if parsed.path in {"/api/auth/slack/callback", "/api/auth/discord/callback", "/api/auth/atlassian/callback", "/api/auth/clickup/callback", "/api/slack/events", "/api/slack/slash"}:
+                    return True
+
                 if not token:
                     return True
                 query_token = parse_qs(parsed.query).get("token", [""])[0]

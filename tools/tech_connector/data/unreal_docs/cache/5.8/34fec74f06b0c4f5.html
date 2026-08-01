@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.AssetTagsSubsystem &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.AssetThumbnailWidget" href="AssetThumbnailWidget.html" />
+    <link rel="prev" title="unreal.AssetRegistryHelpers" href="AssetRegistryHelpers.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="AssetThumbnailWidget.html" title="unreal.AssetThumbnailWidget"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="AssetRegistryHelpers.html" title="unreal.AssetRegistryHelpers"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetTagsSubsystem</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-assettagssubsystem">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.AssetTagsSubsystem</span></code><a class="headerlink" href="#unreal-assettagssubsystem" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">AssetTagsSubsystem</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetTagsSubsystem" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="EngineSubsystem.html#unreal.EngineSubsystem" title="unreal.EngineSubsystem"><code class="xref py py-class docutils literal notranslate"><span class="pre">EngineSubsystem</span></code></a></p>
+<p>Asset Tags Subsystem</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Plugin</strong>: AssetTags</p></li>
+<li><p><strong>Module</strong>: AssetTags</p></li>
+<li><p><strong>File</strong>: AssetTagsSubsystem.h</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_asset_data_to_collection">
+<span class="sig-name descname"><span class="pre">add_asset_data_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_asset_data_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset Data to Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_asset_datas_to_collection">
+<span class="sig-name descname"><span class="pre">add_asset_datas_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_datas</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_asset_datas_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset Datas to Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_datas</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_asset_ptr_to_collection">
+<span class="sig-name descname"><span class="pre">add_asset_ptr_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_ptr</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_asset_ptr_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset Ptr to Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_ptr</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_asset_ptrs_to_collection">
+<span class="sig-name descname"><span class="pre">add_asset_ptrs_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_ptrs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_asset_ptrs_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset Ptrs to Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_ptrs</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_asset_to_collection">
+<span class="sig-name descname"><span class="pre">add_asset_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_asset_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset to Collection
+deprecated: Names containing full asset paths are deprecated. Use Soft Object Path instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.add_assets_to_collection">
+<span class="sig-name descname"><span class="pre">add_assets_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path_names</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.add_assets_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Assets to Collection
+deprecated: Names containing full asset paths are deprecated. Use Soft Object Path instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path_names</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.collection_exists">
+<span class="sig-name descname"><span class="pre">collection_exists</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.collection_exists" title="Link to this definition">¶</a></dt>
+<dd><p>Check whether the given collection exists.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – Name of the collection to test.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the collection exists, false otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.create_collection">
+<span class="sig-name descname"><span class="pre">create_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">share_type</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.create_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Create Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>share_type</strong> (<a class="reference internal" href="CollectionShareType.html#unreal.CollectionShareType" title="unreal.CollectionShareType"><em>CollectionShareType</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.destroy_collection">
+<span class="sig-name descname"><span class="pre">destroy_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.destroy_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Destroy Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.empty_collection">
+<span class="sig-name descname"><span class="pre">empty_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.empty_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Empty Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.get_assets_in_collection">
+<span class="sig-name descname"><span class="pre">get_assets_in_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.get_assets_in_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Get the assets in the given collection.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – Name of the collection to test.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Assets in the given collection.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.get_collections">
+<span class="sig-name descname"><span class="pre">get_collections</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.get_collections" title="Link to this definition">¶</a></dt>
+<dd><p>Get the names of all available collections.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Names of all available collections.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.get_collections_containing_asset">
+<span class="sig-name descname"><span class="pre">get_collections_containing_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Get Collections Containing Asset
+deprecated: Names containing full asset paths are deprecated. Use Soft Object Path instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.get_collections_containing_asset_data">
+<span class="sig-name descname"><span class="pre">get_collections_containing_asset_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset_data" title="Link to this definition">¶</a></dt>
+<dd><p>Get the names of the collections that contain the given asset.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>) – Asset to test.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Names of the collections that contain the asset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.get_collections_containing_asset_ptr">
+<span class="sig-name descname"><span class="pre">get_collections_containing_asset_ptr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_ptr</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset_ptr" title="Link to this definition">¶</a></dt>
+<dd><p>Get the names of the collections that contain the given asset.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_ptr</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset to test.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Names of the collections that contain the asset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.k2_add_asset_to_collection">
+<span class="sig-name descname"><span class="pre">k2_add_asset_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.k2_add_asset_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Asset To Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path</strong> (<a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.k2_add_assets_to_collection">
+<span class="sig-name descname"><span class="pre">k2_add_assets_to_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_paths</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.k2_add_assets_to_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Add Assets To Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_paths</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.k2_get_collections_containing_asset">
+<span class="sig-name descname"><span class="pre">k2_get_collections_containing_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.k2_get_collections_containing_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Get the names of the collections that contain the given asset.
+Use this for in-game access. Use the Collections Manager Scripting Subsystem for any other use case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Names of the collections that contain the asset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.k2_remove_asset_from_collection">
+<span class="sig-name descname"><span class="pre">k2_remove_asset_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.k2_remove_asset_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset From Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path</strong> (<a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.k2_remove_assets_from_collection">
+<span class="sig-name descname"><span class="pre">k2_remove_assets_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_paths</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.k2_remove_assets_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Assets From Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_paths</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_asset_data_from_collection">
+<span class="sig-name descname"><span class="pre">remove_asset_data_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_asset_data_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset Data from Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_asset_datas_from_collection">
+<span class="sig-name descname"><span class="pre">remove_asset_datas_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_datas</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_asset_datas_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset Datas from Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_datas</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_asset_from_collection">
+<span class="sig-name descname"><span class="pre">remove_asset_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_asset_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset from Collection
+deprecated: Names containing full asset paths are deprecated. Use Soft Object Path instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_asset_ptr_from_collection">
+<span class="sig-name descname"><span class="pre">remove_asset_ptr_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_ptr</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_asset_ptr_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset Ptr from Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_ptr</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_asset_ptrs_from_collection">
+<span class="sig-name descname"><span class="pre">remove_asset_ptrs_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_ptrs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_asset_ptrs_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Asset Ptrs from Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_ptrs</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.remove_assets_from_collection">
+<span class="sig-name descname"><span class="pre">remove_assets_from_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_path_names</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.remove_assets_from_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Remove Assets from Collection
+deprecated: Names containing full asset paths are deprecated. Use Soft Object Path instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>asset_path_names</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.rename_collection">
+<span class="sig-name descname"><span class="pre">rename_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.rename_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Rename Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>new_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTagsSubsystem.reparent_collection">
+<span class="sig-name descname"><span class="pre">reparent_collection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_parent_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTagsSubsystem.reparent_collection" title="Link to this definition">¶</a></dt>
+<dd><p>Reparent Collection
+deprecated: Collection Manager Scripting Subsystem has been introduced as a new top level object for managing collections. Use that instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>new_parent_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.AssetTagsSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_asset_data_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_asset_data_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_asset_datas_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_asset_datas_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_asset_ptr_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_asset_ptr_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_asset_ptrs_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_asset_ptrs_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_asset_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_asset_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.add_assets_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.add_assets_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.collection_exists"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.collection_exists()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.create_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.create_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.destroy_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.destroy_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.empty_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.empty_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.get_assets_in_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.get_assets_in_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.get_collections"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.get_collections()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.get_collections_containing_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset_data"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.get_collections_containing_asset_data()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.get_collections_containing_asset_ptr"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.get_collections_containing_asset_ptr()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.k2_add_asset_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.k2_add_asset_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.k2_add_assets_to_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.k2_add_assets_to_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.k2_get_collections_containing_asset"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.k2_get_collections_containing_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.k2_remove_asset_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.k2_remove_asset_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.k2_remove_assets_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.k2_remove_assets_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_asset_data_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_asset_data_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_asset_datas_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_asset_datas_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_asset_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_asset_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_asset_ptr_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_asset_ptr_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_asset_ptrs_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_asset_ptrs_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.remove_assets_from_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.remove_assets_from_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.rename_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.rename_collection()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTagsSubsystem.reparent_collection"><code class="docutils literal notranslate"><span class="pre">AssetTagsSubsystem.reparent_collection()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="AssetRegistryHelpers.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetRegistryHelpers</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="AssetThumbnailWidget.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetThumbnailWidget</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="AssetThumbnailWidget.html" title="unreal.AssetThumbnailWidget"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="AssetRegistryHelpers.html" title="unreal.AssetRegistryHelpers"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetTagsSubsystem</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22389e42c715136',t:'MTc4NTIzODA4OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

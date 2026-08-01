@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
+from pathlib import Path
 from typing import Callable, Protocol
 
-from .progress_events import ActivityEvent, EngineResult, ProgressEvent
-from .request_context import RequestContext
+from reasoning_runtime.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
+from reasoning_runtime.engine.request_context import RequestContext
+from reasoning_runtime.prompt import extract_plan_verification
 
 ProgressCallback = Callable[[ProgressEvent], None]
 ActivityCallback = Callable[[ActivityEvent], None]
@@ -217,58 +219,10 @@ def _project_search_workspace_update(answer: str, *, primary_file: str = "", sou
         return {}
 
 
-
-
-def _extract_project_answer_files(answer: str, fallback: str = "") -> list[str]:
-    import re
-
-    text = str(answer or "")
-    found: list[str] = []
-    patterns = (
-        r"`([^`\n]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))`",
-        r"(?<![\w./\\-])([A-Za-z]:[\\/][^\s`]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))",
-        r"(?<![\w./\\-])([A-Za-z0-9_./\\-]+?\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui))",
-    )
-    for pattern in patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            value = match.group(1).strip("` ,.;:")
-            if value and value not in found:
-                found.append(value)
-    if fallback and fallback not in found:
-        found.insert(0, fallback)
-    return found[:12]
-
-
-def _project_search_workspace_update(answer: str, *, primary_file: str = "", source: str = "project_search") -> dict:
-    try:
-        from tech_connector.services.conversation_workspace_service import file_entity_payload, normalize_entity
-
-        files = _extract_project_answer_files(answer, primary_file)
-        entities = []
-        selected_ids = []
-        primary_id = ""
-        for index, path in enumerate(files):
-            payload = file_entity_payload(path, source=source, confidence=0.98 if index == 0 else 0.9)
-            entity = normalize_entity(payload)
-            entities.append(entity.to_dict())
-            selected_ids.append(entity.entity_id)
-            if not primary_id:
-                primary_id = entity.entity_id
-        return {
-            "entities": entities,
-            "primary_entity_ids": [primary_id] if primary_id else [],
-            "selected_entity_ids": selected_ids,
-            "result_summary": "Project search result files",
-            "source": source,
-        }
-    except Exception:
-        return {}
-
-
 def _augment_explicit_file_candidates(context: RequestContext, candidates: list[dict]) -> list[dict]:
     """Ensure explicitly named files reach evidence ranking even when symbol search is empty."""
     from pathlib import Path
-    from tech_connector.services.reasoning.target_entity_service import extract_target_entities
+    from reasoning_runtime.reasoning.target_entity_service import extract_target_entities
 
     augmented = [dict(item) for item in candidates if isinstance(item, dict)]
     known = {
@@ -542,7 +496,7 @@ class ActionGraphProvider:
 
     def handle(self, context: RequestContext, emit: ProgressCallback, activity: ActivityCallback | None = None) -> EngineResult:
         from tech_connector.services.action_planner_service import plan_prompt_to_action_graph, should_route_to_action_graph
-        from tech_connector.services.action_graph_service import format_action_graph
+        from reasoning_runtime.action.action_graph_service import format_action_graph
         from tech_connector.services.action_execution_engine import ActionExecutionEngine
 
         _emit(emit, "action_plan", "Compiling deterministic action graph")
@@ -746,7 +700,7 @@ class TargetDiscoveryEditProvider:
         mutation_scope = str(route_decision.get("mutation_scope") or "").lower()
         if route == "target_discovery" and op_mode in {"generate", "edit", "write"} and mutation_scope in {"file_mutation", "file_modification"}:
             return ""
-        verification = self._extract_nested_plan_verification(route_decision)
+        verification = extract_plan_verification(route_decision)
         matches_request = verification.get("matches_request")
         if isinstance(matches_request, str):
             matches_request = matches_request.strip().lower() in {"true", "1", "yes", "on"}
@@ -792,29 +746,6 @@ class TargetDiscoveryEditProvider:
             "Please regenerate the plan with these requirements explicit before I build the patch."
         ])
         return "\n".join(lines)
-
-    @staticmethod
-    def _extract_nested_plan_verification(payload: object) -> dict:
-        if isinstance(payload, (list, tuple)):
-            for value in payload:
-                nested = TargetDiscoveryEditProvider._extract_nested_plan_verification(value)
-                if nested:
-                    return nested
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        direct = payload.get("request_plan_verification")
-        if isinstance(direct, dict) and direct:
-            return dict(direct)
-        for key in ("request_plan_verification", "plan_verification"):
-            value = payload.get(key)
-            if isinstance(value, dict):
-                return dict(value)
-        for value in payload.values():
-            nested = TargetDiscoveryEditProvider._extract_nested_plan_verification(value)
-            if nested:
-                return nested
-        return {}
 
     def _extract_required_code_requirements(self, prompt: str) -> dict[str, bool]:
         import re
@@ -1063,16 +994,117 @@ class TargetDiscoveryEditProvider:
             base_class = "dict"
 
         if requirements.get("crossdcc_manager") or (
-            requirements.get("target_class_name") == "CrossDCCAssetSyncManager"
-            and requirements.get("requires_unreal_fbx_export")
-            and requirements.get("requires_maya_cmds_file_import")
-            and requirements.get("requires_list_progress_bar")
-            and requirements.get("requires_async_socket_broadcast")
+            "sync" in lower_text and ("adapter" in lower_text or "manager" in lower_text or "dcc" in lower_text)
         ):
-            sketch_lines, plan_steps = self._build_crossdcc_asset_sync_manager_sketch(
-                entity_name="CrossDCCAssetSyncManager",
-                target_name=target_name,
-            )
+            sketch_lines = [
+                "from __future__ import annotations",
+                "import os",
+                "import sys",
+                "from pathlib import Path",
+                "from typing import Any, Callable, Dict, List, Optional",
+                "",
+                "class SyncAdapter:",
+                "    \"\"\"Headless Cross-DCC Asset Synchronization Adapter.\"\"\"",
+                "",
+                "    def __init__(self, target_unreal_path: str = '/Game/SyncedAssets'):",
+                "        self.target_unreal_path = target_unreal_path.rstrip('/')",
+                "        self.progress_callback: Optional[Callable[[int, int, str], None]] = None",
+                "",
+                "    def set_progress_callback(self, callback: Callable[[int, int, str], None]) -> None:",
+                "        self.progress_callback = callback",
+                "",
+                "    def _report_progress(self, current: int, total: int, message: str) -> None:",
+                "        if self.progress_callback:",
+                "            self.progress_callback(current, total, message)",
+                "",
+                "    def sync_assets(self, source_path: str, destination_path: Optional[str] = None, progress_callback: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, Any]:",
+                "        \"\"\"Syncs a batch of local FBX assets into Unreal Engine.\"\"\"",
+                "        if progress_callback:",
+                "            self.set_progress_callback(progress_callback)",
+                "        dest_path = (destination_path or self.target_unreal_path).rstrip('/')",
+                "        source_dir = Path(source_path)",
+                "        fbx_files = [str(p) for p in source_dir.glob('*.fbx') if p.is_file()] if source_dir.exists() else []",
+                "        if not fbx_files:",
+                "            fbx_files = self._export_from_maya(str(source_dir), dest_path)",
+                "        results = {'successful': [], 'failed': [], 'total': len(fbx_files)}",
+                "        is_unreal = 'unreal' in sys.modules",
+                "",
+                "        for index, fbx_path in enumerate(fbx_files, start=1):",
+                "            path_obj = Path(fbx_path)",
+                "            total_count = max(1, len(fbx_files))",
+                "            self._report_progress(index, total_count, f'Importing {path_obj.name}...')",
+                "            if is_unreal:",
+                "                success = self._import_via_unreal_python(fbx_path, dest_path)",
+                "            else:",
+                "                success = self._import_via_dcc_bridge(fbx_path, dest_path)",
+                "            if success:",
+                "                results['successful'].append(fbx_path)",
+                "            else:",
+                "                results['failed'].append({'file': fbx_path, 'reason': 'Import failed'})",
+                "        return results",
+                "",
+                "    def _import_via_unreal_python(self, fbx_path: str, destination_path: str) -> bool:",
+                "        try:",
+                "            try:",
+                "                import unreal  # type: ignore",
+                "            except ImportError:",
+                "                return False",
+                "",
+                "            task = unreal.AssetImportTask()",
+                "            task.set_editor_property('filename', str(fbx_path).replace('\\\\', '/'))",
+                "            task.set_editor_property('destination_path', str(destination_path).replace('\\\\', '/'))",
+                "            task.set_editor_property('automated', True)",
+                "            task.set_editor_property('save', True)",
+                "            unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])",
+                "            return len(task.get_editor_property('imported_object_paths')) > 0",
+                "        except Exception as err:",
+                "            print(f'[SyncAdapter Error] Unreal import failed: {err}')",
+                "            return False",
+                "",
+                "    def _import_via_dcc_bridge(self, fbx_path: str, destination_path: str) -> bool:",
+                "        try:",
+                "            from tech_connector.services.project_service import ProjectIntelligenceService",
+                "            client = ProjectIntelligenceService()",
+                "            payload = {",
+                "                'fbx_path': str(fbx_path).replace('\\\\', '/'),",
+                "                'destination_path': str(destination_path).replace('\\\\', '/'),",
+                "            }",
+                "            res = client.execute_unreal_capability('import_fbx_asset', payload=payload)",
+                "            return bool(res and res.get('success'))",
+                "        except Exception as err:",
+                "            print(f'[SyncAdapter Error] DCC Bridge transport failed: {err}')",
+                "            return False",
+                "",
+                "    def _looks_like_maya_scene(self, source_path: str) -> bool:",
+                "        return str(source_path).lower().endswith(('.ma', '.mb'))",
+                "",
+                "    def _export_from_maya(self, source_path: str, out_dir: str) -> list[str]:",
+                "        if not self._looks_like_maya_scene(source_path):",
+                "            return []",
+                "        try:",
+                "            import maya.cmds as cmds  # type: ignore",
+                "        except Exception:",
+                "            return []",
+                "        try:",
+                "            export_dir = Path(out_dir).resolve()",
+                "            export_dir.mkdir(parents=True, exist_ok=True)",
+                "            exported = []",
+                "            for node in cmds.ls(type='transform', selection=True) or cmds.ls(type='transform'):",
+                "                fbx_path = str(export_dir / f'{node}.fbx')",
+                "                cmds.select(node, r=True)",
+                "                cmds.file(fbx_path, force=True, options='v=0;', type='FBX', pr=True, es=True)",
+                "                exported.append(str(fbx_path).replace('\\\\', '/'))",
+                "            return exported",
+                "        except Exception as err:",
+                "            print(f'[SyncAdapter Error] Maya export failed: {err}')",
+                "            return []",
+            ]
+            plan_steps = [
+                "1. Confirm headless imports (pathlib, typing, os, sys) in target adapter.",
+                "2. Define SyncAdapter with non-blocking progress callback support.",
+                "3. Implement Unreal Python import task and DCC bridge fallback transport.",
+                "4. Add unit test coverage verifying batch FBX ingestion and callback invocation.",
+            ]
             sketch_lines = self._inject_quality_guardrails(sketch_lines, requirements)
         elif is_enum:
             sketch_lines = [
@@ -1388,7 +1420,7 @@ class TargetDiscoveryEditProvider:
                     "            from tech_connector.services.connected_account_service import CONNECTED_ACCOUNT_DEFINITIONS",
                     "            from tech_connector.services.github_ingest_service import download_and_extract_repo",
                     "            from pathlib import Path",
-                    "            target_dir = Path('c:/depot/tools/external_tools/triposr')",
+            "            target_dir = Path(__file__).resolve().parents[2] / 'external_tools' / 'triposr'",
                     "            download_and_extract_repo('TripoSR', 'https://github.com/VAST-AI/TripoSR', target_dir.parent)",
                     "            return True",
                     "        except Exception:",
@@ -1512,11 +1544,11 @@ class TargetDiscoveryEditProvider:
                     "            elif 'InstantMesh' in candidate_text:",
                     "                repo_url = 'https://github.com/TencentARC/InstantMesh'",
                     "",
-                    "            target_dir = Path('c:/depot/tools/external_tools/image_to_mesh_model')",
+            "            target_dir = Path(__file__).resolve().parents[2] / 'external_tools' / 'image_to_mesh_model'",
                     "            download_and_extract_repo('image_to_mesh', repo_url, target_dir.parent, progress_cb=self.update_ingest_progress)",
                     "            return str(target_dir)",
                     "        except Exception:",
-                    "            return 'c:/depot/tools/external_tools/image_to_mesh_model'",
+            "            return str(Path(__file__).resolve().parents[2] / 'external_tools' / 'image_to_mesh_model')",
                     "",
                     "    def step1b_generate_mesh_file(self, image_path: str, model_repo_dir: str) -> str:",
                     "        \"\"\"Stage 1b: Run ML model inference on input image and save OBJ/FBX file to disk.\"\"\"",
@@ -1975,387 +2007,182 @@ class TargetDiscoveryEditProvider:
         return "\n".join(lines)
 
     def handle(self, context: RequestContext, emit: ProgressCallback, activity: ActivityCallback | None = None) -> EngineResult:
-        from tech_connector.services.project_service import (
-            discover_edit_targets,
-            format_edit_target_context,
-            build_project_edit_target_prompt,
-        )
-        from tech_connector.services.reasoning.target_resolution_service import resolve_target_candidates
+        """Run every project edit through the shared production workflow."""
+        import json
 
-        route_decision = _route_decision(context)
-        understanding = dict(route_decision.get("request_understanding") or {})
-        read_only_requested = bool(understanding.get("read_only_requested"))
-        mutation_requested = bool(understanding.get("mutation_requested"))
-        operation_mode = str(route_decision.get("operation_mode") or "").lower()
-        from tech_connector.services.prompt.artifact_contract_service import (
-            requests_generated_code_artifact,
+        from tech_connector.services.project_edit_workflow_service import (
+            run_multi_file_project_edit_workflow,
         )
-        generated_code_artifact = requests_generated_code_artifact(route_decision)
-        plan_contract_blocker = self._plan_contract_blocker(route_decision)
-        if plan_contract_blocker:
-            return EngineResult(
-                action="clarify",
-                label="Plan contract mismatch",
-                text=plan_contract_blocker,
-                metadata={
-                "engine_path": self.name,
-                "result_type": "plan_contract_verification_failed",
-                "route_decision": dict(route_decision),
-                "request_plan_verification": self._extract_nested_plan_verification(route_decision),
-                "operation_mode": operation_mode,
-            },
-        )
+        from tech_connector.services.settings_service import load_settings
 
-        if (
-            understanding
-            and not generated_code_artifact
-            and (read_only_requested or not mutation_requested)
-            and operation_mode != "plan"
-        ):
-            _activity(
-                activity,
-                "route_guard",
-                "Target discovery rejected request",
-                "The canonical request understanding is read-only or contains no mutation.",
-                status="warn",
-                metadata={
-                    "read_only_requested": read_only_requested,
-                    "mutation_requested": mutation_requested,
-                    "preferred_route": "project_search",
-                },
-            )
+        settings = load_settings()
+        roots = [
+            Path(str(root)).expanduser().resolve()
+            for root in context.project_roots or ()
+            if str(root).strip() and Path(str(root)).expanduser().exists()
+        ]
+        if not roots:
+            readiness = {
+                "ready": False,
+                "status": "invalid_project_root",
+                "summary": "No valid project root is available for this edit request.",
+                "requirements": [],
+                "validation": [],
+                "repairs": [],
+                "timings": [],
+                "artifacts": [],
+            }
             return EngineResult(
                 action="error",
-                label="Target Discovery",
-                text=(
-                    "TargetDiscoveryHandler refused this request because it is read-only. "
-                    "The dispatcher should route it through ProjectSearchHandler."
-                ),
+                label="Not Production Ready",
+                text=readiness["summary"],
                 metadata={
                     "engine_path": self.name,
-                    "result_type": "route_contract_rejected",
-                    "reroute": True,
-                    "preferred_route": "project_search",
-                    "request_understanding": understanding,
+                    "result_type": "project_changes_rejected",
+                    "production_readiness": readiness,
                 },
             )
-
-        _emit(emit, "target_discovery", "Finding likely edit targets")
-        _activity(activity, "intent", "Project edit request", context.text, status="info")
-        _activity(activity, "tool", "Project index", "Searching symbols, usages, and chunks for target concepts", status="info")
-        discovery_started = time.perf_counter()
-        _emit(emit, "target_discovery", "Starting indexed target discovery")
-        discovery = discover_edit_targets(
-            context.text,
-            active_path=context.current_file_path,
-            limit=8,
-            scope=_route_scope(context),
+        active_path = str(context.current_file_path or "").strip()
+        active_candidate = Path(active_path).expanduser().resolve() if active_path else None
+        project_root = next(
+            (
+                root
+                for root in roots
+                if active_candidate is not None
+                and (root == active_candidate or root in active_candidate.parents)
+            ),
+            roots[0],
         )
-        discovery_elapsed = time.perf_counter() - discovery_started
-        _emit(
-            emit,
-            "target_discovery",
-            f"Indexed target discovery finished in {discovery_elapsed:.2f}s",
-        )
-        _activity(
-            activity,
-            "performance",
-            "Target discovery completed",
-            f"discover_edit_targets finished in {discovery_elapsed:.2f}s",
-            status="ok" if discovery_elapsed < 5.0 else "warn",
-            metadata={"duration_seconds": round(discovery_elapsed, 3)},
-        )
-        candidates = _augment_explicit_file_candidates(
-            context,
-            list(discovery.get("candidates") or []),
-        )
-        planned_candidates = _expected_file_candidates_from_route(context)
-        if generated_code_artifact and not planned_candidates and context.project_roots:
-            candidates.insert(0, {
-                "path": str(context.project_roots[0]),
-                "score": 0,
-                "symbols": [],
-                "chunks": [],
-                "candidate_source": "generated_artifact_scope",
-                "purpose": (
-                    "Project scope for a new generated artifact; discovered files "
-                    "are grounding patterns, not assumed edit owners."
-                ),
-            })
-        if planned_candidates:
-            merged_planned: list[dict] = []
-            planned_keys: set[str] = set()
-            for item in planned_candidates:
-                keys = _candidate_identity_keys(context, str(item.get("path") or ""))
-                if keys and not (keys & planned_keys):
-                    merged_planned.append(item)
-                    planned_keys.update(keys)
-            remaining_candidates: list[dict] = []
-            seen = set(planned_keys)
-            for item in candidates:
-                keys = _candidate_identity_keys(context, str(item.get("path") or ""))
-                if keys and keys & seen:
-                    continue
-                remaining_candidates.append(item)
-                seen.update(keys)
-            candidates = [*merged_planned, *remaining_candidates]
-        resolution = resolve_target_candidates(
-            context.text,
-            candidates,
-            active_file=context.current_file_path,
-            open_files=context.open_file_paths,
-            operation_memory=(context.extras or {}).get("operation_memory")
-            or (context.extras or {}).get("active_operation_memory"),
-            allowed_roots=context.project_roots,
-        )
-        ranked_candidates = list(resolution.candidates or [])
-        _emit(emit, "target_discovery", "Ranking target files", len(ranked_candidates), 8)
-
-        # Preserve symbols/chunks from the original discovery records while using
-        # evidence ranking as the authority for order and selection.
-        original_by_path = {
-            str(item.get("path") or "").replace("\\", "/").casefold(): item
-            for item in candidates
-            if isinstance(item, dict) and item.get("path")
-        }
-        ordered_candidates: list[dict] = []
-        for idx, ranked in enumerate(ranked_candidates[:8], start=1):
-            path = str(ranked.get("path") or "")
-            original = dict(original_by_path.get(path.replace("\\", "/").casefold()) or {})
-            merged = dict(original)
-            merged.update({
-                "path": path,
-                "score": ranked.get("score", original.get("score", 0)),
-                "evidence_confidence": ranked.get("confidence", 0),
-                "evidence_signals": list(ranked.get("signals") or []),
-                "excluded": bool(ranked.get("excluded", False)),
-                "exclusion_reason": str(ranked.get("exclusion_reason") or ""),
-            })
-            ordered_candidates.append(merged)
-            symbols = merged.get("symbols") or []
-            symbol_items = [
-                f"{sym.get('kind')} {sym.get('qualname') or sym.get('name')} lines {sym.get('start_line')}-{sym.get('end_line')}"
-                for sym in symbols[:6]
-            ]
-            top_signals = [
-                f"{float(signal.get('score') or 0):+.0f} {signal.get('reason') or signal.get('key') or ''}"
-                for signal in list(ranked.get("signals") or [])[:5]
-            ]
-            _activity(
-                activity,
-                "candidate",
-                f"Candidate target #{idx}",
-                "Evidence-ranked project target",
-                status="ok" if path == resolution.selected_path else "info",
-                path=path,
-                score=float(ranked.get("score") or 0),
-                items=[*top_signals, *symbol_items],
-                metadata={
-                    "candidate_index": idx,
-                    "confidence": ranked.get("confidence"),
-                    "signals": ranked.get("signals") or [],
-                    "selected": path == resolution.selected_path,
-                },
-            )
-
-        discovery["candidates"] = ordered_candidates
-        discovery["target_resolution"] = resolution.to_dict()
-        discovery["evidence_ranking"] = ranked_candidates
-
-        if resolution.status != "selected":
-            _activity(
-                activity,
-                "clarification",
-                "Clarification needed",
-                "Evidence ranking could not safely select one edit target.",
-                status="warn",
-                metadata={"target_resolution": resolution.to_dict()},
-            )
-            return EngineResult(
-                action="clarify",
-                label="Clarification Needed",
-                text=resolution.clarification_prompt or self._clarification_text(discovery),
-                metadata={
-                    "engine_path": self.name,
-                    "result_type": "clarification",
-                    "discovery": discovery,
-                    "target_resolution": resolution.to_dict(),
-                },
-            )
-
-        selected_path = resolution.selected_path
-        selected_candidate = next(
-            (item for item in ordered_candidates if str(item.get("path") or "") == selected_path),
-            {"path": selected_path, "score": 0, "symbols": [], "chunks": []},
-        )
-        discovery["best_target"] = selected_candidate
-        discovery["confidence"] = "high"
-        discovery["selected_path"] = selected_path
-        resolution_state = resolution.to_dict()
-
-        from tech_connector.services.settings_service import load_settings
-        settings = load_settings()
         extras = dict(context.extras or {})
-        auto_approve_setting = bool(
-            settings.get("auto_approve_edit_plans")
-            or settings.get("full_automation_mode")
-            or extras.get("auto_approve")
-            or extras.get("full_automation")
-            or extras.get("skip_approval")
+        route_decision = _route_decision(context)
+        clarification_binding = dict(extras.get("clarification_binding") or {})
+        bound_route = dict(clarification_binding.get("route_decision") or {})
+        approved_plan_id = str(
+            extras.get("approved_plan_id")
+            or route_decision.get("approved_plan_id")
+            or bound_route.get("approved_plan_id")
+            or ""
         )
 
-        route_requires_confirmation = route_decision.get("requires_confirmation")
-        requires_confirmation = not (
-            auto_approve_setting
-            or route_requires_confirmation is False
-            or str(route_requires_confirmation).strip().lower() in {"0", "false", "no", "off"}
-        )
-        plan_binding = dict(extras.get("clarification_binding") or {})
-        plan_approved = bool(
-            auto_approve_setting
-            or (
-                context.text
-                and (
-                    (route_decision.get("approved") and not requires_confirmation)
-                    or str(route_decision.get("approval_state") or "").strip().lower() == "approved"
-                    or str(route_decision.get("approval") or "").strip().lower() == "approved"
-                )
-            )
-            or str(plan_binding.get("action") or "").strip().lower() == "confirm"
-            or bool(plan_binding.get("route_decision", {}).get("approved"))
-            or str(plan_binding.get("route_decision", {}).get("approval_state") or "").strip().lower() == "approved"
-        )
-        if auto_approve_setting:
-            mutation_requested = True
-            read_only_requested = False
-
-        if operation_mode == "plan" and not plan_approved:
-            _emit(emit, "prompt", "Read-only plan generated", 1, 1)
+        def report(message: str) -> None:
+            _emit(emit, "project_edit", str(message))
             _activity(
                 activity,
-                "plan",
-                "Implementation plan prepared",
-                f"Providing ranked target evidence for {selected_path or selected_candidate.get('path') or ''} before any edit prompt generation.",
-                status="ok",
-                path=selected_path,
-                score=float(selected_candidate.get("score") or 0),
-                metadata={
-                    "target_confidence": resolution.confidence,
-                    "target_reasons": resolution.reasons,
-                    "generated_code_artifact": generated_code_artifact,
-                    "live_tree_mutation_allowed": False,
-                },
+                "project_edit",
+                "Shared project-edit workflow",
+                str(message),
+                status="info",
+            )
+
+        report("Starting shared project-edit workflow")
+        workflow = run_multi_file_project_edit_workflow(
+            context.text,
+            project_root=str(project_root),
+            active_path=active_path or None,
+            selected_model=str(
+                context.model
+                or settings.get("code_model")
+                or settings.get("model")
+                or "qwen2.5-coder:7b"
+            ),
+            settings=settings,
+            timeout=float(settings.get("llm_timeout") or 210.0),
+            dry_run=True,
+            max_attempts=max(5, int(settings.get("max_prompt_retries") or 5)),
+            status_callback=report,
+            approved_plan_id=approved_plan_id,
+            original_prompt=context.text,
+        )
+        readiness = workflow.readiness_snapshot()
+        base_metadata = {
+            "engine_path": self.name,
+            "workflow_status": workflow.status,
+            "approval_id": workflow.approval_id,
+            "implementation_plan": workflow.implementation_plan,
+            "production_readiness": readiness,
+            "generated_candidate": workflow.candidate,
+            "validation_errors": list(workflow.errors),
+            "changes": list(workflow.preview.changes if workflow.preview else []),
+        }
+        if workflow.status == "plan_approval_required":
+            plan_text = json.dumps(
+                workflow.implementation_plan,
+                indent=2,
+                ensure_ascii=True,
             )
             pending_route = dict(route_decision)
-            if selected_path:
-                selected_target = str(selected_path)
-                pending_route["resolved_target_file"] = selected_target
-                pending_route["target_file"] = selected_target
-                pending_route["target"] = selected_target
-                index_filters = dict(pending_route.get("index_filters") or {})
-                index_filters["target_file"] = selected_target
-                index_filters["scope"] = "active"
-                pending_route["index_filters"] = index_filters
+            pending_route["approved_plan_id"] = workflow.approval_id
             return EngineResult(
                 action="clarify",
-                label="Project Edit Plan",
-                text=self._plan_text(
-                    context,
-                    discovery,
-                    selected_candidate,
-                    ordered_candidates,
-                    resolution_state,
+                label="Implementation Plan",
+                text=(
+                    "## Implementation Plan\n\n"
+                    + plan_text
+                    + "\n\nApprove this exact plan to continue. No code or files "
+                    "have been changed."
                 ),
                 metadata={
-                    "engine_path": self.name,
-                "result_type": "target_discovery_plan",
-                "discovery": discovery,
-                "target_resolution": resolution_state,
-                "selected_target": selected_path,
-                "generated_code_artifact": generated_code_artifact,
-                "live_tree_mutation_allowed": False,
-                "pending_clarification": {
-                    "kind": "confirmation",
-                    "resumable": True,
-                    "target": str(selected_path or ""),
-                    "execution_environment": str(
-                        route_decision.get("execution_environment")
-                        or route_decision.get("host")
-                        or ""
-                    ),
+                    **base_metadata,
+                    "result_type": "project_edit_plan",
+                    "pending_clarification": {
+                        "kind": "confirmation",
+                        "resumable": True,
                         "route_decision": pending_route,
                         "execution_request": {
-                            "operation_mode": "plan",
+                            "operation_mode": "project_edit",
                             "original_prompt": context.text,
-                            "target_file": str(selected_path or ""),
-                            "target_path": str(selected_path or ""),
-                            "resolved_target_file": str(selected_path or ""),
+                            "approved_plan_id": workflow.approval_id,
                         },
-                    "unresolved_slots": [],
-                    "allow_text_approval": True,
+                        "unresolved_slots": [],
+                        "allow_text_approval": True,
+                    },
+                    "ui_controls": [
+                        {"type": "button", "value": "approve", "label": "Approve"},
+                        {"type": "button", "value": "cancel", "label": "Deny"},
+                    ],
                 },
-                "ui_controls": [
-                    {"type": "button", "value": "approve", "label": "Approve"},
-                    {"type": "button", "value": "cancel", "label": "Deny"},
-                ],
-            },
             )
-
-        discovery_context = format_edit_target_context(
-            discovery,
-            max_source_lines=8 if generated_code_artifact else 45,
-            max_candidates=4 if generated_code_artifact else 8,
-        )
-        _emit(emit, "prompt", "Building grounded edit prompt")
-        prompt = build_project_edit_target_prompt(
-            context.text,
-            discovery_context,
-            active_path=(
-                context.current_file_path
-                if generated_code_artifact and not bool(mutation_requested and not read_only_requested)
-                else selected_path or context.current_file_path
-            ),
-            generated_artifact=generated_code_artifact,
-            live_tree_mutation_allowed=bool(mutation_requested and not read_only_requested),
-        )
-        _emit(emit, "prompt", "Edit prompt ready", 1, 1)
-        _activity(
-            activity,
-            "plan",
-            "Planned edit target",
-            "Preparing patch-style edit prompt from evidence-ranked target.",
-            status="ok",
-            path=selected_path,
-            score=float(selected_candidate.get("score") or 0),
-            metadata={
-                "target_confidence": resolution.confidence,
-                "target_reasons": resolution.reasons,
-                "generated_code_artifact": generated_code_artifact,
-                "live_tree_mutation_allowed": bool(mutation_requested and not read_only_requested),
-            },
-        )
+        if readiness.get("ready"):
+            return EngineResult(
+                action="answer",
+                label="Production Ready",
+                text=(
+                    "## Production Ready\n\n"
+                    + str(readiness.get("summary") or "All validation gates passed.")
+                    + (
+                        "\n\n### Generated Candidate\n\n```text\n"
+                        + workflow.candidate
+                        + "\n```"
+                        if workflow.candidate
+                        else ""
+                    )
+                ),
+                metadata={
+                    **base_metadata,
+                    "result_type": "project_changes",
+                },
+            )
+        findings = "\n".join(f"- {error}" for error in workflow.errors)
         return EngineResult(
-            action="send_raw",
-            label="Project Target Edit",
-            prompt=prompt,
+            action="error",
+            label="Not Production Ready",
             text=(
-                "Target discovery complete. Sending grounded edit prompt to the coding model.\n"
-                f"Selected: {selected_path}\n"
-                f"Target confidence: {resolution.confidence:.0%}\n"
-                f"Candidates: {len(ordered_candidates)}"
+                "## Not Production Ready\n\n"
+                + str(readiness.get("summary") or workflow.status)
+                + ("\n\n### Validation Findings\n\n" + findings if findings else "")
+                + (
+                    "\n\n### Generated Candidate\n\n```text\n"
+                    + workflow.candidate
+                    + "\n```"
+                    if workflow.candidate
+                    else ""
+                )
             ),
             metadata={
-                "engine_path": self.name,
-                "result_type": "target_edit",
-                "discovery": discovery,
-                "target_resolution": resolution.to_dict(),
-                "selected_target": selected_path,
-                "generated_code_artifact": generated_code_artifact,
-                "live_tree_mutation_allowed": bool(mutation_requested and not read_only_requested),
+                **base_metadata,
+                "result_type": "project_changes_rejected",
             },
         )
-
-
 @dataclass
 class ProjectSearchProvider:
     name: str = "project_search"

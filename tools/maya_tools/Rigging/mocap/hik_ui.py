@@ -1133,6 +1133,13 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         skipped_modules = []
 
         try:
+            # 1. Run T-pose alignment on mapped arm joints
+            if hasattr(self, "default_map") and self.default_map:
+                try:
+                    setup_hik.set_t_pose(joint_map=self.default_map)
+                except Exception as e:
+                    print(f"[Warning] Failed to run set_t_pose before building rig: {e}")
+
             for module in all_modules:
                 if module in face_modules:
                     mapped_joints = self._get_face_module_joints(module)

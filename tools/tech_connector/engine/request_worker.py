@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
-from .progress_events import ActivityEvent, EngineResult, ProgressEvent
-from .request_context import RequestContext
 from .request_engine import RequestEngine
+from reasoning_runtime.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
+from reasoning_runtime.engine.request_context import RequestContext
 
 
 class RequestPreparationWorker(QThread):

@@ -86,7 +86,7 @@ function Stop-OllamaModels {
         }
     }
     Stop-ProcessesByPattern `
-        -Patterns @("ollama*", "llama-server*", "llama_cpp_server*") `
+        -Patterns @("ollama*", "llama-server*", "llama_cpp_server*", "mcphost*") `
         -Label "model runtime"
 }
 

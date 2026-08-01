@@ -112,3 +112,11 @@ class UnityBridge(DCCBridgeDelegateMixin):
 
     def get_scene_objects_code(self) -> str:
         return "string.Join(\", \", Array.ConvertAll(GameObject.FindObjectsOfType<GameObject>(), go => go.name))"
+
+    def get_scene_snapshot_code(self, *, selected_only: bool = False, limit: int = 500, **_kwargs) -> str:
+        from tech_connector.services.dcc.scene_snapshot_provider import unity_scene_snapshot_code
+
+        return unity_scene_snapshot_code(selected_only=selected_only, limit=limit)
+
+    def get_scene_snapshot(self, *, selected_only: bool = False, limit: int = 500, **_kwargs) -> tuple:
+        return False, self.get_scene_snapshot_code(selected_only=selected_only, limit=limit)

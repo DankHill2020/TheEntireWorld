@@ -1,4 +1,6 @@
 # file_crawler.py
+from __future__ import annotations
+
 """File crawler for the Project‑Analysis pipeline inside the AI‑Studio server.
 
 Loads the local `config.yaml` and yields file paths that match the configured extensions.

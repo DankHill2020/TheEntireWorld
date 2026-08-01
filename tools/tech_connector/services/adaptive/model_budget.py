@@ -40,7 +40,18 @@ def choose_adaptive_model_budget(
         float(state.confidence.knowledge or 0.0),
     )
 
-    if stage in {"intent", "routing", "presentation", "summary"}:
+    if stage in {"visual", "visual_media", "image", "video", "camera"}:
+        tier = "local_visual"
+        model = (
+            settings.get("router_visual_media")
+            or settings.get("visual_media_model")
+            or settings.get("fast_general_model")
+            or settings.get("router_fast_llm_model")
+        )
+        predict = max(384, min(budget.reserved_output_tokens, 900))
+        ctx = min(max(4096, budget.token_budget), int(settings.get("ollama_max_num_ctx") or 8192))
+        reasoning = "standard"
+    elif stage in {"intent", "routing", "presentation", "summary"}:
         tier = "local_fast"
         model = settings.get("router_fast_llm_model") or settings.get("router_local_plan") or settings.get("general_model")
         predict = min(384, budget.reserved_output_tokens)
@@ -73,7 +84,7 @@ def choose_adaptive_model_budget(
     return AdaptiveModelBudget(
         stage_type=stage_type,
         model_tier=tier,
-        model_name=str(model or selected_model or settings.get("model") or "ollama:qwen2.5-coder:14b"),
+        model_name=str(model or selected_model or settings.get("model") or "ollama:qwen2.5-coder:7b"),
         num_ctx=max(512, int(ctx)),
         num_predict=max(32, int(predict)),
         timeout_seconds=max(30, timeout),

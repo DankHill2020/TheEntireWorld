@@ -21,7 +21,7 @@ TOOLS_ROOT = next(
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.request_context import RequestContext
 from tech_connector.engine.request_engine import RequestEngine
 from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 
@@ -196,7 +196,7 @@ def main() -> int:
     parser.add_argument("prompt")
     parser.add_argument("--project-root", default=str(TOOLS_ROOT))
     parser.add_argument("--active-path", default="")
-    parser.add_argument("--model", default="qwen2.5-coder:14b")
+    parser.add_argument("--model", default="qwen2.5-coder:7b")
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()

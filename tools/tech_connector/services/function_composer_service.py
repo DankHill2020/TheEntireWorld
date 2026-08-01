@@ -91,7 +91,7 @@ def compose_composite_function(
     except Exception:
         settings = {}
         
-    model = settings.get("model") or "qwen2.5-coder:14b"
+    model = settings.get("model") or "qwen2.5-coder:7b"
     general_model = settings.get("general_model") or model
     
     response = query_ollama_text(

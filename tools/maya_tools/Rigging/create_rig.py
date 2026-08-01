@@ -3884,16 +3884,36 @@ def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_jo
     face_joint_map = _filter_existing_face_joint_map(face_joint_map)
 
     # 1. T-Pose setup
+    if not arm_joints and isinstance(leg_joints, dict):
+        b_map = leg_joints
+        def _get_j(slot):
+            v = b_map.get(slot)
+            if isinstance(v, dict):
+                return v.get("joint")
+            return v
+        extracted_arm = [
+            _get_j("LeftArm"), _get_j("RightArm"),
+            _get_j("LeftShoulder"), _get_j("RightShoulder"),
+            _get_j("LeftForeArm"), _get_j("RightForeArm"),
+            _get_j("LeftHand"), _get_j("RightHand")
+        ]
+        if any(extracted_arm):
+            arm_joints = extracted_arm
+
     if not arm_joints:
         arm_joints = ['l_upperarm', 'r_upperarm',
                       'l_clavicle', 'r_clavicle',
                       'l_lowerarm', 'r_lowerarm',
                       'l_hand', 'r_hand']
-    arm_joints = [j for j in arm_joints if cmds.objExists(j)]
-    if len(arm_joints) >= 8:
-        setup_hik.t_pose_character(arm_joints[0], arm_joints[1], arm_joints[2], arm_joints[3], arm_joints[4],
-                                   arm_joints[5],
-                                   arm_joints[6], arm_joints[7])
+
+    arm_joints_valid = [j for j in arm_joints if j and cmds.objExists(j)]
+    if len(arm_joints_valid) >= 8:
+        setup_hik.set_t_pose(arm_joints_valid[0], arm_joints_valid[1], arm_joints_valid[2], arm_joints_valid[3],
+                             arm_joints_valid[4], arm_joints_valid[5], arm_joints_valid[6], arm_joints_valid[7])
+    elif arm_joints_valid:
+        setup_hik.set_t_pose(*arm_joints)
+    elif isinstance(leg_joints, dict):
+        setup_hik.set_t_pose(joint_map=leg_joints)
 
     # Convert the inputs into unified joint maps for modules to read
     body_joint_map = {}
@@ -4184,11 +4204,11 @@ def create_rig_from_mapping(body_joint_map, face_joint_map):
 
     # Let's run create_full_rig with these arguments
     create_full_rig(
-        arm_joints=arm_joints if len(arm_joints) == 8 else None,
+        arm_joints=arm_joints if arm_joints else None,
         leg_joints=body_joint_map,
         spine_joints=spine_joints if spine_joints else None,
         neck_joints=neck_joints if neck_joints else None,
-        root_joints=root_joints if len(root_joints) == 2 else None,
+        root_joints=root_joints if root_joints else None,
         face_joints=face_joints if face_joints else None,
         face_joint_map=face_joint_map
     )

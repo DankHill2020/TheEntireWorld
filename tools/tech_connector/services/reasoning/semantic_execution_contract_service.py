@@ -607,7 +607,7 @@ def _safe_intent_frame(text: str) -> dict[str, Any]:
 
 def _safe_target_entities(text: str) -> list[dict[str, Any]]:
     try:
-        from tech_connector.services.reasoning.target_entity_service import extract_target_entities
+        from reasoning_runtime.reasoning.target_entity_service import extract_target_entities
         return [item.to_dict() for item in extract_target_entities(text)]
     except Exception:
         return []
@@ -615,7 +615,7 @@ def _safe_target_entities(text: str) -> list[dict[str, Any]]:
 
 def _safe_scoped_query(text: str) -> dict[str, Any]:
     try:
-        from tech_connector.services.reasoning.target_entity_service import parse_scoped_member_query
+        from reasoning_runtime.reasoning.target_entity_service import parse_scoped_member_query
         parsed = parse_scoped_member_query(text)
         return parsed.to_dict() if parsed else {}
     except Exception:

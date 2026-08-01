@@ -26,6 +26,49 @@ _GENERATED_CODE_PLANNING_MODES = {
 }
 
 
+def requests_new_code_artifact_without_target(prompt: str) -> bool:
+    """Recognize explicit creation of a new code artifact when no owner is named."""
+
+    text = " ".join(str(prompt or "").strip().split())
+    if not re.search(
+        r"^(?:please\s+)?(?:write|create|build|generate|make|implement)"
+        r"(?:\s+(?:me|us))?\s+(?:a|an|new)\s+",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if not re.search(
+        r"\b(?:qt\s+)?(?:ui|widget|dialog|window|panel|tool|script|module|package|"
+        r"class|function|application|app|service|adapter|manager|generator)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\b(?:in|inside|within|into|on)\s+(?:the\s+)?"
+        r"(?:existing|current|active)\s+(?:file|module|class|ui|widget|tool)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    named_python_files = re.findall(
+        r"\b[A-Za-z_][A-Za-z0-9_./\\-]*\.py\b",
+        text,
+    )
+    if (
+        len(named_python_files) >= 2
+        or re.search(r"\bmulti[- ]file\b", text, flags=re.IGNORECASE)
+    ):
+        return True
+    return not bool(
+        named_python_files
+        or re.search(
+            r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){1,}\b",
+            text,
+        )
+    )
+
+
 def requests_generated_code_artifact(decision: Mapping[str, Any] | None) -> bool:
     """Return whether the semantic contract requires generated implementation code.
 
@@ -64,12 +107,34 @@ def requests_generated_code_artifact(decision: Mapping[str, Any] | None) -> bool
         root.get("planning_mode"),
         planning.get("planning_mode"),
     )
+    operation_modes = _normalized_values(
+        root.get("operation_mode"),
+        planning.get("operation_mode"),
+        understanding.get("operation_mode"),
+        contract.get("operation_mode"),
+    )
+    primary_actions = _normalized_values(
+        root.get("primary_action"),
+        planning.get("primary_action"),
+        understanding.get("primary_action"),
+        contract.get("primary_action"),
+    )
 
     if intents & _GENERATED_CODE_INTENTS:
         return True
     if deliverables & _GENERATED_CODE_DELIVERABLES:
         return True
     if planning_modes & _GENERATED_CODE_PLANNING_MODES:
+        return True
+    if (
+        intents & {"project_code_edit", "code_generation", "function_backed_artifact_generation"}
+        and deliverables
+        and (
+            operation_modes & {"generate", "write"}
+            or primary_actions
+            & {"create", "write", "build", "make", "generate", "implement"}
+        )
+    ):
         return True
     return any(
         value.endswith("_code") or value.startswith("generated_code")

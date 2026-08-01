@@ -25,7 +25,7 @@ TOOLS_ROOT = _detect_tools_root()
 if str(TOOLS_ROOT) not in os.sys.path:
     os.sys.path.insert(0, str(TOOLS_ROOT))
 
-from tech_connector.models.constants import project_index_db_path
+from tech_connector.models.constants import active_project_root, project_index_db_path
 
 DEFAULT_ROOTS = [
     TOOLS_ROOT,
@@ -39,13 +39,36 @@ DEFAULT_ROOTS = [
     Path(r"C:\Program Files\Epic Games\UE_5.8\Engine\Content\Python"),
     Path(r"C:\Desktop\MayaMCP"),
     Path(r"C:\Desktop\UnrealGenAISupport"),
-    Path(r"C:\depot\Time_Fighters 5.8"),
 ]
+
+
+def _additional_project_roots() -> list[Path]:
+    candidates = [
+        os.environ.get("ACTIVE_PROJECT_ROOT", "").strip(),
+        os.environ.get("TECH_CONNECTOR_PROJECT_ROOT", "").strip(),
+        os.environ.get("project_root", "").strip(),
+        os.environ.get("AI_STUDIO_PROJECT_ROOT", "").strip(),
+        str(active_project_root()),
+    ]
+    roots: list[Path] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            p = Path(candidate).expanduser().resolve()
+        except Exception:
+            continue
+        if p.exists():
+            roots.append(p)
+    return roots
 
 
 def root_dirs():
     env = os.environ.get("AI_KNOWLEDGE_ROOTS")
-    roots = [Path(p.strip()) for p in env.split(";") if p.strip()] if env else DEFAULT_ROOTS
+    if env:
+        roots = [Path(p.strip()).expanduser().resolve() for p in env.split(";") if p.strip()]
+    else:
+        roots = DEFAULT_ROOTS + _additional_project_roots()
     return [r for r in roots if r.exists()]
 
 
@@ -100,7 +123,7 @@ def domain_filters(domain: str) -> list[str]:
             r"%/unreal_tools/%",
         ],
         "depot": [f"{TOOLS_ROOT}%"],
-        "project": [r"%Time_Fighters%"],
+        "project": [f"%{active_project_root().name}%"],
         "all": [],
     }.get(domain, [])
 

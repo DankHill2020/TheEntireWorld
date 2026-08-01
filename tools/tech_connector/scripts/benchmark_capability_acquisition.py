@@ -20,6 +20,7 @@ if str(TOOLS_ROOT) not in sys.path:
 from tech_connector.services.capability_acquisition_coordinator import AcquisitionJob
 from tech_connector.services.capability_implementation_provider import ModelBackedCapabilityImplementationProvider
 from tech_connector.services.code_operation_service import validate_patch_in_temp_workspace
+from tech_connector.models.constants import temp_output_path
 from tech_connector.services.project_edit_agent_service import preview_project_edit_agent_response
 from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 
@@ -38,7 +39,7 @@ def main() -> int:
     parser.add_argument("--project-root", default=str(TOOLS_ROOT))
     parser.add_argument(
         "--report",
-        default=str(TOOLS_ROOT / "tech_connector" / "reports" / "capability_acquisition_benchmark.json"),
+        default=str(temp_output_path("capability_acquisition_benchmark.json", subdir="reports")),
     )
     args = parser.parse_args()
 

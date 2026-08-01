@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.GameMode &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.GameModeBase" href="GameModeBase.html" />
+    <link rel="prev" title="unreal.GameMapsSettings" href="GameMapsSettings.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="GameModeBase.html" title="unreal.GameModeBase"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="GameMapsSettings.html" title="unreal.GameMapsSettings"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.GameMode</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-gamemode">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.GameMode</span></code><a class="headerlink" href="#unreal-gamemode" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.GameMode">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">GameMode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.GameMode" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="GameModeBase.html#unreal.GameModeBase" title="unreal.GameModeBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">GameModeBase</span></code></a></p>
+<p>GameMode is a subclass of GameModeBase that behaves like a multiplayer match-based game.
+It has default behavior for picking spawn points and match state.
+If you want a simpler base, inherit from GameModeBase instead.</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: GameMode.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">actor_guid</span></code> (Guid):  [Read-Write] The GUID for this actor; this guid will be the same for actors from instanced streaming levels.
+see: ActorInstanceGuid, FActorInstanceGuidMapper
+note: Don’t use VisibleAnywhere here to avoid getting the CPF_Edit flag and get this property reset when resetting to defaults. See FActorDetails::AddActorCategory and EditorUtilities::CopySingleProperty for details.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">actor_instance_guid</span></code> (Guid):  [Read-Write] The instance GUID for this actor; this guid will be unique for actors from instanced streaming levels.
+see: ActorGuid
+note: This is not guaranteed to be valid during PostLoad, but safe to access from RegisterAllComponents.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_tick_before_begin_play</span></code> (bool):  [Read-Write] Whether we allow this Actor to tick before it receives the BeginPlay event.
+Normally we don’t tick actors until after BeginPlay; this setting allows this behavior to be overridden.
+This Actor must be able to tick for this setting to be relevant.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">always_relevant</span></code> (bool):  [Read-Write] Always relevant for network (overrides bOnlyRelevantToOwner).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">async_physics_tick_enabled</span></code> (bool):  [Read-Write] Whether to use use the async physics tick with this actor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">auto_destroy_when_finished</span></code> (bool):  [Read-Write] If true then destroy self when “finished”, meaning all relevant components report that they are done and no timelines or timers are in flight.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">auto_receive_input</span></code> (AutoReceiveInput):  [Read-Write] Automatically registers this actor to receive input from a player.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">block_input</span></code> (bool):  [Read-Write] If true, all input on the stack below this actor will not be considered</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">call_pre_replication</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">call_pre_replication_for_replay</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">can_be_damaged</span></code> (bool):  [Read-Write] Whether this actor can take damage. Must be true for damage events (e.g. ReceiveDamage()) to be called.
+see: <a class="reference external" href="https://www.unrealengine.com/blog/damage-in-ue4">https://www.unrealengine.com/blog/damage-in-ue4</a>
+see: TakeDamage(), ReceiveDamage()</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">can_be_in_cluster</span></code> (bool):  [Read-Write] If true, this actor can be put inside of a GC Cluster to improve Garbage Collection performance</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">content_bundle_guid</span></code> (Guid):  [Read-Write] The GUID for this actor’s content bundle.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">custom_time_dilation</span></code> (float):  [Read-Write] Allow each actor to run at a different time speed. The DeltaTime for a frame is multiplied by the global TimeDilation (in WorldSettings) and this CustomTimeDilation for this actor’s tick.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data_layer_assets</span></code> (Array[DataLayerAsset]):  [Read-Write] DataLayers assets the actor belongs to.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data_layers</span></code> (Array[ActorDataLayer]):  [Read-Write]
+deprecated: Use DataLayerAssets instead.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default_pawn_class</span></code> (type(Class)):  [Read-Write] The default pawn class used by players.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default_player_name</span></code> (Text):  [Read-Write] The default player name assigned to players that join with no name specified.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default_update_overlaps_method_during_level_streaming</span></code> (ActorUpdateOverlapsMethod):  [Read-Only] Default value taken from config file for this class when ‘UseConfigDefault’ is chosen for
+‘UpdateOverlapsMethodDuringLevelStreaming’. This allows a default to be chosen per class in the matching config.
+For example, for Actor it could be specified in DefaultEngine.ini as:</p>
+<p>[/Script/Engine.Actor]
+DefaultUpdateOverlapsMethodDuringLevelStreaming = OnlyUpdateMovable</p>
+<p>Another subclass could set their default to something different, such as:</p>
+<p>[/Script/Engine.BlockingVolume]
+DefaultUpdateOverlapsMethodDuringLevelStreaming = NeverUpdate
+see: UpdateOverlapsMethodDuringLevelStreaming</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delayed_start</span></code> (bool):  [Read-Write] Whether the game should immediately start when the first player logs in. Affects the default behavior of ReadyToStartMatch</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_auto_lod_generation</span></code> (bool):  [Read-Write] Whether this actor should be considered or not during HLOD generation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">external_data_layer_asset</span></code> (ExternalDataLayerAsset):  [Read-Only]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">find_camera_component_when_view_target</span></code> (bool):  [Read-Write] If true, this actor should search for an owned camera component to view through when used as a view target.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">game_net_driver_replication_system</span></code> (ReplicationSystem):  [Read-Write] Can be used to request a specific replication system for a GameNetDriver that will replicate this game mode.
+Leave to Default to use the game engine’s preferred system.
+Useful when migrating from one repsystem to another and a game mode does not fully support both repsystem yet.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">game_session_class</span></code> (type(Class)):  [Read-Write] Class of GameSession, which handles login approval and online game interface</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">game_state_class</span></code> (type(Class)):  [Read-Write] Class of GameState associated with this GameMode.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">generate_overlap_events_during_level_streaming</span></code> (bool):  [Read-Write] If true, this actor will generate overlap Begin/End events when spawned as part of level streaming, which includes initial level load.
+You might enable this is in the case where a streaming level loads around an actor and you want Begin/End overlap events to trigger.
+see: UpdateOverlapsMethodDuringLevelStreaming</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hidden</span></code> (bool):  [Read-Write] Allows us to only see this Actor in the Editor, and not in the actual game.
+see: SetActorHiddenInGame()</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hlod_layer</span></code> (HLODLayer):  [Read-Write] The UHLODLayer in which this actor should be included.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hud_class</span></code> (type(Class)):  [Read-Write] HUD class this game uses.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ignores_origin_shifting</span></code> (bool):  [Read-Write] Whether this actor should not be affected by world origin shifting.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">inactive_player_state_life_span</span></code> (float):  [Read-Write] Time a playerstate will stick around in an inactive state after a player logout</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">initial_life_span</span></code> (float):  [Read-Write] How long this Actor lives before dying, 0=forever. Note this is the INITIAL value and should not be modified once play has begun.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">input_priority</span></code> (int32):  [Read-Write] The priority of this input component when pushed in to the stack.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">instigator</span></code> (Pawn):  [Read-Write] Pawn responsible for damage and other gameplay events caused by this actor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_editor_only_actor</span></code> (bool):  [Read-Write] Whether this actor is editor-only. Use with care, as if this actor is referenced by anything else that reference will be NULL in cooked builds</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_main_world_only</span></code> (bool):  [Read-Write] If checked, this Actor will only get loaded in a main world (persistent level), it will not be loaded through Level Instances.</p></li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">is_spatially_loaded</span></code> (bool):  [Read-Write] Determine if this actor is spatially loaded when placed in a partitioned world.</dt><dd><p>If true, this actor will be loaded when in the range of any streaming sources and if (1) in no data layers, or (2) one or more of its data layers are enabled.
+If false, this actor will be loaded if (1) in no data layers, or (2) one or more of its data layers are enabled.</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">layers</span></code> (Array[Name]):  [Read-Write] Layers the actor belongs to.  This is outside of the editoronly data to allow hiding of LD-specified layers at runtime for profiling.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_inactive_players</span></code> (int32):  [Read-Write] The maximum number of inactive players before we kick the oldest ones out</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">migrating_asset</span></code> (bool):  [Read-Write] If true, this actor can be migrated to another server even if it’s been loaded from disk</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">min_net_update_frequency</span></code> (float):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">min_respawn_delay</span></code> (float):  [Read-Write] Minimum time before player can respawn after dying.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_cull_distance_squared</span></code> (float):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_dormancy</span></code> (NetDormancy):  [Read-Write] Dormancy setting for actor to take itself off of the replication list without being destroyed on clients.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_load_on_client</span></code> (bool):  [Read-Write] This actor will be loaded on network clients during map load</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_priority</span></code> (float):  [Read-Write] Priority for this actor when checking for replication in a low bandwidth or saturated situation, higher priority means it is more likely to replicate</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_update_frequency</span></code> (float):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">net_use_owner_relevancy</span></code> (bool):  [Read-Write] If actor has valid Owner, call Owner’s IsNetRelevantFor and GetNetPriority</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_bots</span></code> (int32):  [Read-Write] number of non-human players (AI controlled but participating as a player).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_players</span></code> (int32):  [Read-Write] Current number of human players.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_spectators</span></code> (int32):  [Read-Write] Current number of spectators.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_travelling_players</span></code> (int32):  [Read-Write] Number of players that are still traveling from a previous map</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_actor_begin_overlap</span></code> (ActorBeginOverlapSignature):  [Read-Write] Called when another actor begins to overlap this actor, for example a player walking into a trigger.
+For events when objects have a blocking collision, for example a player hitting a wall, see ‘Hit’ events.
+note: Components on both this and the other Actor must have bGenerateOverlapEvents set to true to generate overlap events.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_actor_end_overlap</span></code> (ActorEndOverlapSignature):  [Read-Write] Called when another actor stops overlapping this actor.
+note: Components on both this and the other Actor must have bGenerateOverlapEvents set to true to generate overlap events.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_actor_hit</span></code> (ActorHitSignature):  [Read-Write] Called when this Actor hits (or is hit by) something solid. This could happen due to things like Character movement, using Set Location with ‘sweep’ enabled, or physics simulation.
+For events when objects overlap (e.g. walking into a trigger) see the ‘Overlap’ event.
+note: For collisions during physics simulation to generate hit events, ‘Simulation Generates Hit Events’ must be enabled.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_begin_cursor_over</span></code> (ActorBeginCursorOverSignature):  [Read-Write] Called when the mouse cursor is moved over this actor if mouse over events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_clicked</span></code> (ActorOnClickedSignature):  [Read-Write] Called when the left mouse button is clicked while the mouse is over this actor and click events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_destroyed</span></code> (ActorDestroyedSignature):  [Read-Write] Event triggered when the actor has been explicitly destroyed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_end_cursor_over</span></code> (ActorEndCursorOverSignature):  [Read-Write] Called when the mouse cursor is moved off this actor if mouse over events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_end_play</span></code> (ActorEndPlaySignature):  [Read-Write] Event triggered when the actor is being deleted or removed from a level.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_input_touch_begin</span></code> (ActorOnInputTouchBeginSignature):  [Read-Write] Called when a touch input is received over this actor when touch events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_input_touch_end</span></code> (ActorOnInputTouchEndSignature):  [Read-Write] Called when a touch input is received over this component when touch events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_input_touch_enter</span></code> (ActorBeginTouchOverSignature):  [Read-Write] Called when a finger is moved over this actor when touch over events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_input_touch_leave</span></code> (ActorEndTouchOverSignature):  [Read-Write] Called when a finger is moved off this actor when touch over events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_released</span></code> (ActorOnReleasedSignature):  [Read-Write] Called when the left mouse button is released while the mouse is over this actor and click events are enabled in the player controller.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_take_any_damage</span></code> (TakeAnyDamageSignature):  [Read-Write] Called when the actor is damaged in any way.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_take_point_damage</span></code> (TakePointDamageSignature):  [Read-Write] Called when the actor is damaged by point damage.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">on_take_radial_damage</span></code> (TakeRadialDamageSignature):  [Read-Write] Called when the actor is damaged by radial damage.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">only_relevant_to_owner</span></code> (bool):  [Read-Write] If true, this actor is only relevant to its owner. If this flag is changed during play, all non-owner channels would need to be explicitly closed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">optimize_bp_component_data</span></code> (bool):  [Read-Write] Whether to cook additional data to speed up spawn events at runtime for any Blueprint classes based on this Actor. This option may slightly increase memory usage in a cooked build.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">options_string</span></code> (str):  [Read-Write] Save options string and parse it when needed</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pauseable</span></code> (bool):  [Read-Write] Whether the game is pauseable.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">physics_replication_mode</span></code> (PhysicsReplicationMode):  [Read-Write] Which mode to replicate physics through for this actor. Only relevant if the actor replicates movement and has a component that simulate physics.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pivot_offset</span></code> (Vector):  [Read-Write] Local space pivot offset for the actor, only used in the editor</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">player_controller_class</span></code> (type(Class)):  [Read-Write] The class of PlayerController to spawn for players logging in.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">player_state_class</span></code> (type(Class)):  [Read-Write] A PlayerState of this class will be associated with every player to replicate relevant player information to all clients.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">primary_actor_tick</span></code> (ActorTickFunction):  [Read-Write] Primary Actor tick function, which calls TickActor().
+Tick functions can be configured to control whether ticking is enabled, at what time during a frame the update occurs, and to set up tick dependencies.
+see: <a class="reference external" href="https://docs.unrealengine.com/API/Runtime/Engine/Engine/FTickFunction">https://docs.unrealengine.com/API/Runtime/Engine/Engine/FTickFunction</a>
+see: AddTickPrerequisiteActor(), AddTickPrerequisiteComponent()</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">relevant_for_level_bounds</span></code> (bool):  [Read-Write] If true, this actor’s component’s bounds will be included in the level’s
+bounding box unless the Actor’s class has overridden IsLevelBoundsRelevant</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">remote_role</span></code> (NetRole):  [Read-Only] Describes how much control the remote machine has over the actor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replay_rewindable</span></code> (bool):  [Read-Write] If true, this actor will only be destroyed during scrubbing if the replay is set to a time before the actor existed.
+Otherwise, RewindForReplay will be called if we detect the actor needs to be reset.
+Note, this Actor must not be destroyed by gamecode, and RollbackViaDeletion may not be used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replay_spectator_player_controller_class</span></code> (type(Class)):  [Read-Write] The PlayerController class used when spectating a network replay.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replicate_movement</span></code> (bool):  [Read-Write] If true, replicate movement/location related properties.
+Actor must also be set to replicate.
+see: SetReplicates()
+see: <a class="reference external" href="https://docs.unrealengine.com/InteractiveExperiences/Networking/Actors">https://docs.unrealengine.com/InteractiveExperiences/Networking/Actors</a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replicate_using_registered_sub_object_list</span></code> (bool):  [Read-Write] When true the replication system will only replicate the registered subobjects and the replicated actor components list
+When false the replication system will instead call the virtual ReplicateSubobjects() function where the subobjects and actor components need to be manually replicated.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replicated_movement</span></code> (RepMovement):  [Read-Write] Used for replication of our RootComponent’s position and velocity</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replicates</span></code> (bool):  [Read-Write] If true, this actor will replicate to remote machines
+see: SetReplicates()</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">role</span></code> (NetRole):  [Read-Only] Describes how much control the local machine has over the actor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">root_component</span></code> (SceneComponent):  [Read-Write] The component that defines the transform (location, rotation, scale) of this Actor in the world, all other components must be attached to this one somehow</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">runtime_grid</span></code> (Name):  [Read-Write] Determine in which partition grid this actor will be placed in the partition (if the world is partitioned).
+If None, the decision will be left to the partition.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">server_stat_replicator_class</span></code> (type(Class)):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">spawn_collision_handling_method</span></code> (SpawnActorCollisionHandlingMethod):  [Read-Write] Controls how to handle spawning this actor in a situation where it’s colliding with something else. “Default” means AlwaysSpawn here.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">spectator_class</span></code> (type(Class)):  [Read-Write] The pawn class used by the PlayerController for players when spectating.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sprite_scale</span></code> (float):  [Read-Write] The scale to apply to any billboard components in editor builds (happens in any WITH_EDITOR build, including non-cooked games).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">start_players_as_spectators</span></code> (bool):  [Read-Write] Whether players should immediately spawn when logging in, or stay as spectators until they manually spawn</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tags</span></code> (Array[Name]):  [Read-Write] Array of tags that can be used for grouping and categorizing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">update_overlaps_method_during_level_streaming</span></code> (ActorUpdateOverlapsMethod):  [Read-Write] Condition for calling UpdateOverlaps() to initialize overlap state when loaded in during level streaming.
+If set to ‘UseConfigDefault’, the default specified in ini (displayed in ‘DefaultUpdateOverlapsMethodDuringLevelStreaming’) will be used.
+If overlaps are not initialized, this actor and attached components will not have an initial state of what objects are touching it,
+and overlap events may only come in once one of those objects update overlaps themselves (for example when moving).
+However if an object touching it <em>does</em> initialize state, both objects will know about their touching state with each other.
+This can be a potentially large performance savings during level loading and streaming, and is safe if the object and others initially
+overlapping it do not need the overlap state because they will not trigger overlap notifications.</p>
+<p>Note that if ‘bGenerateOverlapEventsDuringLevelStreaming’ is true, overlaps are always updated in this case, but that flag
+determines whether the Begin/End overlap events are triggered.
+see: bGenerateOverlapEventsDuringLevelStreaming, DefaultUpdateOverlapsMethodDuringLevelStreaming, GetUpdateOverlapsMethodDuringLevelStreaming()</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_seamless_travel</span></code> (bool):  [Read-Write] Whether the game perform map travels using SeamlessTravel() which loads in the background and doesn’t disconnect clients</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.abort_match">
+<span class="sig-name descname"><span class="pre">abort_match</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.abort_match" title="Link to this definition">¶</a></dt>
+<dd><p>Report that a match has failed due to unrecoverable error</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.delayed_start">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delayed_start</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.GameMode.delayed_start" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Whether the game should immediately start when the first player logs in. Affects the default behavior of ReadyToStartMatch</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.end_match">
+<span class="sig-name descname"><span class="pre">end_match</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.end_match" title="Link to this definition">¶</a></dt>
+<dd><p>Transition from InProgress to WaitingPostMatch. You can call this manually, will also get called if ReadyToEndMatch returns true</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.get_match_state">
+<span class="sig-name descname"><span class="pre">get_match_state</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a></span></span><a class="headerlink" href="#unreal.GameMode.get_match_state" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the current match state, this is an accessor to protect the state machine flow</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.is_match_in_progress">
+<span class="sig-name descname"><span class="pre">is_match_in_progress</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.GameMode.is_match_in_progress" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if the match state is InProgress or other gameplay state</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.min_respawn_delay">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">min_respawn_delay</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.GameMode.min_respawn_delay" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Minimum time before player can respawn after dying.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.num_bots">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">num_bots</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.GameMode.num_bots" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] number of non-human players (AI controlled but participating as a player).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.num_players">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">num_players</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.GameMode.num_players" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Current number of human players.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.num_spectators">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">num_spectators</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.GameMode.num_spectators" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Current number of spectators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.GameMode.num_travelling_players">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">num_travelling_players</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.GameMode.num_travelling_players" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Number of players that are still traveling from a previous map</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.on_set_match_state">
+<span class="sig-name descname"><span class="pre">on_set_match_state</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">new_state</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.on_set_match_state" title="Link to this definition">¶</a></dt>
+<dd><p>Implementable event to respond to match state changes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>new_state</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.ready_to_end_match">
+<span class="sig-name descname"><span class="pre">ready_to_end_match</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.GameMode.ready_to_end_match" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if ready to End Match. Games should override this</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.ready_to_start_match">
+<span class="sig-name descname"><span class="pre">ready_to_start_match</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.GameMode.ready_to_start_match" title="Link to this definition">¶</a></dt>
+<dd><p>Returns true if ready to Start Match. Games should override this</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.restart_game">
+<span class="sig-name descname"><span class="pre">restart_game</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.restart_game" title="Link to this definition">¶</a></dt>
+<dd><p>Restart the game, by default travel to the current map</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.say">
+<span class="sig-name descname"><span class="pre">say</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">msg</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.say" title="Link to this definition">¶</a></dt>
+<dd><p>Exec command to broadcast a string to all players</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>msg</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.GameMode.start_match">
+<span class="sig-name descname"><span class="pre">start_match</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.GameMode.start_match" title="Link to this definition">¶</a></dt>
+<dd><p>Transition from WaitingToStart to InProgress. You can call this manually, will also get called if ReadyToStartMatch returns true</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.GameMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.GameMode"><code class="docutils literal notranslate"><span class="pre">GameMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.GameMode.abort_match"><code class="docutils literal notranslate"><span class="pre">GameMode.abort_match()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.delayed_start"><code class="docutils literal notranslate"><span class="pre">GameMode.delayed_start</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.end_match"><code class="docutils literal notranslate"><span class="pre">GameMode.end_match()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.get_match_state"><code class="docutils literal notranslate"><span class="pre">GameMode.get_match_state()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.is_match_in_progress"><code class="docutils literal notranslate"><span class="pre">GameMode.is_match_in_progress()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.min_respawn_delay"><code class="docutils literal notranslate"><span class="pre">GameMode.min_respawn_delay</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.num_bots"><code class="docutils literal notranslate"><span class="pre">GameMode.num_bots</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.num_players"><code class="docutils literal notranslate"><span class="pre">GameMode.num_players</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.num_spectators"><code class="docutils literal notranslate"><span class="pre">GameMode.num_spectators</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.num_travelling_players"><code class="docutils literal notranslate"><span class="pre">GameMode.num_travelling_players</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.on_set_match_state"><code class="docutils literal notranslate"><span class="pre">GameMode.on_set_match_state()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.ready_to_end_match"><code class="docutils literal notranslate"><span class="pre">GameMode.ready_to_end_match()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.ready_to_start_match"><code class="docutils literal notranslate"><span class="pre">GameMode.ready_to_start_match()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.restart_game"><code class="docutils literal notranslate"><span class="pre">GameMode.restart_game()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.say"><code class="docutils literal notranslate"><span class="pre">GameMode.say()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.GameMode.start_match"><code class="docutils literal notranslate"><span class="pre">GameMode.start_match()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="GameMapsSettings.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.GameMapsSettings</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="GameModeBase.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.GameModeBase</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="GameModeBase.html" title="unreal.GameModeBase"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="GameMapsSettings.html" title="unreal.GameMapsSettings"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.GameMode</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a220cb3c482c1376',t:'MTc4NTIwOTMwNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

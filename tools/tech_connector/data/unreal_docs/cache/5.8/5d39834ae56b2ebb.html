@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.EditorAssetSubsystem &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.EditorAutomationActor" href="EditorAutomationActor.html" />
+    <link rel="prev" title="unreal.EditorAssetLibrary" href="EditorAssetLibrary.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="EditorAutomationActor.html" title="unreal.EditorAutomationActor"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="EditorAssetLibrary.html" title="unreal.EditorAssetLibrary"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.EditorAssetSubsystem</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-editorassetsubsystem">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.EditorAssetSubsystem</span></code><a class="headerlink" href="#unreal-editorassetsubsystem" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">EditorAssetSubsystem</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.EditorAssetSubsystem" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="EditorSubsystem.html#unreal.EditorSubsystem" title="unreal.EditorSubsystem"><code class="xref py py-class docutils literal notranslate"><span class="pre">EditorSubsystem</span></code></a></p>
+<p>UEditorAssetSubsystem
+Subsystem for exposing asset related utilities to scripts.
+Asset Paths can be represented in the following ways:</p>
+<blockquote>
+<div><p>(Reference/Text Path)   StaticMesh’/Game/MyFolder/MyAsset.MyAsset’
+(Full Name)                             StaticMesh /Game/MyFolder/MyAsset.MyAsset
+(Path Name)                             /Game/MyFolder/MyAsset.MyAsset
+(Package Name)                  /Game/MyFolder/MyAsset</p>
+</div></blockquote>
+<dl class="simple">
+<dt>Directory Paths can be represented in the following ways:</dt><dd><p>/Game/MyNewFolder/
+/Game/MyNewFolder</p>
+</dd>
+</dl>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: UnrealEd</p></li>
+<li><p><strong>File</strong>: EditorAssetSubsystem.h</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.add_on_extract_asset_from_file">
+<span class="sig-name descname"><span class="pre">add_on_extract_asset_from_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">delegate</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.add_on_extract_asset_from_file" title="Link to this definition">¶</a></dt>
+<dd><p>Call this to add a callback to extract an asset from a file,
+for example from a drag and drop operation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>delegate</strong> (<em>OnExtractAssetFromFileDynamic</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.checkout_asset">
+<span class="sig-name descname"><span class="pre">checkout_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_checkout</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.checkout_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Checkout an asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_to_checkout</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset that we want to checkout.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.checkout_directory">
+<span class="sig-name descname"><span class="pre">checkout_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recursive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.checkout_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Checkout all assets in a directory. It will load the assets if needed.
+All objects that are in the directory will be checked out. Assets will be loaded before being checked out.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory of the assets to be checked out.</p></li>
+<li><p><strong>recursive</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – If the AssetPath is a folder, the search will be recursive and will checkout the assets in the sub folders.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.checkout_loaded_asset">
+<span class="sig-name descname"><span class="pre">checkout_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_checkout</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.checkout_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Checkout the asset corresponding to an object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_to_checkout</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset to checkout.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.checkout_loaded_assets">
+<span class="sig-name descname"><span class="pre">checkout_loaded_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_to_checkout</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.checkout_loaded_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Checkout the assets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>assets_to_checkout</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>) – Assets to checkout.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.consolidate_assets">
+<span class="sig-name descname"><span class="pre">consolidate_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_consolidate_to</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">assets_to_consolidate</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.consolidate_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Consolidates assets by replacing all references/uses of the provided AssetsToConsolidate with references to AssetToConsolidateTo.
+This is useful when you want all references of assets to be replaced by a single asset.
+The function first attempts to directly replace all relevant references located within objects that are already loaded and in memory.
+Next, it deletes the AssetsToConsolidate, leaving behind object redirectors to AssetToConsolidateTo.
+note: The AssetsToConsolidate are DELETED by this function.
+note: Modified objects will be saved if the operation succeeds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_to_consolidate_to</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset to which all references of the AssetsToConsolidate will instead refer to after this operation completes.</p></li>
+<li><p><strong>assets_to_consolidate</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>) – All references to these assets will be modified to reference AssetToConsolidateTo instead.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.delete_asset">
+<span class="sig-name descname"><span class="pre">delete_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path_to_delete</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.delete_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Delete the package an asset is in. All objects in the package will be deleted.
+This is a Force Delete. It does not check if the asset has references in other Levels or by Actors.
+It will close all the asset editors and may clear the Transaction buffer (Undo History).
+Will try to mark the file as deleted. The Asset will be loaded before being deleted.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path_to_delete</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset to delete.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.delete_directory">
+<span class="sig-name descname"><span class="pre">delete_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.delete_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Delete the packages inside a directory. If the directory is then empty, delete the directory.
+This is a Force Delete. It does not check if the assets have references in other Levels or by Actors.
+It will close all the asset editors and may clear the Transaction buffer (Undo History).
+Will try to mark the file as deleted. Assets will be loaded before being deleted.
+The search is always recursive. It will try to delete the sub folders.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory that will be marked for deletion and deleted.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.delete_loaded_asset">
+<span class="sig-name descname"><span class="pre">delete_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_delete</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.delete_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Delete an asset that is already loaded.
+This is a Force Delete. It does not check if the asset has references in other Levels or by Actors.
+It will close all the asset editors and may clear the Transaction buffer (Undo History).
+Will try to mark the file as deleted.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_to_delete</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset to delete.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.delete_loaded_assets">
+<span class="sig-name descname"><span class="pre">delete_loaded_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_to_delete</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.delete_loaded_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Delete assets that are already loaded.
+This is a Force Delete. It does not check if the assets have references in other Levels or by Actors.
+It will close all the asset editors and may clear the Transaction buffer (Undo History).
+Will try to mark the files as deleted.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>assets_to_delete</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>) – Loaded assets to delete.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.do_assets_exist">
+<span class="sig-name descname"><span class="pre">do_assets_exist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_paths</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.do_assets_exist" title="Link to this definition">¶</a></dt>
+<dd><p>Check if assets exist in the Asset Registry.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_paths</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a><em>]</em>) – Asset Paths of the assets to check for existence.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if all assets exist and are valid.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.does_asset_exist">
+<span class="sig-name descname"><span class="pre">does_asset_exist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.does_asset_exist" title="Link to this definition">¶</a></dt>
+<dd><p>Check if an asset exists in the Asset Registry.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path to check for existence.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the asset exists and is valid.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.does_directory_contain_assets">
+<span class="sig-name descname"><span class="pre">does_directory_contain_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recursive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.does_directory_contain_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Check if a directory contains any assets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Long Path Name of the directory.</p></li>
+<li><p><strong>recursive</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if there is any assets.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.does_directory_exist">
+<span class="sig-name descname"><span class="pre">does_directory_exist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.does_directory_exist" title="Link to this definition">¶</a></dt>
+<dd><p>Check if a directory exists.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Long Path Name of the directory.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if it does exist and it is valid.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.duplicate_asset">
+<span class="sig-name descname"><span class="pre">duplicate_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_asset_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.duplicate_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Duplicate an asset. Will try to checkout the file. The Asset will be loaded before being duplicated.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset that we want to copy from.</p></li>
+<li><p><strong>destination_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the duplicated asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The duplicated object if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.duplicate_directory">
+<span class="sig-name descname"><span class="pre">duplicate_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_directory_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.duplicate_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Duplicate a directory and the assets in it.
+Will try to checkout the files. The Assets will be loaded before being duplicated.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory of the assets that we want to duplicate from.</p></li>
+<li><p><strong>destination_directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory of the duplicated asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The duplicated object if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.duplicate_loaded_asset">
+<span class="sig-name descname"><span class="pre">duplicate_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_asset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.duplicate_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Duplicate an asset that is already loaded. Will try to checkout the file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset that we want to copy from.</p></li>
+<li><p><strong>destination_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the duplicated asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The duplicated object if the operation succeeds</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.find_asset_data">
+<span class="sig-name descname"><span class="pre">find_asset_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.find_asset_data" title="Link to this definition">¶</a></dt>
+<dd><p>Return the AssetData for the Asset that can then be used with AssetRegistryHelpers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path to retrieve data from.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The AssetData found.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.find_package_referencers_for_asset">
+<span class="sig-name descname"><span class="pre">find_package_referencers_for_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">load_assets_to_confirm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.find_package_referencers_for_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Find Package Referencers for an asset. Only Soft and Hard dependencies will be looked for.
+Soft are dependencies which don’t need to be loaded for the object to be used.
+Hard are dependencies which are required for correct usage of the source asset and must be loaded at the same time.
+Other references may exist. The asset may be currently used in memory by another asset, by the editor or by code.
+Package dependencies are cached with the asset. False positives can happen until all the assets are loaded and re-saved.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset that we are looking for.</p></li>
+<li><p><strong>load_assets_to_confirm</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Whether the asset and any potential referencers will be loaded to confirm the dependencies.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The package paths of the referencers.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_all_assets_by_meta_data_tags">
+<span class="sig-name descname"><span class="pre">get_all_assets_by_meta_data_tags</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">required_tags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allowed_classes</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_all_assets_by_meta_data_tags" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all assets which have the given tags.
+params: RequiredTags The tags the assets should have
+params: AllowedClasses The class types the contained assets should have</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>required_tags</strong> (<a class="reference internal" href="Set.html#unreal.Set" title="unreal.Set"><em>Set</em></a><em>[</em><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a><em>]</em>)</p></li>
+<li><p><strong>allowed_classes</strong> (<a class="reference internal" href="Set.html#unreal.Set" title="unreal.Set"><em>Set</em></a><em>[</em><a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_asset_filename_length_for_cooking">
+<span class="sig-name descname"><span class="pre">get_asset_filename_length_for_cooking</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_asset_filename_length_for_cooking" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the length of the computed cooked package name and path</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_loaded_asset_filename_length_for_cooking">
+<span class="sig-name descname"><span class="pre">get_loaded_asset_filename_length_for_cooking</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_loaded_asset_filename_length_for_cooking" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the length of the computed cooked package name and path</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_metadata_tag">
+<span class="sig-name descname"><span class="pre">get_metadata_tag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_metadata_tag" title="Link to this definition">¶</a></dt>
+<dd><p>Get the value associated with the given tag of a loaded asset’s metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The object from which to retrieve the metadata.</p></li>
+<li><p><strong>tag</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The tag to find in the metadata.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The string value associated with the tag.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_metadata_tag_values">
+<span class="sig-name descname"><span class="pre">get_metadata_tag_values</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Map.html#unreal.Map" title="unreal.Map"><span class="pre">Map</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_metadata_tag_values" title="Link to this definition">¶</a></dt>
+<dd><p>Get all tags/values of a loaded asset’s metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The object from which to retrieve the metadata.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The list of all Tags and Values.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Map.html#unreal.Map" title="unreal.Map">Map</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>, <a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_path_name_for_loaded_asset">
+<span class="sig-name descname"><span class="pre">get_path_name_for_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">loaded_asset</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_path_name_for_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Return a valid AssetPath for a loaded asset.
+Similar to GetPathName(). The format will be: /Game/MyFolder/MyAsset.MyAsset</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>loaded_asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The loaded asset to get the path of.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>If valid, the asset Path of the loaded asset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.get_tag_values">
+<span class="sig-name descname"><span class="pre">get_tag_values</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Map.html#unreal.Map" title="unreal.Map"><span class="pre">Map</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.get_tag_values" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all TagValues (from Asset Registry) associated with an (unloaded) asset as strings value.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path we are trying to find.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The list of all TagNames &amp; TagValues.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Map.html#unreal.Map" title="unreal.Map">Map</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>, <a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.list_assets">
+<span class="sig-name descname"><span class="pre">list_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recursive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_folder</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.list_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Return the list of all the assets found in the DirectoryPath.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory path of the asset we want the list from.</p></li>
+<li><p><strong>recursive</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – The search will be recursive and will look in sub folders.</p></li>
+<li><p><strong>include_folder</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – The result will include folders name.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The list of assets found.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.list_assets_by_tag_value">
+<span class="sig-name descname"><span class="pre">list_assets_by_tag_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag_value</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.list_assets_by_tag_value" title="Link to this definition">¶</a></dt>
+<dd><p>Return the list of all the assets that have the pair of Tag/Value.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tag_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The tag associated with the assets requested.</p></li>
+<li><p><strong>tag_value</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The value associated with the assets requested.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The list of assets found.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.load_asset">
+<span class="sig-name descname"><span class="pre">load_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.load_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Load an asset. It will verify if the object is already loaded and only load it if it’s necessary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset to load</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Found or loaded asset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.load_blueprint_class">
+<span class="sig-name descname"><span class="pre">load_blueprint_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.EditorAssetSubsystem.load_blueprint_class" title="Link to this definition">¶</a></dt>
+<dd><p>Load a Blueprint asset and return its generated class. It will verify if the object is already loaded and only load it if it’s necessary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the Blueprint asset.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Found or loaded class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type">type</a>(<a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class">Class</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.make_directory">
+<span class="sig-name descname"><span class="pre">make_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.make_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Create a directory on disk.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Long Path Name of the directory.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.remove_metadata_tag">
+<span class="sig-name descname"><span class="pre">remove_metadata_tag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.remove_metadata_tag" title="Link to this definition">¶</a></dt>
+<dd><p>Remove the given tag from a loaded asset’s metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The object from which to retrieve the metadata.</p></li>
+<li><p><strong>tag</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The tag to remove from the metadata.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.remove_on_extract_asset_from_file">
+<span class="sig-name descname"><span class="pre">remove_on_extract_asset_from_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">delegate</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.remove_on_extract_asset_from_file" title="Link to this definition">¶</a></dt>
+<dd><p>Call this to remove a callback added with AddOnExtractAssetFromFile.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>delegate</strong> (<em>OnExtractAssetFromFileDynamic</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.rename_asset">
+<span class="sig-name descname"><span class="pre">rename_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_asset_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.rename_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Rename an asset. Equivalent to a Move operation.
+Will try to checkout the file. The Asset will be loaded before being renamed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset that we want to copy from.</p></li>
+<li><p><strong>destination_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the renamed asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.rename_directory">
+<span class="sig-name descname"><span class="pre">rename_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_directory_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.rename_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Rename a directory. Equivalent to a Move operation moving all contained assets.
+Will try to checkout the files. The Assets will be loaded before being renamed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory of the assets that we want to rename from.</p></li>
+<li><p><strong>destination_directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory of the renamed asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.rename_loaded_asset">
+<span class="sig-name descname"><span class="pre">rename_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source_asset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_asset_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.rename_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Rename an asset that is already loaded. Equivalent to a Move operation.
+Will try to checkout the file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>source_asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset that we want to copy from.</p></li>
+<li><p><strong>destination_asset_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the duplicated asset.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.save_asset">
+<span class="sig-name descname"><span class="pre">save_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_save</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_if_is_dirty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.save_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Save the packages the assets live in. All objects that live in the package will be saved.
+Will try to checkout the file first. The Asset will be loaded before being saved.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_to_save</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Asset Path of the asset that we want to save.</p></li>
+<li><p><strong>only_if_is_dirty</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Only checkout/save the asset if it’s dirty.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.save_directory">
+<span class="sig-name descname"><span class="pre">save_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_if_is_dirty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recursive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.save_directory" title="Link to this definition">¶</a></dt>
+<dd><p>Save the packages the assets live in inside the directory. All objects that are in the directory will be saved.
+Will try to checkout the file first. Assets will be loaded before being saved.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Directory that will be checked out and saved.</p></li>
+<li><p><strong>only_if_is_dirty</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Only checkout asset that are dirty.</p></li>
+<li><p><strong>recursive</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – The search will be recursive and it will save the asset in the sub folders.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.save_loaded_asset">
+<span class="sig-name descname"><span class="pre">save_loaded_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_to_save</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_if_is_dirty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.save_loaded_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Save the package the asset lives in. All objects that live in the package will be saved. Will try to checkout the file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_to_save</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Asset that we want to save.</p></li>
+<li><p><strong>only_if_is_dirty</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Only checkout asset that are dirty.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.save_loaded_assets">
+<span class="sig-name descname"><span class="pre">save_loaded_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_to_save</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_if_is_dirty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.save_loaded_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Save the packages the assets live in. All objects that live in the packages will be saved. Will try to checkout the files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets_to_save</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>) – Assets that we want to save.</p></li>
+<li><p><strong>only_if_is_dirty</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Only checkout asset that are dirty.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.set_dirty_flag">
+<span class="sig-name descname"><span class="pre">set_dirty_flag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dirty_state</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.set_dirty_flag" title="Link to this definition">¶</a></dt>
+<dd><p>Set the package dirty flag for an asset</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – Object we want to set the package dirty state.</p></li>
+<li><p><strong>dirty_state</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – The dirty state, true mean the asset package need to be save.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the operation succeeds.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.set_metadata_tag">
+<span class="sig-name descname"><span class="pre">set_metadata_tag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tag</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.set_metadata_tag" title="Link to this definition">¶</a></dt>
+<dd><p>Set the value associated with a given tag of a loaded asset’s metadata.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The object from which to retrieve the metadata.</p></li>
+<li><p><strong>tag</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The tag to set in the metadata.</p></li>
+<li><p><strong>value</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The string value to associate with the tag.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.EditorAssetSubsystem.sort_by_meta_data">
+<span class="sig-name descname"><span class="pre">sort_by_meta_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta_data_tag</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta_data_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sort_order</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Array[AssetData]</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.EditorAssetSubsystem.sort_by_meta_data" title="Link to this definition">¶</a></dt>
+<dd><p>Sorts the assets based on their meta data’s type.
+Supported types: FString, int, float, FDateTime.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a><em>]</em>) – The assets to sort</p></li>
+<li><p><strong>meta_data_tag</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The on which the sort is based</p></li>
+<li><p><strong>meta_data_type</strong> (<a class="reference internal" href="EditorAssetMetaDataSortType.html#unreal.EditorAssetMetaDataSortType" title="unreal.EditorAssetMetaDataSortType"><em>EditorAssetMetaDataSortType</em></a>) – The meta data type of MetaDataTag</p></li>
+<li><p><strong>sort_order</strong> (<a class="reference internal" href="EditorAssetSortOrder.html#unreal.EditorAssetSortOrder" title="unreal.EditorAssetSortOrder"><em>EditorAssetSortOrder</em></a>) – Whether to sort ascending or descending</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>Whether the data was sorted, e.g. false if not all assets have the MetaDataTag.</p>
+<p>assets (Array[AssetData]): The assets to sort</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>] or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.EditorAssetSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.add_on_extract_asset_from_file"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.add_on_extract_asset_from_file()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.checkout_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.checkout_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.checkout_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.checkout_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.checkout_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.checkout_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.checkout_loaded_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.checkout_loaded_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.consolidate_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.consolidate_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.delete_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.delete_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.delete_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.delete_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.delete_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.delete_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.delete_loaded_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.delete_loaded_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.do_assets_exist"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.do_assets_exist()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.does_asset_exist"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.does_asset_exist()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.does_directory_contain_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.does_directory_contain_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.does_directory_exist"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.does_directory_exist()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.duplicate_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.duplicate_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.duplicate_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.duplicate_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.duplicate_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.duplicate_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.find_asset_data"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.find_asset_data()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.find_package_referencers_for_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.find_package_referencers_for_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_all_assets_by_meta_data_tags"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_all_assets_by_meta_data_tags()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_asset_filename_length_for_cooking"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_asset_filename_length_for_cooking()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_loaded_asset_filename_length_for_cooking"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_loaded_asset_filename_length_for_cooking()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_metadata_tag"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_metadata_tag()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_metadata_tag_values"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_metadata_tag_values()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_path_name_for_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_path_name_for_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.get_tag_values"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.get_tag_values()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.list_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.list_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.list_assets_by_tag_value"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.list_assets_by_tag_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.load_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.load_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.load_blueprint_class"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.load_blueprint_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.make_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.make_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.remove_metadata_tag"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.remove_metadata_tag()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.remove_on_extract_asset_from_file"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.remove_on_extract_asset_from_file()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.rename_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.rename_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.rename_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.rename_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.rename_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.rename_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.save_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.save_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.save_directory"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.save_directory()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.save_loaded_asset"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.save_loaded_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.save_loaded_assets"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.save_loaded_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.set_dirty_flag"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.set_dirty_flag()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.set_metadata_tag"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.set_metadata_tag()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.EditorAssetSubsystem.sort_by_meta_data"><code class="docutils literal notranslate"><span class="pre">EditorAssetSubsystem.sort_by_meta_data()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="EditorAssetLibrary.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.EditorAssetLibrary</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="EditorAutomationActor.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.EditorAutomationActor</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="EditorAutomationActor.html" title="unreal.EditorAutomationActor"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="EditorAssetLibrary.html" title="unreal.EditorAssetLibrary"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.EditorAssetSubsystem</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22389ebac990e76',t:'MTc4NTIzODA4OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

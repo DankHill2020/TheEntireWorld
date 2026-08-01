@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
 class ChatPanel(QWidget):
@@ -113,6 +114,21 @@ class ChatPanel(QWidget):
         self.image_btn.clicked.connect(self.paste_image_requested.emit)
         prompt_row.addWidget(self.image_btn)
 
+        # Quick Helper Buttons for Connected Services (+JIRA, +Confluence, +Slack, +Discord, +Tutorial)
+        helper_buttons = [
+            ("+JIRA", "@jira ", "Add a Jira directive to the prompt"),
+            ("+Confluence", "@confluence ", "Add a Confluence directive to the prompt"),
+            ("+Slack", "@slack ", "Add a Slack directive to the prompt"),
+            ("+Discord", "@discord ", "Add a Discord directive to the prompt"),
+            ("+Tutorial", "/tutorial ", "Ask for a learn-by-doing walkthrough instead of auto execution"),
+        ]
+        for service_label, directive, tooltip in helper_buttons:
+            btn = QPushButton(service_label)
+            btn.setToolTip(tooltip)
+            btn.setStyleSheet("background-color: #1a2634; color: #5bd000; font-weight: bold; border: 1px solid #12324a; border-radius: 4px; padding: 4px 8px;")
+            btn.clicked.connect(lambda _chk=False, d=directive: self._append_directive_to_prompt(d))
+            prompt_row.addWidget(btn)
+
         self.tools_btn = QPushButton("⋯")
         self.tools_btn.setToolTip("More chat actions")
         self.tools_btn.setMaximumWidth(34)
@@ -125,7 +141,7 @@ class ChatPanel(QWidget):
 
         root.addLayout(prompt_row)
 
-        self.context_label = QLabel("Context: Chat • Project • Model")
+        self.context_label = QLabel("Context: Chat • Project • Model | Mode: 🤖 Auto")
         self.context_label.setObjectName("prompt_context_label")
         self.context_label.setStyleSheet("color: #8fd6a5; font-size: 11px;")
         root.addWidget(self.context_label)
@@ -133,6 +149,12 @@ class ChatPanel(QWidget):
     def _build_tools_menu(self) -> QMenu:
         menu = QMenu(self)
         for key, label in [
+            ("toggle_tutorial_mode", "🎓 Toggle Tutorial Walkthrough Mode"),
+            ("insert_jira", "+JIRA (@jira)"),
+            ("insert_confluence", "+Confluence (@confluence)"),
+            ("open_jira_creator", "📋 Create Jira Task Details..."),
+            ("open_jira_viewer", "🔍 Inspect / Edit Jira Issues..."),
+            ("open_confluence_viewer", "📚 Confluence Doc Viewer & Editor..."),
             ("copy_last_prompt", "Copy Last Prompt"),
             ("copy_last_response", "Copy Last Response"),
             ("copy_full_log", "Copy Full Log"),
@@ -144,9 +166,39 @@ class ChatPanel(QWidget):
             action.triggered.connect(lambda _checked=False, k=key: self._tool_action(k))
         return menu
 
+    def _append_directive_to_prompt(self, directive: str) -> None:
+        current = self.prompt.text()
+        if not current.strip():
+            self.prompt.setText(directive)
+        else:
+            self.prompt.setText(f"{current.rstrip()} {directive}")
+        self.prompt.setFocus()
+
     def _tool_action(self, key: str) -> None:
-        if key == "clear_attachments":
+        if key == "toggle_tutorial_mode":
+            from tech_connector.services.tutorial_mode_service import tutorial_service
+            new_mode = "automation" if tutorial_service.is_tutorial_mode() else "interactive_guide"
+            tutorial_service.set_mode(new_mode)
+            mode_label = "🎓 Tutorial Walkthrough" if new_mode == "interactive_guide" else "🤖 Auto"
+            self.context_label.setText(f"Context: Chat • Project • Model | Mode: {mode_label}")
+        elif key == "clear_attachments":
             self.clear_attachments()
+        elif key == "insert_jira":
+            self._append_directive_to_prompt("@jira ")
+        elif key == "insert_confluence":
+            self._append_directive_to_prompt("@confluence ")
+        elif key == "open_jira_creator":
+            from tech_connector.ui.jira_task_dialog import JiraTaskCreatorDialog
+            dialog = JiraTaskCreatorDialog(self)
+            dialog.exec_()
+        elif key == "open_jira_viewer":
+            from tech_connector.ui.jira_task_dialog import JiraTaskViewerDialog
+            dialog = JiraTaskViewerDialog(self)
+            dialog.exec_()
+        elif key == "open_confluence_viewer":
+            from tech_connector.ui.confluence_doc_dialog import ConfluenceDocViewerDialog
+            dialog = ConfluenceDocViewerDialog(self)
+            dialog.exec_()
         self.tool_action_requested.emit(key)
 
     def _emit_send(self) -> None:
@@ -164,7 +216,7 @@ class ChatPanel(QWidget):
             self,
             "Attach files",
             "",
-            "All Files (*.*);;Code Files (*.py *.cpp *.h *.hpp *.cs *.json *.yaml *.yml *.md *.txt);;Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)",
+            "All Files (*.*);;Code Files (*.py *.cpp *.h *.hpp *.cs *.json *.yaml *.yml *.md *.txt);;Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;Videos (*.mp4 *.mov *.avi *.mkv *.webm *.m4v)",
         )
         if not paths:
             return
@@ -176,9 +228,13 @@ class ChatPanel(QWidget):
             path = str(Path(raw))
             if path in self.attached_files or path in self.attached_images:
                 continue
-            if Path(path).suffix.lower() in IMAGE_EXTS:
+            suffix = Path(path).suffix.lower()
+            if suffix in IMAGE_EXTS:
                 self.attached_images.append(path)
                 self._add_image_chip(path)
+            elif suffix in VIDEO_EXTS:
+                self.attached_files.append(path)
+                self._add_video_chip(path)
             else:
                 self.attached_files.append(path)
                 self._add_file_chip(path)
@@ -201,76 +257,18 @@ class ChatPanel(QWidget):
         label.setStyleSheet("padding: 4px 8px; border: 1px solid #00b866; border-radius: 4px;")
         self.attachment_layout.insertWidget(max(0, self.attachment_layout.count() - 1), label)
 
+    def _add_video_chip(self, path: str) -> None:
+        p = Path(path)
+        label = QLabel(f"Video {html.escape(p.name)}")
+        label.setToolTip(str(p))
+        label.setStyleSheet("padding: 4px 8px; border: 1px solid #1e9bff; border-radius: 4px; color:#b9dcff;")
+        self.attachment_layout.insertWidget(max(0, self.attachment_layout.count() - 1), label)
+
     def _add_image_chip(self, path: str) -> None:
         p = Path(path)
         label = QLabel()
         pix = QPixmap(str(p))
         if not pix.isNull():
-            label.setPixmap(pix.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            label.setText(f"🖼 {html.escape(p.name)}")
-        label.setToolTip(str(p))
-        label.setStyleSheet("padding: 2px; border: 1px solid #00b866; border-radius: 4px;")
-        self.attachment_layout.insertWidget(max(0, self.attachment_layout.count() - 1), label)
-
-    def append_user_message(self, text: str, files: Iterable[str] = (), images: Iterable[str] = ()) -> None:
-        body = html.escape(text or "")
-        attachment_html = self._attachments_html(files, images)
-        self.thread.append(f"<p><b style='color:#00b866'>YOU</b><br>{body}{attachment_html}</p>")
-        self._scroll_bottom()
-
-    def append_assistant_message(self, text: str) -> None:
-        self.thread.append(f"<p><b style='color:#dff7e7'>ASSISTANT</b></p>{self._render_markdownish(text)}")
-        self._scroll_bottom()
-
-    def append_status(self, text: str) -> None:
-        self.thread.append(f"<p style='color:#bfeecb'><i>{html.escape(text)}</i></p>")
-        self._scroll_bottom()
-
-    def _attachments_html(self, files: Iterable[str], images: Iterable[str]) -> str:
-        parts = []
-        for image in images:
-            p = Path(image)
-            parts.append(
-                f"<br><img src='{QUrl.fromLocalFile(str(p)).toString()}' style='max-width:420px; max-height:260px; border:1px solid #00b866;'>"
-            )
-        for file in files:
-            p = Path(file)
-            mime = mimetypes.guess_type(str(p))[0] or "file"
-            parts.append(f"<br><span style='color:#bfeecb'>📄 {html.escape(p.name)} ({html.escape(mime)})</span>")
-        return "".join(parts)
-
-    def _render_markdownish(self, text: str) -> str:
-        # Render fenced code blocks as complete chunks, not line-by-line fragments.
-        text = text or ""
-        html_parts = []
-        pos = 0
-        pattern = re_compile_code_fence()
-        for match in pattern.finditer(text):
-            before = text[pos:match.start()]
-            if before:
-                html_parts.append(f"<p>{html.escape(before).replace(chr(10), '<br>')}</p>")
-            lang = html.escape(match.group(1) or "text")
-            code = html.escape(match.group(2) or "")
-            html_parts.append(
-                "<div style='border:1px solid #00b866; background:#07110b; margin:8px 0;'>"
-                f"<div style='padding:4px 8px; color:#bfeecb;'>Code • {lang}</div>"
-                f"<pre style='white-space:pre-wrap; margin:0; padding:8px;'>{code}</pre>"
-                "</div>"
-            )
-            pos = match.end()
-        rest = text[pos:]
-        if rest:
-            html_parts.append(f"<p>{html.escape(rest).replace(chr(10), '<br>')}</p>")
-        return "".join(html_parts)
-
-    def _open_anchor(self, url: QUrl) -> None:
-        QDesktopServices.openUrl(url)
-
-    def _scroll_bottom(self) -> None:
-        bar = self.thread.verticalScrollBar()
-        bar.setValue(bar.maximum())
-
 
 def re_compile_code_fence():
     # Kept outside the class to avoid recompiling when rendering many chunks.

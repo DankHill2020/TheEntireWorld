@@ -14,8 +14,10 @@ import textwrap
 import time
 from typing import Callable
 
+from tech_connector.models.constants import temp_output_path
 
-ROOT = Path("C:/depot/tools/tech_connector/reports/runtime/project_edit_ui_stress").resolve()
+
+ROOT = temp_output_path("workspace", subdir="project_edit_ui_stress").resolve()
 PKG = ROOT / "stresspkg"
 TESTS = ROOT / "tests"
 
@@ -1116,7 +1118,7 @@ def main() -> int:
     os.environ["TECH_CONNECTOR_PROJECT_ROOT"] = str(ROOT)
     os.environ["TECH_CONNECTOR_PROJECT_EDIT_DEBUG_CANDIDATE"] = "1"
     sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, "C:/depot/tools")
+    sys.path.insert(0, str(TOOLS_ROOT))
     _reset_root()
     cases = [
         _case_circular_imports,
@@ -1146,7 +1148,7 @@ def main() -> int:
     results = []
     for factory in cases:
         results.append(run_case(factory))
-    report_path = ROOT / "project_edit_ui_stress_results.json"
+    report_path = temp_output_path("project_edit_ui_stress_results.json", subdir="reports")
     report_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     markdown_path = ROOT / "project_edit_ui_stress_results.md"
     _write_markdown_report(results, markdown_path)

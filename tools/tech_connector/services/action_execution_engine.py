@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import copy
 import re
@@ -11,18 +11,26 @@ import traceback
 import uuid
 from typing import Any, Callable
 
-from tech_connector.services.action_contract_service import canonical_action_type, validate_planner_executor_contract
-from tech_connector.services.action_graph_service import (
+from reasoning_runtime.action.action_contract_service import (
+    canonical_action_type,
+    validate_planner_executor_contract,
+)
+from reasoning_runtime.action.action_graph_service import (
     MUTABILITY_DCC,
     MUTABILITY_READ_ONLY,
     normalize_action,
     normalize_action_graph,
     validate_action_graph,
 )
+from tech_connector.models.constants import temp_output_path
 
 
 def _utc_now() -> str:
-    return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 @dataclass
@@ -1593,7 +1601,9 @@ def _register_ingested_repository(
     if registry is None:
         registry_path = context.policy.get("capability_registry_path")
         if not registry_path and context.project_root:
-            registry_path = str(Path(context.project_root) / "data" / "capability_registry.json")
+            from tech_connector.models.constants import capability_registry_path
+
+            registry_path = str(capability_registry_path(context.project_root))
         if registry_path:
             try:
                 from tech_connector.services.capability_registry import CapabilityRegistry
@@ -1650,7 +1660,7 @@ def _handle_execute_dcc(
 ) -> dict[str, Any]:
     """Execute a generic ActionGraph DCC operation through the canonical DCC layer."""
     try:
-        from tech_connector.engine.request_context import RequestContext
+        from reasoning_runtime.engine.request_context import RequestContext
     except Exception:
         @dataclass(frozen=True)
         class RequestContext:  # type: ignore[no-redef]
@@ -1801,7 +1811,7 @@ def _handle_download_or_ingest_asset(action: dict[str, Any], context: ExecutionC
     if not candidates or idx >= len(candidates):
         return {"ok": False, "error": "No candidate selected or empty candidate list."}
     candidate = candidates[idx]
-    cache_root = args.get("cache_root") or ".ai_studio/cache"
+    cache_root = args.get("cache_root") or str(temp_output_path("assets", subdir="asset_cache"))
     approved = bool(args.get("approved") or context.approved)
     target_host = args.get("target_host") or ""
     destination = args.get("destination") or ""

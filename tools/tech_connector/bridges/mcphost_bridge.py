@@ -191,11 +191,16 @@ class TerminalBridge(QObject):
             kernel32 = None
 
         try:
-            while self.running and self.proc:
+            while self.running:
+                proc = self.proc
+                if proc is None:
+                    break
                 avail = 0
                 if os.name == "nt" and kernel32:
                     try:
-                        fd = self.proc.stdout.fileno()
+                        if proc.stdout is None:
+                            break
+                        fd = proc.stdout.fileno()
                         handle = msvcrt.get_osfhandle(fd)
                         avail_bytes = ctypes.c_ulong()
                         if kernel32.PeekNamedPipe(
@@ -208,21 +213,23 @@ class TerminalBridge(QObject):
                     import select
 
                     try:
-                        r, _, _ = select.select([self.proc.stdout], [], [], 0)
+                        if proc.stdout is None:
+                            break
+                        r, _, _ = select.select([proc.stdout], [], [], 0)
                         avail = 1 if r else 0
                     except Exception:
                         avail = 1
 
                 if avail > 0:
                     read_size = 128 if avail <= 128 else min(avail, 1024)
-                    data = self.proc.stdout.read(read_size)
+                    data = proc.stdout.read(read_size) if proc.stdout else ""
                     if data:
                         self._emit_output(data)
                         continue
 
-                if self.proc.poll() is not None:
+                if proc.poll() is not None:
                     try:
-                        remaining = self.proc.stdout.read()
+                        remaining = proc.stdout.read() if proc.stdout else ""
                         if remaining:
                             self._emit_output(remaining)
                     except Exception:
@@ -313,12 +320,15 @@ class TerminalBridge(QObject):
         self.proc = None
         try:
             if proc and proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=1.0)
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+                else:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=1.0)
         except Exception:
             try:
                 if proc and proc.poll() is None:

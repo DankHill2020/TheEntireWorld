@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any
 
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.request_context import RequestContext
 
 
 @dataclass

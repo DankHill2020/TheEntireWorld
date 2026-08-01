@@ -282,3 +282,64 @@ def send_pipeline_output(settings: dict[str, Any], title: str, body: str, *, sta
     if not results:
         results["enabled"] = False
     return results
+
+
+
+def parse_and_dispatch_inline_messaging(
+    text: str,
+    settings: dict[str, Any] | None = None,
+    *,
+    default_title: str = "Tech Connector Output",
+) -> list[dict[str, Any]]:
+    import re
+    settings = settings or {}
+    pattern = r"@(?P<platform>slack|discord|jira|confluence|clickup|docs)(?:\.(?P<target>[a-zA-Z0-9_\-\.]+))?(?:\s+(?P<content>.*?))(?=(?:@(?:slack|discord|jira|confluence|clickup|docs)|$))"
+    matches = list(re.finditer(pattern, text, re.DOTALL | re.IGNORECASE))
+    
+    if not matches:
+        return []
+    
+    results = []
+    for match in matches:
+        platform = match.group("platform").lower()
+        target = (match.group("target") or ("KAN" if platform == "jira" else "DOCS")).strip()
+        raw_content = (match.group("content") or "").strip() or text
+        
+        parts = target.split(".")
+        main_target = parts[0]
+        sub_type = parts[1].lower() if len(parts) > 1 else ""
+        
+        formatted_msg = f"[{default_title}] Target: #{target}\n\n{raw_content}"
+        
+        if platform == "slack":
+            url = settings.get(f"slack_webhook_{main_target}") or settings.get("slack_webhook_url", "")
+            ok, msg = send_slack_webhook(url, formatted_msg)
+            results.append({"platform": "slack", "target": target, "ok": ok, "message": msg, "content": raw_content})
+        elif platform == "discord":
+            url = settings.get(f"discord_webhook_{main_target}") or settings.get("discord_webhook_url", "")
+            username = settings.get("discord_username", "Tech Connector")
+            ok, msg = send_discord_webhook(url, formatted_msg, username=username)
+            results.append({"platform": "discord", "target": target, "ok": ok, "message": msg, "content": raw_content})
+        elif platform == "jira":
+            from tech_connector.services.atlassian_service import create_jira_issue, build_jira_issue_payload
+            issue_type = "Bug" if sub_type in {"bug", "issue"} else ("Story" if sub_type == "story" else ("Epic" if sub_type == "epic" else ("Sub-task" if sub_type == "subtask" else "Task")))
+            parent_key = main_target if sub_type == "subtask" and "-" in main_target else ""
+            proj_key = main_target.split("-")[0] if "-" in main_target else main_target
+            
+            payload = build_jira_issue_payload(proj_key, f"{default_title}: {target}", raw_content, issue_type=issue_type, parent_key=parent_key)
+            ok, msg, data = create_jira_issue(settings, payload)
+            results.append({"platform": "jira", "target": target, "issue_type": issue_type, "ok": ok, "message": msg, "content": raw_content, "data": data})
+        elif platform in {"confluence", "docs"}:
+            from tech_connector.services.atlassian_service import create_confluence_page, build_confluence_page_payload
+            parent_id = parts[1] if len(parts) > 1 and parts[1].isdigit() else ""
+            space_id = main_target
+            payload = build_confluence_page_payload(space_id, f"{default_title}: {target}", raw_content, parent_id=parent_id)
+            ok, msg, data = create_confluence_page(settings, payload)
+            results.append({"platform": "confluence", "target": target, "parent_id": parent_id, "ok": ok, "message": msg, "content": raw_content, "data": data})
+        elif platform == "clickup":
+            from tech_connector.services.clickup_service import create_clickup_task
+            payload = {"list_id": main_target, "name": f"{default_title}: {target}", "description": raw_content, "status": "bug" if sub_type == "bug" else "to do"}
+            ok, msg, data = create_clickup_task(settings, payload)
+            results.append({"platform": "clickup", "target": target, "sub_type": sub_type, "ok": ok, "message": msg, "content": raw_content, "data": data})
+            
+    return results

@@ -8,9 +8,11 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-TOOLS_ROOT = Path(__file__).resolve().parents[2]
-if str(TOOLS_ROOT) not in sys.path:
-    sys.path.insert(0, str(TOOLS_ROOT))
+APP_ROOT = Path(__file__).resolve().parents[2]
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
+
+from tech_connector.models.constants import temp_output_path
 
 from tech_connector.bridges.blender.blender_bridge import BlenderBridge
 from tech_connector.bridges.maya.maya_bridge import MayaBridge
@@ -90,13 +92,13 @@ def main() -> int:
     parser.add_argument("--execute", action="store_true", help="Execute only when Maya, Blender, and Unreal preflight succeeds.")
     parser.add_argument(
         "--output",
-        default="C:/depot/tools/tech_connector/reports/official_cross_dcc_ui_flow.json",
+        default=str(temp_output_path("official_cross_dcc_ui_flow.json", subdir="reports")),
     )
     args = parser.parse_args()
 
     report: dict[str, Any] = {"prompt": PROMPT}
     total_started = perf_counter()
-    flow = resolve_pipeline_prompt_flow(PROMPT, [str(TOOLS_ROOT)])
+    flow = resolve_pipeline_prompt_flow(PROMPT, [str(APP_ROOT)])
     report["flow"] = flow
     plan = dict(flow.get("workflow_plan") or {})
 

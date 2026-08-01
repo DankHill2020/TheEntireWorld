@@ -115,6 +115,57 @@ class TextParser(HTMLParser):
         return " ".join(self.text_parts)
 
 
+class ApiMemberParser(HTMLParser):
+    """Extract authoritative class/member declarations from an Epic API page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.members: list[tuple[str, str, str]] = []
+        self._qualified_name = ""
+        self._parts: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        if tag.lower() != "dt":
+            return
+        qualified_name = str(dict(attrs).get("id") or "").strip()
+        if qualified_name.startswith("unreal."):
+            self._qualified_name = qualified_name
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._qualified_name:
+            value = " ".join(data.split())
+            if value:
+                self._parts.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "dt" or not self._qualified_name:
+            return
+        signature = " ".join(self._parts).replace(" ¶", "").strip()
+        lowered = signature.casefold()
+        if lowered.startswith("class "):
+            object_type = "class"
+        elif "(" in signature:
+            object_type = "function"
+        else:
+            object_type = "property"
+        self.members.append(
+            (self._qualified_name, object_type, signature[:1000])
+        )
+        self._qualified_name = ""
+        self._parts = []
+
+
+_PARSED_MEMBER_CACHE: dict[
+    tuple[str, str],
+    tuple[tuple[int, int], list[dict[str, Any]]],
+] = {}
+
+
 def docs_url(version: str = DEFAULT_VERSION, base_url: str = DEFAULT_BASE_URL) -> str:
     return f"{base_url}?application_version={urllib.parse.quote(version)}"
 
@@ -203,6 +254,458 @@ def _page_details(html_text: str, fallback_name: str) -> tuple[str, str, str]:
     return title[:240], summary[:900], signature[:500]
 
 
+def _cached_member_rows(
+    version: str,
+    cache_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Parse locally cached Epic class pages into member-level API rows."""
+
+    target_dir = cache_dir(version, cache_root)
+    paths = list(target_dir.glob("*.html")) if target_dir.exists() else []
+    fingerprint = (
+        len(paths),
+        max(
+            (path.stat().st_mtime_ns for path in paths),
+            default=0,
+        ),
+    )
+    cache_key = (str(target_dir.resolve()), str(version))
+    cached = _PARSED_MEMBER_CACHE.get(cache_key)
+    if cached and cached[0] == fingerprint:
+        return [dict(row) for row in cached[1]]
+
+    rows_by_name: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        try:
+            page_html = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        parser = ApiMemberParser()
+        parser.feed(page_html)
+        for qualified_name, object_type, signature in parser.members:
+            parts = qualified_name.split(".")
+            if len(parts) < 2:
+                continue
+            owner = parts[1]
+            source = (
+                f"{DEFAULT_BASE_URL}class/{urllib.parse.quote(owner)}"
+                f"?application_version={urllib.parse.quote(str(version))}"
+            )
+            row = {
+                "qualified_name": qualified_name,
+                "object_type": object_type,
+                "signature": signature,
+                "docstring": signature,
+                "source": source,
+                "tags": [
+                    "unreal",
+                    "python_api",
+                    object_type,
+                    "official_cached_member",
+                ],
+                "metadata": {
+                    "docs_version": str(version),
+                    "cached_at": iso_now(),
+                    "cache_file": str(path),
+                    "authoritative_signature": True,
+                },
+            }
+            previous = rows_by_name.get(qualified_name)
+            if previous is None or len(signature) > len(
+                str(previous.get("signature") or "")
+            ):
+                rows_by_name[qualified_name] = row
+    rows = list(rows_by_name.values())
+    _PARSED_MEMBER_CACHE[cache_key] = (fingerprint, rows)
+    return [dict(row) for row in rows]
+
+
+def lookup_official_unreal_api(
+    api_path: str,
+    *,
+    version: str = DEFAULT_VERSION,
+    timeout: float = 20.0,
+    cache_root: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Resolve an exact ``unreal.*`` chain from Epic's official class pages."""
+
+    requested = str(api_path or "").strip()
+    if not requested.startswith("unreal."):
+        return None
+    parts = re.findall(
+        r"[A-Za-z_][A-Za-z0-9_]*",
+        requested.removeprefix("unreal."),
+    )
+    if not parts:
+        return None
+    owner = parts[0]
+    members = parts[1:]
+    target_dir = cache_dir(version, cache_root)
+
+    def class_page(class_name: str) -> tuple[str, str]:
+        url = (
+            f"{DEFAULT_BASE_URL}class/{urllib.parse.quote(class_name)}"
+            f"?application_version={urllib.parse.quote(version)}"
+        )
+        page, _from_cache = _fetch(url, target_dir, timeout=timeout)
+        parser = TextParser()
+        parser.feed(page)
+        return url, parser.text
+
+    def member_signature(text: str, member: str) -> str:
+        match = re.search(
+            rf"(?:classmethod\s+)?{re.escape(member)}\s*\([^)]*\)"
+            r"\s*(?:→|->)\s*"
+            r"[^¶\n]{1,220}",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return " ".join(match.group(0).split())[:500]
+        match = re.search(
+            rf"(?:classmethod\s+)?{re.escape(member)}\s*\([^)]*\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return " ".join(match.group(0).split())[:500]
+        property_match = re.search(
+            rf"\bproperty\s+({re.escape(member)})\b"
+            r"(?:\s*:\s*[A-Za-z_][A-Za-z0-9_.\[\] |]*)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return (
+            " ".join(property_match.group(0).split())[:500]
+            if property_match
+            else ""
+        )
+
+    resolved_steps: list[str] = []
+    try:
+        if not members:
+            url, text = class_page(owner)
+            class_match = re.search(
+                rf"class\s+unreal\.\s*{re.escape(owner)}"
+                r"\s*(?:\([^)]*\))?",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if not class_match:
+                return None
+            signature = " ".join(class_match.group(0).split())[:500]
+            return {
+                "qualified_name": requested,
+                "resolved_owner": "unreal",
+                "signature": signature,
+                "source": url,
+                "source_excerpt": signature,
+                "provider": "epic_unreal_python_api",
+                "provenance": f"official_epic_python_api_{version}",
+                "confidence": "exact",
+                "authoritative_signature": True,
+            }
+        for intermediate in members[:-1]:
+            url, text = class_page(owner)
+            signature = member_signature(text, intermediate)
+            if not signature:
+                return None
+            resolved_steps.append(f"unreal.{owner}.{signature}")
+            return_match = re.search(
+                r"(?:→|->)\s*([A-Z][A-Za-z0-9_]*)",
+                signature,
+            )
+            if not return_match:
+                return None
+            owner = return_match.group(1)
+
+        member = members[-1]
+        url, text = class_page(owner)
+        signature = member_signature(text, member)
+        if not signature:
+            return None
+        resolved_steps.append(f"unreal.{owner}.{signature}")
+        canonical_member_match = re.match(
+            r"property\s+([A-Za-z_][A-Za-z0-9_]*)",
+            signature,
+        )
+        canonical_member = (
+            canonical_member_match.group(1)
+            if canonical_member_match
+            else member
+        )
+        return {
+            "qualified_name": requested,
+            "canonical_qualified_name": (
+                f"unreal.{owner}.{canonical_member}"
+            ),
+            "resolved_owner": f"unreal.{owner}",
+            "signature": signature,
+            "source": url,
+            "source_excerpt": "\n".join(resolved_steps),
+            "provider": "epic_unreal_python_api",
+            "provenance": f"official_epic_python_api_{version}",
+            "confidence": "exact",
+            "authoritative_signature": True,
+        }
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+        return None
+
+
+def search_official_unreal_capabilities(
+    text: str,
+    *,
+    version: str = DEFAULT_VERSION,
+    limit: int = 12,
+    timeout: float = 20.0,
+    cache_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Discover relevant classes and members from Epic's official API index."""
+
+    def tokens(value: str) -> set[str]:
+        expanded = re.sub(
+            r"(?<=[a-z0-9])(?=[A-Z])",
+            " ",
+            (value or "").replace("_", " "),
+        )
+        normalized: set[str] = set()
+        for raw_token in re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", expanded):
+            token = raw_token.casefold()
+            if token in {
+                "add", "and", "class", "from", "python", "the",
+                "unreal", "using", "with",
+            }:
+                continue
+            normalized.add(token)
+            if token.endswith("ing") and len(token) > 5:
+                normalized.add(token[:-3])
+                normalized.add(token[:-3] + "e")
+            elif token.endswith("ed") and len(token) > 4:
+                normalized.add(token[:-2])
+                normalized.add(token[:-1])
+            elif token.endswith("ies") and len(token) > 5:
+                normalized.add(token[:-3] + "y")
+            elif token.endswith("s") and len(token) > 4:
+                normalized.add(token[:-1])
+        return normalized
+
+    query_tokens = tokens(text)
+    if not query_tokens:
+        return []
+    action_tokens = {
+        "apply", "build", "change", "connect", "convert", "copy", "create",
+        "delete",
+        "edit", "export", "find", "generate", "get", "import", "load",
+        "make", "modify", "query", "read", "remove", "save", "set",
+        "spawn", "update", "validate", "write",
+    }
+    owner_role_tokens = {
+        "editor", "factory", "helper", "helpers", "library", "service",
+        "subsystem", "tool", "tools", "utility",
+    }
+    has_action_intent = bool(query_tokens & action_tokens)
+    subject_tokens = query_tokens - action_tokens - owner_role_tokens
+    target_dir = cache_dir(version, cache_root)
+    index_url = docs_url(version)
+    try:
+        index_html, _from_cache = _fetch(
+            index_url,
+            target_dir,
+            timeout=timeout,
+        )
+    except (OSError, TimeoutError, urllib.error.URLError):
+        return []
+    entries = _parse_index(index_html, index_url)
+    ranked_entries: list[tuple[int, ApiDocEntry]] = []
+    for entry in entries:
+        entry_tokens = tokens(entry.qualified_name)
+        overlap = query_tokens & entry_tokens
+        if overlap:
+            score = len(overlap) * 10
+            if has_action_intent and entry_tokens & owner_role_tokens:
+                score += 12
+            ranked_entries.append((score, entry))
+    ranked_entries.sort(
+        key=lambda item: (-item[0], len(item[1].qualified_name))
+    )
+    candidate_entries = list(ranked_entries[:24])
+    candidate_names = {
+        entry.qualified_name for _score, entry in candidate_entries
+    }
+    if has_action_intent:
+        for role in sorted(owner_role_tokens):
+            role_candidates = [
+                item for item in ranked_entries
+                if (
+                    role in tokens(item[1].qualified_name)
+                    and (
+                        not subject_tokens
+                        or subject_tokens & tokens(item[1].qualified_name)
+                    )
+                )
+            ]
+            for item in role_candidates[:2]:
+                if item[1].qualified_name in candidate_names:
+                    continue
+                candidate_entries.append(item)
+                candidate_names.add(item[1].qualified_name)
+    concept_candidates = []
+    for item in ranked_entries:
+        entry_tokens = (
+            tokens(item[1].qualified_name)
+            - owner_role_tokens
+            - {"new", "node", "object"}
+        )
+        if (
+            1 < len(entry_tokens) <= 5
+            and entry_tokens <= query_tokens
+        ):
+            concept_candidates.append(item)
+    for item in concept_candidates[:32]:
+        if item[1].qualified_name in candidate_names:
+            continue
+        candidate_entries.append(item)
+        candidate_names.add(item[1].qualified_name)
+    concept_first: list[tuple[int, ApiDocEntry]] = []
+    concept_first_names: set[str] = set()
+    for item in [*concept_candidates[:32], *candidate_entries]:
+        if item[1].qualified_name in concept_first_names:
+            continue
+        concept_first.append(item)
+        concept_first_names.add(item[1].qualified_name)
+    candidate_entries = concept_first[:80]
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    cached_ranked: list[tuple[int, dict[str, Any]]] = []
+    for cached_row in _cached_member_rows(version, cache_root):
+        qualified_name = str(cached_row.get("qualified_name") or "")
+        searchable_tokens = tokens(
+            " ".join([
+                qualified_name,
+                str(cached_row.get("signature") or ""),
+                str(cached_row.get("docstring") or ""),
+            ])
+        )
+        overlap = query_tokens & searchable_tokens
+        if not overlap:
+            continue
+        score = len(overlap) * 10
+        if has_action_intent and overlap & action_tokens:
+            score += 15
+        cached_ranked.append((score, cached_row))
+    cached_ranked.sort(
+        key=lambda item: (
+            -item[0],
+            len(str(item[1].get("qualified_name") or "")),
+        )
+    )
+    for score, cached_row in cached_ranked[: max(12, limit)]:
+        qualified_name = str(cached_row.get("qualified_name") or "")
+        if not qualified_name or qualified_name in seen:
+            continue
+        seen.add(qualified_name)
+        rows.append({
+            "qualified_name": qualified_name,
+            "owner_module": qualified_name.rsplit(".", 1)[0],
+            "import_statement": "import unreal",
+            "signature": str(cached_row.get("signature") or ""),
+            "source_excerpt": str(cached_row.get("docstring") or "")[:2200],
+            "path": str(cached_row.get("source") or ""),
+            "provider": "official_public_api_research",
+            "provenance": f"official_epic_python_api_{version}_cached_member",
+            "confidence": "exact",
+            "authoritative_signature": True,
+            "relevance_score": score,
+            "supports": ", ".join(sorted(
+                query_tokens & tokens(
+                    str(cached_row.get("qualified_name") or "")
+                    + " "
+                    + str(cached_row.get("signature") or "")
+                )
+            )),
+        })
+    for _score, entry in candidate_entries:
+        try:
+            page_html, _from_cache = _fetch(
+                entry.url,
+                target_dir,
+                timeout=timeout,
+            )
+        except (OSError, TimeoutError, urllib.error.URLError):
+            continue
+        parser = TextParser()
+        parser.feed(page_html)
+        page_text = parser.text
+        class_name = entry.qualified_name.rsplit(".", 1)[-1]
+        class_signature = re.search(
+            rf"\bclass\s+unreal\.{re.escape(class_name)}\s*\([^)]*\)",
+            page_text,
+            flags=re.IGNORECASE,
+        )
+        if entry.qualified_name not in seen:
+            seen.add(entry.qualified_name)
+            rows.append({
+                "qualified_name": entry.qualified_name,
+                "owner_module": "unreal",
+                "import_statement": "import unreal",
+                "signature": (
+                    " ".join(class_signature.group(0).split())
+                    if class_signature else ""
+                ),
+                "source_excerpt": entry.summary,
+                "path": entry.url,
+                "provider": "official_public_api_research",
+                "provenance": f"official_epic_python_api_{version}",
+                "confidence": "exact",
+                "authoritative_signature": bool(class_signature),
+                "supports": ", ".join(
+                    sorted(query_tokens & tokens(entry.qualified_name))
+                ),
+            })
+        member_matches = re.finditer(
+            r"(?:classmethod\s+)?([a-z_][A-Za-z0-9_]*)\s*\([^)]*\)"
+            r"(?:\s*(?:→|->)\s*[^¶\n]{1,220})?",
+            page_text,
+            flags=re.IGNORECASE,
+        )
+        ranked_members: list[tuple[int, str, str]] = []
+        for match in member_matches:
+            member_name = match.group(1)
+            overlap = query_tokens & tokens(member_name)
+            if not overlap:
+                continue
+            ranked_members.append((
+                len(overlap),
+                member_name,
+                " ".join(match.group(0).split())[:500],
+            ))
+        ranked_members.sort(key=lambda item: (-item[0], item[1]))
+        for _member_score, member_name, signature in ranked_members[:6]:
+            qualified = f"unreal.{class_name}.{member_name}"
+            if qualified in seen:
+                continue
+            seen.add(qualified)
+            rows.append({
+                "qualified_name": qualified,
+                "owner_module": f"unreal.{class_name}",
+                "import_statement": "import unreal",
+                "signature": signature,
+                "source_excerpt": signature,
+                "path": entry.url,
+                "provider": "official_public_api_research",
+                "provenance": f"official_epic_python_api_{version}",
+                "confidence": "exact",
+                "authoritative_signature": True,
+                "supports": ", ".join(
+                    sorted(query_tokens & tokens(member_name))
+                ),
+            })
+            if len(rows) >= max(1, limit):
+                return rows[:limit]
+    return rows[:limit]
+
+
 def _compact_rows(entries: Iterable[ApiDocEntry]) -> list[dict[str, Any]]:
     rows = []
     for entry in entries:
@@ -268,12 +771,28 @@ class UnrealApiDocsCache:
             stages.append(stage_result("docs_pages_enriched", True, time.monotonic(), count=enriched))
 
         rows = _compact_rows(entries)
+        cached_member_rows = _cached_member_rows(
+            self.version,
+            self.cache_path.parent,
+        )
+        rows_by_name = {
+            str(row.get("qualified_name") or ""): row for row in rows
+        }
+        for row in cached_member_rows:
+            rows_by_name[str(row.get("qualified_name") or "")] = row
+        rows = list(rows_by_name.values())
         for row in rows:
             row["metadata"]["docs_version"] = self.version
 
         write_started = time.monotonic()
         api_count = self._write(rows)
         stages.append(stage_result("python_api_populated", api_count > 0, write_started, count=api_count))
+        stages.append(stage_result(
+            "cached_api_members_materialized",
+            True,
+            write_started,
+            count=len(cached_member_rows),
+        ))
 
         manifest = {
             "version": self.version,
@@ -281,6 +800,7 @@ class UnrealApiDocsCache:
             "cached_at": iso_now(),
             "entries": len(rows),
             "enriched_pages": enriched,
+            "cached_member_entries": len(cached_member_rows),
             "project_root": str(self.project_root),
         }
         try:

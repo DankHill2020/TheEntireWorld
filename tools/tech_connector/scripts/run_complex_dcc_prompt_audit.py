@@ -8,14 +8,16 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-TOOLS_ROOT = Path(__file__).resolve().parents[2]
-if str(TOOLS_ROOT) not in sys.path:
-    sys.path.insert(0, str(TOOLS_ROOT))
+from tech_connector.models.constants import active_project_root, temp_output_path
+
+SCRIPT_ROOT = Path(__file__).resolve().parents[2]
+if str(SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_ROOT))
 
 from tech_connector.bridges.blender.blender_bridge import BlenderBridge
 from tech_connector.bridges.maya.maya_bridge import MayaBridge
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.request_context import RequestContext
 from tech_connector.services.prompt.prompt_dispatch_service import PromptDispatchService
 from tech_connector.services.prompt.prompt_execution_context_service import (
     build_prompt_execution_context,
@@ -219,8 +221,15 @@ def _audit_prompt(case: dict[str, Any], project_roots: list[str], availability: 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run complex Maya/Blender/Unreal prompt planning audit.")
-    parser.add_argument("--project-root", action="append", default=["C:/depot/tools"])
-    parser.add_argument("--output", default="C:/depot/tools/tech_connector/reports/complex_dcc_prompt_audit.json")
+    parser.add_argument(
+        "--project-root",
+        action="append",
+        default=[str(active_project_root())],
+    )
+    parser.add_argument(
+        "--output",
+        default=str(temp_output_path("complex_dcc_prompt_audit.json", subdir="reports")),
+    )
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--json", action="store_true", help="Also print the full JSON report to stdout.")
     args = parser.parse_args()

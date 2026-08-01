@@ -1395,9 +1395,14 @@ def _route_candidate_diagnostics(text: str, lower: str, *, host: str, hosts: lis
         "project_search": {"score": 0.0, "reasons": []},
         "chat": {"score": 0.1, "reasons": ["fallback route"]},
     }
+    from tech_connector.services.project_service import is_target_discovery_edit_request
+
     if _is_explicit_source_code_mutation(text, lower):
         candidates["target_discovery"]["score"] += 1.0
         candidates["target_discovery"]["reasons"].append("explicit source file plus code mutation")
+    if is_target_discovery_edit_request(text):
+        candidates["target_discovery"]["score"] += 0.9
+        candidates["target_discovery"]["reasons"].append("target discovery edit request")
     if _explicit_source_file_references(text):
         candidates["target_discovery"]["score"] += 0.45
         candidates["project_search"]["score"] += 0.25
@@ -2418,7 +2423,7 @@ def _is_explicit_pipeline_build_request(lower: str) -> bool:
 def _has_host_handoff_language(lower: str, hosts: list[str]) -> bool:
     if len(hosts) >= 2:
         return True
-    if re.search(r"\b(pipeline|workflow|bridge|transfer|export|import)\b", lower):
+    if re.search(r"\b(pipeline|workflow|bridge|transfer)\b", lower):
         return True
     return bool(
         re.search(r"\bconnect\b", lower)
@@ -2466,6 +2471,7 @@ def _read_only_host_code_query_decision(
         requires_dcc_connection=False,
         required_context=["project_index", "symbol_index", "request_goal_graph"],
         model_tier="none_deterministic",
+        task_graph=_read_only_review_task_graph(lower),
         reasons=[
             "Interrogative source-code language asks which project callable "
             "implements host behavior; it does not request host execution."
@@ -2601,35 +2607,6 @@ def classify_prompt_route(
     hosts = _detect_hosts(text)
     no_execute = _has_no_execute_guard(lower)
 
-    # Matches: 'add a/an X class in pkg.mod', 'add X and Y functions in pkg.mod',
-    # 'add a ProceduralX class and MaterialY dataclass in pkg.sub.mod', etc.
-    _ADD_CODE_PATTERN = re.compile(
-        r"\badd\s+(?:a\s+|an\s+)?"
-        r"[A-Za-z0-9_]+(?:\s+(?:and|&)\s+[A-Za-z0-9_]+)*"
-        r"\s+(?:class(?:es)?|functions?|dataclass(?:es)?|enums?|widgets?|dialogs?|methods?)"
-        r"(?:\s+and\s+[A-Za-z0-9_]+\s+(?:class(?:es)?|functions?|dataclass(?:es)?|enums?|widgets?|dialogs?|methods?))?"
-        r"\s+in\s+[A-Za-z0-9_.]+"
-    )
-    if _ADD_CODE_PATTERN.search(lower):
-        return _finalize_decision(PromptRouteDecision(
-            route="target_discovery",
-            provider="target_discovery",
-            intent_category="project_target_edit",
-            host=host or "project_code",
-            execution_route="engine.target_discovery",
-            handler_id="TargetDiscoveryEditProvider",
-            operation_mode="generate",
-            target_type="code",
-            execution_environment="project_index",
-            mutation_scope="file_mutation",
-            confidence=0.98,
-            requires_confirmation=False,
-            requires_dcc_connection=False,
-            model_tier="local_code",
-            reasons=[
-                "Prompt explicitly requests writing or adding a Python class/function into a named target module.",
-            ],
-        ), lower)
     if (
         _is_unreal_animation_blueprint_feature_request(lower)
         and not _is_explicit_pipeline_build_request(lower)
@@ -2848,6 +2825,64 @@ def classify_prompt_route(
             decision.request_understanding = request_understanding.to_dict()
         if goal_graph and not decision.task_graph:
             decision.task_graph = dict(goal_graph)
+        elif not decision.task_graph and decision.operations:
+            operation_goals = []
+            previous_goal_id = ""
+            for index, operation in enumerate(decision.operations, start=1):
+                item = dict(operation or {})
+                goal_id = str(
+                    item.get("step_id")
+                    or item.get("operation_id")
+                    or item.get("id")
+                    or f"operation_{index}"
+                )
+                dependencies = [
+                    str(value)
+                    for value in (
+                        item.get("depends_on")
+                        or ([previous_goal_id] if previous_goal_id else [])
+                    )
+                    if str(value)
+                ]
+                operation_goals.append(
+                    {
+                        "task_id": goal_id,
+                        "title": str(
+                            item.get("title")
+                            or item.get("name")
+                            or item.get("operation")
+                            or item.get("action")
+                            or goal_id
+                        ),
+                        "action": str(
+                            item.get("action")
+                            or item.get("operation")
+                            or item.get("capability")
+                            or "execute"
+                        ),
+                        "goal_type": "execute",
+                        "objective": str(
+                            item.get("objective")
+                            or item.get("description")
+                            or item.get("title")
+                            or goal_id
+                        ),
+                        "depends_on": dependencies,
+                        "required_inputs": list(item.get("requires") or []),
+                        "produces": list(item.get("produces") or []),
+                        "read_only": False,
+                        "terminal": index == len(decision.operations),
+                    }
+                )
+                previous_goal_id = goal_id
+            decision.task_graph = {
+                "framework": "typed_operation_goal_graph_v1",
+                "primary_goal": decision.primary_goal or primary_goal,
+                "goal_type": decision.goal_type or goal_type or "execute",
+                "goals": operation_goals,
+                "ordered_goals": operation_goals,
+                "estimated_steps": len(operation_goals),
+            }
         elif goal_graph and decision.task_graph and goal_graph != decision.task_graph:
             # Specialized operation graphs describe the callable's known
             # implementation. Preserve the semantic graph separately so a
@@ -3041,6 +3076,7 @@ def classify_prompt_route(
             requires_plan=True,
             required_context=["target_discovery", "symbol_index", "project_ui_patterns"],
             model_tier="local_code",
+            task_graph=_dcc_tool_task_graph(text, read_only=no_execute),
             reasons=[
                 "The terminal goal is a UI wrapper around a discovered callable, so target discovery must preserve both stages."
             ],

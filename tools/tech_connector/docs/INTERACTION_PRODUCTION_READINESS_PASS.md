@@ -1,4 +1,4 @@
-# Interaction Production Readiness Pass
+﻿# Interaction Production Readiness Pass
 
 Date: 2026-07-10
 
@@ -160,24 +160,24 @@ Updated static invariants:
 Commands run from `C:\depot\tools\tech_connector`:
 
 ```powershell
-python -m py_compile .\services\interaction_lifecycle_service.py .\services\choice_provider_service.py .\services\interaction_quality_service.py .\services\recovery_action_service.py .\app\main_window_chat_runtime.py .\app\main_window_workflows.py ..\examples\tech_connector\tests\test_interaction_lifecycle_service.py ..\examples\tech_connector\tests\test_enterprise_interaction_invariants.py
+python -m py_compile .\services\interaction_lifecycle_service.py .\services\choice_provider_service.py .\services\interaction_quality_service.py .\services\recovery_action_service.py .\app\main_window_chat_runtime.py .\app\main_window_workflows.py .\examples\tests\test_interaction_lifecycle_service.py .\examples\tests\test_enterprise_interaction_invariants.py
 ```
 
 Result: passed.
 
 ```powershell
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_interaction_lifecycle_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_chat_continuation_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_choice_provider_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_recovery_action_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_prompt_dispatch_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_enterprise_interaction_invariants.py"
+python -m unittest discover -s .\examples\tests -p "test_interaction_lifecycle_service.py"
+python -m unittest discover -s .\examples\tests -p "test_chat_continuation_service.py"
+python -m unittest discover -s .\examples\tests -p "test_choice_provider_service.py"
+python -m unittest discover -s .\examples\tests -p "test_recovery_action_service.py"
+python -m unittest discover -s .\examples\tests -p "test_prompt_dispatch_service.py"
+python -m unittest discover -s .\examples\tests -p "test_enterprise_interaction_invariants.py"
 ```
 
 Result: 37 tests passed.
 
 ```powershell
-python -m unittest discover -s ..\examples\tech_connector\tests
+python -m unittest discover -s .\examples\tests
 ```
 
 Result: 111 tests passed.

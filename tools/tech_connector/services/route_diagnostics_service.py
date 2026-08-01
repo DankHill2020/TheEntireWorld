@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from tech_connector.models.constants import temp_output_path
+
 
 @dataclass(frozen=True)
 class RouteCandidateDiagnostic:
@@ -127,8 +129,9 @@ def render_route_diagnostics(report: RouteDiagnosticReport | dict[str, Any], *, 
 
 
 def _metrics_path(project_root: str | None = None) -> Path:
-    root = Path(project_root or ".").resolve()
-    return root / ".ai_studio" / "routing_metrics.jsonl"
+    if project_root:
+        return Path(project_root).resolve() / ".ai_studio" / "routing_metrics.jsonl"
+    return temp_output_path("routing_metrics.jsonl", subdir="routing_metrics")
 
 
 def record_route_metric(metric: dict[str, Any], *, project_root: str | None = None) -> None:

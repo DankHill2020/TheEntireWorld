@@ -9,6 +9,7 @@ from tech_connector.services.prompt.prompt_route_eval_service import (
     format_prompt_route_eval_detail,
     load_prompt_route_eval_cases,
 )
+from tech_connector.models.constants import TOOLS_ROOT
 
 
 DEFAULT_FIXTURE = (
@@ -24,7 +25,7 @@ DEFAULT_FIXTURE = (
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate deterministic prompt route accuracy and timing.")
     parser.add_argument("--fixture", default=str(DEFAULT_FIXTURE))
-    parser.add_argument("--project-root", action="append", default=["C:/depot/tools"])
+    parser.add_argument("--project-root", action="append", default=[str(TOOLS_ROOT)])
     parser.add_argument("--case", action="append", default=[], help="Only run matching case id(s).")
     parser.add_argument("--category", action="append", default=[], help="Only run matching category/categories.")
     parser.add_argument("--json", action="store_true", help="Print full JSON rows instead of a compact summary.")

@@ -5,6 +5,7 @@ Every indexed function/tool becomes a structured capability entry in SQLite.
 This powers the workflow composer and model router context injection.
 """
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -220,8 +221,21 @@ def register_from_symbol(sym: Dict[str, Any]) -> Optional[int]:
     risk = _infer_risk(name, sym.get("docstring", ""))
     tags = _infer_tags(imports, calls, unreal)
 
+    qualified_name = str(sym.get("qualname") or name)
+    if qualified_name != name:
+        # Remove the pre-v2 short-name row as each source symbol is reindexed.
+        # This migrates safely without guessing an owner for untouched rows.
+        conn = _conn()
+        with conn:
+            conn.execute(
+                "DELETE FROM capabilities WHERE name = ? AND source_file = ?",
+                (name, str(sym.get("file") or "")),
+            )
+        conn.close()
     return register_capability({
-        "name":        name,
+        # Qualified names prevent methods with the same short name in separate
+        # classes in one source file from overwriting each other.
+        "name":        qualified_name,
         "app":         app,
         "inputs":      sym.get("params", []),
         "outputs":     sym.get("outputs", sym.get("returns", [])),
@@ -244,13 +258,33 @@ def find_capabilities(
     tag: Optional[str] = None,
     max_results: int = 20,
 ) -> List[Dict[str, Any]]:
-    """Search capabilities by name / docstring substring.
+    """Search capabilities using contextual terms and optional host filters.
 
     Optionally filter by app or tag.
     """
     conn = _conn()
-    conditions = ["(name LIKE ? OR docstring LIKE ? OR signature LIKE ?)"]
-    params: List[Any] = [f"%{query}%", f"%{query}%", f"%{query}%"]
+    broad_terms = {
+        "a", "an", "and", "api", "as", "at", "be", "by", "class", "code",
+        "for", "from", "function", "in", "is", "it", "method", "of", "on",
+        "or", "the", "this", "to", "use", "using", "via", "with",
+    }
+    query_terms = list(dict.fromkeys(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}", query or "")
+        if token.casefold() not in broad_terms
+    ))[:12]
+    conditions: List[str] = []
+    params: List[Any] = []
+    if query_terms:
+        term_conditions = []
+        for term in query_terms:
+            term_conditions.append(
+                "(name LIKE ? OR docstring LIKE ? OR signature LIKE ? "
+                "OR tags_json LIKE ? OR operation_keys_json LIKE ?)"
+            )
+            wildcard = f"%{term}%"
+            params.extend([wildcard, wildcard, wildcard, wildcard, wildcard])
+        conditions.append(f"({' OR '.join(term_conditions)})")
 
     if app:
         conditions.append("app = ?")
@@ -259,12 +293,14 @@ def find_capabilities(
         conditions.append("tags_json LIKE ?")
         params.append(f"%{tag}%")
 
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    candidate_limit = max(max_results * 8, max_results)
     sql = (
         "SELECT name, app, inputs_json, outputs_json, requires_json, "
         "risk, source_file, lineno, docstring, signature, tags_json, "
         "unreal_calls_json, local_calls_json, operation_keys_json "
-        f"FROM capabilities WHERE {' AND '.join(conditions)} "
-        f"LIMIT {max_results}"
+        f"FROM capabilities{where_clause} "
+        f"LIMIT {candidate_limit}"
     )
     rows = conn.execute(sql, params).fetchall()
     conn.close()
@@ -284,8 +320,25 @@ def find_capabilities(
                 d[k] = json.loads(d[k] or "[]")
             except Exception:
                 d[k] = []
+        haystack = " ".join(
+            str(d.get(field) or "")
+            for field in (
+                "name", "docstring", "signature", "tags",
+                "operation_keys", "local_calls", "unreal_calls",
+            )
+        ).casefold()
+        name_text = str(d.get("name") or "").casefold()
+        d["_capability_score"] = (
+            sum(8 for term in query_terms if term in name_text)
+            + sum(2 for term in query_terms if term in haystack)
+            + (20 if query and query.casefold() in haystack else 0)
+        )
         result.append(d)
-    return result
+    result.sort(key=lambda item: (
+        -int(item.pop("_capability_score", 0)),
+        str(item.get("name") or "").casefold(),
+    ))
+    return result[:max_results]
 
 
 def compose_workflow(steps: List[str]) -> Dict[str, Any]:

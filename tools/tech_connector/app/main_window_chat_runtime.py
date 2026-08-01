@@ -3,9 +3,9 @@
 import sys
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 import json
 import re
@@ -100,6 +100,7 @@ from tech_connector.services.ollama_service import (
 
 PROMPT_PROGRESS_QUIET_SECONDS = 10
 PROMPT_PROGRESS_CHAT_INTERVAL_SECONDS = 15
+DEFAULT_CHAT_VISIBLE_MAX_CHARS = 120_000
 
 
 class MainWindowChatRuntimeMixin:
@@ -114,9 +115,11 @@ class MainWindowChatRuntimeMixin:
             {
                 "label": label or state.get("label") or "request",
                 "started_at": state.get("started_at") or now,
+                "stage_started_at": state.get("stage_started_at") or now,
                 "last_event_at": now,
                 "last_chat_update_at": state.get("last_chat_update_at") or 0.0,
                 "last_message": state.get("last_message") or "Accepted request",
+                "last_raw_message": state.get("last_raw_message") or "Accepted request",
                 "last_human_stage": state.get("last_human_stage") or "",
                 "observer_notice_sent": bool(state.get("observer_notice_sent", False)),
                 "active": True,
@@ -132,7 +135,13 @@ class MainWindowChatRuntimeMixin:
         if not timer.isActive():
             timer.start()
 
-    def _note_prompt_progress_event(self, message: str, role: str = "main") -> None:
+    def _note_prompt_progress_event(
+        self,
+        message: str,
+        role: str = "main",
+        *,
+        raw_message: str = "",
+    ) -> None:
         observers = getattr(self, "_prompt_progress_observers", None)
         if not observers:
             return
@@ -143,10 +152,13 @@ class MainWindowChatRuntimeMixin:
         new_message = (message or "").strip() or state.get("last_message") or "Working"
         old_stage = self._background_status_stage_key(state.get("last_message") or "")
         new_stage = self._background_status_stage_key(new_message)
-        state["last_event_at"] = time.time()
+        now = time.time()
+        state["last_event_at"] = now
         state["last_message"] = new_message
+        state["last_raw_message"] = (raw_message or message or "").strip() or new_message
         if new_stage and new_stage != old_stage:
             state["observer_notice_sent"] = False
+            state["stage_started_at"] = now
 
     def _stop_prompt_progress_observer(self, role: str = "main") -> None:
         observers = getattr(self, "_prompt_progress_observers", None)
@@ -173,24 +185,82 @@ class MainWindowChatRuntimeMixin:
                 continue
             last_message = str(state.get("last_message") or "Working")
             label = str(state.get("label") or "request")
-            status = f"I'm still working on {label}. {last_message}"
+            human = self._humanize_background_status(last_message)
+            stage_elapsed = max(
+                0,
+                int(now - float(state.get("stage_started_at") or state.get("started_at") or now)),
+            )
+            quiet = max(0, int(now - float(state.get("last_event_at") or now)))
+            status = (
+                f"{human.rstrip('.')} | stage {stage_elapsed}s | "
+                f"total {elapsed}s | last update {quiet}s ago"
+            )
             if hasattr(self, "live_process_label"):
                 self.live_process_label.setText(f"Working: {status}")
             if (
                 now - float(state.get("last_chat_update_at") or 0.0)
                 >= PROMPT_PROGRESS_CHAT_INTERVAL_SECONDS
             ):
-                human = self._humanize_background_status(last_message)
                 stage_key = self._background_status_stage_key(last_message)
                 if human:
                     state["last_chat_update_at"] = now
                     state["last_human_stage"] = stage_key
                     state["observer_notice_sent"] = True
-                    detail = human.rstrip(".")
-                    if elapsed >= PROMPT_PROGRESS_CHAT_INTERVAL_SECONDS:
-                        detail += f". Still working on this step ({elapsed}s elapsed)."
-                    else:
-                        detail += "."
+                    metadata_by_role = getattr(self, "_pending_response_metadata_by_role", {}) or {}
+                    metadata = dict(metadata_by_role.get(role) or {})
+                    model = str(
+                        metadata.get("active_raw_model")
+                        or metadata.get("model")
+                        or metadata.get("requested_model")
+                        or ""
+                    ).strip()
+                    provider = str(
+                        metadata.get("provider")
+                        or metadata.get("model_provider")
+                        or ""
+                    ).strip()
+                    route_data = dict(getattr(self, "_last_prompt_route_decision", {}) or {})
+                    target = str(
+                        route_data.get("selected_target")
+                        or route_data.get("resolved_target_file")
+                        or route_data.get("target_file")
+                        or ""
+                    ).strip()
+                    decision_terms = (
+                        "because",
+                        "rejected",
+                        "resolved",
+                        "recover",
+                        "escalat",
+                        "evidence",
+                        "approved",
+                        "skip",
+                        "failed",
+                        "invalid",
+                    )
+                    update_label = (
+                        "Current reasoning"
+                        if any(term in human.casefold() for term in decision_terms)
+                        else "Active step"
+                    )
+                    detail_lines = [
+                        f"{update_label}: {human.rstrip('.')}",
+                        f"Request: {label}",
+                    ]
+                    if model or provider:
+                        model_label = model or "selected model"
+                        if provider:
+                            model_label += f" via {provider}"
+                        detail_lines.append(f"Model: {model_label}")
+                    if target:
+                        detail_lines.append(f"Target: {target}")
+                    detail_lines.extend(
+                        [
+                            f"Stage elapsed: {stage_elapsed}s | Total elapsed: {elapsed}s",
+                            f"Last engine update: {quiet}s ago",
+                        ]
+                    )
+                    detail = "\n".join(detail_lines)
                     self.append(f"\nASSISTANT [Update]:\n{detail}\n")
 
     def _background_status_stage_key(self, message: str) -> str:
@@ -203,20 +273,22 @@ class MainWindowChatRuntimeMixin:
         return re.sub(r"\s+", " ", text).strip() or "background_work"
 
     def _humanize_background_status(self, message: str) -> str:
-        """Convert worker/model plumbing into a brief user-facing update."""
+        """Preserve observable stage facts while removing only transport noise."""
         text = re.sub(r"\s+", " ", str(message or "")).strip()
         if not text:
-            return "I'm still working on this."
+            return "Working; no stage message has been received yet."
         lower = text.lower()
-        internal_terms = (
-            "serializing", "chars", "tokens", "dispatch", "handler",
-            "route", "worker", "model response", "subprocess", "pipeline",
-        )
-        if any(term in lower for term in internal_terms):
-            return "I'm still working through the request."
+        if "waiting for model response" in lower:
+            return "Waiting for the selected model to produce output."
+        if "receiving model/tool output" in lower:
+            return "Receiving model or tool output."
+        if "serializing" in lower:
+            return text.rstrip(".") + "."
+        if "subprocess pipe active" in lower:
+            return "The model subprocess is active; waiting for its next progress event."
         text = re.sub(r"^(working:|still working:?|accepted request[- :]*|preparing[- :]*)", "", text, flags=re.I).strip(" .")
         if not text:
-            return "I'm still working through the request."
+            return "Routing the request and resolving its execution context."
         return text[0].upper() + text[1:].rstrip(".") + "."
 
     def append_status_once(self, msg):
@@ -228,6 +300,8 @@ class MainWindowChatRuntimeMixin:
 
     def _mark_response_started(self, role="main"):
         role = role or "main"
+        self.last_chat_activity_time = time.time()
+        self.ollama_is_idle = False
         self._response_started_at_by_role[role] = time.time()
         self._start_prompt_progress_observer(role, label=f"{role} model response")
         self._note_prompt_progress_event("Waiting for model response", role)
@@ -243,11 +317,103 @@ class MainWindowChatRuntimeMixin:
             return f"Worked for {minutes}m {seconds}s"
         return f"Worked for {seconds}s"
 
+    def _canonical_thread_transcript(self) -> str:
+        """Return the complete structured thread independently of the rendered chat window."""
+        session = list(getattr(self, "current_session", []) or [])
+        formatter = getattr(self, "_history_session_to_transcript", None)
+        if callable(formatter):
+            return formatter(session)
+
+        parts = []
+        for message in session:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "message").upper()
+            content = message.get("content") or ""
+            if not isinstance(content, str):
+                content = json.dumps(content, indent=2, ensure_ascii=False)
+            if content.strip():
+                parts.append(f"\n{role}:\n{content}\n")
+        return "".join(parts)
+
+    def _chat_visible_max_chars(self) -> int:
+        try:
+            configured = int(
+                self.settings.get(
+                    "chat_visible_max_chars",
+                    DEFAULT_CHAT_VISIBLE_MAX_CHARS,
+                )
+            )
+        except (TypeError, ValueError):
+            configured = DEFAULT_CHAT_VISIBLE_MAX_CHARS
+        return max(40_000, configured)
+
+    def _trim_visible_chat_history(self) -> None:
+        """Bound Qt-facing text while the canonical session remains complete."""
+        raw = str(getattr(self, "chat_history_raw", "") or "")
+        limit = self._chat_visible_max_chars()
+        if len(raw) <= limit:
+            return
+
+        minimum_cut = len(raw) - limit
+        boundaries = [
+            raw.find(marker, minimum_cut)
+            for marker in ("\nYOU", "\nASSISTANT", "\nSYSTEM", "\n[")
+        ]
+        valid_boundaries = [index for index in boundaries if index >= minimum_cut]
+        cut_at = min(valid_boundaries) if valid_boundaries else minimum_cut
+        self._chat_history_omitted_chars = int(
+            getattr(self, "_chat_history_omitted_chars", 0) or 0
+        ) + cut_at
+        self.chat_history_raw = raw[cut_at:].lstrip()
+
+    def _visible_chat_transcript(self) -> str:
+        self._trim_visible_chat_history()
+        raw = str(getattr(self, "chat_history_raw", "") or "")
+        omitted = int(getattr(self, "_chat_history_omitted_chars", 0) or 0)
+        if not omitted:
+            return raw
+        return (
+            "[Earlier thread content is retained in context and saved history. "
+            f"{omitted:,} display characters are hidden here; use Full Thread to view everything.]\n\n"
+            + raw
+        )
+
+    def show_full_thread(self) -> None:
+        transcript = self._canonical_thread_transcript()
+        if not transcript.strip():
+            transcript = str(getattr(self, "chat_history_raw", "") or "")
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Full Thread")
+        dialog.resize(1000, 760)
+        layout = QVBoxLayout(dialog)
+        viewer = QPlainTextEdit(dialog)
+        viewer.setReadOnly(True)
+        viewer.setLineWrapMode(QPlainTextEdit.NoWrap)
+        viewer.setPlainText(transcript)
+        layout.addWidget(viewer, 1)
+
+        actions = QHBoxLayout()
+        copy_btn = QPushButton("Copy Full Thread", dialog)
+        close_btn = QPushButton("Close", dialog)
+        copy_btn.clicked.connect(
+            lambda: QGuiApplication.clipboard().setText(transcript)
+        )
+        close_btn.clicked.connect(dialog.accept)
+        actions.addStretch(1)
+        actions.addWidget(copy_btn)
+        actions.addWidget(close_btn)
+        layout.addLayout(actions)
+        dialog.exec()
+        dialog.deleteLater()
+
     def append(self, text):
         if not text:
             return
         self.extract_code_blocks(text)
         self.chat_history_raw += text
+        self._trim_visible_chat_history()
 
         if hasattr(self, "log"):
             scroll = self.log.verticalScrollBar()
@@ -290,6 +456,7 @@ class MainWindowChatRuntimeMixin:
     def clear_visible_chat_state(self):
         """Reset rendered chat and pending stream buffers without touching saved history."""
         self.chat_history_raw = ""
+        self._chat_history_omitted_chars = 0
         self.chat_copy_blocks = []
         self._stream_buffer_by_role = {}
         self._stream_header_written = set()
@@ -366,6 +533,7 @@ class MainWindowChatRuntimeMixin:
             final_text = f"\n{header}:\n{preview_content}\n"
             self.extract_code_blocks(final_text)
             self.chat_history_raw += final_text
+            self._trim_visible_chat_history()
 
             project_edit_preview = None
             if ("<modify_file" in preview_content or "<create_file" in preview_content) and hasattr(self, "editor_diff_widget"):
@@ -441,11 +609,18 @@ class MainWindowChatRuntimeMixin:
         if not hasattr(self, "log"):
             return
         started = time.perf_counter()
-        html = self.raw_text_to_html(self.chat_history_raw)
+        visible_transcript = self._visible_chat_transcript()
+        if visible_transcript == getattr(self, "_last_rendered_visible_transcript", None):
+            if self._chat_render_pending_bottom:
+                self.log.moveCursor(QTextCursor.End)
+            return
+        html = self.raw_text_to_html(visible_transcript)
         self._stream_preview_base_html = html
 
         previous_scroll = int(getattr(self, "_chat_render_previous_scroll", 0) or 0)
         self.log.setHtml(html)
+        self._last_rendered_visible_transcript = visible_transcript
+        self._last_rendered_chat_html = html
         if self._chat_render_pending_bottom:
             self.log.moveCursor(QTextCursor.End)
         else:
@@ -460,6 +635,7 @@ class MainWindowChatRuntimeMixin:
                 "chat_render",
                 duration_ms=duration_ms,
                 raw_chars=len(self.chat_history_raw or ""),
+                omitted_chars=int(getattr(self, "_chat_history_omitted_chars", 0) or 0),
                 html_chars=len(html or ""),
             )
 
@@ -555,7 +731,7 @@ class MainWindowChatRuntimeMixin:
         if render_base and hasattr(self, "log"):
             self.log.setHtml(
                 self._stream_preview_base_html
-                or self.raw_text_to_html(self.chat_history_raw)
+                or self.raw_text_to_html(self._visible_chat_transcript())
             )
             if self._chat_render_pending_bottom:
                 self.log.moveCursor(QTextCursor.End)
@@ -1073,7 +1249,10 @@ class MainWindowChatRuntimeMixin:
             self.append(f"\n[Status] Copied response {current + 1} to clipboard.\n")
 
     def copy_full_log(self):
-        QGuiApplication.clipboard().setText(self.log.toPlainText())
+        transcript = self._canonical_thread_transcript()
+        if not transcript.strip():
+            transcript = str(getattr(self, "chat_history_raw", "") or "")
+        QGuiApplication.clipboard().setText(transcript)
         self.append("\n[Copied full log.]\n")
 
     def health_check(self):
@@ -1256,6 +1435,31 @@ class MainWindowChatRuntimeMixin:
             else:
                 self.set_card("motionbuilder", "busy", "Tool activity")
 
+        response_active = bool(
+            getattr(self, "_response_started_at_by_role", {}) or {}
+        )
+        startup_only_lines = {
+            "[subprocess pipe active]",
+            "[pty active]",
+            "mcphost ready for input.",
+        }
+        cleaned_lines = [
+            line.strip().lower()
+            for line in cleaned.splitlines()
+            if line.strip()
+        ]
+        if cleaned and not response_active and all(
+            line in startup_only_lines
+            or "loaded" in line and "tools from mcp servers" in line
+            or line.startswith("model loaded")
+            for line in cleaned_lines
+        ):
+            if any("ready" in line or "tools from mcp servers" in line for line in cleaned_lines):
+                self.mcphost_ready = True
+                if "ok" not in self.status_cards["mcphost"].styleSheet():
+                    self.set_card("mcphost", "ok", "Ready")
+            return
+
         if cleaned:
             self.set_live_process("Streaming response")
             self.mcphost_ready = True
@@ -1283,6 +1487,8 @@ class MainWindowChatRuntimeMixin:
     def start_mcphost(self):
         if self.bridge.running:
             return
+        self.last_chat_activity_time = time.time()
+        self.ollama_is_idle = False
         model = self.selected_mcphost_model()
         config = self.config_box.currentText().strip()
         use_pty = self.use_pty_checkbox.isChecked()
@@ -1354,6 +1560,9 @@ class MainWindowChatRuntimeMixin:
         )
 
     def prestart_core_mcphost_sessions(self):
+        if bool(self.settings.get("ollama_lazy_start", True)):
+            self.append("\n[Status] Lazy model start is enabled; core model sessions will start on first use.\n")
+            return
         config = self.config_box.currentText().strip()
         use_pty = self.use_pty_checkbox.isChecked()
 
@@ -1410,10 +1619,10 @@ class MainWindowChatRuntimeMixin:
         # Empty narration means internal plumbing. Keep it out of the normal
         # thread while retaining it for diagnostics and developer activity.
         if not message:
-            self._note_prompt_progress_event(raw_message)
+            self._note_prompt_progress_event(raw_message, raw_message=raw_message)
             return
 
-        self._note_prompt_progress_event(message)
+        self._note_prompt_progress_event(message, raw_message=raw_message)
 
         try:
             app = QApplication.instance()
@@ -1578,6 +1787,8 @@ class MainWindowChatRuntimeMixin:
         self.append(f"\n[Status] Activity details {'enabled' if enabled else 'disabled'}.\n")
 
     def send_raw(self, text, label="Prompt"):
+        self.last_chat_activity_time = time.time()
+        self.ollama_is_idle = False
         self.last_user_prompt = text
         self.service.last_user_prompt = text
         self.set_live_process(f"Preparing raw prompt: {label}")
@@ -1604,7 +1815,7 @@ class MainWindowChatRuntimeMixin:
         chatbot_module = self.settings.get("chatbot_provider_module", "default")
         if chatbot_module and chatbot_module != "default":
             def run_custom_chatbot():
-                from tech_connector.services.modular_provider_utils import invoke_custom_provider
+                from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
                 def append_chunk(chunk):
                     from PySide6.QtCore import QTimer
                     from PySide6.QtWidgets import QApplication
@@ -1620,7 +1831,7 @@ class MainWindowChatRuntimeMixin:
                         pass
 
                     invoke_custom_provider(
-                        chatbot_module,
+                        resolve_custom_provider_binding("chatbot_module", chatbot_module, "generate_chat_response", self.settings),
                         generate_chat_response,
                         text,
                         history_list,
@@ -1631,6 +1842,10 @@ class MainWindowChatRuntimeMixin:
             import threading
             threading.Thread(target=run_custom_chatbot, daemon=True).start()
             return
+
+        if not bool(getattr(self.bridge, "running", False)):
+            self.set_live_process("Starting model session")
+            self.start_mcphost()
 
         def send_main_prompt_background() -> None:
             started = time.perf_counter()
@@ -3645,8 +3860,10 @@ class MainWindowChatRuntimeMixin:
         if not hasattr(self, "_capability_registry_cache"):
             try:
                 from tech_connector.services.capability_registry import CapabilityRegistry
-                from tech_connector.models.constants import TOOLS_ROOT
-                registry_path = Path(str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))())).parent / "data" / "capability_registry.json"
+                from tech_connector.models.constants import TOOLS_ROOT, capability_registry_path
+                registry_path = capability_registry_path(
+                    str(getattr(self, "active_project_root_path", lambda: str(TOOLS_ROOT))())
+                )
                 self._capability_registry_cache = CapabilityRegistry(registry_path)
             except Exception:
                 self._capability_registry_cache = None
@@ -4518,6 +4735,8 @@ class MainWindowChatRuntimeMixin:
             self.mcphost_manager.stop_session(role)
 
         if not session.bridge.running:
+            self.last_chat_activity_time = time.time()
+            self.ollama_is_idle = False
             ok, cmd_display, error = self.mcphost_manager.start_session(
                 role, config, use_pty, model_override=desired_model
             )
@@ -4848,10 +5067,6 @@ class MainWindowChatRuntimeMixin:
     def on_chat_input_text_changed(self, text: str):
         import time
         self.last_chat_activity_time = time.time()
-        if getattr(self, "ollama_is_idle", False):
-            self.ollama_is_idle = False
-            print("[Ollama] Chat activity detected. Waking up models...", flush=True)
-            self.keep_ollama_warm()
         cursor_pos = self.input.cursorPosition()
         before_cursor = text[:cursor_pos]
         if len(text or "") > 4000 and not any(marker in before_cursor[-120:] for marker in ("@", "!")):

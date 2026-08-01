@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.Material &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.MaterialAggregate" href="MaterialAggregate.html" />
+    <link rel="prev" title="unreal.MasterAudioSubmixCaptureProtocol" href="MasterAudioSubmixCaptureProtocol.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="MaterialAggregate.html" title="unreal.MaterialAggregate"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="MasterAudioSubmixCaptureProtocol.html" title="unreal.MasterAudioSubmixCaptureProtocol"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Material</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-material">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.Material</span></code><a class="headerlink" href="#unreal-material" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.Material">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">Material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.Material" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaterialInterface</span></code></a></p>
+<p>A Material is an asset which can be applied to a mesh to control the visual look of the scene.
+When light from the scene hits the surface, the shading model of the material is used to calculate how that light interacts with the surface.</p>
+<p>Warning: Creating new materials directly increases shader compile times!  Consider creating a Material Instance off of an existing material instead.</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: Material.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_front_layer_translucency</span></code> (bool):  [Read-Write] Allows a translucent material to be used with Front Layer Translucency by compiling additional shaders. Useful for controlling what should be included in Front Layer Translucency.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_negative_emissive_color</span></code> (bool):  [Read-Write] Whether the material should allow outputting negative emissive color values.  Only allowed on unlit materials.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_translucent_custom_depth_writes</span></code> (bool):  [Read-Write] Allows a translucent material to be used with custom depth writing by compiling additional shaders.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_translucent_local_light_shadow</span></code> (bool):  [Read-Write] Allows a translucent material to receive local light shadows.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">allow_variable_rate_shading</span></code> (bool):  [Read-Write] Allows the use of variable rate shading when evaluating this material. This will only apply to the base/translucency pass.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">always_evaluate_world_position_offset</span></code> (bool):  [Read-Write] Forces World Position Offset to always be evaluated for this material, even if the primitive it’s applied to has disabled it
+via “Evaluate World Position Offset” or “World Position Offset Disable Distance”.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">apply_cloud_fogging</span></code> (bool):  [Read-Write] When true, translucent materials receive cloud contribution as part of the fog evaluation, per vertex or per pixel according to the other selected options. This is a rough approximation but can help in some cases. Defaults to false. Fog is applied on clouds, so Apply Fogging must be true to use this feature.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_import_data</span></code> (AssetImportData):  [Read-Write] Importing data and options used for this material</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_user_data</span></code> (Array[AssetUserData]):  [Read-Write] Array of user data stored with the asset</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">automatically_set_usage_in_editor</span></code> (bool):  [Read-Write] Whether to automatically set usage flags on this material or its instances based on what they are applied to in the editor.
+Note that adding usage flags accidentally can add unwanted shader permutations.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blend_mode</span></code> (BlendMode):  [Read-Write] Determines how the material’s color is blended with background colors.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blendable_location</span></code> (BlendableLocation):  [Read-Write] Where the node is inserted in the (post processing) graph, only used if domain is PostProcess</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blendable_output_alpha</span></code> (bool):  [Read-Write] If this is enabled, the blendable will output alpha</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blendable_priority</span></code> (int32):  [Read-Write] If multiple nodes with the same  type are inserted at the same point, this defined order and if they get combined, only used if domain is PostProcess</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cast_dynamic_shadow_as_masked</span></code> (bool):  [Read-Write] Whether the material should cast shadows as masked even though it has a translucent blend mode.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cast_ray_traced_shadows</span></code> (bool):  [Read-Write] when true, the material casts ray tracing shadows.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compatible_with_lumen_card_sharing</span></code> (bool):  [Read-Write] When true, allows to share Lumen Cards between different instances even when material uses world position or per instance data, which may change material look per instance. All materials on a component needs this flag set for sharing to work.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compute_fog_per_pixel</span></code> (bool):  [Read-Write] When true, translucent materials have fog computed for every pixel, which costs more but fixes artifacts due to low tessellation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">contact_shadows</span></code> (bool):  [Read-Write] Contact shadows on translucency</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">decal_blend_mode</span></code> (DecalBlendMode):  [Read-Write]
+deprecated: No longer used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">disable_depth_test</span></code> (bool):  [Read-Write] Whether to draw on top of opaque pixels even if behind them. This only has meaning for translucency.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">disable_pre_exposure_scale</span></code> (bool):  [Read-Write] Disable pre-exposure scale in post process materials (multiply by View.OneOverPreExposure on inputs, View.PreExposure on output).  Useful for
+materials that don’t care about the absolute intensity of SceneColor (for example, a blur), simplifying custom HLSL and saving some performance.
+Or useful for non-color UserSceneTextures (for example, mask, matte, modulation, offset, or ID textures), where pre-exposure scale is
+undesirable.  Pre-exposure scale can be manually reapplied via custom HLSL if needed on specific inputs or the output.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">displacement_fade_range</span></code> (DisplacementFadeRange):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">displacement_scaling</span></code> (DisplacementScaling):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dither_opacity_mask</span></code> (bool):  [Read-Write] Dither opacity mask. When combined with Temporal AA this can be used as a form of limited translucency which supports all lighting features.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dithered_lod_transition</span></code> (bool):  [Read-Write] Whether meshes rendered with the material should support dithered LOD transitions.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">editor_only_data</span></code> (MaterialInterfaceEditorOnlyData):  [Read-Only]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_displacement_fade</span></code> (bool):  [Read-Write] Enables fading out and disabling of dynamic displacement in the distance, as displacement becomes unnoticeable</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_exec_wire</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_mobile_separate_translucency</span></code> (bool):  [Read-Write] Indicates that the translucent material should not be affected by bloom or DOF. (Note: Depth testing is not available)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_new_hlsl_generator</span></code> (bool):  [Read-Write] when true, the new material translator is used to translate this material</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_responsive_aa</span></code> (bool):  [Read-Write] Indicates that the material should be rendered using responsive anti-aliasing. Improves sharpness of small moving particles such as sparks.
+Only use for small moving features because it will cause aliasing of the background.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_stencil_test</span></code> (bool):  [Read-Write] Selectively execute post process material only for pixels that pass the stencil test against the Custom Depth/Stencil buffer.
+Pixels that fail the stencil test are filled with the previous post process material output or scene color.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">enable_tessellation</span></code> (bool):  [Read-Write] Whether tessellation is enabled on the material. NOTE: Required for displacement to work.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">float_precision_mode</span></code> (MaterialFloatPrecisionMode):  [Read-Write] Per Material override to change floating point precision in the pixel shader (ALU and uniforms precision)
+Full-precision (highp) is slower than (half-precision/mediump) but can be used to work around precision-related rendering errors.
+Use:
+‘Default’ to take the precision set by the project wide cvar r.Mobile.FloatPrecisionMode. It defaults to 0 (half precision)
+‘Full-precision for MaterialExpressions only’ if you still want to keep half precision in.ush/.usf shaders (global shaders)
+‘Full-precision for every float’ to force every float and uniform to full-precision
+‘Half-precision’ to try to use half precision ALU and uniforms where appropriate
+‘Half-precision including shader parameters’ same behaviour as ‘Half-precision’ but it also uses half precision for uniforms with custom parameters like PreshaderBuffer uniform</p></li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">force_compatible_with_light_function_atlas</span></code> (bool):  [Read-Write] Indicates that this material is safe to use with the light function atlas:</dt><dd><ul class="simple">
+<li><p>texture coordinates are manipulated in a way that works.</p></li>
+<li><p>world position and depth are not used in the graph or do work with the atlas.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Forces all deferred lights to go the fast batched lighting code path (no screen shadow mask).</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">forward_blends_sky_light_cubemaps</span></code> (bool):  [Read-Write] Enables blending of sky light cubemap textures. When disabled, the secondary cubemap is only visible when the blend factor is 1.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">forward_render_use_preintegrated_gf_for_simple_ibl</span></code> (bool):  [Read-Write] Forward (including mobile) renderer: use preintegrated GF lut for simple IBL, but will use one more sampler.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fully_rough</span></code> (bool):  [Read-Write] Forces the material to be completely rough. Saves a number of instructions and one sampler.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">generate_spherical_particle_normals</span></code> (bool):  [Read-Write] Whether to generate spherical normals for particles that use this material.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">has_pixel_animation</span></code> (bool):  [Read-Write] Whether the opaque material has any pixel animations happening, that isn’t included in the geometric velocities.
+This allows to disable renderer’s heuristics that assumes animation is fully described with motion vector, such as TSR’s anti-flickering heuristic.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_blendable</span></code> (bool):  [Read-Write] Allows blendability to be turned off, only used if domain is PostProcess</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_sky</span></code> (bool):  [Read-Write] Unlit and Opaque materials can be used as sky material on a sky dome mesh. When IsSky is true, these meshes will not receive any contribution from the aerial perspective. Height and Volumetric fog effects will still be applied.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_thin_surface</span></code> (bool):  [Read-Write] Indicates that the material should be rendered as a thin surface (i.e., without inner volume). Only used by Substrate materials. Enabling ThinSurface will disable subsurface profiles.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_translucency_velocity_from_depth</span></code> (bool):  [Read-Write] When true, translucent materials that write velocity will calculate it only based on the written depth and camera movement.
+This can be useful for translucent volume raycasts which write pixel depth offset and want to calculate velocity based on the output depth.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lightmass_settings</span></code> (LightmassMaterialInterfaceSettings):  [Read-Write] The Lightmass settings for this object.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">material_decal_response</span></code> (MaterialDecalResponse):  [Read-Write] Defines how the material reacts on DBuffer decals (Affects look, performance and texture/sample usage).
+Non DBuffer Decals can be disabled on the primitive (e.g. static mesh)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">material_domain</span></code> (MaterialDomain):  [Read-Write] The domain that the material’s attributes will be evaluated in.
+Certain pieces of material functionality are only valid in certain domains, for example vertex normal is only valid on a surface.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_world_position_offset_displacement</span></code> (float):  [Read-Write] Specifies the max world position offset of the material. Use this value to resolve issues with culling and self-occlusion caused by
+World Position Offset, and/or to restrict how much offset is permitted (i.e. values are clamped on each axis).
+NOTE: A value of 0.0 effectively means “no maximum”, and will not clamp the offsets, however it will also not extend culling bounds.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">nanite_override_material</span></code> (MaterialOverrideNanite):  [Read-Write] An override material which will be used instead of this one when rendering with Nanite.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">neural_profile</span></code> (NeuralProfile):  [Read-Write] Neural network profile. For internal usage, not editable/visible</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">neural_profile_id</span></code> (int8):  [Read-Write] Set by reference object cannot be modified.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">normal_curvature_to_roughness</span></code> (bool):  [Read-Write] Reduce roughness based on screen space normal changes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_customized_u_vs</span></code> (int32):  [Read-Write] Number of customized UV inputs to display.  Unconnected customized UV inputs will just pass through the vertex UVs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">opacity_mask_clip_value</span></code> (float):  [Read-Write] If BlendMode is BLEND_Masked, the surface is not rendered where OpacityMask &lt; OpacityMaskClipValue.
+If BlendMode is BLEND_Translucent, BLEND_Additive, or BLEND_Modulate, and “Output Depth and Velocity” is enabled,
+the object velocity is not rendered where Opacity &lt; OpacityMaskClipValue.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">output_translucent_velocity</span></code> (bool):  [Read-Write] When true, translucent materials will output motion vectors and write to depth buffer in velocity pass.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">parameter_group_data</span></code> (Array[ParameterGroupData]):  [Read-Write]
+deprecated: GetEditorOnlyData().ParameterGroupData</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">phys_material</span></code> (PhysicalMaterial):  [Read-Write] Physical material to use for this graphics material. Used for sounds, effects etc.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">phys_material_mask</span></code> (PhysicalMaterialMask):  [Read-Write] Physical material mask to use for this graphics material. Used for sounds, effects etc.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">physical_material_map</span></code> (PhysicalMaterial):  [Read-Write] Physical material mask map to use for this graphics material. Used for sounds, effects etc.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_depth_offset_mode</span></code> (PixelDepthOffsetMode):  [Read-Write] Controls whether refraction takes into account the material surface coverage, or not.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">preshader_gap</span></code> (uint16):  [Read-Write] If non-zero, overrides r.Material.PreshaderGapInterval for this material.  Workaround for a platform specific register overflow bug.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">preview_mesh</span></code> (SoftObjectPath):  [Read-Write] The mesh used by the material editor to preview the material.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">refraction_coverage_mode</span></code> (RefractionCoverageMode):  [Read-Write] Controls whether refraction takes into account the material surface coverage, or not. This is only for when substrate FrontMaterial is plugged in, not legacy root node material for the sake of compatibility.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">refraction_depth_bias</span></code> (float):  [Read-Write] This is the refraction depth bias, larger values offset distortion to prevent closer objects from rendering into the distorted surface at acute viewing angles but increases the disconnect between surface and where the refraction starts.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">refraction_method</span></code> (RefractionMode):  [Read-Write] Controls how the Refraction input is interpreted and how the refraction offset into scene color is computed for this material.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">relax_runtime_virtual_texture_restrictions</span></code> (bool):  [Read-Write] Relax restrictions on Runtime Virtual Texture output compilation.
+Normally we give a compilation error whenever a Runtime Virtual Texture Output reads from a Virtual Texture.
+This is because there is no feedback from Runtime Virtual Texture Output passes and no guarantee that Virtual Textures will be ready.
+If allowed then Runtime Virtual Texture pages can contain stale low resolution data that is not evicted until the pages are flushed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resolution_relative_to_input</span></code> (Name):  [Read-Write] Set output resolution relative to the given User Scene Texture input.  Negative User Texture Divisors upsample (clamped at full resolution).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">screen_space_reflections</span></code> (bool):  [Read-Write] SSR on translucency</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">shading_model</span></code> (MaterialShadingModel):  [Read-Write] Determines how inputs are combined to create the material’s final color.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">shading_rate</span></code> (MaterialShadingRate):  [Read-Write] Select what shading rate to apply, on platforms that support variable rate shading.
+Non-1x1 rates will reduce the rasterization fidelity for the material; they will not super-sample the material.
+This can save GPU performance on materials where reduced fidelity is acceptable.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stencil_compare</span></code> (MaterialStencilCompare):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stencil_ref_value</span></code> (uint8):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">substrate_roughness_tracking</span></code> (bool):  [Read-Write] This can be used to disable roughness tracking. When this is done, top layers roughness will no longer impact bottom layer roughness.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">subsurface_profile</span></code> (SubsurfaceProfile):  [Read-Write] SubsurfaceProfile, for Screen Space Subsurface Scattering..</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tangent_space_normal</span></code> (bool):  [Read-Write] Whether the material takes a tangent space normal or a world space normal as input.
+(TangentSpace requires extra instructions but is often more convenient).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">thumbnail_info</span></code> (ThumbnailInfo):  [Read-Only] Information for thumbnail rendering</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucency_directional_lighting_intensity</span></code> (float):  [Read-Write] Useful for artificially increasing the influence of the normal on the lighting result for translucency.
+A value larger than 1 increases the influence of the normal, a value smaller than 1 makes the lighting more ambient.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucency_lighting_mode</span></code> (TranslucencyLightingMode):  [Read-Write] Sets the lighting mode that will be used on this material if it is translucent.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucency_pass</span></code> (MaterialTranslucencyPass):  [Read-Write] Specifies the separate pass in which to render translucency.
+This can be used to avoid artifacts caused by certain post processing effects.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_backscattering_exponent</span></code> (float):  [Read-Write] Controls how diffuse the material’s backscattering is when using the MSM_Subsurface shading model.
+Larger exponents give a less diffuse look (smaller, brighter backscattering highlight).
+This is only used when the object is casting a volumetric translucent shadow from a directional light.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_directional_light_shadow_quality</span></code> (float):  [Read-Write] Set directional light shadow quality received by translucent material.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_local_light_shadow_quality</span></code> (float):  [Read-Write] Set local light shadow quality received by translucent material.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_multiple_scattering_extinction</span></code> (LinearColor):  [Read-Write] Colored extinction factor used to approximate multiple scattering in dense volumes.
+This is only used when the object is casting a volumetric translucent shadow.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_self_shadow_density_scale</span></code> (float):  [Read-Write] Scale used to make translucent self-shadowing more or less opaque than the material’s shadow on other objects.
+This is only used when the object is casting a volumetric translucent shadow.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_self_shadow_second_density_scale</span></code> (float):  [Read-Write] Used to make a second self shadow gradient, to add interesting shading in the shadow of the first.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_self_shadow_second_opacity</span></code> (float):  [Read-Write] Controls the strength of the second self shadow gradient.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_shadow_density_scale</span></code> (float):  [Read-Write] Scale used to make translucent shadows more or less opaque than the material’s actual opacity.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">translucent_shadow_start_offset</span></code> (float):  [Read-Write] Local space distance to bias the translucent shadow.  Positive values move the shadow away from the light.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">two_sided</span></code> (bool):  [Read-Write] Indicates that the material should be rendered without backface culling and the normal should be flipped for backfaces.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_alpha_to_coverage</span></code> (bool):  [Read-Write] Use alpha to coverage for masked material on mobile, make sure MSAA is enabled as well.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_emissive_for_dynamic_area_lighting</span></code> (bool):  [Read-Write] If enabled, the material’s emissive colour is injected into the LightPropagationVolume</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_hq_forward_reflections</span></code> (bool):  [Read-Write] Forward renderer: enables multiple parallax-corrected reflection captures that blend together.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_lightmap_directionality</span></code> (bool):  [Read-Write] Use lightmap directionality and per pixel normals. If disabled, lighting from lightmaps will be flat but cheaper.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_material_attributes</span></code> (bool):  [Read-Write] when true, the material attributes pin is used instead of the regular pins.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_planar_forward_reflections</span></code> (bool):  [Read-Write] Enables planar reflection when using the forward renderer or mobile. Enabling this setting reduces the number of samplers available to the material as one more sampler will be used for the planar reflection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_translucency_vertex_fog</span></code> (bool):  [Read-Write] When true, translucent materials are fogged. Defaults to true.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_shading_models</span></code> (str):  [Read-Only] These are the shading models present in this material. Note that all these shading models might not be used in all feature levels and quality levels.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_beam_trails</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_clothing</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_curves</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_editor_compositing</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_geometry_cache</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_geometry_collections</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_hair_strands</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_heterogeneous_volumes</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_instanced_skinned_mesh</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_instanced_static_meshes</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_lidar_point_cloud</span></code> (bool):  [Read-Write] Indicates that the material and its instances can be use with LiDAR Point Clouds
+This will result in the shaders required to support LiDAR Point Cloud geometries being compiled which will increase shader compile time and memory usage.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_mesh_deformer</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_mesh_particles</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_morph_targets</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_nanite</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_neural_networks</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_niagara_mesh_particles</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_niagara_ribbons</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_niagara_sprites</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_particle_sprites</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_skeletal_mesh</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_spline_meshes</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_static_lighting</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_static_mesh</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_virtual_heightfield_mesh</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_volumetric_cloud</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_voxels</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used_with_water</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">user_scene_texture</span></code> (Name):  [Read-Write] Specify a user generated scene texture as output, overriding the default output implied by “Blendable Location”, only used if domain is PostProcess</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">user_texture_divisor</span></code> (IntPoint):  [Read-Write] A divisor for the resolution of the User Scene Texture above, allowing an intermediate with reduced resolution</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">wireframe</span></code> (bool):  [Read-Write] Enables a wireframe view of the mesh the material is applied to.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">write_only_alpha</span></code> (bool):  [Read-Write] Whether the transluency pass should write its alpha, and only the alpha, into the framebuffer</p></li>
+</ul>
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.always_evaluate_world_position_offset">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">always_evaluate_world_position_offset</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.always_evaluate_world_position_offset" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Forces World Position Offset to always be evaluated for this material, even if the primitive it’s applied to has disabled it
+via “Evaluate World Position Offset” or “World Position Offset Disable Distance”.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.automatically_set_usage_in_editor">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">automatically_set_usage_in_editor</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.automatically_set_usage_in_editor" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Whether to automatically set usage flags on this material or its instances based on what they are applied to in the editor.
+Note that adding usage flags accidentally can add unwanted shader permutations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.blend_mode">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">blend_mode</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="BlendMode.html#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><a class="headerlink" href="#unreal.Material.blend_mode" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Determines how the material’s color is blended with background colors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="BlendMode.html#unreal.BlendMode" title="unreal.BlendMode">BlendMode</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.blendable_location">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">blendable_location</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="BlendableLocation.html#unreal.BlendableLocation" title="unreal.BlendableLocation"><span class="pre">BlendableLocation</span></a></span><a class="headerlink" href="#unreal.Material.blendable_location" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Where the node is inserted in the (post processing) graph, only used if domain is PostProcess</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="BlendableLocation.html#unreal.BlendableLocation" title="unreal.BlendableLocation">BlendableLocation</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.blendable_output_alpha">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">blendable_output_alpha</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.blendable_output_alpha" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If this is enabled, the blendable will output alpha</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.blendable_priority">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">blendable_priority</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.Material.blendable_priority" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If multiple nodes with the same  type are inserted at the same point, this defined order and if they get combined, only used if domain is PostProcess</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.compatible_with_lumen_card_sharing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">compatible_with_lumen_card_sharing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.compatible_with_lumen_card_sharing" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] When true, allows to share Lumen Cards between different instances even when material uses world position or per instance data, which may change material look per instance. All materials on a component needs this flag set for sharing to work.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.decal_blend_mode">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">decal_blend_mode</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="DecalBlendMode.html#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><a class="headerlink" href="#unreal.Material.decal_blend_mode" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]
+deprecated: No longer used.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="DecalBlendMode.html#unreal.DecalBlendMode" title="unreal.DecalBlendMode">DecalBlendMode</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.displacement_fade_range">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">displacement_fade_range</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="DisplacementFadeRange.html#unreal.DisplacementFadeRange" title="unreal.DisplacementFadeRange"><span class="pre">DisplacementFadeRange</span></a></span><a class="headerlink" href="#unreal.Material.displacement_fade_range" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="DisplacementFadeRange.html#unreal.DisplacementFadeRange" title="unreal.DisplacementFadeRange">DisplacementFadeRange</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.displacement_scaling">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">displacement_scaling</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="DisplacementScaling.html#unreal.DisplacementScaling" title="unreal.DisplacementScaling"><span class="pre">DisplacementScaling</span></a></span><a class="headerlink" href="#unreal.Material.displacement_scaling" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="DisplacementScaling.html#unreal.DisplacementScaling" title="unreal.DisplacementScaling">DisplacementScaling</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.float_precision_mode">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">float_precision_mode</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="MaterialFloatPrecisionMode.html#unreal.MaterialFloatPrecisionMode" title="unreal.MaterialFloatPrecisionMode"><span class="pre">MaterialFloatPrecisionMode</span></a></span><a class="headerlink" href="#unreal.Material.float_precision_mode" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Per Material override to change floating point precision in the pixel shader (ALU and uniforms precision)
+Full-precision (highp) is slower than (half-precision/mediump) but can be used to work around precision-related rendering errors.
+Use:
+‘Default’ to take the precision set by the project wide cvar r.Mobile.FloatPrecisionMode. It defaults to 0 (half precision)
+‘Full-precision for MaterialExpressions only’ if you still want to keep half precision in.ush/.usf shaders (global shaders)
+‘Full-precision for every float’ to force every float and uniform to full-precision
+‘Half-precision’ to try to use half precision ALU and uniforms where appropriate
+‘Half-precision including shader parameters’ same behaviour as ‘Half-precision’ but it also uses half precision for uniforms with custom parameters like PreshaderBuffer uniform</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="MaterialFloatPrecisionMode.html#unreal.MaterialFloatPrecisionMode" title="unreal.MaterialFloatPrecisionMode">MaterialFloatPrecisionMode</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.forward_blends_sky_light_cubemaps">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">forward_blends_sky_light_cubemaps</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.forward_blends_sky_light_cubemaps" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Enables blending of sky light cubemap textures. When disabled, the secondary cubemap is only visible when the blend factor is 1.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.forward_render_use_preintegrated_gf_for_simple_ibl">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">forward_render_use_preintegrated_gf_for_simple_ibl</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.forward_render_use_preintegrated_gf_for_simple_ibl" title="Link to this definition">¶</a></dt>
+<dd><p>use preintegrated GF lut for simple IBL, but will use one more sampler.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+<dt class="field-even">Type<span class="colon">:</span></dt>
+<dd class="field-even"><p>[Read-Only] Forward (including mobile) renderer</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.fully_rough">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">fully_rough</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.fully_rough" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Forces the material to be completely rough. Saves a number of instructions and one sampler.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.is_blendable">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_blendable</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.is_blendable" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Allows blendability to be turned off, only used if domain is PostProcess</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.material_decal_response">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">material_decal_response</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="MaterialDecalResponse.html#unreal.MaterialDecalResponse" title="unreal.MaterialDecalResponse"><span class="pre">MaterialDecalResponse</span></a></span><a class="headerlink" href="#unreal.Material.material_decal_response" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Defines how the material reacts on DBuffer decals (Affects look, performance and texture/sample usage).
+Non DBuffer Decals can be disabled on the primitive (e.g. static mesh)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="MaterialDecalResponse.html#unreal.MaterialDecalResponse" title="unreal.MaterialDecalResponse">MaterialDecalResponse</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.material_domain">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">material_domain</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="MaterialDomain.html#unreal.MaterialDomain" title="unreal.MaterialDomain"><span class="pre">MaterialDomain</span></a></span><a class="headerlink" href="#unreal.Material.material_domain" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] The domain that the material’s attributes will be evaluated in.
+Certain pieces of material functionality are only valid in certain domains, for example vertex normal is only valid on a surface.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="MaterialDomain.html#unreal.MaterialDomain" title="unreal.MaterialDomain">MaterialDomain</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.max_world_position_offset_displacement">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">max_world_position_offset_displacement</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Material.max_world_position_offset_displacement" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Specifies the max world position offset of the material. Use this value to resolve issues with culling and self-occlusion caused by
+World Position Offset, and/or to restrict how much offset is permitted (i.e. values are clamped on each axis).
+NOTE: A value of 0.0 effectively means “no maximum”, and will not clamp the offsets, however it will also not extend culling bounds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.max_world_position_offset_distance">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">max_world_position_offset_distance</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Material.max_world_position_offset_distance" title="Link to this definition">¶</a></dt>
+<dd><p>‘max_world_position_offset_distance’ was renamed to ‘max_world_position_offset_displacement’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="NiagaraScript.html#unreal.NiagaraScript.deprecated" title="unreal.NiagaraScript.deprecated">deprecated</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.normal_curvature_to_roughness">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">normal_curvature_to_roughness</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.normal_curvature_to_roughness" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Reduce roughness based on screen space normal changes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.parameter_group_data">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">parameter_group_data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><a class="headerlink" href="#unreal.Material.parameter_group_data" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]
+deprecated: GetEditorOnlyData().ParameterGroupData</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="ParameterGroupData.html#unreal.ParameterGroupData" title="unreal.ParameterGroupData">ParameterGroupData</a>])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.resolution_relative_to_input">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">resolution_relative_to_input</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a></span><a class="headerlink" href="#unreal.Material.resolution_relative_to_input" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set output resolution relative to the given User Scene Texture input.  Negative User Texture Divisors upsample (clamped at full resolution).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.substrate_roughness_tracking">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">substrate_roughness_tracking</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.substrate_roughness_tracking" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] This can be used to disable roughness tracking. When this is done, top layers roughness will no longer impact bottom layer roughness.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.use_alpha_to_coverage">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_alpha_to_coverage</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.use_alpha_to_coverage" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Use alpha to coverage for masked material on mobile, make sure MSAA is enabled as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.use_emissive_for_dynamic_area_lighting">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_emissive_for_dynamic_area_lighting</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.use_emissive_for_dynamic_area_lighting" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If enabled, the material’s emissive colour is injected into the LightPropagationVolume</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.use_hq_forward_reflections">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_hq_forward_reflections</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.use_hq_forward_reflections" title="Link to this definition">¶</a></dt>
+<dd><p>enables multiple parallax-corrected reflection captures that blend together.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+<dt class="field-even">Type<span class="colon">:</span></dt>
+<dd class="field-even"><p>[Read-Only] Forward renderer</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.use_lightmap_directionality">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_lightmap_directionality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.use_lightmap_directionality" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Use lightmap directionality and per pixel normals. If disabled, lighting from lightmaps will be flat but cheaper.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.use_planar_forward_reflections">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_planar_forward_reflections</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.use_planar_forward_reflections" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Enables planar reflection when using the forward renderer or mobile. Enabling this setting reduces the number of samplers available to the material as one more sampler will be used for the planar reflection.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_beam_trails">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_beam_trails</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_beam_trails" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_clothing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_clothing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_clothing" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_curves">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_curves</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_curves" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_editor_compositing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_editor_compositing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_editor_compositing" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_geometry_cache">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_geometry_cache</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_geometry_cache" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_geometry_collections">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_geometry_collections</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_geometry_collections" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_hair_strands">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_hair_strands</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_hair_strands" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_heterogeneous_volumes">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_heterogeneous_volumes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_heterogeneous_volumes" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_instanced_skinned_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_instanced_skinned_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_instanced_skinned_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_instanced_static_meshes">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_instanced_static_meshes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_instanced_static_meshes" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_lidar_point_cloud">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_lidar_point_cloud</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_lidar_point_cloud" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Indicates that the material and its instances can be use with LiDAR Point Clouds
+This will result in the shaders required to support LiDAR Point Cloud geometries being compiled which will increase shader compile time and memory usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_mesh_deformer">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_mesh_deformer</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_mesh_deformer" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_mesh_particles">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_mesh_particles</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_mesh_particles" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_morph_targets">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_morph_targets</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_morph_targets" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_nanite">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_nanite</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_nanite" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_niagara_mesh_particles">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_niagara_mesh_particles</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_niagara_mesh_particles" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_niagara_ribbons">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_niagara_ribbons</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_niagara_ribbons" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_niagara_sprites">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_niagara_sprites</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_niagara_sprites" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_particle_sprites">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_particle_sprites</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_particle_sprites" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_skeletal_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_skeletal_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_skeletal_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_spline_meshes">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_spline_meshes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_spline_meshes" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_static_lighting">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_static_lighting</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_static_lighting" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_static_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_static_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_static_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_virtual_heightfield_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_virtual_heightfield_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_virtual_heightfield_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_volumetric_cloud">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_volumetric_cloud</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_volumetric_cloud" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_voxels">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_voxels</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_voxels" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.used_with_water">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">used_with_water</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Material.used_with_water" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.user_scene_texture">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">user_scene_texture</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a></span><a class="headerlink" href="#unreal.Material.user_scene_texture" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Specify a user generated scene texture as output, overriding the default output implied by “Blendable Location”, only used if domain is PostProcess</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Material.user_texture_divisor">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">user_texture_divisor</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="IntPoint.html#unreal.IntPoint" title="unreal.IntPoint"><span class="pre">IntPoint</span></a></span><a class="headerlink" href="#unreal.Material.user_texture_divisor" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] A divisor for the resolution of the User Scene Texture above, allowing an intermediate with reduced resolution</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="IntPoint.html#unreal.IntPoint" title="unreal.IntPoint">IntPoint</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.Material</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Material"><code class="docutils literal notranslate"><span class="pre">Material</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Material.always_evaluate_world_position_offset"><code class="docutils literal notranslate"><span class="pre">Material.always_evaluate_world_position_offset</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.automatically_set_usage_in_editor"><code class="docutils literal notranslate"><span class="pre">Material.automatically_set_usage_in_editor</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.blend_mode"><code class="docutils literal notranslate"><span class="pre">Material.blend_mode</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.blendable_location"><code class="docutils literal notranslate"><span class="pre">Material.blendable_location</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.blendable_output_alpha"><code class="docutils literal notranslate"><span class="pre">Material.blendable_output_alpha</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.blendable_priority"><code class="docutils literal notranslate"><span class="pre">Material.blendable_priority</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.compatible_with_lumen_card_sharing"><code class="docutils literal notranslate"><span class="pre">Material.compatible_with_lumen_card_sharing</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.decal_blend_mode"><code class="docutils literal notranslate"><span class="pre">Material.decal_blend_mode</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.displacement_fade_range"><code class="docutils literal notranslate"><span class="pre">Material.displacement_fade_range</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.displacement_scaling"><code class="docutils literal notranslate"><span class="pre">Material.displacement_scaling</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.float_precision_mode"><code class="docutils literal notranslate"><span class="pre">Material.float_precision_mode</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.forward_blends_sky_light_cubemaps"><code class="docutils literal notranslate"><span class="pre">Material.forward_blends_sky_light_cubemaps</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.forward_render_use_preintegrated_gf_for_simple_ibl"><code class="docutils literal notranslate"><span class="pre">Material.forward_render_use_preintegrated_gf_for_simple_ibl</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.fully_rough"><code class="docutils literal notranslate"><span class="pre">Material.fully_rough</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.is_blendable"><code class="docutils literal notranslate"><span class="pre">Material.is_blendable</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.material_decal_response"><code class="docutils literal notranslate"><span class="pre">Material.material_decal_response</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.material_domain"><code class="docutils literal notranslate"><span class="pre">Material.material_domain</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.max_world_position_offset_displacement"><code class="docutils literal notranslate"><span class="pre">Material.max_world_position_offset_displacement</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.max_world_position_offset_distance"><code class="docutils literal notranslate"><span class="pre">Material.max_world_position_offset_distance</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.normal_curvature_to_roughness"><code class="docutils literal notranslate"><span class="pre">Material.normal_curvature_to_roughness</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.parameter_group_data"><code class="docutils literal notranslate"><span class="pre">Material.parameter_group_data</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.resolution_relative_to_input"><code class="docutils literal notranslate"><span class="pre">Material.resolution_relative_to_input</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.substrate_roughness_tracking"><code class="docutils literal notranslate"><span class="pre">Material.substrate_roughness_tracking</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.use_alpha_to_coverage"><code class="docutils literal notranslate"><span class="pre">Material.use_alpha_to_coverage</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.use_emissive_for_dynamic_area_lighting"><code class="docutils literal notranslate"><span class="pre">Material.use_emissive_for_dynamic_area_lighting</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.use_hq_forward_reflections"><code class="docutils literal notranslate"><span class="pre">Material.use_hq_forward_reflections</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.use_lightmap_directionality"><code class="docutils literal notranslate"><span class="pre">Material.use_lightmap_directionality</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.use_planar_forward_reflections"><code class="docutils literal notranslate"><span class="pre">Material.use_planar_forward_reflections</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_beam_trails"><code class="docutils literal notranslate"><span class="pre">Material.used_with_beam_trails</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_clothing"><code class="docutils literal notranslate"><span class="pre">Material.used_with_clothing</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_curves"><code class="docutils literal notranslate"><span class="pre">Material.used_with_curves</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_editor_compositing"><code class="docutils literal notranslate"><span class="pre">Material.used_with_editor_compositing</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_geometry_cache"><code class="docutils literal notranslate"><span class="pre">Material.used_with_geometry_cache</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_geometry_collections"><code class="docutils literal notranslate"><span class="pre">Material.used_with_geometry_collections</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_hair_strands"><code class="docutils literal notranslate"><span class="pre">Material.used_with_hair_strands</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_heterogeneous_volumes"><code class="docutils literal notranslate"><span class="pre">Material.used_with_heterogeneous_volumes</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_instanced_skinned_mesh"><code class="docutils literal notranslate"><span class="pre">Material.used_with_instanced_skinned_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_instanced_static_meshes"><code class="docutils literal notranslate"><span class="pre">Material.used_with_instanced_static_meshes</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_lidar_point_cloud"><code class="docutils literal notranslate"><span class="pre">Material.used_with_lidar_point_cloud</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_mesh_deformer"><code class="docutils literal notranslate"><span class="pre">Material.used_with_mesh_deformer</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_mesh_particles"><code class="docutils literal notranslate"><span class="pre">Material.used_with_mesh_particles</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_morph_targets"><code class="docutils literal notranslate"><span class="pre">Material.used_with_morph_targets</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_nanite"><code class="docutils literal notranslate"><span class="pre">Material.used_with_nanite</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_niagara_mesh_particles"><code class="docutils literal notranslate"><span class="pre">Material.used_with_niagara_mesh_particles</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_niagara_ribbons"><code class="docutils literal notranslate"><span class="pre">Material.used_with_niagara_ribbons</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_niagara_sprites"><code class="docutils literal notranslate"><span class="pre">Material.used_with_niagara_sprites</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_particle_sprites"><code class="docutils literal notranslate"><span class="pre">Material.used_with_particle_sprites</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_skeletal_mesh"><code class="docutils literal notranslate"><span class="pre">Material.used_with_skeletal_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_spline_meshes"><code class="docutils literal notranslate"><span class="pre">Material.used_with_spline_meshes</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_static_lighting"><code class="docutils literal notranslate"><span class="pre">Material.used_with_static_lighting</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_static_mesh"><code class="docutils literal notranslate"><span class="pre">Material.used_with_static_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_virtual_heightfield_mesh"><code class="docutils literal notranslate"><span class="pre">Material.used_with_virtual_heightfield_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_volumetric_cloud"><code class="docutils literal notranslate"><span class="pre">Material.used_with_volumetric_cloud</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_voxels"><code class="docutils literal notranslate"><span class="pre">Material.used_with_voxels</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.used_with_water"><code class="docutils literal notranslate"><span class="pre">Material.used_with_water</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.user_scene_texture"><code class="docutils literal notranslate"><span class="pre">Material.user_scene_texture</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Material.user_texture_divisor"><code class="docutils literal notranslate"><span class="pre">Material.user_texture_divisor</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="MasterAudioSubmixCaptureProtocol.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.MasterAudioSubmixCaptureProtocol</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="MaterialAggregate.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.MaterialAggregate</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="MaterialAggregate.html" title="unreal.MaterialAggregate"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="MasterAudioSubmixCaptureProtocol.html" title="unreal.MasterAudioSubmixCaptureProtocol"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Material</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a220870e2aed6be9',t:'MTc4NTIwNjUxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.AssetImportTask &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.AssetMappingTable" href="AssetMappingTable.html" />
+    <link rel="prev" title="unreal.AssetImportData" href="AssetImportData.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="AssetMappingTable.html" title="unreal.AssetMappingTable"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="AssetImportData.html" title="unreal.AssetImportData"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetImportTask</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-assetimporttask">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.AssetImportTask</span></code><a class="headerlink" href="#unreal-assetimporttask" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.AssetImportTask">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">AssetImportTask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetImportTask" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><code class="xref py py-class docutils literal notranslate"><span class="pre">Object</span></code></a></p>
+<p>Contains data for a group of assets to import</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: UnrealEd</p></li>
+<li><p><strong>File</strong>: AssetImportTask.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">async_</span></code> (bool):  [Read-Write] Perform the import asynchronously for file formats where async import is available</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">automated</span></code> (bool):  [Read-Write] Avoid dialogs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">destination_name</span></code> (str):  [Read-Write] Optional custom name to import as (if you are using interchange the name must be set in a pipeline and this field will be ignored)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">destination_path</span></code> (str):  [Read-Write] Path where asset will be imported to</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">factory</span></code> (Factory):  [Read-Write] Optional factory to use</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">filename</span></code> (str):  [Read-Write] Filename to import</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">imported_object_paths</span></code> (Array[str]):  [Read-Write] Paths to objects created or updated after import</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">options</span></code> (Object):  [Read-Write] Import options specific to the type of asset</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replace_existing</span></code> (bool):  [Read-Write] Overwrite existing assets</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">replace_existing_settings</span></code> (bool):  [Read-Write] Replace existing settings when overwriting existing assets</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">result</span></code> (Array[Object]):  [Read-Write]
+deprecated: Please use the GetObjects function instead.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">save</span></code> (bool):  [Read-Write] Save after importing</p></li>
+</ul>
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.async_">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">async_</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.async_" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Perform the import asynchronously for file formats where async import is available</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.automated">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">automated</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.automated" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Avoid dialogs</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.destination_name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">destination_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.destination_name" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Optional custom name to import as (if you are using interchange the name must be set in a pipeline and this field will be ignored)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.destination_path">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">destination_path</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.destination_path" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Path where asset will be imported to</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.factory">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">factory</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory"><span class="pre">Factory</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.factory" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Optional factory to use</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory">Factory</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.filename">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">filename</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.filename" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Filename to import</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.get_objects">
+<span class="sig-name descname"><span class="pre">get_objects</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetImportTask.get_objects" title="Link to this definition">¶</a></dt>
+<dd><p>Get the list of imported objects.
+Note that if the import was asynchronous, this will block until the results are ready.
+To test whether asynchronous results are ready or not, use IsAsyncImportComplete().</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.imported_object_paths">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">imported_object_paths</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.imported_object_paths" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Paths to objects created or updated after import</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.is_async_import_complete">
+<span class="sig-name descname"><span class="pre">is_async_import_complete</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetImportTask.is_async_import_complete" title="Link to this definition">¶</a></dt>
+<dd><p>Query whether this asynchronous import task is complete, and the results are ready to read.
+This will always return true in the case of a blocking import.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.options">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">options</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.options" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Import options specific to the type of asset</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.replace_existing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">replace_existing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.replace_existing" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Overwrite existing assets</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.replace_existing_settings">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">replace_existing_settings</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.replace_existing_settings" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Replace existing settings when overwriting existing assets</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.result">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">result</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.result" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]
+deprecated: Please use the GetObjects function instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetImportTask.save">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">save</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.AssetImportTask.save" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Save after importing</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.AssetImportTask</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetImportTask"><code class="docutils literal notranslate"><span class="pre">AssetImportTask</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetImportTask.async_"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.async_</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.automated"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.automated</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.destination_name"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.destination_name</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.destination_path"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.destination_path</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.factory"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.factory</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.filename"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.filename</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.get_objects"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.get_objects()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.imported_object_paths"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.imported_object_paths</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.is_async_import_complete"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.is_async_import_complete()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.options"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.options</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.replace_existing"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.replace_existing</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.replace_existing_settings"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.replace_existing_settings</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.result"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.result</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetImportTask.save"><code class="docutils literal notranslate"><span class="pre">AssetImportTask.save</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="AssetImportData.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetImportData</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="AssetMappingTable.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetMappingTable</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="AssetMappingTable.html" title="unreal.AssetMappingTable"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="AssetImportData.html" title="unreal.AssetImportData"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetImportTask</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2236a405db066e3',t:'MTc4NTIzNjc5Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

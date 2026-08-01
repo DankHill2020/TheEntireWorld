@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.Texture &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.Texture2D" href="Texture2D.html" />
+    <link rel="prev" title="unreal.TextRenderComponent" href="TextRenderComponent.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="Texture2D.html" title="unreal.Texture2D"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="TextRenderComponent.html" title="unreal.TextRenderComponent"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Texture</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-texture">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.Texture</span></code><a class="headerlink" href="#unreal-texture" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.Texture">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">Texture</span></span><a class="headerlink" href="#unreal.Texture" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="StreamableRenderAsset.html#unreal.StreamableRenderAsset" title="unreal.StreamableRenderAsset"><code class="xref py py-class docutils literal notranslate"><span class="pre">StreamableRenderAsset</span></code></a></p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: Texture.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_brightness</span></code> (float):  [Read-Write] Static texture brightness adjustment (scales HSV value.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_brightness_curve</span></code> (float):  [Read-Write] Static texture curve adjustment (raises HSV value to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_hue</span></code> (float):  [Read-Write] Static texture hue adjustment (0 - 360) (offsets HSV hue by value in degrees.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_max_alpha</span></code> (float):  [Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 1 (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_min_alpha</span></code> (float):  [Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 0 (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_rgb_curve</span></code> (float):  [Read-Write] Static texture RGB curve adjustment (raises linear-space RGB color to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_saturation</span></code> (float):  [Read-Write] Static texture saturation adjustment (scales HSV saturation.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_vibrance</span></code> (float):  [Read-Write] Static texture “vibrance” adjustment (0 - 1) (HSV saturation algorithm adjustment.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">alpha_coverage_thresholds</span></code> (Vector4):  [Read-Write] Alpha values per channel to compare to when preserving alpha coverage. 0 means disable channel.  Typical good values in 0.5 - 0.9, not 1.0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_import_data</span></code> (AssetImportData):  [Read-Only]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_user_data</span></code> (Array[AssetUserData]):  [Read-Write] Array of user data stored with the asset</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">availability</span></code> (TextureAvailability):  [Read-Write] Whether the texture will be encoded to a gpu format and uploaded to the graphics card, or kept on the CPU for access by gamecode / blueprint.
+For CPU availability, the texture will still upload a tiny black texture as a placeholder. Only applies to 2d textures.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_color</span></code> (Color):  [Read-Write] The color that will be replaced with transparent black if chroma keying is enabled</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_texture</span></code> (bool):  [Read-Write] Whether to chroma key the image, replacing any pixels that match ChromaKeyColor with transparent black</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_threshold</span></code> (float):  [Read-Write] The threshold that components have to match for the texel to be considered equal to the ChromaKeyColor when chroma keying (&lt;=, set to 0 to require a perfect exact match)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_power</span></code> (float):  [Read-Write] default 1, high values result in a stronger effect e.g 1, 2, 4, 8
+this is not a slider because the texture update would not be fast enough</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_texture</span></code> (Texture):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_texture_mode</span></code> (CompositeTextureMode):  [Read-Write] defines how the CompositeTexture is applied, e.g. CTM_RoughnessFromNormalAlpha</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compress_final</span></code> (bool):  [Read-Write] If enabled, compress with Final quality during this Editor session.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_cache_id</span></code> (Guid):  [Read-Write] Change this optional ID to force the texture to be recompressed by changing its cache key.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_no_alpha</span></code> (bool):  [Read-Write] If enabled, the texture’s alpha channel will be forced to opaque for any compressed texture output format.  Does not apply if output format is uncompressed RGBA.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_quality</span></code> (TextureCompressionQuality):  [Read-Write] The compression quality for generated ASTC textures (i.e. mobile platform textures).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_settings</span></code> (TextureCompressionSettings):  [Read-Write] Compression settings to use when building the texture.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cook_platform_tiling_settings</span></code> (TextureCookPlatformTilingSettings):  [Read-Write] If the platform supports it, tile the texture when cooking, or keep it linear and tile it when it’s actually submitted to the GPU.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">defer_compression</span></code> (bool):  [Read-Write] If enabled, defer compression of the texture until save or manually compressed in the texture editor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">do_scale_mips_for_alpha_coverage</span></code> (bool):  [Read-Write] Whether mip RGBA should be scaled to preserve the number of pixels with Value &gt;= AlphaCoverageThresholds.  AlphaCoverageThresholds are ignored if this is off.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">downscale</span></code> (PerPlatformFloat):  [Read-Write] Downscale source texture, applied only to 2d textures without mips
+&lt; 1.0 - use scale value from texture group
+1.0 - do not scale texture
+&gt; 1.0 - scale texure</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">downscale_options</span></code> (TextureDownscaleOptions):  [Read-Write] Texture downscaling options</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">filter</span></code> (TextureFilter):  [Read-Write] The texture filtering mode to use when sampling this texture.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flip_green_channel</span></code> (bool):  [Read-Write] When true the texture’s green channel will be inverted. This is useful for some normal maps.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">global_force_mip_levels_to_be_resident</span></code> (bool):  [Read-Write] Global and serialized version of ForceMiplevelsToBeResident.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_bias</span></code> (int32):  [Read-Write] A bias to the index of the top mip level to use.  That is, number of mip levels to drop when cooking.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_group</span></code> (TextureGroup):  [Read-Write] Texture group this texture belongs to</p></li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">lossy_compression_amount</span></code> (TextureLossyCompressionAmount):  [Read-Write] How aggressively should any relevant lossy compression be applied. For compressors that support EncodeSpeed (i.e. Oodle), this is only</dt><dd><p>applied if enabled (see Project Settings -&gt; Texture Encoding). Note that this is <em>in addition</em> to any
+unavoidable loss due to the target format - selecting “No Lossy Compression” will not result in zero distortion for BCn formats.</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_texture_size</span></code> (int32):  [Read-Write] The maximum resolution for generated textures. A value of 0 means the maximum size for the format on each platform.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mip_gen_settings</span></code> (TextureMipGenSettings):  [Read-Write] Per asset specific setting to define the mip-map generation properties like sharpening and kernel size.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mip_load_options</span></code> (TextureMipLoadOptions):  [Read-Write] The texture mip load options.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">never_stream</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">normalize_normals</span></code> (bool):  [Read-Write] Normalize colors in Normal Maps after mip generation for better and sharper quality; recommended on if not required to match legacy behavior.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_cinematic_mip_levels</span></code> (int32):  [Read-Write] Number of mip-levels to use for cinematic quality.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">oodle_preserve_extremes</span></code> (bool):  [Read-Write] If set to true, then Oodle encoder preserves 0 and 255 (0.0 and 1.0) values exactly in alpha channel for BC3/BC7 and in all channels for BC4/BC5.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">oodle_texture_sdk_version</span></code> (Name):  [Read-Write] Oodle Texture SDK Version to encode with.  Enter ‘latest’ to update; ‘None’ preserves legacy encoding to avoid patches.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pad_with_border_color</span></code> (bool):  [Read-Write] If set to true, texture padding will be performed using colors of the border pixels. This can be used to improve quality of the generated mipmaps for padded textures.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">padding_color</span></code> (Color):  [Read-Write] The color used to pad the texture out if it is padded due to PowerOfTwoMode</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">power_of_two_mode</span></code> (TexturePowerOfTwoSetting):  [Read-Write] How to pad the texture to a power of 2 size (if necessary)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">preserve_border</span></code> (bool):  [Read-Write] When true the texture’s border will be preserved during mipmap generation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resize_during_build_x</span></code> (int32):  [Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original width will be used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resize_during_build_y</span></code> (int32):  [Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original height will be used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">source_color_settings</span></code> (TextureSourceColorSettings):  [Read-Write] Texture color management settings: source encoding and color space.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">srgb</span></code> (bool):  [Read-Write] Whether Texture and its source are in SRGB Gamma color space.  Can only be used with 8-bit and compressed formats.  This should be unchecked if using alpha channels individually as masks.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_legacy_gamma</span></code> (bool):  [Read-Write] A flag for using the simplified legacy gamma space e.g pow(color,1/2.2) for converting from FColor to FLinearColor, if we’re doing sRGB.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_new_mip_filter</span></code> (bool):  [Read-Write] Disable for legacy compatibility.  New and changed textures should set this to use modern improved image processing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_virtual_texture_streaming_priority</span></code> (bool):  [Read-Write] Override the virtual texture streaming priority set on this texture by the texture LOD group.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_prefetch_mips</span></code> (uint8):  [Read-Write] The number of mips that a virtual texture can stream using the traditional CPU texture streaming system.
+In most cases this should be 0 because the virtual texture GPU feedback is sufficient and will minimize memory usage.
+But CPU prefetching can be used in some cases to avoid late appearance of mips.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_streaming</span></code> (bool):  [Read-Write] Is this texture streamed in using VT</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_streaming_priority</span></code> (VTProducerPriority):  [Read-Write] Priority to use when using virtual texture streaming for this texture.</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.add_asset_user_data_of_class">
+<span class="sig-name descname"><span class="pre">add_asset_user_data_of_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user_data_class</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.Texture.add_asset_user_data_of_class" title="Link to this definition">¶</a></dt>
+<dd><p>Creates and adds an instance of the provided AssetUserData class to the target asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>user_data_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – UAssetUserData sub class to create</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Whether or not an instance of InUserDataClass was succesfully added</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_brightness">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_brightness</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_brightness" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture brightness adjustment (scales HSV value.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_brightness_curve">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_brightness_curve</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_brightness_curve" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture curve adjustment (raises HSV value to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_hue">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_hue</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_hue" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture hue adjustment (0 - 360) (offsets HSV hue by value in degrees.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_max_alpha">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_max_alpha</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_max_alpha" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 1 (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_min_alpha">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_min_alpha</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_min_alpha" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 0 (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_rgb_curve">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_rgb_curve</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_rgb_curve" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture RGB curve adjustment (raises linear-space RGB color to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_saturation">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_saturation</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_saturation" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture saturation adjustment (scales HSV saturation.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.adjust_vibrance">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">adjust_vibrance</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.adjust_vibrance" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Static texture “vibrance” adjustment (0 - 1) (HSV saturation algorithm adjustment.)  (Non-destructive; Requires texture source art to be available.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.alpha_coverage_thresholds">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">alpha_coverage_thresholds</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Vector4.html#unreal.Vector4" title="unreal.Vector4"><span class="pre">Vector4</span></a></span><a class="headerlink" href="#unreal.Texture.alpha_coverage_thresholds" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Alpha values per channel to compare to when preserving alpha coverage. 0 means disable channel.  Typical good values in 0.5 - 0.9, not 1.0</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Vector4.html#unreal.Vector4" title="unreal.Vector4">Vector4</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.availability">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">availability</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureAvailability.html#unreal.TextureAvailability" title="unreal.TextureAvailability"><span class="pre">TextureAvailability</span></a></span><a class="headerlink" href="#unreal.Texture.availability" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether the texture will be encoded to a gpu format and uploaded to the graphics card, or kept on the CPU for access by gamecode / blueprint.
+For CPU availability, the texture will still upload a tiny black texture as a placeholder. Only applies to 2d textures.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureAvailability.html#unreal.TextureAvailability" title="unreal.TextureAvailability">TextureAvailability</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.blueprint_get_built_texture_size">
+<span class="sig-name descname"><span class="pre">blueprint_get_built_texture_size</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Vector3f.html#unreal.Vector3f" title="unreal.Vector3f"><span class="pre">Vector3f</span></a></span></span><a class="headerlink" href="#unreal.Texture.blueprint_get_built_texture_size" title="Link to this definition">¶</a></dt>
+<dd><dl class="simple">
+<dt>Get the dimensions of the largest mip of the texture when built, accounting for LODBias and other constraints</dt><dd><p>Returns the 3d size when built for the current platform.  Does not cause texture to get built.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Vector3f.html#unreal.Vector3f" title="unreal.Vector3f">Vector3f</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.blueprint_get_memory_size">
+<span class="sig-name descname"><span class="pre">blueprint_get_memory_size</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int64</span></span></span><a class="headerlink" href="#unreal.Texture.blueprint_get_memory_size" title="Link to this definition">¶</a></dt>
+<dd><p>Gets the memory size of the texture, in bytes.
+This is the size in GPU memory of the built platformdata, accounting for LODBias, etc.
+Returns zero for error.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int64</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.blueprint_get_texture_source_disk_and_memory_size">
+<span class="sig-name descname"><span class="pre">blueprint_get_texture_source_disk_and_memory_size</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">)</span> <span class="pre">-&gt;</span> <span class="pre">(out_disk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">int64</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_memory_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">int64</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.Texture.blueprint_get_texture_source_disk_and_memory_size" title="Link to this definition">¶</a></dt>
+<dd><p>Gets the memory size of the texture source top mip, in bytes, and the size on disk of the asset, which may be compressed.
+Uses texture source, not available in runtime games.
+Does not cause texture source to be loaded, queries cached values.
+Returns zero for error.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><p>out_disk_size (int64):</p>
+<p>out_memory_size (int64):</p>
+</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.blueprint_get_texture_source_id_string">
+<span class="sig-name descname"><span class="pre">blueprint_get_texture_source_id_string</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.Texture.blueprint_get_texture_source_id_string" title="Link to this definition">¶</a></dt>
+<dd><p>Return the ID for the texture source.
+If the source isn’t valid or editor data isn’t available, returns false.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>out_texture_source_id (str):</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.chroma_key_color">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">chroma_key_color</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Color.html#unreal.Color" title="unreal.Color"><span class="pre">Color</span></a></span><a class="headerlink" href="#unreal.Texture.chroma_key_color" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The color that will be replaced with transparent black if chroma keying is enabled</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Color.html#unreal.Color" title="unreal.Color">Color</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.chroma_key_texture">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">chroma_key_texture</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.chroma_key_texture" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether to chroma key the image, replacing any pixels that match ChromaKeyColor with transparent black</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.chroma_key_threshold">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">chroma_key_threshold</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.chroma_key_threshold" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The threshold that components have to match for the texel to be considered equal to the ChromaKeyColor when chroma keying (&lt;=, set to 0 to require a perfect exact match)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.composite_power">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">composite_power</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.Texture.composite_power" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] default 1, high values result in a stronger effect e.g 1, 2, 4, 8
+this is not a slider because the texture update would not be fast enough</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.composite_texture">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">composite_texture</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.Texture" title="unreal.Texture"><span class="pre">Texture</span></a></span><a class="headerlink" href="#unreal.Texture.composite_texture" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="#unreal.Texture" title="unreal.Texture">Texture</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.composite_texture_mode">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">composite_texture_mode</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="CompositeTextureMode.html#unreal.CompositeTextureMode" title="unreal.CompositeTextureMode"><span class="pre">CompositeTextureMode</span></a></span><a class="headerlink" href="#unreal.Texture.composite_texture_mode" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] defines how the CompositeTexture is applied, e.g. CTM_RoughnessFromNormalAlpha</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="CompositeTextureMode.html#unreal.CompositeTextureMode" title="unreal.CompositeTextureMode">CompositeTextureMode</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.compress_final">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">compress_final</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.compress_final" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If enabled, compress with Final quality during this Editor session.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.compression_no_alpha">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">compression_no_alpha</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.compression_no_alpha" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If enabled, the texture’s alpha channel will be forced to opaque for any compressed texture output format.  Does not apply if output format is uncompressed RGBA.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.compression_quality">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">compression_quality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureCompressionQuality.html#unreal.TextureCompressionQuality" title="unreal.TextureCompressionQuality"><span class="pre">TextureCompressionQuality</span></a></span><a class="headerlink" href="#unreal.Texture.compression_quality" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The compression quality for generated ASTC textures (i.e. mobile platform textures).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureCompressionQuality.html#unreal.TextureCompressionQuality" title="unreal.TextureCompressionQuality">TextureCompressionQuality</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.compression_settings">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">compression_settings</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureCompressionSettings.html#unreal.TextureCompressionSettings" title="unreal.TextureCompressionSettings"><span class="pre">TextureCompressionSettings</span></a></span><a class="headerlink" href="#unreal.Texture.compression_settings" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Compression settings to use when building the texture.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureCompressionSettings.html#unreal.TextureCompressionSettings" title="unreal.TextureCompressionSettings">TextureCompressionSettings</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.compute_texture_source_channel_min_max">
+<span class="sig-name descname"><span class="pre">compute_texture_source_channel_min_max</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">(out_color_min=LinearColor,</span> <span class="pre">out_color_max=LinearColor)</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.Texture.compute_texture_source_channel_min_max" title="Link to this definition">¶</a></dt>
+<dd><p>Scan the texture source pixels to compute the min &amp; max values of the RGBA channels.
+Uses texture source, not available in runtime games.
+Causes texture source data to be loaded, is computed by scanning pixels when called.
+Will set Min=Max=zero and return false on failure</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><p>out_color_min (LinearColor):</p>
+<p>out_color_max (LinearColor):</p>
+</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.cook_platform_tiling_settings">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">cook_platform_tiling_settings</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureCookPlatformTilingSettings.html#unreal.TextureCookPlatformTilingSettings" title="unreal.TextureCookPlatformTilingSettings"><span class="pre">TextureCookPlatformTilingSettings</span></a></span><a class="headerlink" href="#unreal.Texture.cook_platform_tiling_settings" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If the platform supports it, tile the texture when cooking, or keep it linear and tile it when it’s actually submitted to the GPU.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureCookPlatformTilingSettings.html#unreal.TextureCookPlatformTilingSettings" title="unreal.TextureCookPlatformTilingSettings">TextureCookPlatformTilingSettings</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.defer_compression">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">defer_compression</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.defer_compression" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If enabled, defer compression of the texture until save or manually compressed in the texture editor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.do_scale_mips_for_alpha_coverage">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">do_scale_mips_for_alpha_coverage</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.do_scale_mips_for_alpha_coverage" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether mip RGBA should be scaled to preserve the number of pixels with Value &gt;= AlphaCoverageThresholds.  AlphaCoverageThresholds are ignored if this is off.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.export_to_disk">
+<span class="sig-name descname"><span class="pre">export_to_disk</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.Texture.export_to_disk" title="Link to this definition">¶</a></dt>
+<dd><p>Export the specified texture to disk</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filename</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The filename on disk to save as</p></li>
+<li><p><strong>options</strong> (<a class="reference internal" href="ImageWriteOptions.html#unreal.ImageWriteOptions" title="unreal.ImageWriteOptions"><em>ImageWriteOptions</em></a>) – Parameters defining the various export options</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.filter">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">filter</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureFilter.html#unreal.TextureFilter" title="unreal.TextureFilter"><span class="pre">TextureFilter</span></a></span><a class="headerlink" href="#unreal.Texture.filter" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The texture filtering mode to use when sampling this texture.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureFilter.html#unreal.TextureFilter" title="unreal.TextureFilter">TextureFilter</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.flip_green_channel">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">flip_green_channel</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.flip_green_channel" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] When true the texture’s green channel will be inverted. This is useful for some normal maps.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.get_asset_user_data_of_class">
+<span class="sig-name descname"><span class="pre">get_asset_user_data_of_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user_data_class</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AssetUserData.html#unreal.AssetUserData" title="unreal.AssetUserData"><span class="pre">AssetUserData</span></a></span></span><a class="headerlink" href="#unreal.Texture.get_asset_user_data_of_class" title="Link to this definition">¶</a></dt>
+<dd><p>Returns an instance of the provided AssetUserData class if it’s contained in the target asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>user_data_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – UAssetUserData sub class to get</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The instance of the UAssetUserData class contained, or null if it doesn’t exist</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AssetUserData.html#unreal.AssetUserData" title="unreal.AssetUserData">AssetUserData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.get_texture_streaming_method">
+<span class="sig-name descname"><span class="pre">get_texture_streaming_method</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="TextureStreamingMethod.html#unreal.TextureStreamingMethod" title="unreal.TextureStreamingMethod"><span class="pre">TextureStreamingMethod</span></a></span></span><a class="headerlink" href="#unreal.Texture.get_texture_streaming_method" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the type of streaming the texture is currently using on the current platform. (None/Streamed/Virtual) *</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="TextureStreamingMethod.html#unreal.TextureStreamingMethod" title="unreal.TextureStreamingMethod">TextureStreamingMethod</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.has_asset_user_data_of_class">
+<span class="sig-name descname"><span class="pre">has_asset_user_data_of_class</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user_data_class</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.Texture.has_asset_user_data_of_class" title="Link to this definition">¶</a></dt>
+<dd><p>Checks whether or not an instance of the provided AssetUserData class is contained.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>user_data_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – UAssetUserData sub class to check for</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Whether or not an instance of InUserDataClass was found</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.lod_bias">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_bias</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.Texture.lod_bias" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] A bias to the index of the top mip level to use.  That is, number of mip levels to drop when cooking.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.lod_group">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_group</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureGroup.html#unreal.TextureGroup" title="unreal.TextureGroup"><span class="pre">TextureGroup</span></a></span><a class="headerlink" href="#unreal.Texture.lod_group" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Texture group this texture belongs to</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureGroup.html#unreal.TextureGroup" title="unreal.TextureGroup">TextureGroup</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.lossy_compression_amount">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lossy_compression_amount</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureLossyCompressionAmount.html#unreal.TextureLossyCompressionAmount" title="unreal.TextureLossyCompressionAmount"><span class="pre">TextureLossyCompressionAmount</span></a></span><a class="headerlink" href="#unreal.Texture.lossy_compression_amount" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] How aggressively should any relevant lossy compression be applied. For compressors that support EncodeSpeed (i.e. Oodle), this is only
+applied if enabled (see Project Settings -&gt; Texture Encoding). Note that this is <em>in addition</em> to any
+unavoidable loss due to the target format - selecting “No Lossy Compression” will not result in zero distortion for BCn formats.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureLossyCompressionAmount.html#unreal.TextureLossyCompressionAmount" title="unreal.TextureLossyCompressionAmount">TextureLossyCompressionAmount</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.max_texture_size">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">max_texture_size</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.Texture.max_texture_size" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The maximum resolution for generated textures. A value of 0 means the maximum size for the format on each platform.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.mip_gen_settings">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">mip_gen_settings</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureMipGenSettings.html#unreal.TextureMipGenSettings" title="unreal.TextureMipGenSettings"><span class="pre">TextureMipGenSettings</span></a></span><a class="headerlink" href="#unreal.Texture.mip_gen_settings" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Per asset specific setting to define the mip-map generation properties like sharpening and kernel size.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureMipGenSettings.html#unreal.TextureMipGenSettings" title="unreal.TextureMipGenSettings">TextureMipGenSettings</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.mip_load_options">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">mip_load_options</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureMipLoadOptions.html#unreal.TextureMipLoadOptions" title="unreal.TextureMipLoadOptions"><span class="pre">TextureMipLoadOptions</span></a></span><a class="headerlink" href="#unreal.Texture.mip_load_options" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The texture mip load options.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureMipLoadOptions.html#unreal.TextureMipLoadOptions" title="unreal.TextureMipLoadOptions">TextureMipLoadOptions</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.normalize_normals">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">normalize_normals</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.normalize_normals" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Normalize colors in Normal Maps after mip generation for better and sharper quality; recommended on if not required to match legacy behavior.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.oodle_preserve_extremes">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">oodle_preserve_extremes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.oodle_preserve_extremes" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If set to true, then Oodle encoder preserves 0 and 255 (0.0 and 1.0) values exactly in alpha channel for BC3/BC7 and in all channels for BC4/BC5.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.oodle_texture_sdk_version">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">oodle_texture_sdk_version</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a></span><a class="headerlink" href="#unreal.Texture.oodle_texture_sdk_version" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Oodle Texture SDK Version to encode with.  Enter ‘latest’ to update; ‘None’ preserves legacy encoding to avoid patches.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.pad_with_border_color">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">pad_with_border_color</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.pad_with_border_color" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If set to true, texture padding will be performed using colors of the border pixels. This can be used to improve quality of the generated mipmaps for padded textures.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.padding_color">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">padding_color</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Color.html#unreal.Color" title="unreal.Color"><span class="pre">Color</span></a></span><a class="headerlink" href="#unreal.Texture.padding_color" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The color used to pad the texture out if it is padded due to PowerOfTwoMode</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Color.html#unreal.Color" title="unreal.Color">Color</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.power_of_two_mode">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">power_of_two_mode</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TexturePowerOfTwoSetting.html#unreal.TexturePowerOfTwoSetting" title="unreal.TexturePowerOfTwoSetting"><span class="pre">TexturePowerOfTwoSetting</span></a></span><a class="headerlink" href="#unreal.Texture.power_of_two_mode" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] How to pad the texture to a power of 2 size (if necessary)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TexturePowerOfTwoSetting.html#unreal.TexturePowerOfTwoSetting" title="unreal.TexturePowerOfTwoSetting">TexturePowerOfTwoSetting</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.preserve_border">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">preserve_border</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.preserve_border" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] When true the texture’s border will be preserved during mipmap generation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.resize_during_build_x">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">resize_during_build_x</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.Texture.resize_during_build_x" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original width will be used.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.resize_during_build_y">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">resize_during_build_y</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.Texture.resize_during_build_y" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original height will be used.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture.set_virtual_texture_streaming">
+<span class="sig-name descname"><span class="pre">set_virtual_texture_streaming</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">virtual_texture_streaming</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.Texture.set_virtual_texture_streaming" title="Link to this definition">¶</a></dt>
+<dd><p>Set Virtual Texture Streaming</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>virtual_texture_streaming</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.source_color_settings">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">source_color_settings</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureSourceColorSettings.html#unreal.TextureSourceColorSettings" title="unreal.TextureSourceColorSettings"><span class="pre">TextureSourceColorSettings</span></a></span><a class="headerlink" href="#unreal.Texture.source_color_settings" title="Link to this definition">¶</a></dt>
+<dd><p>source encoding and color space.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureSourceColorSettings.html#unreal.TextureSourceColorSettings" title="unreal.TextureSourceColorSettings">TextureSourceColorSettings</a>)</p>
+</dd>
+<dt class="field-even">Type<span class="colon">:</span></dt>
+<dd class="field-even"><p>[Read-Write] Texture color management settings</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.srgb">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">srgb</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.srgb" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether Texture and its source are in SRGB Gamma color space.  Can only be used with 8-bit and compressed formats.  This should be unchecked if using alpha channels individually as masks.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.use_legacy_gamma">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_legacy_gamma</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.use_legacy_gamma" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] A flag for using the simplified legacy gamma space e.g pow(color,1/2.2) for converting from FColor to FLinearColor, if we’re doing sRGB.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.use_new_mip_filter">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">use_new_mip_filter</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.use_new_mip_filter" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Disable for legacy compatibility.  New and changed textures should set this to use modern improved image processing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.virtual_texture_streaming">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">virtual_texture_streaming</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.Texture.virtual_texture_streaming" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Only] Is this texture streamed in using VT</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture.virtual_texture_streaming_priority">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">virtual_texture_streaming_priority</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="VTProducerPriority.html#unreal.VTProducerPriority" title="unreal.VTProducerPriority"><span class="pre">VTProducerPriority</span></a></span><a class="headerlink" href="#unreal.Texture.virtual_texture_streaming_priority" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Priority to use when using virtual texture streaming for this texture.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="VTProducerPriority.html#unreal.VTProducerPriority" title="unreal.VTProducerPriority">VTProducerPriority</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.Texture</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Texture"><code class="docutils literal notranslate"><span class="pre">Texture</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Texture.add_asset_user_data_of_class"><code class="docutils literal notranslate"><span class="pre">Texture.add_asset_user_data_of_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_brightness"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_brightness</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_brightness_curve"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_brightness_curve</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_hue"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_hue</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_max_alpha"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_max_alpha</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_min_alpha"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_min_alpha</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_rgb_curve"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_rgb_curve</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_saturation"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_saturation</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.adjust_vibrance"><code class="docutils literal notranslate"><span class="pre">Texture.adjust_vibrance</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.alpha_coverage_thresholds"><code class="docutils literal notranslate"><span class="pre">Texture.alpha_coverage_thresholds</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.availability"><code class="docutils literal notranslate"><span class="pre">Texture.availability</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.blueprint_get_built_texture_size"><code class="docutils literal notranslate"><span class="pre">Texture.blueprint_get_built_texture_size()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.blueprint_get_memory_size"><code class="docutils literal notranslate"><span class="pre">Texture.blueprint_get_memory_size()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.blueprint_get_texture_source_disk_and_memory_size"><code class="docutils literal notranslate"><span class="pre">Texture.blueprint_get_texture_source_disk_and_memory_size()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.blueprint_get_texture_source_id_string"><code class="docutils literal notranslate"><span class="pre">Texture.blueprint_get_texture_source_id_string()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.chroma_key_color"><code class="docutils literal notranslate"><span class="pre">Texture.chroma_key_color</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.chroma_key_texture"><code class="docutils literal notranslate"><span class="pre">Texture.chroma_key_texture</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.chroma_key_threshold"><code class="docutils literal notranslate"><span class="pre">Texture.chroma_key_threshold</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.composite_power"><code class="docutils literal notranslate"><span class="pre">Texture.composite_power</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.composite_texture"><code class="docutils literal notranslate"><span class="pre">Texture.composite_texture</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.composite_texture_mode"><code class="docutils literal notranslate"><span class="pre">Texture.composite_texture_mode</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.compress_final"><code class="docutils literal notranslate"><span class="pre">Texture.compress_final</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.compression_no_alpha"><code class="docutils literal notranslate"><span class="pre">Texture.compression_no_alpha</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.compression_quality"><code class="docutils literal notranslate"><span class="pre">Texture.compression_quality</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.compression_settings"><code class="docutils literal notranslate"><span class="pre">Texture.compression_settings</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.compute_texture_source_channel_min_max"><code class="docutils literal notranslate"><span class="pre">Texture.compute_texture_source_channel_min_max()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.cook_platform_tiling_settings"><code class="docutils literal notranslate"><span class="pre">Texture.cook_platform_tiling_settings</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.defer_compression"><code class="docutils literal notranslate"><span class="pre">Texture.defer_compression</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.do_scale_mips_for_alpha_coverage"><code class="docutils literal notranslate"><span class="pre">Texture.do_scale_mips_for_alpha_coverage</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.export_to_disk"><code class="docutils literal notranslate"><span class="pre">Texture.export_to_disk()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.filter"><code class="docutils literal notranslate"><span class="pre">Texture.filter</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.flip_green_channel"><code class="docutils literal notranslate"><span class="pre">Texture.flip_green_channel</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.get_asset_user_data_of_class"><code class="docutils literal notranslate"><span class="pre">Texture.get_asset_user_data_of_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.get_texture_streaming_method"><code class="docutils literal notranslate"><span class="pre">Texture.get_texture_streaming_method()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.has_asset_user_data_of_class"><code class="docutils literal notranslate"><span class="pre">Texture.has_asset_user_data_of_class()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.lod_bias"><code class="docutils literal notranslate"><span class="pre">Texture.lod_bias</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.lod_group"><code class="docutils literal notranslate"><span class="pre">Texture.lod_group</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.lossy_compression_amount"><code class="docutils literal notranslate"><span class="pre">Texture.lossy_compression_amount</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.max_texture_size"><code class="docutils literal notranslate"><span class="pre">Texture.max_texture_size</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.mip_gen_settings"><code class="docutils literal notranslate"><span class="pre">Texture.mip_gen_settings</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.mip_load_options"><code class="docutils literal notranslate"><span class="pre">Texture.mip_load_options</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.normalize_normals"><code class="docutils literal notranslate"><span class="pre">Texture.normalize_normals</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.oodle_preserve_extremes"><code class="docutils literal notranslate"><span class="pre">Texture.oodle_preserve_extremes</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.oodle_texture_sdk_version"><code class="docutils literal notranslate"><span class="pre">Texture.oodle_texture_sdk_version</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.pad_with_border_color"><code class="docutils literal notranslate"><span class="pre">Texture.pad_with_border_color</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.padding_color"><code class="docutils literal notranslate"><span class="pre">Texture.padding_color</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.power_of_two_mode"><code class="docutils literal notranslate"><span class="pre">Texture.power_of_two_mode</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.preserve_border"><code class="docutils literal notranslate"><span class="pre">Texture.preserve_border</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.resize_during_build_x"><code class="docutils literal notranslate"><span class="pre">Texture.resize_during_build_x</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.resize_during_build_y"><code class="docutils literal notranslate"><span class="pre">Texture.resize_during_build_y</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.set_virtual_texture_streaming"><code class="docutils literal notranslate"><span class="pre">Texture.set_virtual_texture_streaming()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.source_color_settings"><code class="docutils literal notranslate"><span class="pre">Texture.source_color_settings</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.srgb"><code class="docutils literal notranslate"><span class="pre">Texture.srgb</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.use_legacy_gamma"><code class="docutils literal notranslate"><span class="pre">Texture.use_legacy_gamma</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.use_new_mip_filter"><code class="docutils literal notranslate"><span class="pre">Texture.use_new_mip_filter</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.virtual_texture_streaming"><code class="docutils literal notranslate"><span class="pre">Texture.virtual_texture_streaming</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture.virtual_texture_streaming_priority"><code class="docutils literal notranslate"><span class="pre">Texture.virtual_texture_streaming_priority</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="TextRenderComponent.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.TextRenderComponent</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="Texture2D.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.Texture2D</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="Texture2D.html" title="unreal.Texture2D"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="TextRenderComponent.html" title="unreal.TextRenderComponent"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Texture</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a223f94848ef8bef',t:'MTc4NTI0MjY1MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

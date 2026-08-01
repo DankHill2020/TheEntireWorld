@@ -320,7 +320,7 @@ def understand_prompt_request(
     The result then passes through deterministic normalization and safety checks.
     """
     try:
-        from tech_connector.services.prompt_task_splitter_service import normalize_prompt_text, split_prompt_clauses
+        from tech_connector.services.prompt.prompt_task_splitter_service import normalize_prompt_text, split_prompt_clauses
         normalized_source = normalize_prompt_text(text)
         clause_plan = split_prompt_clauses(normalized_source)
         raw = re.sub(r"\s+", " ", normalized_source).strip()
@@ -397,7 +397,7 @@ def understand_prompt_request_deterministic(
     it must never wait for a model or inspect project state.
     """
     try:
-        from tech_connector.services.prompt_task_splitter_service import normalize_prompt_text, split_prompt_clauses
+        from tech_connector.services.prompt.prompt_task_splitter_service import normalize_prompt_text, split_prompt_clauses
 
         normalized_source = normalize_prompt_text(text)
         clause_plan = split_prompt_clauses(normalized_source)
@@ -494,7 +494,7 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
     lower = text.lower()
     host = host or _detect_prompt_host(lower)
     try:
-        from tech_connector.services.target_entity_service import (
+        from reasoning_runtime.reasoning.target_entity_service import (
             parse_scoped_member_query,
         )
         scoped_query = parse_scoped_member_query(text)
@@ -502,6 +502,7 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         scoped_query = None
     files = re.findall(r"\b[A-Za-z_][A-Za-z0-9_./\\-]*\.(?:py|pyi|cpp|cc|c|h|hpp|cs|qml|ui)\b", text, re.I)
     explicit_scope_match = re.search(
+        r"(?<![A-Za-z0-9_])"
         r"(?P<path>(?:[A-Za-z]:[\\/]|[.]{1,2}[\\/]|/)[^\n\r:*?\"<>|]+?)"
         r"(?=\s*(?:$|[?.!,;]|\b(?:and|but|that|which|where|under|inside|within|"
         r"are|aren['’]?t|is|isn['’]?t|was|were|not|never)\b))",
@@ -803,6 +804,22 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         behavior = ""
         confidence = 0.8
         reasons = ["The request asks to change project code or create a code artifact."]
+    elif mutation_requested and host and re.search(
+        r"\b(system|feature|behavior|behaviour|flow|logic|states?|locomotion|"
+        r"animation|assets?|blueprints?|anim\s*bp|character\s*bp|"
+        r"inventory|gameplay|hud|ai|patrol|perception|blackboard)\b",
+        lower,
+    ):
+        primary_route = "target_discovery"
+        primary_intent = "host_feature_edit"
+        primary_action = "modify"
+        requested_artifact = "host_feature"
+        behavior = _read_only_behavior_phrase(lower) or lower
+        confidence = 0.86
+        reasons = [
+            f"The request asks to implement a multi-part feature for {host}; "
+            "discover its owning code, graph, or assets before mutation."
+        ]
     elif _is_explicit_file_existence_query(lower, bool(files)):
         primary_route = "project_search"
         primary_intent = "project_search"
@@ -1456,7 +1473,7 @@ def _model_understanding(
         OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
         def semantic_intent_model():
-            return "qwen2.5:1.5b"
+            return "qwen3:4b-instruct"
 
         def build_semantic_understanding_options(settings=None):
             return {
@@ -1532,7 +1549,7 @@ JSON schema:
   "reasons": []
 }"""
     try:
-        from tech_connector.services.prompt_task_splitter_service import clause_plan_for_model, split_prompt_clauses
+        from tech_connector.services.prompt.prompt_task_splitter_service import clause_plan_for_model, split_prompt_clauses
         clause_packet = clause_plan_for_model(split_prompt_clauses(text))
     except Exception:
         clause_packet = "DETERMINISTIC CLAUSE PLAN unavailable"
@@ -2335,7 +2352,11 @@ def _target_phrase(raw: str) -> str:
     # Preserve user wording after common action verbs; this is advisory metadata,
     # not a replacement for indexed target resolution.
     match = re.search(r"\b(?:add|create|write|implement|insert|modify|change|update|fix|repair|refactor|rename|find|show|inspect)\b\s+(.+)", raw, flags=re.I)
-    return match.group(1).strip()[:300] if match else ""
+    if not match:
+        return ""
+    phrase = match.group(1).strip()
+    phrase = re.sub(r"^(?:me|us)\s+", "", phrase, flags=re.IGNORECASE)
+    return phrase[:300]
 
 
 CONFIDENCE_AUTO_PLAN_MIN = 0.60

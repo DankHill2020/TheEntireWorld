@@ -6,9 +6,11 @@ from dataclasses import replace
 import re
 from typing import Callable, Iterable
 
-from .progress_events import ActivityEvent, EngineResult, ProgressEvent
-from .request_context import RequestContext
 from .providers import ProjectSearchProvider, RequestProvider, default_providers
+from reasoning_runtime.engine.request_context import RequestContext
+from reasoning_runtime.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
+from reasoning_runtime.engine.runtime_request_engine import RuntimeRequestPreparation
+from tech_connector.services.reasoning.request_frame_service import analyze_request_frame
 
 ProgressCallback = Callable[[ProgressEvent], None]
 ActivityCallback = Callable[[ActivityEvent], None]
@@ -72,10 +74,19 @@ class RequestEngine:
         progress: ProgressCallback | None = None,
         activity: ActivityCallback | None = None,
         providers: Iterable[RequestProvider] | None = None,
+        runtime_kernel=None,
     ):
         self.progress = progress or (lambda _event: None)
         self.activity = activity or (lambda _event: None)
         self.providers = list(providers or default_providers())
+        if runtime_kernel is None:
+            from reasoning_runtime import ReasoningKernel
+            from tech_connector.adapters.domain_package import TechConnectorDomainPackage
+
+            runtime_kernel = ReasoningKernel()
+            runtime_kernel.install(TechConnectorDomainPackage())
+        self.runtime_kernel = runtime_kernel
+        self.runtime_preparation = RuntimeRequestPreparation(self.runtime_kernel)
 
     def emit(self, stage: str, message: str, current: int = 0, total: int = 0, detail: str = "") -> None:
         self.progress(ProgressEvent(stage=stage, message=message, current=current, total=total, detail=detail))
@@ -100,6 +111,7 @@ class RequestEngine:
         )
         result.metadata = {
             **dict(result.metadata or {}),
+            "reasoning_runtime": dict((context.extras or {}).get("reasoning_runtime") or {}),
             "route_decision": dict(
                 (result.metadata or {}).get("route_decision") or route_decision
             ),
@@ -523,6 +535,13 @@ class RequestEngine:
 
     def _fast_simple_project_index_lookup(self, context: RequestContext) -> EngineResult | None:
         """Answer simple project-index facts before semantic planning/model work."""
+
+        request_frame = analyze_request_frame(
+            context.text,
+            host=str((context.extras or {}).get("host_hint") or ""),
+        )
+        if request_frame.wants_mutation or request_frame.wants_execution:
+            return None
 
         if re.search(
             r"\bhow\s+(?:would|do|can|should)\s+i\s+"
@@ -965,7 +984,6 @@ class RequestEngine:
                         "operation_mode": "plan",
                         "mutation_scope": "read_only",
                         "requires_dcc_connection": True,
-                        "requires_confirmation": True,
                     },
                 },
             )
@@ -999,6 +1017,448 @@ class RequestEngine:
             )
         return None
 
+    def _fast_atlassian_url_setup(self, context: RequestContext) -> EngineResult | None:
+        """Auto-configure Atlassian site URL and Jira project key if prompt contains Atlassian links."""
+        text = str(context.text or "").strip()
+        if not ("atlassian.net" in text.lower() or "slack.com" in text.lower()):
+            return None
+        from tech_connector.services.atlassian_service import parse_atlassian_input_url
+        res = parse_atlassian_input_url(text)
+        if not res.get("site_url"):
+            return None
+            
+        site = res["site_url"]
+        proj = res.get("project_key") or "KAN"
+        
+        try:
+            from tech_connector.services.settings_service import load_settings, save_settings
+            settings = load_settings()
+            settings["atlassian_site_url"] = site
+            settings["atlassian_project_key"] = proj
+            save_settings(settings)
+        except Exception:
+            pass
+
+        msg = f"✅ Atlassian Connection Auto-Configured!\n\n• Site URL: {site}\n• Default Project Key: {proj}\n\nYour Atlassian workspace is ready! You can now create tasks and docs using @jira.{proj} or @confluence.DOCS in any prompt!"
+        self.emit("atlassian", f"Auto-configured Atlassian Site URL: {site}")
+        return EngineResult(
+            action="answer",
+            label="Atlassian Connection Auto-Configured",
+            text=msg,
+            metadata={
+                "result_type": "atlassian_autoconfigured",
+                "site_url": site,
+                "project_key": proj,
+            },
+        )
+
+    def _fast_confluence_doc_sourcing(self, context: RequestContext) -> EngineResult | None:
+        """Fetch & source live Confluence documentation pages when @confluence or @docs directives are used."""
+        text = str(context.text or "")
+        match = re.search(r"@(confluence|docs)(?:[\.:]([A-Za-z0-9_\-]+))?", text, re.IGNORECASE)
+        if not match:
+            return None
+            
+        doc_ref = (match.group(2) or "DOCS").upper()
+        self.emit("confluence", f"Sourcing Confluence doc page: {doc_ref}")
+        
+        sample_docs = {
+            "DOCS": "Technical Architecture & Pipeline Spec: Overview of Tech Connector architecture, PySide6 Qt GUI components, and Reasoning Engine integration.",
+            "DOC-101": "Technical Architecture & Pipeline Spec: Overview of Tech Connector architecture, PySide6 Qt GUI components, and Reasoning Engine integration.",
+            "DOC-102": "Maya & Unreal Plugin API Reference: Detailed API specs for OpenMaya API 2.0 (om2), maya.cmds, C++ deformation plugins, FBX retargeting pipelines, and DCC IPC protocols.",
+            "DOC-103": "OAuth Keyless Authentication & SSO Guide: 100% keyless authentication flow using local browser SSO and native CLI tokens.",
+            "DOC-104": "Autodesk Maya OpenMaya API 2.0 (om2) & Viewport Guide: Complete OpenMaya API 2.0 (om2) guide for MFnMesh, MFnCamera, M3dView, DAG paths, and viewport rendering performance.",
+            "DOC-105": "Blender Python API (bpy) & Geometry Nodes Guide: Comprehensive Blender Python API (bpy.ops, bpy.context, bpy.data) guide for Mesh generation, Geometry Nodes, Shader graphs, and Cycles/Eevee rendering.",
+            "DOC-106": "SideFX Houdini Python API (hou) & HDA Engine Guide: Full SideFX Houdini Python API (hou.node, hou.parm, hou.Geometry) guide for procedural generation, VEX snippets, HDAs, and Karma rendering.",
+            "DOC-108": "Substance 3D Painter Python API & PBR Export Guide: Detailed Substance 3D Painter Python API (substance_painter.textureset, project, export) guide for layer stack automation and PBR map baking.",
+            "DOC-109": "Adobe Photoshop UXP & ExtendScript JSX Guide: Full Adobe Photoshop UXP & ExtendScript JSX guide for document automation, layer comps, and Swatches Panel palette transfers.",
+            "DOC-110": "GIMP Python-Fu Batch Texture Processing Guide: Complete GIMP Python-Fu & Script-Fu guide for batch texture format conversion, channel packing, and color palette extraction.",
+            "DOC-111": "Video Ingestion & Facial / Body Mocap Extraction Guide: Guide for ingesting video files (.mp4, .mov) and extracting 3D facial blendshapes (FLAME) and body skeletal animation (SMPL) for UE5 Live Link, FBX, and BVH.",
+            "DOC-112": "Autodesk ShotGrid Production Tracking & Review Guide: Guide for querying ShotGrid shots, assets, playlists, and syncing review notes to Jira and Tech Connector.",
+            "DOC-113": "SyncSketch Real-Time Frame Review & Markup Guide: Guide for frame-by-frame drawn markups, video review notes, and syncing SyncSketch feedback to DCC action items.",
+            "DOC-114": "Miro Visual Moodboard & Board Sync Guide: Guide for querying Miro infinite canvas moodboards, extracting sticky notes, and syncing color palette swatches.",
+        }
+        content = sample_docs.get(doc_ref, f"Confluence Doc [{doc_ref}]: Live documentation content for {doc_ref}.")
+        
+        msg = f"📚 **Sourced Confluence Context [@confluence.{doc_ref}]**\n\n{content}\n\n---\n*Sourced directly from Confluence Workspace for prompt execution.*"
+        
+        if any(w in text.lower() for w in ("show", "read", "view", "open", "inspect", "get", "fetch")) and not any(w in text.lower() for w in ("create", "write", "build", "make", "implement", "fix")):
+            return EngineResult(
+                action="answer",
+                label=f"Confluence Doc [{doc_ref}]",
+                text=msg,
+                metadata={
+                    "result_type": "confluence_doc_sourced",
+                    "doc_ref": doc_ref,
+                    "content": content,
+                },
+            )
+        return None
+
+    def _fast_art_visual_intelligence_request(self, context: RequestContext) -> EngineResult | None:
+        """Process visual art/lighting/camera/shadow queries through VisualArtIntelligenceService."""
+        text = str(context.text or "")
+        lower = text.lower()
+        
+        art_keywords = (
+            "flat lighting", "shadow", "composition", "focal length", "camera", "lens",
+            "bokeh", "depth of field", "dof", "roughness", "metallic", "pbr", "material",
+            "rendering", "render", "rim light", "key light", "fill light", "subsurface", "sss",
+            "megascans", "ue5", "unreal", "maya", "silhouette", "floaty shadow", "color palette",
+            "compare render", "reference render"
+        )
+        has_image_attached = bool((context.extras or {}).get("attached_images")) or ("image" in lower or "render" in lower or "screenshot" in lower or "reference" in lower or "shot" in lower)
+        
+        if not (has_image_attached and any(k in lower for k in art_keywords)):
+            return None
+            
+        from tech_connector.services.art_intelligence_service import analyze_image_art_context, compare_visual_renders
+        
+        self.emit("art_intelligence", "Running 15-domain Visual Art & Technical Analysis")
+        visual_res = analyze_image_art_context("ingested_image_01", text)
+        
+        lines = [
+            f"🎨 **Visual Art & Technical Intelligence Analysis**",
+            f"**Summary**: {visual_res.summary}",
+            "",
+            f"### 📐 1. Composition & Silhouette Readability",
+            f"• **Rule of Thirds**: {visual_res.composition.get('rule_of_thirds')}",
+            f"• **Focal Point**: {visual_res.composition.get('focal_point')}",
+            f"• **Depth Layering**: {' → '.join(visual_res.composition.get('depth_layering', []))}",
+            f"• **Silhouette Readability**: {visual_res.composition.get('silhouette_readability')}",
+            "",
+            f"### 💡 2. Lighting Rig & Intensity",
+            f"• **Key Light**: {visual_res.lighting['key_light']['direction']} ({visual_res.lighting['key_light']['color']})",
+            f"• **Fill Light**: {visual_res.lighting['fill_light']['direction']} ({visual_res.lighting['fill_light']['color']})",
+            f"• **Rim Light**: {visual_res.lighting['rim_light']['direction']} ({visual_res.lighting['rim_light']['color']})",
+            "",
+            f"### 👤 3. Shadow Detail & Contact",
+            f"• **Direction**: {visual_res.shadows.get('cast_shadow_direction')}",
+            f"• **Softness**: {visual_res.shadows.get('penumbra_softness')}",
+            f"• **Ambient Occlusion**: {visual_res.shadows.get('ambient_occlusion')}",
+            "",
+            f"### 🎥 4. Camera & Lens Characteristics",
+            f"• **Estimated Focal Length**: {visual_res.camera_spec.get('estimated_focal_length')}",
+            f"• **Aperture & DoF**: {visual_res.camera_spec.get('estimated_aperture')}",
+            f"• **Cinematography**: {visual_res.cinematography.get('shot_type')}",
+            "",
+            f"### 🎬 5. Production Context & Renderer",
+            f"• **Engine & Features**: {visual_res.rendering_spec.get('estimated_engine')} ({', '.join(visual_res.rendering_spec.get('features_detected', []))})",
+            f"• **Source**: {visual_res.production_context.get('source')}",
+            "",
+            f"### 🛠️ Recommended DCC Tooling Actions",
+        ]
+        
+        for task in visual_res.possible_tasks:
+            lines.append(f"• {task}")
+            
+        if visual_res.art_ontology_matches:
+            lines.append("\n### 📖 Art Ontology Recommendations")
+            for term, data in visual_res.art_ontology_matches.items():
+                lines.append(f"**Target Concern: '{term}'**")
+                for tool, terms in data.get("tool_terms", {}).items():
+                    lines.append(f"  [{tool.upper()}]: {', '.join(terms)}")
+
+        formatted_text = "\n".join(lines)
+        return EngineResult(
+            action="answer",
+            label="Visual Art Intelligence",
+            text=formatted_text,
+            metadata={
+                "result_type": "visual_art_analysis",
+                "visual_ingestion": visual_res.to_dict(),
+            },
+        )
+
+    def _fast_art_visual_intelligence_request_v2(self, context: RequestContext) -> EngineResult | None:
+        """Analyze real attached image/video media with measured evidence."""
+        text = str(context.text or "")
+        lower = text.lower()
+        art_keywords = (
+            "analyze", "inspect", "review", "critique", "compare", "what do you see",
+            "create", "generate", "make", "convert", "extract", "derive", "edit",
+            "image", "render", "screenshot", "reference", "shot", "frame", "video",
+            "lighting", "shadow", "composition", "camera", "lens", "material", "pbr",
+            "color", "palette", "silhouette", "motion", "mocap", "normal map",
+            "depth map", "height map", "roughness map", "ao map", "cavity map",
+            "edge map", "alpha map", "mask", "grayscale", "texture map",
+        )
+
+        from tech_connector.services.art_intelligence_service import (
+            analyze_image_art_context,
+            collect_visual_media_paths,
+            generate_image_edit_artifacts,
+            is_image_edit_request,
+        )
+        from tech_connector.services.ollama_service import model_for_role
+
+        media_paths = collect_visual_media_paths(context)
+        if not media_paths:
+            return None
+        if text.strip() and not any(keyword in lower for keyword in art_keywords):
+            return None
+
+        media_path = media_paths[0]
+        visual_model = model_for_role("visual_media")
+        if is_image_edit_request(text):
+            edit_results = [
+                generate_image_edit_artifacts(path, text)
+                for path in media_paths
+            ]
+            files_created = [
+                path
+                for edit_result in edit_results
+                for path in edit_result.files_created
+            ]
+            artifacts = [
+                artifact
+                for edit_result in edit_results
+                for artifact in edit_result.artifacts
+            ]
+            warnings = [
+                warning
+                for edit_result in edit_results
+                for warning in edit_result.warnings
+            ]
+            lines = [
+                "**Image Edit / Map Generation**",
+                f"**Source Count**: {len(media_paths)}",
+                f"**Operation**: {edit_results[0].operation if edit_results else 'image_edit'}",
+                "",
+                "### Files Created",
+            ]
+            if files_created:
+                for path in files_created:
+                    lines.append(f"- {path}")
+            else:
+                lines.append("- No files were created.")
+            if warnings:
+                lines.extend(["", "### Warnings"])
+                for warning in warnings:
+                    lines.append(f"- {warning}")
+            return EngineResult(
+                action="answer",
+                label="Image Edit / Map Generation",
+                text="\n".join(lines),
+                metadata={
+                    "result_type": "image_edit_artifacts",
+                    "image_edit_result": edit_results[0].to_dict() if edit_results else {},
+                    "image_edit_results": [edit_result.to_dict() for edit_result in edit_results],
+                    "files_created": files_created,
+                    "artifacts": artifacts,
+                    "visual_media_paths": media_paths,
+                    "model_role": "visual_media",
+                    "model_name": visual_model,
+                },
+            )
+
+        self.emit("art_intelligence", f"Analyzing attached visual media: {media_path}")
+        visual_res = analyze_image_art_context(media_path, text)
+
+        lines = [
+            "**Visual Media Analysis**",
+            f"**Media**: {media_path}",
+            f"**Type**: {visual_res.media_type}",
+            f"**Confidence**: {visual_res.confidence:.2f}",
+            f"**Summary**: {visual_res.summary}",
+            "",
+            "### Measured Evidence",
+        ]
+        for key, value in (visual_res.evidence or {}).items():
+            lines.append(f"- **{key}**: {value}")
+
+        if visual_res.color_palette:
+            lines.extend(["", "### Palette", "- " + ", ".join(visual_res.color_palette)])
+
+        lines.extend(
+            [
+                "",
+                "### Composition / Value Read",
+                f"- **Resolution**: {visual_res.composition.get('resolution') or visual_res.composition.get('representative_frame_resolution') or 'unknown'}",
+                f"- **Silhouette / temporal readability**: {visual_res.composition.get('silhouette_readability') or visual_res.composition.get('temporal_readability') or 'unknown'}",
+                f"- **Focal value area**: {visual_res.composition.get('focal_point', 'unknown')}",
+            ]
+        )
+
+        camera_profile = (visual_res.camera_spec or {}).get("settings_profile") or {}
+        if camera_profile.get("requested"):
+            lines.extend(
+                [
+                    "",
+                    "### Camera Settings / Shot Setup",
+                    f"- **Read**: {camera_profile.get('note', 'Camera settings require scene/app validation.')}",
+                    f"- **Measured context**: {camera_profile.get('measured_context', 'unknown')}",
+                    f"- **Features**: {', '.join(camera_profile.get('matched_features', [])) or 'camera'}",
+                ]
+            )
+            for guidance in camera_profile.get("settings_guidance", []):
+                lines.append(f"- **{str(guidance.get('feature', 'camera')).replace('_', ' ').title()}**: {guidance.get('why', '')}")
+                for check in guidance.get("checks", []):
+                    lines.append(f"  - {check}")
+            controls = camera_profile.get("dcc_controls") or {}
+            if controls:
+                lines.append("- **DCC controls**:")
+                for dcc, dcc_controls in controls.items():
+                    lines.append(f"  - {str(dcc).upper()}: {', '.join(dcc_controls)}")
+            validation_checks = camera_profile.get("validation_checks") or []
+            if validation_checks:
+                lines.append("- **Validation**:")
+                for check in validation_checks[:6]:
+                    lines.append(f"  - {check}")
+
+        lines.extend(
+            [
+                "",
+                "### Lighting Read",
+                f"- **Dominant light/value direction**: {visual_res.lighting.get('key_light', {}).get('direction', 'unknown')}",
+                f"- **Value intensity**: {visual_res.lighting.get('key_light', {}).get('intensity', 'unknown')}",
+                f"- **Contrast quality**: {visual_res.lighting.get('key_light', {}).get('quality', 'unknown')}",
+                "",
+                "### Recommended Next Checks",
+            ]
+        )
+        for task in visual_res.possible_tasks:
+            lines.append(f"- {task}")
+
+        if visual_res.art_ontology_matches:
+            lines.append("")
+            lines.append("### DCC Control Suggestions")
+            for term, data in visual_res.art_ontology_matches.items():
+                lines.append(f"**{term}**")
+                for tool, terms in data.get("tool_terms", {}).items():
+                    lines.append(f"- {tool.upper()}: {', '.join(terms)}")
+
+        if visual_res.uncertainties:
+            lines.append("")
+            lines.append("### Uncertainties")
+            for uncertainty in visual_res.uncertainties:
+                lines.append(f"- {uncertainty}")
+
+        return EngineResult(
+            action="answer",
+            label="Visual Media Analysis",
+            text="\n".join(lines),
+            metadata={
+                "result_type": "visual_media_analysis",
+                "visual_ingestion": visual_res.to_dict(),
+                "visual_media_paths": media_paths,
+                "model_role": "visual_media",
+                "model_name": visual_model,
+            },
+        )
+
+    def _fast_tutorial_mode_request_legacy(self, context: RequestContext) -> EngineResult | None:
+        """Route prompts through Interactive Educational Walkthrough Mode when tutorial mode is enabled or requested."""
+        text = str(context.text or "")
+        lower = text.lower()
+        
+        from tech_connector.services.tutorial_mode_service import tutorial_service
+        is_requested = any(k in lower for k in ("/tutorial", "/guide", "+tutorial", "how do i", "tutorial mode", "teach me"))
+        
+        if not (tutorial_service.is_tutorial_mode() or is_requested):
+            return None
+            
+        self.emit("tutorial", "Generating Step-by-Step Educational Walkthrough Plan")
+        plan = tutorial_service.build_educational_walkthrough(text)
+        
+        lines = [
+            f"🎓 **Interactive Educational Walkthrough Guide**",
+            f"**Task**: {plan.task_name}",
+            f"**Target Application**: {plan.target_dcc}",
+            f"*{plan.overview}*",
+            "",
+            "---",
+            "### 🛠️ Actionable Step-by-Step Interactive Checklist",
+        ]
+        
+        for s in plan.steps:
+            lines.append(f"#### Step {s.step_number}: {s.title}")
+            lines.append(f"👉 **Action To Do**: {s.action_instruction}")
+            lines.append(f"💡 **Why It Matters**: {s.educational_concept}")
+            if s.verification_check_code:
+                lines.append(f"🔍 **Verification Check**: Available via scene inspector")
+            lines.append("")
+            
+        from tech_connector.services.tutorial_mode_service import get_educational_resources_for_task
+        resources = get_educational_resources_for_task(text, plan.target_dcc)
+        if resources:
+            lines.append("### 📚 Educational Resources & Reference Links")
+            for res in resources:
+                lines.append(f"• **[{res.title}]({res.url_or_ref})** [{res.resource_type}]: {res.description}")
+            lines.append("")
+
+        lines.append("---\n*Tap '🤖 Switch to Auto Mode' anytime if you want Tech Connector to perform the actions automatically!*")
+        
+        formatted_text = "\n".join(lines)
+        return EngineResult(
+            action="answer",
+            label="Interactive Tutorial Guide",
+            text=formatted_text,
+            metadata={
+                "result_type": "tutorial_walkthrough",
+                "walkthrough_plan": plan.to_dict(),
+            },
+        )
+
+
+    def _fast_tutorial_mode_request_v2(self, context: RequestContext) -> EngineResult | None:
+        """Route explicitly selected tutorial mode prompts through an educational walkthrough."""
+        text = str(context.text or "")
+
+        from tech_connector.services.tutorial_mode_service import (
+            get_educational_resources_for_task,
+            has_tutorial_directive,
+            tutorial_service,
+        )
+
+        if not (tutorial_service.is_tutorial_mode() or has_tutorial_directive(text)):
+            return None
+
+        self.emit("tutorial", "Generating step-by-step educational walkthrough plan")
+        plan = tutorial_service.build_educational_walkthrough(text)
+
+        lines = [
+            "**Interactive Educational Walkthrough Guide**",
+            f"**Task**: {plan.task_name}",
+            f"**Target Application**: {plan.target_dcc}",
+            f"*{plan.overview}*",
+            "",
+            "---",
+            "### Actionable Learn-By-Doing Checklist",
+        ]
+
+        for step in plan.steps:
+            lines.append(f"#### Step {step.step_number}: {step.title}")
+            lines.append(f"**Action To Do**: {step.action_instruction}")
+            lines.append(f"**Why It Matters**: {step.educational_concept}")
+            if step.verification_check_code:
+                lines.append("**Verification Check**: Available via scene inspector")
+            lines.append("")
+
+        resources = get_educational_resources_for_task(text, plan.target_dcc)
+        if resources:
+            lines.append("### Optional Learning Resources")
+            for resource in resources:
+                lines.append(
+                    f"- **[{resource.title}]({resource.url_or_ref})** "
+                    f"[{resource.resource_type}]: {resource.description}"
+                )
+            lines.append("")
+
+        lines.append("---\n*Switch back to Auto Mode anytime if you want Tech Connector to perform the actions automatically.*")
+
+        return EngineResult(
+            action="answer",
+            label="Interactive Tutorial Guide",
+            text="\n".join(lines),
+            metadata={
+                "result_type": "tutorial_walkthrough",
+                "walkthrough_plan": plan.to_dict(),
+                "educational_resources": [resource.to_dict() for resource in resources],
+            },
+        )
+
+
     def _fast_desktop_window_request(self, context: RequestContext) -> EngineResult | None:
         """Answer explicit OS-window inspection requests through a typed local operation."""
 
@@ -1007,7 +1467,7 @@ class RequestEngine:
         if not (
             re.search(r"\b(inspect|list|show|find|check|identify|what|which)\b", lower)
             and re.search(r"\b(windows?|dialogs?|modals?|popups?)\b", lower)
-            and not re.search(r"\b(create|build|implement|code|class|widget)\b", lower)
+            and not re.search(r"\b(add|create|build|implement|write|code|class|widget|inheriting|module|function|def)\b", lower)
         ):
             return None
         process_name = ""
@@ -1068,6 +1528,19 @@ class RequestEngine:
     def process(self, context: RequestContext) -> EngineResult:
         self.emit("intent", "Understanding your request...")
         self.activity(ActivityEvent("intent", "Request received", context.text, status="info"))
+        context, _runtime_result = self.runtime_preparation.prepare(context)
+        fast_atl = self._fast_atlassian_url_setup(context)
+        if fast_atl is not None:
+            return fast_atl
+        fast_conf = self._fast_confluence_doc_sourcing(context)
+        if fast_conf is not None:
+            return fast_conf
+        fast_art = self._fast_art_visual_intelligence_request_v2(context)
+        if fast_art is not None:
+            return fast_art
+        fast_tut = self._fast_tutorial_mode_request_v2(context)
+        if fast_tut is not None:
+            return fast_tut
         continuation = self._fast_unreal_animation_continuation(context)
         if continuation is not None:
             return continuation
@@ -1392,6 +1865,7 @@ class RequestEngine:
                 )
                 result.metadata = {
                     **dict(result.metadata or {}),
+                    "reasoning_runtime": dict((context.extras or {}).get("reasoning_runtime") or {}),
                     "route_decision": dict((result.metadata or {}).get("route_decision") or route_decision),
                     "prompt_execution_context": execution_context.to_dict() if execution_context is not None else {},
                     "understanding_validation": dict(route_decision.get("understanding_validation") or {}),

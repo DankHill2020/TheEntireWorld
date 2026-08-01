@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.FbxImportUI &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.FbxMeshImportData" href="FbxMeshImportData.html" />
+    <link rel="prev" title="unreal.FbxFactory" href="FbxFactory.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="FbxMeshImportData.html" title="unreal.FbxMeshImportData"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="FbxFactory.html" title="unreal.FbxFactory"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.FbxImportUI</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-fbximportui">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.FbxImportUI</span></code><a class="headerlink" href="#unreal-fbximportui" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.FbxImportUI">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">FbxImportUI</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.FbxImportUI" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><code class="xref py py-class docutils literal notranslate"><span class="pre">Object</span></code></a></p>
+<p>Fbx Import UI</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: UnrealEd</p></li>
+<li><p><strong>File</strong>: FbxImportUI.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">anim_end_frame</span></code> (str):  [Read-Only] The fbx animation end frame</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">anim_sequence_import_data</span></code> (FbxAnimSequenceImportData):  [Read-Write] Import data used when importing animations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">anim_start_frame</span></code> (str):  [Read-Only] The fbx animation start frame</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">auto_compute_lod_distances</span></code> (bool):  [Read-Write] If checked, the editor will automatically compute screen size values for the static mesh’s LODs. If unchecked, the user can enter custom screen size values for each LOD.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">automated_import_should_detect_type</span></code> (bool):  [Read-Write] If true the automated import path should detect the import type.  If false the import type was specified by the user</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">create_physics_asset</span></code> (bool):  [Read-Write] If checked, create new PhysicsAsset if it doesn’t have it</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_axis_direction</span></code> (str):  [Read-Only] The file axis direction, up vector and hand</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_creator</span></code> (str):  [Read-Only] The file creator information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_creator_application</span></code> (str):  [Read-Only] The file vendor information, software name and version that was use to create the file</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_sample_rate</span></code> (str):  [Read-Only] The fbx animation frame rate</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_units</span></code> (str):  [Read-Only] The file units</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_version</span></code> (str):  [Read-Only] The fbx file version</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_animations</span></code> (bool):  [Read-Write] True to import animations from the FBX File</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_as_skeletal</span></code> (bool):  [Read-Write] Whether to import the incoming FBX as a skeletal object</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_materials</span></code> (bool):  [Read-Write] If no existing materials are found, whether to automatically create Unreal materials for materials found in the FBX scene</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_mesh</span></code> (bool):  [Read-Write] Whether to import the mesh. Allows animation only import when importing a skeletal mesh.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_rigid_mesh</span></code> (bool):  [Read-Write] Enables importing of ‘rigid skeletalmesh’ (unskinned, hierarchy-based animation) from this FBX file, no longer shown, used behind the scenes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">import_textures</span></code> (bool):  [Read-Write] Whether or not we should import textures. This option is disabled when we are importing materials because textures are always imported in that case.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_obj_import</span></code> (bool):  [Read-Write] Whether or not the imported file is in OBJ format</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance0</span></code> (float):  [Read-Write] Set a screen size value for LOD 0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance1</span></code> (float):  [Read-Write] Set a screen size value for LOD 1</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance2</span></code> (float):  [Read-Write] Set a screen size value for LOD 2</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance3</span></code> (float):  [Read-Write] Set a screen size value for LOD 3</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance4</span></code> (float):  [Read-Write] Set a screen size value for LOD 4</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance5</span></code> (float):  [Read-Write] Set a screen size value for LOD 5</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance6</span></code> (float):  [Read-Write] Set a screen size value for LOD 6</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_distance7</span></code> (float):  [Read-Write] Set a screen size value for LOD 7</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_number</span></code> (int32):  [Read-Write] Set the number of LODs for the editor to import. Setting the value to 0 imports the number of LODs found in the file (up to the maximum).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mesh_type_to_import</span></code> (FBXImportType):  [Read-Write] Type of asset to import from the FBX file</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minimum_lod_number</span></code> (int32):  [Read-Write] Set the minimum LOD used for rendering. Setting the value to 0 will use the default value of LOD0.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">original_import_type</span></code> (FBXImportType):  [Read-Write] The original detected type of this import</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">override_animation_name</span></code> (str):  [Read-Write] Override for the name of the animation to import. By default, it will be the name of FBX *</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">override_full_name</span></code> (bool):  [Read-Write] Use the string in “Name” field as full name of mesh. The option only works when the scene contains one mesh.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">physics_asset</span></code> (PhysicsAsset):  [Read-Write] If this is set, use this PhysicsAsset. It is possible bCreatePhysicsAsset == false, and PhysicsAsset == NULL. It is possible they do not like to create anything.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">reset_to_fbx_on_material_conflict</span></code> (bool):  [Read-Write] If true, the imported material sections will automatically be reset to the imported data in case of a reimport conflict.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">skeletal_mesh_import_data</span></code> (FbxSkeletalMeshImportData):  [Read-Write] Import data used when importing skeletal meshes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">skeleton</span></code> (Skeleton):  [Read-Write] Skeleton to use for imported asset. When importing a mesh, leaving this as “None” will create a new skeleton. When importing an animation this MUST be specified to import the asset.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">static_mesh_import_data</span></code> (FbxStaticMeshImportData):  [Read-Write] Import data used when importing static meshes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">texture_import_data</span></code> (FbxTextureImportData):  [Read-Write] Import data used when importing textures</p></li>
+</ul>
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.anim_sequence_import_data">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">anim_sequence_import_data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FbxAnimSequenceImportData.html#unreal.FbxAnimSequenceImportData" title="unreal.FbxAnimSequenceImportData"><span class="pre">FbxAnimSequenceImportData</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.anim_sequence_import_data" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Import data used when importing animations</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FbxAnimSequenceImportData.html#unreal.FbxAnimSequenceImportData" title="unreal.FbxAnimSequenceImportData">FbxAnimSequenceImportData</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.auto_compute_lod_distances">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">auto_compute_lod_distances</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.auto_compute_lod_distances" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If checked, the editor will automatically compute screen size values for the static mesh’s LODs. If unchecked, the user can enter custom screen size values for each LOD.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.automated_import_should_detect_type">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">automated_import_should_detect_type</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.automated_import_should_detect_type" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If true the automated import path should detect the import type.  If false the import type was specified by the user</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.create_physics_asset">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">create_physics_asset</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.create_physics_asset" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If checked, create new PhysicsAsset if it doesn’t have it</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_animations">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_animations</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_animations" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] True to import animations from the FBX File</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_as_skeletal">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_as_skeletal</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_as_skeletal" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether to import the incoming FBX as a skeletal object</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_materials">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_materials</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_materials" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If no existing materials are found, whether to automatically create Unreal materials for materials found in the FBX scene</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether to import the mesh. Allows animation only import when importing a skeletal mesh.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_rigid_mesh">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_rigid_mesh</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_rigid_mesh" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Enables importing of ‘rigid skeletalmesh’ (unskinned, hierarchy-based animation) from this FBX file, no longer shown, used behind the scenes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.import_textures">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">import_textures</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.import_textures" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether or not we should import textures. This option is disabled when we are importing materials because textures are always imported in that case.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.is_obj_import">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_obj_import</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.is_obj_import" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Whether or not the imported file is in OBJ format</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance0">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance0</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance0" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 0</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance1">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance1</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance1" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 1</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance2">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance2</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance2" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 2</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance3">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance3</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance3" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 3</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance4">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance4</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance4" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 4</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance5">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance5</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance5" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 5</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance6">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance6</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance6" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 6</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_distance7">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_distance7</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_distance7" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set a screen size value for LOD 7</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.lod_number">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">lod_number</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.lod_number" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set the number of LODs for the editor to import. Setting the value to 0 imports the number of LODs found in the file (up to the maximum).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.mesh_type_to_import">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">mesh_type_to_import</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FBXImportType.html#unreal.FBXImportType" title="unreal.FBXImportType"><span class="pre">FBXImportType</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.mesh_type_to_import" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Type of asset to import from the FBX file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FBXImportType.html#unreal.FBXImportType" title="unreal.FBXImportType">FBXImportType</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.minimum_lod_number">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">minimum_lod_number</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PyTestObject.html#unreal.PyTestObject.int" title="unreal.PyTestObject.int"><span class="pre">int</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.minimum_lod_number" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Set the minimum LOD used for rendering. Setting the value to 0 will use the default value of LOD0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(int32)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.original_import_type">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">original_import_type</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FBXImportType.html#unreal.FBXImportType" title="unreal.FBXImportType"><span class="pre">FBXImportType</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.original_import_type" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The original detected type of this import</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FBXImportType.html#unreal.FBXImportType" title="unreal.FBXImportType">FBXImportType</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.override_animation_name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">override_animation_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.override_animation_name" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Override for the name of the animation to import. By default, it will be the name of FBX *</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.override_full_name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">override_full_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.override_full_name" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Use the string in “Name” field as full name of mesh. The option only works when the scene contains one mesh.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.physics_asset">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">physics_asset</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="PhysicsAsset.html#unreal.PhysicsAsset" title="unreal.PhysicsAsset"><span class="pre">PhysicsAsset</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.physics_asset" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If this is set, use this PhysicsAsset. It is possible bCreatePhysicsAsset == false, and PhysicsAsset == NULL. It is possible they do not like to create anything.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="PhysicsAsset.html#unreal.PhysicsAsset" title="unreal.PhysicsAsset">PhysicsAsset</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.reset_to_default">
+<span class="sig-name descname"><span class="pre">reset_to_default</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.FbxImportUI.reset_to_default" title="Link to this definition">¶</a></dt>
+<dd><p>Reset to Default</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.reset_to_fbx_on_material_conflict">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">reset_to_fbx_on_material_conflict</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.reset_to_fbx_on_material_conflict" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] If true, the imported material sections will automatically be reset to the imported data in case of a reimport conflict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.skeletal_mesh_import_data">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">skeletal_mesh_import_data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FbxSkeletalMeshImportData.html#unreal.FbxSkeletalMeshImportData" title="unreal.FbxSkeletalMeshImportData"><span class="pre">FbxSkeletalMeshImportData</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.skeletal_mesh_import_data" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Import data used when importing skeletal meshes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FbxSkeletalMeshImportData.html#unreal.FbxSkeletalMeshImportData" title="unreal.FbxSkeletalMeshImportData">FbxSkeletalMeshImportData</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.skeleton">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">skeleton</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="Skeleton.html#unreal.Skeleton" title="unreal.Skeleton"><span class="pre">Skeleton</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.skeleton" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Skeleton to use for imported asset. When importing a mesh, leaving this as “None” will create a new skeleton. When importing an animation this MUST be specified to import the asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="Skeleton.html#unreal.Skeleton" title="unreal.Skeleton">Skeleton</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.static_mesh_import_data">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">static_mesh_import_data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FbxStaticMeshImportData.html#unreal.FbxStaticMeshImportData" title="unreal.FbxStaticMeshImportData"><span class="pre">FbxStaticMeshImportData</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.static_mesh_import_data" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Import data used when importing static meshes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FbxStaticMeshImportData.html#unreal.FbxStaticMeshImportData" title="unreal.FbxStaticMeshImportData">FbxStaticMeshImportData</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.FbxImportUI.texture_import_data">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">texture_import_data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="FbxTextureImportData.html#unreal.FbxTextureImportData" title="unreal.FbxTextureImportData"><span class="pre">FbxTextureImportData</span></a></span><a class="headerlink" href="#unreal.FbxImportUI.texture_import_data" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Import data used when importing textures</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="FbxTextureImportData.html#unreal.FbxTextureImportData" title="unreal.FbxTextureImportData">FbxTextureImportData</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.FbxImportUI</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.FbxImportUI"><code class="docutils literal notranslate"><span class="pre">FbxImportUI</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.FbxImportUI.anim_sequence_import_data"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.anim_sequence_import_data</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.auto_compute_lod_distances"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.auto_compute_lod_distances</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.automated_import_should_detect_type"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.automated_import_should_detect_type</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.create_physics_asset"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.create_physics_asset</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_animations"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_animations</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_as_skeletal"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_as_skeletal</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_materials"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_materials</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_mesh"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_rigid_mesh"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_rigid_mesh</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.import_textures"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.import_textures</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.is_obj_import"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.is_obj_import</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance0"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance0</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance1"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance1</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance2"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance2</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance3"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance3</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance4"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance4</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance5"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance5</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance6"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance6</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_distance7"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_distance7</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.lod_number"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.lod_number</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.mesh_type_to_import"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.mesh_type_to_import</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.minimum_lod_number"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.minimum_lod_number</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.original_import_type"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.original_import_type</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.override_animation_name"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.override_animation_name</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.override_full_name"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.override_full_name</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.physics_asset"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.physics_asset</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.reset_to_default"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.reset_to_default()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.reset_to_fbx_on_material_conflict"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.reset_to_fbx_on_material_conflict</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.skeletal_mesh_import_data"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.skeletal_mesh_import_data</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.skeleton"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.skeleton</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.static_mesh_import_data"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.static_mesh_import_data</span></code></a></li>
+<li><a class="reference internal" href="#unreal.FbxImportUI.texture_import_data"><code class="docutils literal notranslate"><span class="pre">FbxImportUI.texture_import_data</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="FbxFactory.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.FbxFactory</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="FbxMeshImportData.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.FbxMeshImportData</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="FbxMeshImportData.html" title="unreal.FbxMeshImportData"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="FbxFactory.html" title="unreal.FbxFactory"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.FbxImportUI</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22c47082f615060',t:'MTc4NTMyOTcyMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

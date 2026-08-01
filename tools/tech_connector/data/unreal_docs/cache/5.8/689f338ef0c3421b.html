@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.BlendMode &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.BlendProfileRotationBlendSpace" href="BlendProfileRotationBlendSpace.html" />
+    <link rel="prev" title="unreal.BlendListTransitionType" href="BlendListTransitionType.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="BlendProfileRotationBlendSpace.html" title="unreal.BlendProfileRotationBlendSpace"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="BlendListTransitionType.html" title="unreal.BlendListTransitionType"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.BlendMode</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-blendmode">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.BlendMode</span></code><a class="headerlink" href="#unreal-blendmode" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.BlendMode">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">BlendMode</span></span><a class="headerlink" href="#unreal.BlendMode" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="EnumBase.html#unreal.EnumBase" title="unreal.EnumBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">EnumBase</span></code></a></p>
+<p>The blending mode for materials
+warning: This is mirrored in Lightmass, be sure to update the blend mode structure and logic there if this changes.
+warning: Check UMaterialInstance::Serialize if changed!!</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: EngineTypes.h</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_ADDITIVE">
+<span class="sig-name descname"><span class="pre">BLEND_ADDITIVE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_ADDITIVE" title="Link to this definition">¶</a></dt>
+<dd><p>3</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_ALPHA_COMPOSITE">
+<span class="sig-name descname"><span class="pre">BLEND_ALPHA_COMPOSITE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_ALPHA_COMPOSITE" title="Link to this definition">¶</a></dt>
+<dd><p>5</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_ALPHA_HOLDOUT">
+<span class="sig-name descname"><span class="pre">BLEND_ALPHA_HOLDOUT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_ALPHA_HOLDOUT" title="Link to this definition">¶</a></dt>
+<dd><p>6</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_MASKED">
+<span class="sig-name descname"><span class="pre">BLEND_MASKED</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_MASKED" title="Link to this definition">¶</a></dt>
+<dd><p>1</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_MODULATE">
+<span class="sig-name descname"><span class="pre">BLEND_MODULATE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_MODULATE" title="Link to this definition">¶</a></dt>
+<dd><p>4</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_OPAQUE">
+<span class="sig-name descname"><span class="pre">BLEND_OPAQUE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_OPAQUE" title="Link to this definition">¶</a></dt>
+<dd><p>0</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_TRANSLUCENT">
+<span class="sig-name descname"><span class="pre">BLEND_TRANSLUCENT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_TRANSLUCENT" title="Link to this definition">¶</a></dt>
+<dd><p>2</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.BlendMode.BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE">
+<span class="sig-name descname"><span class="pre">BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.BlendMode" title="unreal.BlendMode"><span class="pre">BlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.BlendMode.BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE" title="Link to this definition">¶</a></dt>
+<dd><p>7</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.BlendMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.BlendMode"><code class="docutils literal notranslate"><span class="pre">BlendMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_ADDITIVE"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_ADDITIVE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_ALPHA_COMPOSITE"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_ALPHA_COMPOSITE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_ALPHA_HOLDOUT"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_ALPHA_HOLDOUT</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_MASKED"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_MASKED</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_MODULATE"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_MODULATE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_OPAQUE"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_OPAQUE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_TRANSLUCENT"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_TRANSLUCENT</span></code></a></li>
+<li><a class="reference internal" href="#unreal.BlendMode.BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE"><code class="docutils literal notranslate"><span class="pre">BlendMode.BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="BlendListTransitionType.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.BlendListTransitionType</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="BlendProfileRotationBlendSpace.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.BlendProfileRotationBlendSpace</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="BlendProfileRotationBlendSpace.html" title="unreal.BlendProfileRotationBlendSpace"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="BlendListTransitionType.html" title="unreal.BlendListTransitionType"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.BlendMode</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22072fc4fcb636f',t:'MTc4NTIwNTY5Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

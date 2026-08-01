@@ -49,6 +49,7 @@ from tech_connector.ui.pipeline_utility_nodes import (
     utility_node_menu_items,
 )
 from tech_connector.services.tool_search_ranking_service import (
+    tool_query_matches,
     tool_query_rank,
     tool_search_tokens,
 )
@@ -217,6 +218,7 @@ def symbol_search_text(symbol: dict[str, Any]) -> str:
         str((symbol or {}).get(key) or "")
         for key in (
             "name", "display_name", "function_display_name", "module", "function_path", "file_path",
+            "qualified_name", "qualname", "class_name", "callable_scope",
             "docstring", "description", "signature", "source_package", "package", "provider_id",
             "provider_display_name", "category_id", "category_display_name", "tags",
         )
@@ -238,6 +240,19 @@ def is_addable_tool_symbol(symbol: dict[str, Any]) -> bool:
         return False
     if symbol.get("private") is True or symbol.get("internal") is True:
         return bool(explicit_public)
+    callable_scope = str(symbol.get("callable_scope") or "").strip().lower()
+    if not explicit_public and callable_scope in {
+        "instance_method",
+        "class_method",
+        "nested_function",
+    }:
+        return False
+    if (
+        not explicit_public
+        and symbol.get("class_name")
+        and callable_scope != "static_method"
+    ):
+        return False
     return True
 
 
@@ -548,7 +563,42 @@ def tool_menu_label(symbol: dict[str, Any]) -> str:
 def compact_tool_label(symbol: dict[str, Any]) -> str:
     provider = provider_metadata(symbol)
     category = tool_category(symbol, provider)
-    return f"{provider['display']} / {category} / {tool_menu_label(symbol)}"
+    label = f"{provider['display']} / {category} / {tool_menu_label(symbol)}"
+    source_path = str(symbol.get("file_path") or symbol.get("source_path") or "")
+    source_name = source_path.replace("\\", "/").rsplit("/", 1)[-1]
+    if source_name and str(symbol.get("source_kind") or "").lower() != "utility":
+        label = f"{label} [{source_name}]"
+    return label
+
+
+def tool_symbol_identity(symbol: dict[str, Any]) -> tuple[str, ...]:
+    provider = provider_metadata(symbol)
+    source_path = str(
+        symbol.get("file_path")
+        or symbol.get("source_path")
+        or symbol.get("module")
+        or symbol.get("source_package")
+        or ""
+    ).replace("\\", "/").casefold()
+    qualified_name = str(
+        symbol.get("qualified_name")
+        or symbol.get("qualname")
+        or symbol.get("function_path")
+        or ".".join(
+            part
+            for part in (
+                str(symbol.get("class_name") or ""),
+                str(symbol.get("name") or ""),
+            )
+            if part
+        )
+    ).casefold()
+    return (
+        str(provider.get("id") or "").casefold(),
+        source_path,
+        qualified_name,
+        str(symbol.get("kind") or "").casefold(),
+    )
 
 
 def compact_tool_context(symbol: dict[str, Any]) -> str:
@@ -873,6 +923,14 @@ class PipelineNodeItem(QGraphicsRectItem):
             self.setBrush(QColor("#010507"))
 
     def _literal_label_text(self, name: str, annotation: str = "") -> str:
+        connection = self.view.input_connection(self.graph_node.step_id, name)
+        if connection is not None:
+            source_node = self.view.nodes.get(connection.from_step)
+            source_name = str(
+                ((source_node.symbol if source_node else {}) or {}).get("name")
+                or connection.from_step
+            )
+            return f"{name}: <- {source_name}.{connection.from_output}"[:40]
         literal = self.view.literal_value(self.graph_node.step_data, name)
         display_value = (
             literal
@@ -1164,7 +1222,7 @@ class PipelineNodeView(QGraphicsView):
         require_query: bool = False,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        terms = (query or "").lower().split()
+        terms = tool_search_tokens(query)
         if require_query and not terms:
             return []
         cache = self._tool_symbol_search_cache
@@ -1177,16 +1235,22 @@ class PipelineNodeView(QGraphicsView):
                 return []
         rows = []
         for row in cache:
-            if terms and not all(term in row["haystack"] for term in terms):
+            if terms and not tool_query_matches(row, terms):
                 continue
             rows.append(row)
         if terms:
-            query_text = " ".join(terms)
-
             rows = sorted(rows, key=lambda row: pipeline_tool_query_rank(row, terms))
+        unique_rows = []
+        seen_symbols = set()
+        for row in rows:
+            identity = tool_symbol_identity(row["symbol"])
+            if identity in seen_symbols:
+                continue
+            seen_symbols.add(identity)
+            unique_rows.append(row)
         if limit is not None:
-            rows = rows[: max(0, limit)]
-        return [row["symbol"] for row in rows]
+            unique_rows = unique_rows[: max(0, limit)]
+        return [row["symbol"] for row in unique_rows]
 
     def _populate_add_tool_menu(
             self,
@@ -1819,17 +1883,8 @@ class PipelineNodeView(QGraphicsView):
         show_more_message: bool = True,
     ) -> None:
         list_widget.clear()
-        sorted_symbols = sorted(
-            public_tool_symbols(symbols),
-            key=lambda sym: (
-                provider_metadata(sym)["order"],
-                provider_metadata(sym)["display"].lower(),
-                str(tool_category(sym, provider_metadata(sym))).lower(),
-                str(sym.get("name") or "").lower(),
-                str(sym.get("file_path") or "").lower(),
-            ),
-        )
-        for symbol in sorted_symbols[:max_rows]:
+        display_symbols = list(symbols)
+        for symbol in display_symbols[:max_rows]:
             label = compact_tool_label(symbol)
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, symbol)
@@ -1841,11 +1896,11 @@ class PipelineNodeView(QGraphicsView):
             ]
             item.setToolTip("\n".join(part for part in tooltip_parts if part))
             list_widget.addItem(item)
-        if show_more_message and len(sorted_symbols) > max_rows:
-            item = QListWidgetItem(f"Type more to narrow results... ({len(sorted_symbols) - max_rows} hidden)")
+        if show_more_message and len(display_symbols) > max_rows:
+            item = QListWidgetItem(f"Type more to narrow results... ({len(display_symbols) - max_rows} hidden)")
             item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
             list_widget.addItem(item)
-        if show_empty_message and not sorted_symbols:
+        if show_empty_message and not display_symbols:
             item = QListWidgetItem("No matching tools")
             item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
             list_widget.addItem(item)
@@ -2098,6 +2153,62 @@ class PipelineNodeView(QGraphicsView):
         finally:
             self._restoring_undo = False
 
+    def input_connection(self, step_id: str, param_name: str):
+        return next(
+            (
+                link
+                for link in self.links
+                if link.link_type == "data"
+                and link.to_step == step_id
+                and link.to_input == param_name
+            ),
+            None,
+        )
+
+    def connected_input_sources(self, step_data: dict[str, Any]) -> dict[str, str]:
+        step_id = str((step_data or {}).get("graph_step_id") or "")
+        if not step_id:
+            return {}
+        connected = {}
+        for link in self.links:
+            if link.link_type != "data" or link.to_step != step_id or not link.to_input:
+                continue
+            source_node = self.nodes.get(link.from_step)
+            source_name = str(
+                ((source_node.symbol if source_node else {}) or {}).get("name")
+                or link.from_step
+            )
+            connected[str(link.to_input)] = f"{source_name}.{link.from_output}"
+        return connected
+
+    def disconnect_input(self, step_id: str, param_name: str) -> bool:
+        matching = [
+            link
+            for link in self.links
+            if link.link_type == "data"
+            and link.to_step == step_id
+            and link.to_input == param_name
+        ]
+        if not matching:
+            return False
+        self._push_undo_state(f"disconnect input {param_name}")
+        self.links = [link for link in self.links if link not in matching]
+        self.refresh_links(rebuild=True)
+        node_item = self.node_items.get(step_id)
+        if node_item is not None:
+            node_item.refresh_literal_label(param_name)
+        self.linkDeleted.emit({
+            "count": len(matching),
+            "to_step": step_id,
+            "to_input": param_name,
+        })
+        self.graphChanged.emit()
+        self.orderChanged.emit(self.execution_order())
+        self.statusMessage.emit(
+            f"Unlocked input '{param_name}' by disconnecting {len(matching)} data link(s)."
+        )
+        return True
+
     def literal_value(self, step_data, param_name):
         return ((step_data.get("literal_values") or {}).get(param_name) or "")
 
@@ -2221,7 +2332,7 @@ class PipelineNodeView(QGraphicsView):
     def materialize_action_graph(self, graph: dict[str, Any], *, append: bool = False) -> dict[str, Any]:
         """Create a validated node-view pipeline from a canonical action graph."""
 
-        from tech_connector.services.action_graph_service import normalize_action_graph, validate_action_graph
+        from reasoning_runtime.action.action_graph_service import normalize_action_graph, validate_action_graph
 
         data = normalize_action_graph(graph)
         graph_validation = validate_action_graph(data)
@@ -2623,12 +2734,25 @@ class PipelineNodeView(QGraphicsView):
         if port.name == FLOW_PORT:
             return
         step = port.node_item.graph_node.step_data
+        step_id = port.node_item.graph_node.step_id
+        connection = self.input_connection(step_id, port.name)
+        if connection is not None:
+            source_node = self.nodes.get(connection.from_step)
+            source_name = str(
+                ((source_node.symbol if source_node else {}) or {}).get("name")
+                or connection.from_step
+            )
+            self.statusMessage.emit(
+                f"Input '{port.name}' is driven by "
+                f"{source_name}.{connection.from_output}. Disconnect it to edit a literal value."
+            )
+            return
         value, ok = QInputDialog.getText(self, "Edit input value", f"{port.name}:", text=str(self.literal_value(step, port.name)))
         if ok:
             self._push_undo_state("edit literal")
             self.set_literal_value(step, port.name, value)
             port.node_item.refresh_literal_label(port.name)
-            self.literalChanged.emit({"step_data": step, "step_id": port.node_item.graph_node.step_id, "input": port.name, "value": value})
+            self.literalChanged.emit({"step_data": step, "step_id": step_id, "input": port.name, "value": value})
             self.graphChanged.emit()
 
     def contextMenuEvent(self, event):

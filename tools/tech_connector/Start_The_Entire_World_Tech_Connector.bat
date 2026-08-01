@@ -50,6 +50,12 @@ if exist "%SETUP_MARKER%" (
     echo ok > "%SETUP_MARKER%"
 )
 
+echo Checking media analysis dependencies...
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip show imageio >nul 2>nul
+if errorlevel 1 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0requirements\media.txt"
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip show imageio-ffmpeg >nul 2>nul
+if errorlevel 1 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0requirements\media.txt"
+
 echo Installing/updating local components...
 
 set PYDIR=C:\Desktop\UnrealGenAISupport\Content\Python

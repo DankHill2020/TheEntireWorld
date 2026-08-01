@@ -25,7 +25,7 @@ try:
     from tech_connector.project_analysis.capability_registry import register_from_symbol
 
     _CAP_REGISTRY_AVAILABLE = True
-except ImportError:
+except Exception:
     _CAP_REGISTRY_AVAILABLE = False
 
 
@@ -500,6 +500,44 @@ def extract_string_literals(node: ast.AST) -> list[str]:
     return sorted(set(strings))[:200]
 
 
+def symbol_lookup_keys(name: str, qualname: str, parent_qualname: str = "") -> list[tuple[str, str, float]]:
+    """Return normalized deterministic lookup keys for one symbol."""
+
+    rows: dict[tuple[str, str], float] = {}
+
+    def add(key: str, match_kind: str, weight: float) -> None:
+        normalized = re.sub(r"\s+", " ", str(key or "").strip().lower())
+        if not normalized:
+            return
+        lookup_key = (normalized, match_kind)
+        rows[lookup_key] = max(float(weight), rows.get(lookup_key, 0.0))
+
+    def parts(value: str) -> list[str]:
+        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value or ""))
+        return [
+            token.lower()
+            for token in re.split(r"[^A-Za-z0-9]+|_", expanded)
+            if len(token) >= 2
+        ]
+
+    add(name, "exact", 100.0)
+    add(qualname, "qualname", 96.0)
+    add(f"{parent_qualname}.{name}" if parent_qualname else "", "qualname", 94.0)
+    all_parts = parts(name)
+    qual_parts = parts(qualname)
+    for token in all_parts:
+        add(token, "token", 65.0)
+    for token in qual_parts:
+        add(token, "qualname_token", 45.0)
+    acronym = "".join(token[0] for token in all_parts if token)
+    if len(acronym) >= 2:
+        add(acronym, "acronym", 70.0)
+    joined = "".join(all_parts)
+    if joined and joined != str(name or "").lower():
+        add(joined, "compact", 72.0)
+    return [(key, match_kind, weight) for (key, match_kind), weight in rows.items()]
+
+
 def extract_signature(node: ast.AST) -> str:
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return getattr(node, "name", "")
@@ -798,6 +836,17 @@ def init_db(conn: sqlite3.Connection):
         FOREIGN KEY(file_id) REFERENCES files(id)
     );
 
+    CREATE TABLE IF NOT EXISTS symbol_lookup (
+        symbol_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        match_kind TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1.0,
+        path TEXT NOT NULL,
+        rel_path TEXT,
+        source_scope TEXT,
+        FOREIGN KEY(symbol_id) REFERENCES symbols(id)
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
         text,
         path UNINDEXED,
@@ -823,6 +872,9 @@ def init_db(conn: sqlite3.Connection):
     CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
     CREATE INDEX IF NOT EXISTS idx_symbols_qualname ON symbols(qualname);
     CREATE INDEX IF NOT EXISTS idx_symbols_parent ON symbols(parent_qualname);
+    CREATE INDEX IF NOT EXISTS idx_symbol_lookup_key ON symbol_lookup(key);
+    CREATE INDEX IF NOT EXISTS idx_symbol_lookup_symbol ON symbol_lookup(symbol_id);
+    CREATE INDEX IF NOT EXISTS idx_symbol_lookup_scope ON symbol_lookup(source_scope);
     CREATE INDEX IF NOT EXISTS idx_symbol_calls_call_name ON symbol_calls(call_name);
     CREATE INDEX IF NOT EXISTS idx_symbol_calls_lineno ON symbol_calls(call_lineno);
     CREATE INDEX IF NOT EXISTS idx_imports_import_name ON imports(import_name);
@@ -850,6 +902,9 @@ def init_db(conn: sqlite3.Connection):
         if col_name not in symbol_columns:
             cur.execute(f"ALTER TABLE symbols ADD COLUMN {col_name} TEXT")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_symbols_parent ON symbols(parent_qualname)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_symbol_lookup_key ON symbol_lookup(key)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_symbol_lookup_symbol ON symbol_lookup(symbol_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_symbol_lookup_scope ON symbol_lookup(source_scope)")
 
     cur.execute("PRAGMA table_info(imports)")
     import_columns = {row[1] for row in cur.fetchall()}
@@ -934,6 +989,7 @@ def clear_file(conn: sqlite3.Connection, path: Path):
     cur.execute("DELETE FROM file_dependencies WHERE source_file_id = ? OR target_file_id = ?", (file_id, file_id))
     cur.execute("DELETE FROM module_resolution_errors WHERE source_file_id = ?", (file_id,))
     cur.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+    cur.execute("DELETE FROM symbol_lookup WHERE symbol_id IN (SELECT id FROM symbols WHERE file_id = ?)", (file_id,))
     cur.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
     cur.execute("DELETE FROM files WHERE id = ?", (file_id,))
     conn.commit()
@@ -1083,6 +1139,14 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, *, symbols_only
             ))
 
             symbol_id = cur.lastrowid
+            for key, match_kind, weight in symbol_lookup_keys(sym.name, sym.qualname, sym.parent_qualname):
+                cur.execute(
+                    """
+                    INSERT INTO symbol_lookup(symbol_id, key, match_kind, weight, path, rel_path, source_scope)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (symbol_id, key, match_kind, weight, str(path), rel, source_scope),
+                )
             if not symbols_only:
                 for call in sym.call_sites:
                     cur.execute(
@@ -1107,8 +1171,35 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, *, symbols_only
                         "calls": sym.calls,
                         "unreal_refs": sym.unreal_refs,
                     })
-                except Exception:
-                    pass  # Registry unavailable — silently skip
+                except Exception as exc:
+                    # Symbol indexing may continue, but missing capability rows
+                    # must remain visible and attributable.
+                    import sys
+
+                    fingerprint = (
+                        str(path),
+                        str(sym.qualname),
+                        type(exc).__name__,
+                        str(exc),
+                    )
+                    reported = getattr(
+                        index_file,
+                        "_reported_capability_errors",
+                        set(),
+                    )
+                    if fingerprint not in reported:
+                        reported.add(fingerprint)
+                        setattr(
+                            index_file,
+                            "_reported_capability_errors",
+                            reported,
+                        )
+                        print(
+                            "[capability-index warning] "
+                            f"{path}:{sym.qualname}: "
+                            f"{type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
 
     # Unreal / DCC asset metadata
     if not symbols_only and ext in (".uasset", ".umap", ".uproject", ".uplugin"):
@@ -1428,6 +1519,49 @@ def rebuild_fts_tables(conn: sqlite3.Connection):
     print("FTS rebuild complete.")
 
 
+def rebuild_symbol_lookup_table(conn: sqlite3.Connection):
+    """Rebuild compact symbol lookup keys from the symbols source table."""
+    cur = conn.cursor()
+    cur.execute("DELETE FROM symbol_lookup")
+    rows = cur.execute(
+        """
+        SELECT
+            symbols.id,
+            symbols.name,
+            symbols.qualname,
+            symbols.parent_qualname,
+            files.path,
+            files.rel_path,
+            files.source_scope
+        FROM symbols
+        JOIN files ON files.id = symbols.file_id
+        """
+    ).fetchall()
+    inserted = 0
+    for symbol_id, name, qualname, parent_qualname, path, rel_path, source_scope in rows:
+        for key, match_kind, weight in symbol_lookup_keys(name, qualname, parent_qualname):
+            cur.execute(
+                """
+                INSERT INTO symbol_lookup(symbol_id, key, match_kind, weight, path, rel_path, source_scope)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (symbol_id, key, match_kind, weight, path, rel_path, source_scope),
+            )
+            inserted += 1
+    conn.commit()
+    print(f"Symbol lookup keys: {inserted}")
+
+
+def symbol_lookup_needs_rebuild(conn: sqlite3.Connection) -> bool:
+    cur = conn.cursor()
+    try:
+        symbol_count = int(cur.execute("SELECT COUNT(*) FROM symbols").fetchone()[0])
+        lookup_count = int(cur.execute("SELECT COUNT(*) FROM symbol_lookup").fetchone()[0])
+    except Exception:
+        return False
+    return symbol_count > 0 and lookup_count == 0
+
+
 def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Build the Tech Connector knowledge index.")
     parser.add_argument(
@@ -1529,6 +1663,7 @@ def main(argv: list[str] | None = None):
             print("")
             print("Graph-only mode: using existing indexed files/symbols/imports.")
             rebuild_dependency_graph(conn)
+            rebuild_symbol_lookup_table(conn)
             if not args.no_fts:
                 rebuild_fts_tables(conn)
             else:
@@ -1601,6 +1736,8 @@ def main(argv: list[str] | None = None):
                 continue
 
         changed_index = bool(updated or removed or args.full)
+        if changed_index or symbol_lookup_needs_rebuild(conn):
+            rebuild_symbol_lookup_table(conn)
         if args.symbols_only:
             print("")
             print("Skipping dependency graph: symbols-only bootstrap mode.")

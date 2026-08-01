@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "tiers": {
+    "reasoning-runtime": {
+      "display_name": "Tech Connector Reasoning Runtime",
+      "description": "Lean installed app for chat, reasoning, model/provider setup, pipeline editing, and app orchestration without the full tools depot.",
+      "include": [
+        "tech_connector/app",
+        "tech_connector/assets",
+        "tech_connector/bridges",
+        "tech_connector/config",
+        "tech_connector/data",
+        "tech_connector/editor",
+        "tech_connector/engine",
+        "tech_connector/knowledge",
+        "tech_connector/models",
+        "tech_connector/router",
+        "tech_connector/services",
+        "tech_connector/ui",
+        "tech_connector/api.py",
+        "tech_connector/path_bootstrap.py",
+        "tech_connector/studio_main.py",
+        "tech_connector/__init__.py",
+        "reasoning_runtime"
+      ],
+      "exclude": [
+        ".git",
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/.agents",
+        "**/.continue",
+        "**/.idea",
+        "**/scratch*",
+        "external_tools",
+        "tech_connector/installers",
+        "maya_tools",
+        "motionbuilder_tools",
+        "plugins",
+        "custom_qt"
+      ]
+    },
+    "full-tools": {
+      "display_name": "Tech Connector Full Tools Package",
+      "description": "Complete tools package for technical artists, pipeline developers, DCC bridges, examples, and source-adjacent workflows.",
+      "include": [
+        "tech_connector",
+        "reasoning_runtime",
+        "maya_tools",
+        "motionbuilder_tools",
+        "plugins",
+        "custom_qt"
+      ],
+      "exclude": [
+        ".git",
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/.agents",
+        "**/.continue",
+        "**/.idea",
+        "**/scratch*",
+        "external_tools/downloaded_code",
+        "external_tools/downloaded_assets"
+      ]
+    }
+  }
+}

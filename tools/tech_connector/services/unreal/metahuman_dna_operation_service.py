@@ -6,11 +6,17 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from tech_connector.models.constants import TOOLS_ROOT
 
 
 def _tools_root() -> Path:
-    raw = os.environ.get("TOOLSROOT") or "C:/depot/tools"
-    return Path(raw)
+    raw = (
+        os.environ.get("TOOLSROOT", "").strip()
+        or os.environ.get("AI_STUDIO_TOOLS_ROOT", "").strip()
+    )
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return TOOLS_ROOT
 
 
 def _default_tool_root() -> Path:

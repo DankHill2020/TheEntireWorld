@@ -159,6 +159,24 @@ def choose_ollama_generation_budget(
     max_ctx = _positive_int(settings.get("ollama_max_num_ctx")) or 8192
     max_predict = _positive_int(settings.get("ollama_max_num_predict")) or 1200
     max_timeout = _positive_int(settings.get("ollama_max_timeout_seconds")) or 240
+    prompt_lower = (prompt or "").lower()
+    is_code_generation = any(
+        f" {verb} " in f" {prompt_lower} "
+        for verb in ("add", "build", "create", "generate", "implement", "provide", "return", "write")
+    ) and any(
+        artifact in prompt_lower
+        for artifact in (" class", " code", " dialog", " function", " method", " script", " ui", " widget")
+    )
+
+    if is_code_generation:
+        return OllamaGenerationBudget(
+            tier="code",
+            model_tier="standard",
+            num_ctx=min(max_ctx, 6144),
+            num_predict=min(max_predict, 1000),
+            timeout_seconds=min(max_timeout, 180),
+            reason="complete code generation with enough output capacity for requested declarations and behavior",
+        )
 
     if complexity >= 5:
         return OllamaGenerationBudget(

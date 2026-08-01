@@ -182,3 +182,34 @@ def render_desktop_window_inspection(result: dict[str, Any]) -> str:
             f"{bounds.get('width')}x{bounds.get('height')}{suffix}"
         )
     return "\n".join(lines)
+
+
+def focus_window_for_process(process_name: str) -> bool:
+    """Bring target process window to the foreground on Windows."""
+    if sys.platform != "win32" or not process_name:
+        return False
+    user32 = ctypes.windll.user32
+    info = inspect_desktop_windows(process_name=process_name, limit=1)
+    windows = info.get("windows") or []
+    if not windows:
+        return False
+    hwnd = int(windows[0]["handle"])
+    if hwnd:
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        return True
+    return False
+
+
+def get_target_window_bounds(target: str) -> dict[str, int] | None:
+    """Get pixel bounds rectangle for target application process window."""
+    if sys.platform != "win32" or not target or target in {"desktop", "full", "tech_connector"}:
+        return None
+    info = inspect_desktop_windows(process_name=target, limit=1)
+    windows = info.get("windows") or []
+    if windows and windows[0].get("bounds"):
+        b = windows[0]["bounds"]
+        if b.get("width") > 50 and b.get("height") > 50:
+            return b
+    return None
+

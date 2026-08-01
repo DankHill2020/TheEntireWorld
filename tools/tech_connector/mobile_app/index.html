@@ -9,42 +9,193 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+
+  <!-- Animated Splash Screen Video Intro -->
+  <div class="splash-screen" id="splashScreen">
+    <div class="splash-card">
+      <video id="splashVideo" src="/tech_connector_logo.mp4" autoplay muted playsinline poster="/tech_connector_logo.png"></video>
+      <div class="splash-title">TECH CONNECTOR</div>
+      <div class="splash-sub">MOBILE REMOTE SURFACE</div>
+      <div class="splash-loader"></div>
+    </div>
+  </div>
+
   <section class="pair-screen" id="pairScreen" aria-label="Pair Tech Connector Remote">
-    <div class="pair-card">
-      <img class="brand-logo" src="/tech_connector_logo.png" alt="Tech Connector logo">
-      <div class="pair-kicker">Tech Connector Remote</div>
-      <h1>Pair</h1>
-      <p class="muted">Connect this device to the running PC app by scanning its Mobile Second Screen QR code.</p>
-      <button class="pair-button" data-action="start-pairing">Pair with PC</button>
-      <div class="pair-scanner" id="pairScanner" hidden>
-        <video id="qrVideo" playsinline muted hidden></video>
-        <p class="muted small" id="pairHelp">Scan the QR code shown in Tech Connector on the workstation.</p>
-        <div class="toolbar">
-          <input id="pairUrlInput" placeholder="Paste PC QR link">
-          <button data-action="save-pair-url">Connect</button>
+    <div class="pair-card glass-panel">
+      <div class="pair-card-top">
+        <div class="brand-badge">
+          <video class="brand-logo-video" src="/tech_connector_logo.mp4" autoplay loop muted playsinline poster="/tech_connector_logo.png"></video>
+          <div class="brand-text">
+            <div class="pair-kicker">TECH CONNECTOR REMOTE</div>
+            <h1 data-i18n="workstation_pair">Workstation Pair</h1>
+          </div>
+        </div>
+        <!-- Language Selector Dropdown -->
+        <select class="lang-select" data-action="change-lang" title="Select Language">
+          <option value="en">🌐 English</option>
+          <option value="es">🌐 Español</option>
+          <option value="fr">🌐 Français</option>
+          <option value="de">🌐 Deutsch</option>
+          <option value="zh">🌐 中文</option>
+          <option value="ja">🌐 日本語</option>
+          <option value="ko">🌐 한국어</option>
+          <option value="pt">🌐 Português</option>
+          <option value="it">🌐 Italiano</option>
+          <option value="ru">🌐 Русский</option>
+          <option value="ar">🌐 العربية</option>
+          <option value="hi">🌐 हिन्दी</option>
+          <option value="nl">🌐 Nederlands</option>
+          <option value="tr">🌐 Türkçe</option>
+          <option value="pl">🌐 Polski</option>
+        </select>
+      </div>
+      <p class="muted" data-i18n="pair_description">Pair your mobile device with your desktop workstation to control pipelines, build graphs, and stream live app viewports.</p>
+
+      <!-- Pairing Method Tabs -->
+      <div class="pair-tabs">
+        <button class="pair-tab active" data-action="switch-pair-tab" data-tab="qr" data-i18n="tab_qr">📸 QR Scanner</button>
+        <button class="pair-tab" data-action="switch-pair-tab" data-tab="autodetect" data-i18n="tab_autodetect">🔍 Auto-Detect LAN</button>
+        <button class="pair-tab" data-action="switch-pair-tab" data-tab="manual" data-i18n="tab_manual">🔑 Token / Link</button>
+        <button class="pair-tab" data-action="switch-pair-tab" data-tab="2fa" data-i18n="tab_2fa">🛡️ 2FA Security</button>
+        <button class="pair-tab" data-action="switch-pair-tab" data-tab="remote-reg" data-i18n="tab_remote_reg">📧 Email / 📱 SMS</button>
+      </div>
+
+      <!-- Tab Content: QR Camera Scanner -->
+      <div class="pair-tab-content" id="tabQR">
+        <button class="pair-button primary-btn" data-action="start-pairing" data-i18n="scan_qr_btn">Scan Workstation QR Code</button>
+        <div class="pair-scanner" id="pairScanner" hidden>
+          <div class="viewfinder-container">
+            <video id="qrVideo" playsinline muted hidden></video>
+            <div class="viewfinder-target">
+              <div class="scan-line"></div>
+            </div>
+          </div>
+          <p class="muted small" id="pairHelp" data-i18n="point_camera_help">Point your camera at the QR code shown in Tech Connector on your workstation.</p>
         </div>
       </div>
+
+      <!-- Tab Content: LAN Auto-Detect -->
+      <div class="pair-tab-content" id="tabAutoDetect" hidden>
+        <p class="muted small" data-i18n="lan_scan_help">Scan your local network for running Tech Connector workstations.</p>
+        <button class="pair-button" data-action="auto-detect-lan" data-i18n="auto_detect_btn">⚡ Auto-Detect Workstation</button>
+        <div id="lanDetectStatus" class="mono muted small top-space"></div>
+      </div>
+
+      
+      
+      <!-- Remote Email / Phone Registration & 2FA Panel -->
+      <div id="tabRemoteReg" class="pair-tab-content" hidden>
+        <p class="muted small" data-i18n="remote_reg_desc">Register your Email or Phone number to pair remotely when away from your workstation.</p>
+        
+        <div class="inspector-form">
+          <div class="inspector-field">
+            <label data-i18n="email_label">Email Address</label>
+            <input type="email" id="remoteEmailInput" placeholder="artist@studio.com">
+          </div>
+          <div class="inspector-field">
+            <label data-i18n="phone_label">Phone Number (SMS)</label>
+            <input type="tel" id="remotePhoneInput" placeholder="+1 (555) 019-2834">
+          </div>
+          <div class="inspector-field">
+            <label data-i18n="auth_method_label">Delivery Method</label>
+            <select id="remoteAuthMethod">
+              <option value="email">📧 Email OTP</option>
+              <option value="phone">📱 SMS OTP</option>
+            </select>
+          </div>
+          <button data-action="send-remote-2fa" class="pair-button primary-btn" data-i18n="send_remote_otp_btn">Send Remote 2FA Security Code</button>
+        </div>
+
+        <div id="remoteRegStatus" class="mono muted small top-space center-text"></div>
+      </div>
+
+      <!-- 2FA Security Challenge Panel -->
+      <div id="twoFactorPanel" class="pair-tab-content 2fa-panel" hidden>
+        <div class="security-badge">
+          <span class="shield-icon">🛡️</span>
+          <div>
+            <h3 data-i18n="two_factor_title">Two-Factor Authentication</h3>
+            <p class="muted small" data-i18n="two_factor_help">Enter the 6-digit security code displayed on your workstation.</p>
+          </div>
+        </div>
+
+        <div class="otp-inputs-row">
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="0" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="1" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="2" inputmode="numeric">
+          <span class="otp-separator">-</span>
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="3" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="4" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit" data-otp-index="5" inputmode="numeric">
+        </div>
+
+        <div id="twoFactorStatus" class="mono muted small top-space center-text"></div>
+
+        <div class="toolbar top-space">
+          <button data-action="verify-2fa" class="pair-button primary-btn" data-i18n="verify_2fa_btn">Verify 2FA Code</button>
+          <button data-action="request-2fa-pin" class="pair-button" data-i18n="resend_2fa_btn">Request New Code on PC</button>
+        </div>
+      </div>
+
+      <!-- Tab Content: Manual Token / Link -->
+      <div class="pair-tab-content" id="tabManual" hidden>
+        <p class="muted small" data-i18n="manual_link_help">Paste the full connection link or token from Tech Connector menu.</p>
+        <div class="toolbar">
+          <input id="pairUrlInput" placeholder="http://192.168.x.x:8765/?token=...">
+          <button data-action="save-pair-url" class="primary-btn" data-i18n="connect_btn">Connect</button>
+        </div>
+      </div>
+    
+        <div class="security-settings-box top-space">
+          <label class="opt-out-row">
+            <input type="checkbox" id="require2FAForRemoteRunToggle" checked data-action="toggle-2fa-setting">
+            <b>🔒 Require 2FA code before running pipelines remotely</b>
+          </label>
+          <div class="muted small">Uncheck to opt out of 2FA for 1-click remote execution.</div>
+        </div>
+
     </div>
   </section>
 
   <div class="viewport" id="viewport">
     <main class="stage" id="stage">
-      <header>
-        <img class="header-logo" src="/tech_connector_logo.png" alt="">
-        <div>
-          <h1>Tech Connector Remote</h1>
-          <div class="muted small">Second screen for the desktop workstation</div>
+      <header class="glass-header">
+        <div class="header-brand">
+          <video class="header-logo-video" src="/tech_connector_logo.mp4" autoplay loop muted playsinline poster="/tech_connector_logo.png"></video>
+          <div>
+            <h1>Tech Connector Remote</h1>
+            <div class="muted small" data-i18n="header_subtitle">Mobile Control Surface & Live Stream</div>
+          </div>
         </div>
-        <span class="pill" id="online">Connecting</span>
-        <span class="pill" id="project">Project</span>
-        <span class="pill" id="model">Model</span>
+        <div class="header-pills">
+          <span class="pill status-pill" id="online" data-i18n="connecting">Connecting</span>
+          <span class="pill" id="project">Project</span>
+          <span class="pill" id="model">Model</span>
+        </div>
         <nav class="toolbar push">
+          <select class="lang-select small-btn" data-action="change-lang" title="Select Language">
+            <option value="en">🌐 EN</option>
+            <option value="es">🌐 ES</option>
+            <option value="fr">🌐 FR</option>
+            <option value="de">🌐 DE</option>
+            <option value="zh">🌐 ZH</option>
+            <option value="ja">🌐 JA</option>
+            <option value="ko">🌐 KO</option>
+            <option value="pt">🌐 PT</option>
+            <option value="it">🌐 IT</option>
+            <option value="ru">🌐 RU</option>
+            <option value="ar">🌐 AR</option>
+            <option value="hi">🌐 HI</option>
+            <option value="nl">🌐 NL</option>
+            <option value="tr">🌐 TR</option>
+            <option value="pl">🌐 PL</option>
+          </select>
+          <button data-action="unpair-device" class="small-btn bad-btn" title="Unpair and change workstation" data-i18n="repair_btn">⚡ Re-Pair</button>
           <button data-action="zoom-out">-</button>
           <button data-action="zoom-reset">100%</button>
           <button data-action="zoom-in">+</button>
-          <button data-action="install-app">Install</button>
-          <button data-action="download-app">Download</button>
-          <button data-action="refresh">Refresh</button>
+          <button data-action="install-app" data-i18n="install_btn">Install App</button>
+          <button data-action="refresh" data-i18n="refresh_btn">Refresh</button>
         </nav>
       </header>
 
@@ -84,6 +235,223 @@
       </section>
 
       <section class="grid">
+
+        <!-- Slack / Discord / Webhook Messaging Integration Panel -->
+        <div class="panel wide" data-menu="messaging">
+          <div class="panel-header">
+            <h2>💬 Slack & Discord Messaging Integrations</h2>
+            <div class="toolbar">
+              <button data-action="test-slack-messaging">Test Slack</button>
+              <button data-action="test-discord-messaging">Test Discord</button>
+              <button data-action="save-messaging-settings" class="primary-btn">Save Webhooks</button>
+            </div>
+          </div>
+          
+          <div class="messaging-grid">
+            <!-- 1-Click Official OAuth Login Strip -->
+
+          
+          <div class="oauth-login-strip top-space">
+            <button data-action="oauth-login-slack" class="oauth-btn slack-oauth-btn">
+              <span class="oauth-logo">💬</span>
+              <span>Sign in with Slack</span>
+            </button>
+            <button data-action="oauth-login-discord" class="oauth-btn discord-oauth-btn">
+              <span class="oauth-logo">🎮</span>
+              <span>Sign in with Discord</span>
+            </button>
+            <button data-action="oauth-login-atlassian" class="oauth-btn atlassian-oauth-btn">
+              <span class="oauth-logo">📋</span>
+              <span>Sign in with Atlassian (Jira & Confluence)</span>
+            </button>
+            <button data-action="oauth-login-clickup" class="oauth-btn clickup-oauth-btn">
+              <span class="oauth-logo">🎯</span>
+              <span>Sign in with ClickUp</span>
+            </button>
+          </div>
+
+
+          <!-- Slack Card -->
+            <div class="messaging-card glass-panel">
+              <div class="card-title">
+                <span class="messaging-icon">💬</span>
+                <div>
+                  <h3>Slack Webhook Integration</h3>
+                  <div class="muted small">Broadcast pipeline status & job reports to Slack channels.</div>
+                </div>
+              </div>
+              <div class="inspector-form top-space">
+                <div class="inspector-field">
+                  <label>Slack Incoming Webhook URL</label>
+                  <input type="text" id="slackWebhookInput" placeholder="https://hooks.slack.com/services/...">
+                </div>
+                <div class="inspector-field">
+                  <label>Quick Message / Test Post</label>
+                  <input type="text" id="slackMessageInput" placeholder="Pipeline execution finished successfully!">
+                </div>
+                <div class="toolbar">
+                  <button data-action="send-slack-msg" class="primary-btn">Send Message to Slack</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Discord Card -->
+            <div class="messaging-card glass-panel">
+              <div class="card-title">
+                <span class="messaging-icon">🎮</span>
+                <div>
+                  <h3>Discord Webhook Integration</h3>
+                  <div class="muted small">Broadcast pipeline status & alerts to Discord channels.</div>
+                </div>
+              </div>
+              <div class="inspector-form top-space">
+                <div class="inspector-field">
+                  <label>Discord Webhook URL</label>
+                  <input type="text" id="discordWebhookInput" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+                <div class="inspector-field">
+                  <label>Bot Display Name</label>
+                  <input type="text" id="discordUsernameInput" value="Tech Connector">
+                </div>
+                <div class="inspector-field">
+                  <label>Quick Message / Test Post</label>
+                  <input type="text" id="discordMessageInput" placeholder="Pipeline report generated for Maya & Unreal.">
+                </div>
+                <div class="toolbar">
+                  <button data-action="send-discord-msg" class="primary-btn">Send Message to Discord</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="messagingStatus" class="mono muted small top-space"></div>
+        </div>
+
+        <!-- Interactive Node Graph & Live Multi-App Workspace -->
+        <div class="panel wide node-editor-panel" data-menu="graph">
+          <div class="panel-header">
+            <h2>Interactive Pipeline Node Graph</h2>
+            <div class="toolbar">
+              <button class="primary-btn" data-action="run-graph">▶ Run Pipeline Remotely</button>
+              <button data-action="save-graph">💾 Save to Workstation</button>
+              <button data-action="open-node-palette">+ Add Node</button>
+              <button data-action="auto-layout-graph">📐 Auto Layout</button>
+              <button data-action="toggle-split-view">📺 Toggle Screen Share</button>
+              <button data-action="clear-graph">New Graph</button>
+            </div>
+          </div>
+          
+          <div class="workspace-layout" id="workspaceLayout">
+            <!-- Multi-App Live Screen Share & Remote Control Drawer -->
+            <div class="screen-share-drawer" id="screenShareDrawer">
+              <div class="drawer-header">
+                <span class="drawer-title">📺 Live PC Control & Viewport</span>
+                <select id="appTargetSelect" data-action="change-app-target" title="Target Window">
+                  <option value="desktop">🖥️ Full Desktop</option>
+                  <option value="unreal">🎮 Unreal Engine</option>
+                  <option value="maya">🎨 Autodesk Maya</option>
+                  <option value="blender">🧊 Blender</option>
+                  <option value="motionbuilder">💃 MotionBuilder</option>
+                </select>
+                <select id="streamFpsSelect" data-action="change-stream-fps" title="Stream Frame Rate">
+                  <option value="30">⚡ 30 FPS</option>
+                  <option value="15" selected>🚀 15 FPS</option>
+                  <option value="10">🐢 10 FPS</option>
+                  <option value="0">⏸️ Manual</option>
+                </select>
+                <button data-action="toggle-trackpad-mode" id="trackpadToggleBtn" class="small-btn" title="Toggle Virtual Touchpad Trackpad Mode">🖱️ Trackpad Mode</button>
+                <button data-action="refresh-screen" class="small-btn">Refresh</button>
+              </div>
+
+              <div class="screen-frame interactive-viewport" id="screenFrame">
+                <img id="screenImage" alt="Live Application Screen Stream" draggable="false">
+                <div class="app-badge-overlay" id="appBadgeOverlay">
+                  <span class="status-dot live"></span>
+                  <span id="screenTargetBadgeText">Desktop</span>
+                  <span class="hud-telemetry" id="hudTelemetry">15 FPS • 12ms</span>
+                </div>
+
+                <!-- Virtual Trackpad Mouse Cursor Indicator -->
+                <div class="virtual-cursor" id="virtualCursor" hidden></div>
+
+                <!-- DCC Quick Action Control Strip -->
+                <div class="dcc-toolbar-overlay" id="dccToolbarOverlay">
+                  <button data-dcc-cmd="orbit" class="dcc-btn" title="Orbit Viewport (Alt + Drag)">🎥 Orbit</button>
+                  <button data-dcc-cmd="focus" class="dcc-btn" title="Frame Selected (F)">🔍 Frame (F)</button>
+                  <button data-dcc-cmd="translate" class="dcc-btn" title="Translate Gizmo (W)">W</button>
+                  <button data-dcc-cmd="rotate" class="dcc-btn" title="Rotate Gizmo (E)">E</button>
+                  <button data-dcc-cmd="scale" class="dcc-btn" title="Scale Gizmo (R)">R</button>
+                  <button data-dcc-cmd="play" class="dcc-btn" title="Play/Pause Animation (Space)">⏯️</button>
+                  <button data-dcc-cmd="undo" class="dcc-btn" title="Undo (Ctrl+Z)">↩️</button>
+                  <button data-dcc-cmd="redo" class="dcc-btn" title="Redo (Ctrl+Y)">↪️</button>
+                  <button data-dcc-cmd="key" class="dcc-btn" title="Set Keyframe (S)">🔑 Key</button>
+                  <button data-action="open-virtual-keyboard" class="dcc-btn" title="Open Virtual Keyboard">⌨️ Keybd</button>
+                  <button data-action="toggle-fullscreen-screen" class="dcc-btn" title="Toggle Fullscreen">⛶</button>
+                </div>
+              </div>
+
+              <div id="screenStatus" class="mono muted small flex-row-between">
+                <span>Touch/Tap screen to click PC • Drag to move cursor • 2-finger scroll</span>
+                <span id="controlModeStatus" class="highlight-text">Direct Touch Mode</span>
+              </div>
+            </div>
+
+            <!-- Interactive Graph Canvas Container -->
+            <div class="graph-canvas-container" id="graphCanvasContainer">
+              <div class="canvas-grid-bg"></div>
+              <svg id="svgWireLayer" class="svg-wire-layer">
+                <defs>
+                  <marker id="arrowData" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#16f26a"/>
+                  </marker>
+                  <marker id="arrowFlow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#1e9bff"/>
+                  </marker>
+                </defs>
+              </svg>
+              <div id="nodeContainer" class="node-container"></div>
+              <div class="canvas-controls">
+                <button data-action="zoom-in">+</button>
+                <button data-action="zoom-reset">100%</button>
+                <button data-action="zoom-out">-</button>
+              </div>
+            </div>
+
+            <!-- Node Attribute Inspector Drawer -->
+            <div class="attribute-inspector" id="attributeInspector">
+              <div class="inspector-header">
+                <h3>Node Attributes</h3>
+                <span class="muted small" id="inspectorNodeKind">Select a node</span>
+              </div>
+              <div class="inspector-body" id="inspectorBody">
+                <div class="muted center-text">Tap any node on the graph canvas to inspect and edit parameter attributes.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Node Library Catalog Palette Modal -->
+        <div class="modal-overlay" id="nodePaletteModal" hidden>
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3>Node Catalog</h3>
+              <button data-action="close-node-palette" class="close-btn">✕</button>
+            </div>
+            <div class="toolbar bottom-space">
+              <input id="paletteFilter" placeholder="Search Maya, Unreal, Blender, Utility nodes..." data-action="filter-palette">
+              <select id="palettePackageFilter" data-action="filter-palette-package">
+                <option value="all">All Packages</option>
+                <option value="Maya">Maya</option>
+                <option value="Unreal">Unreal</option>
+                <option value="Blender">Blender</option>
+                <option value="MotionBuilder">MotionBuilder</option>
+                <option value="Utility">Utility</option>
+              </select>
+            </div>
+            <div id="paletteCatalogList" class="list catalog-list"></div>
+          </div>
+        </div>
+
         <div class="panel wide" data-menu="kickoff">
           <h2>Kick Off Jobs</h2>
           <div class="toolbar bottom-space">
@@ -93,37 +461,9 @@
           <div id="pipelines" class="list"></div>
         </div>
 
-        <div class="panel" data-menu="create">
-          <h2>Create Jobs</h2>
-          <input id="jobTitle" placeholder="Job name">
-          <textarea id="prompt" placeholder="Ask Tech Connector..."></textarea>
-          <div class="toolbar bottom-space">
-            <input id="jobProvider" placeholder="Provider/app, e.g. Maya or Unreal">
-            <button data-action="add-job-node">Add Node</button>
-          </div>
-          <div id="jobSteps" class="list compact-list"></div>
-          <div class="toolbar top-space">
-            <button data-action="create-job">Create Job</button>
-            <button data-action="send-prompt">Quick Prompt</button>
-          </div>
-          <p class="muted">Mobile node cards preserve graph intent. The desktop keeps the full node editor and executes the real pipeline path.</p>
-        </div>
-
         <div class="panel" data-menu="applications">
           <h2>View PC / Pipeline Progress</h2>
           <div id="applications" class="list"></div>
-        </div>
-
-        <div class="panel wide" data-menu="screen">
-          <h2>Live Screen</h2>
-          <div class="toolbar bottom-space">
-            <button data-action="refresh-screen">Refresh Screen</button>
-            <button data-command="request_screenshot">Snapshot Job</button>
-          </div>
-          <div class="screen-frame">
-            <img id="screenImage" alt="Current Tech Connector screen">
-          </div>
-          <div id="screenStatus" class="mono muted">Waiting for desktop snapshot...</div>
         </div>
 
         <div class="panel" data-menu="jobs">
@@ -166,5 +506,127 @@
   </nav>
 
   <script src="/app.js" defer></script>
+
+  <!-- Remote Execution 2FA Security Challenge Modal -->
+  <div id="remoteRun2FAModal" class="modal-backdrop" hidden>
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <div class="security-badge">
+          <span class="shield-icon">🔒</span>
+          <div>
+            <h3>2FA Security Verification</h3>
+            <p class="muted small">A 2FA security code is required to execute remote pipelines on your workstation.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <b>Target Pipeline:</b> <span id="execPipelineName">Mobile Graph Workflow</span>
+        </div>
+        <div class="row top-space">
+          <span class="muted small" id="exec2FARecipient">Code sent to registered Email/Phone</span>
+        </div>
+
+        <div class="otp-inputs-row top-space">
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="0" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="1" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="2" inputmode="numeric">
+          <span class="otp-separator">-</span>
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="3" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="4" inputmode="numeric">
+          <input type="text" maxlength="1" class="otp-digit exec-otp" data-exec-otp="5" inputmode="numeric">
+        </div>
+
+        <div id="exec2FAStatus" class="mono muted small center-text top-space"></div>
+
+        <label class="opt-out-row top-space">
+          <input type="checkbox" id="optOut2FACheckbox" data-action="toggle-2fa-opt-out">
+          <span>Remember this device & opt out of 2FA for remote execution</span>
+        </label>
+      </div>
+      <div class="modal-footer toolbar top-space">
+        <button data-action="confirm-remote-run-2fa" class="primary-btn">▶ Confirm & Execute</button>
+        <button data-action="close-remote-run-2fa" class="bad-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Smart Channel Picker Modal for Sharing Messages & Code Snippets -->
+  <div id="smartChannelPickerModal" class="modal-backdrop" hidden>
+    <div class="modal-card glass-panel smart-channel-card">
+      <div class="modal-header">
+        <div class="card-title">
+          <span class="messaging-icon">💬</span>
+          <div>
+            <h3>Share Code Snippet or Message</h3>
+            <p class="muted small">Select a smart channel or team member to broadcast this output.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="snippet-preview-box">
+          <div class="muted small" id="smartSnippetTitle">Code Snippet Preview</div>
+          <pre id="smartSnippetContent" class="mono"></pre>
+        </div>
+
+        <div class="inspector-field top-space">
+          <label>Filter Smart Channels & Users</label>
+          <input type="text" id="smartChannelFilter" placeholder="Search #general, #renders, @john...">
+        </div>
+
+        <div id="smartChannelsList" class="smart-channels-grid top-space">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+      <div class="modal-footer toolbar top-space">
+        <button data-action="confirm-share-smart-channel" class="primary-btn">▶ Broadcast to Selected Channel</button>
+        <button data-action="close-smart-channel-modal" class="bad-btn">Cancel</button>
+      </div>
+    </div>
+  <!-- Remote Virtual Keyboard Modal -->
+  <div id="virtualKeyboardModal" class="modal-backdrop" hidden>
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <div class="card-title">
+          <span class="messaging-icon">⌨️</span>
+          <div>
+            <h3>Send Text & Keys to Workstation</h3>
+            <p class="muted small">Type text or trigger keyboard shortcuts directly on your PC.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="inspector-field">
+          <label>Type Text & Press Send</label>
+          <input type="text" id="virtualTextInput" placeholder="Enter text to type on PC...">
+        </div>
+        <div class="toolbar top-space">
+          <button data-action="send-virtual-type" class="primary-btn">⌨️ Send Text to PC</button>
+        </div>
+
+        <h4 class="top-space">Quick Hotkey Shortcuts</h4>
+        <div class="toolbar top-space">
+          <button data-action="send-key" data-key="ENTER">↵ Enter</button>
+          <button data-action="send-key" data-key="SPACE">␣ Space</button>
+          <button data-action="send-key" data-key="TAB">⇥ Tab</button>
+          <button data-action="send-key" data-key="ESCAPE">⎋ Esc</button>
+          <button data-action="send-key" data-key="BACKSPACE">⌫ Backspace</button>
+          <button data-action="send-key" data-key="DELETE">⌦ Delete</button>
+        </div>
+        <div class="toolbar top-space">
+          <button data-action="send-hotkey" data-key="Z" data-mod="CTRL">Ctrl + Z (Undo)</button>
+          <button data-action="send-hotkey" data-key="Y" data-mod="CTRL">Ctrl + Y (Redo)</button>
+          <button data-action="send-hotkey" data-key="S" data-mod="CTRL">Ctrl + S (Save)</button>
+          <button data-action="send-hotkey" data-key="C" data-mod="CTRL">Ctrl + C (Copy)</button>
+          <button data-action="send-hotkey" data-key="V" data-mod="CTRL">Ctrl + V (Paste)</button>
+        </div>
+      </div>
+      <div class="modal-footer toolbar top-space">
+        <button data-action="close-virtual-keyboard" class="bad-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

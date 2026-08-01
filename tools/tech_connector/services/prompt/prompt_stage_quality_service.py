@@ -7,60 +7,14 @@ the full prompt path: semantic context, validation, route selection, capability
 planning, and optional engine target dispatch.
 """
 
-from dataclasses import asdict, dataclass, field
 from time import perf_counter
 from typing import Any, Iterable
 
-
-@dataclass
-class StageQualityCheck:
-    stage: str
-    check: str
-    ok: bool
-    detail: str = ""
-    expected: Any = None
-    actual: Any = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class PromptStageQualityReport:
-    prompt: str
-    ok: bool
-    score: float
-    elapsed_ms: float
-    route: str = ""
-    provider: str = ""
-    intent_category: str = ""
-    planning_mode: str = ""
-    matched_patterns: list[str] = field(default_factory=list)
-    operation_sequence: list[str] = field(default_factory=list)
-    planned_callables: list[str] = field(default_factory=list)
-    engine_action: str = ""
-    selected_target: str = ""
-    checks: list[StageQualityCheck] = field(default_factory=list)
-    artifacts: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "prompt": self.prompt,
-            "ok": self.ok,
-            "score": round(self.score, 4),
-            "elapsed_ms": round(self.elapsed_ms, 3),
-            "route": self.route,
-            "provider": self.provider,
-            "intent_category": self.intent_category,
-            "planning_mode": self.planning_mode,
-            "matched_patterns": list(self.matched_patterns),
-            "operation_sequence": list(self.operation_sequence),
-            "planned_callables": list(self.planned_callables),
-            "engine_action": self.engine_action,
-            "selected_target": self.selected_target,
-            "checks": [item.to_dict() for item in self.checks],
-            "artifacts": dict(self.artifacts),
-        }
+from reasoning_runtime.prompt import (
+    PromptStageQualityReport,
+    StageQualityCheck,
+    extract_plan_verification,
+)
 
 
 def audit_prompt_stage_quality(
@@ -79,7 +33,7 @@ def audit_prompt_stage_quality(
     expected_engine_actions: Iterable[str] = (),
     expected_selected_target_suffix: str = "",
 ) -> PromptStageQualityReport:
-    from tech_connector.engine.request_context import RequestContext
+    from reasoning_runtime.engine.request_context import RequestContext
     from tech_connector.engine.request_engine import RequestEngine
     from tech_connector.services.prompt.prompt_execution_context_service import (
         build_prompt_execution_context,
@@ -157,11 +111,11 @@ def audit_prompt_stage_quality(
         add("quality_bar", "temp_workspace_validation_planned", "code.validate_patch_in_temp_workspace" in actions, actual=actions)
 
     if require_plan_match:
-        plan_verification = _extract_plan_verification(decision.get("request_plan_verification"))
+        plan_verification = extract_plan_verification(decision.get("request_plan_verification"))
         if not plan_verification:
-            plan_verification = _extract_plan_verification(task_graph)
+            plan_verification = extract_plan_verification(task_graph)
         if not plan_verification:
-            plan_verification = _extract_plan_verification(context.planning_result or {})
+            plan_verification = extract_plan_verification(context.planning_result or {})
         if not plan_verification:
             add("capability_plan", "request_plan_verification_present", False, detail="No plan verification payload found.")
         else:
@@ -294,27 +248,3 @@ def _collect_key(value: Any, key: str) -> list[Any]:
             found.extend(_collect_key(nested, key))
     return found
 
-
-def _extract_plan_verification(value: Any) -> dict[str, Any]:
-    if isinstance(value, (list, tuple)):
-        for nested in value:
-            found = _extract_plan_verification(nested)
-            if found:
-                return found
-        return {}
-    if not isinstance(value, dict):
-        return {}
-    direct = value.get("request_plan_verification")
-    if isinstance(direct, dict) and direct:
-        return direct
-    for key in ("request_plan_verification", "plan_verification"):
-        nested = value.get(key)
-        if isinstance(nested, dict) and nested:
-            return nested
-    for nested in value.values():
-        if not isinstance(nested, (dict, list, tuple)):
-            continue
-        found = _extract_plan_verification(nested)
-        if found:
-            return found
-    return {}

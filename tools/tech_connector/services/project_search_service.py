@@ -37,7 +37,13 @@ def _active_project_roots(active_path: str | None = None) -> list[str]:
             start = p.parent if p.is_file() else p
             probe = start
             while probe != probe.parent:
-                if (probe / ".git").exists() or (probe / "app").exists() or (probe / "pyproject.toml").exists():
+                if (
+                    (probe / ".git").exists()
+                    or (probe / "app").exists()
+                    or (probe / "pyproject.toml").exists()
+                    or (probe / ".uproject").exists()
+                    or any(probe.glob("*.uproject"))
+                ):
                     val = str(probe)
                     if val not in roots:
                         roots.insert(0, val)
@@ -1493,7 +1499,7 @@ def _answer_file_symbol_question(question: str, active_path: str | None = None) 
 
 def _parse_scoped_member_request(question: str):
     try:
-        from tech_connector.services.reasoning.target_entity_service import (
+        from reasoning_runtime.reasoning.target_entity_service import (
             parse_scoped_member_query,
         )
         return parse_scoped_member_query(question)

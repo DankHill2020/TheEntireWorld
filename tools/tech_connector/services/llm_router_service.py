@@ -1,7 +1,7 @@
-"""LLM routing with a stable provider/model selection for each prompt run."""
+﻿"""LLM routing with a stable provider/model selection for each prompt run."""
 
-from dataclasses import dataclass
-from contextvars import ContextVar
+from __future__ import annotations
+
 from functools import wraps
 import json
 import math
@@ -12,57 +12,35 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
-
-@dataclass(frozen=True)
-class LLMProviderRoute:
-    """Resolved provider contract that can be reused for an entire prompt run."""
-
-    provider: str
-    model: str
-    api_key: str = ""
-    cloud_active: bool = False
-
-
-class LLMCloudProviderError(RuntimeError):
-    """A locked cloud provider failed and was deliberately not replaced."""
+from reasoning_runtime.models import (
+    ModelProviderLockError as LLMCloudProviderError,
+    ModelProviderRoute as LLMProviderRoute,
+    assert_model_provider_healthy,
+    current_model_calls,
+    current_model_provider_route,
+    locked_model_provider_route,
+    mark_model_provider_failed,
+    model_provider_integrity,
+    public_provider_route,
+)
 
 
 _CLOUD_DEFAULT_MODELS = {
-    "openai": "gpt-4o",
+    "openai": "gpt-5.6-sol",
     "anthropic": "claude-sonnet-5",
     "gemini": "gemini-2.5-flash",
+    "x": "grok-4.5",
 }
-_ACTIVE_PROVIDER_ROUTE: ContextVar[Optional[LLMProviderRoute]] = ContextVar(
-    "tech_connector_llm_provider_route",
-    default=None,
-)
-_ACTIVE_MODEL_CALLS: ContextVar[Optional[list[dict[str, Any]]]] = ContextVar(
-    "tech_connector_llm_model_calls",
-    default=None,
-)
-_ACTIVE_PROVIDER_FAILURE: ContextVar[Optional[str]] = ContextVar(
-    "tech_connector_llm_provider_failure",
-    default=None,
-)
-
-
 def _public_route(route: LLMProviderRoute) -> dict[str, Any]:
-    return {
-        "provider": route.provider,
-        "model": route.model,
-        "cloud_active": route.cloud_active,
-        "fallback_allowed": False,
-    }
+    return public_provider_route(route)
 
 
 def current_llm_provider_route() -> Optional[LLMProviderRoute]:
-    return _ACTIVE_PROVIDER_ROUTE.get()
+    return current_model_provider_route()
 
 
 def assert_llm_provider_healthy() -> None:
-    failure = _ACTIVE_PROVIDER_FAILURE.get()
-    if failure:
-        raise LLMCloudProviderError(failure)
+    assert_model_provider_healthy()
 
 
 def lock_llm_provider_for_prompt(function):
@@ -77,45 +55,18 @@ def lock_llm_provider_for_prompt(function):
             settings.get("model")
             or settings.get("cloud_provider_model")
             or settings.get("general_model")
-            or "qwen3:8b"
+            or "qwen3:4b-instruct"
         )
         route = resolve_llm_provider_route(selected, settings)
-        route_token = _ACTIVE_PROVIDER_ROUTE.set(route)
-        calls: list[dict[str, Any]] = []
-        calls_token = _ACTIVE_MODEL_CALLS.set(calls)
-        failure_token = _ACTIVE_PROVIDER_FAILURE.set(None)
-        try:
+        with locked_model_provider_route(route) as calls:
             result = function(*args, **kwargs)
             metadata = getattr(result, "metadata", None)
             if isinstance(metadata, dict):
                 metadata["llm_provider_lock"] = _public_route(route)
                 metadata["llm_model_calls"] = list(calls)
-                metadata["llm_provider_integrity"] = {
-                    "valid": all(
-                        call.get("provider") == route.provider
-                        and (
-                            not route.cloud_active
-                            or call.get("model") == route.model
-                        )
-                        for call in calls
-                    ),
-                    "call_count": len(calls),
-                    "unexpected_routes": [
-                        call
-                        for call in calls
-                        if call.get("provider") != route.provider
-                        or (
-                            route.cloud_active
-                            and call.get("model") != route.model
-                        )
-                    ],
-                }
+                metadata["llm_provider_integrity"] = model_provider_integrity(route, calls)
                 result.metadata = metadata
             return result
-        finally:
-            _ACTIVE_PROVIDER_FAILURE.reset(failure_token)
-            _ACTIVE_MODEL_CALLS.reset(calls_token)
-            _ACTIVE_PROVIDER_ROUTE.reset(route_token)
 
     return wrapped
 
@@ -132,7 +83,12 @@ def _provider_from_model(model: str) -> tuple[str, str]:
     value = str(model or "").strip()
     if ":" in value:
         prefix, model_name = value.split(":", 1)
-        aliases = {"google": "gemini", "gemini": "gemini"}
+        aliases = {
+            "google": "gemini",
+            "gemini": "gemini",
+            "grok": "x",
+            "xai": "x",
+        }
         provider = aliases.get(prefix.lower(), prefix.lower())
         if provider in _CLOUD_DEFAULT_MODELS:
             normalized_name = model_name.strip()
@@ -158,6 +114,8 @@ def _provider_from_model(model: str) -> tuple[str, str]:
         return "anthropic", value
     if lowered.startswith(("gpt-", "o1", "o3", "o4")):
         return "openai", value
+    if lowered.startswith("grok-"):
+        return "x", value
     return "", value
 
 
@@ -171,7 +129,22 @@ def resolve_llm_provider_route(
 
         settings = load_settings()
     settings = settings or {}
-    local_model = str(requested_model or settings.get("general_model") or "qwen3:8b")
+    from tech_connector.services.ollama_service import resolve_ollama_model_name
+
+    local_model = str(requested_model or settings.get("general_model") or "qwen3:4b-instruct")
+    local_model = resolve_ollama_model_name(local_model)
+    fallback_local_model = str(
+        settings.get("ollama_model")
+        or settings.get("fallback_general_model")
+        or settings.get("fast_general_model")
+        or settings.get("router_fast_llm_model")
+        or "qwen3:4b-instruct"
+    )
+    fallback_local_model = resolve_ollama_model_name(
+        fallback_local_model.removeprefix("ollama:").strip()
+    )
+    if _provider_from_model(fallback_local_model)[0]:
+        fallback_local_model = "qwen3:4b-instruct"
     if (
         settings.get("model_source_mode") == "local_only"
         or settings.get("local_only") is True
@@ -190,23 +163,43 @@ def resolve_llm_provider_route(
             )
             or str(settings.get("google_api_key") or "").strip()
         ),
+        "x": _credential(settings, "xai_api_key", "XAI_API_KEY"),
     }
-    requested_provider, requested_name = _provider_from_model(local_model)
-    if requested_provider and credentials.get(requested_provider):
+    requested_provider, requested_name = _provider_from_model(requested_model or "")
+    if requested_model and requested_model.startswith("ollama:"):
+        return LLMProviderRoute("ollama", local_model)
+
+    target_provider = requested_provider
+    target_name = requested_name
+    if not target_provider:
+        configured_model = str(settings.get("cloud_provider_model") or "").strip()
+        c_provider, c_name = _provider_from_model(configured_model)
+        if c_provider:
+            target_provider, target_name = c_provider, c_name
+        else:
+            return LLMProviderRoute("ollama", local_model)
+
+    target_account_provider = (
+        "google" if target_provider == "gemini" else target_provider
+    )
+    if target_account_provider:
+        import tech_connector.services.authenticated_provider_service as auth_svc
+
+        if auth_svc.account_provider_is_connected(target_account_provider):
+            return LLMProviderRoute(
+                target_provider,
+                target_name or _CLOUD_DEFAULT_MODELS[target_provider],
+                "",
+                True,
+                "account",
+            )
+    if target_provider and credentials.get(target_provider):
         return LLMProviderRoute(
-            requested_provider,
-            requested_name or _CLOUD_DEFAULT_MODELS[requested_provider],
-            credentials[requested_provider],
+            target_provider,
+            target_name or _CLOUD_DEFAULT_MODELS[target_provider],
+            credentials[target_provider],
             True,
-        )
-    configured_model = str(settings.get("cloud_provider_model") or "").strip()
-    provider, model_name = _provider_from_model(configured_model)
-    if provider and credentials.get(provider):
-        return LLMProviderRoute(
-            provider,
-            model_name or _CLOUD_DEFAULT_MODELS[provider],
-            credentials[provider],
-            True,
+            "api_key",
         )
 
     configured_providers = [
@@ -222,22 +215,23 @@ def resolve_llm_provider_route(
         )
 
     # Warning for missing credentials if a cloud model was requested
-    if requested_provider and not credentials.get(requested_provider):
-        print(
-            f"\n[WARNING] Cloud model '{local_model}' was requested, but no API key is configured "
-            f"for '{requested_provider}'. Falling back to local Ollama.\n",
-            file=sys.stderr,
-            flush=True,
-        )
-    elif provider and not credentials.get(provider):
-        print(
-            f"\n[WARNING] Configured cloud model '{configured_model}' has no API key configured "
-            f"for '{provider}'. Falling back to local Ollama.\n",
-            file=sys.stderr,
-            flush=True,
-        )
+    if target_provider:
+        import tech_connector.services.authenticated_provider_service as auth_svc
 
-    return LLMProviderRoute("ollama", local_model)
+        acc_provider = (
+            "google" if target_provider == "gemini" else target_provider
+        )
+        if not auth_svc.account_provider_is_connected(
+            acc_provider
+        ) and not credentials.get(target_provider):
+            print(
+                f"\n[WARNING] Cloud model '{local_model}' was requested, but '{target_provider}' "
+                f"is not connected via account login or optional API key. Falling back to local Ollama.\n",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    return LLMProviderRoute("ollama", fallback_local_model)
 
 
 def generate_llm_response(
@@ -246,18 +240,20 @@ def generate_llm_response(
     system: Optional[str] = None,
     response_format: Optional[dict | str] = None,
     options: Optional[dict[str, Any]] = None,
-    timeout: int = 45,
+    timeout: int = 300,
     *,
     provider_route: Optional[LLMProviderRoute] = None,
     allow_cloud_fallback: bool = False,
+    no_progress_seconds: int | None = None,
+    max_wall_seconds: int | None = None,
 ) -> str:
     """Generate a response without changing an active cloud route mid-run."""
     from tech_connector.services.settings_service import load_settings
     settings = load_settings()
-    active_route = current_llm_provider_route()
+    active_route = current_model_provider_route()
     route = (
         provider_route
-        if provider_route is not None and provider_route.cloud_active
+        if provider_route is not None
         else active_route
         if active_route is not None and active_route.cloud_active
         else LLMProviderRoute("ollama", model)
@@ -265,7 +261,7 @@ def generate_llm_response(
         else resolve_llm_provider_route(model, settings)
     )
     if route.cloud_active:
-        assert_llm_provider_healthy()
+        assert_model_provider_healthy()
     call_event = {
         "provider": route.provider,
         "model": route.model,
@@ -273,7 +269,7 @@ def generate_llm_response(
         "started_at_monotonic": round(time.monotonic(), 6),
         "status": "running",
     }
-    active_calls = _ACTIVE_MODEL_CALLS.get()
+    active_calls = current_model_calls()
     if active_calls is not None:
         active_calls.append(call_event)
     started = time.monotonic()
@@ -286,6 +282,8 @@ def generate_llm_response(
                 response_format,
                 options,
                 timeout,
+                no_progress_seconds=no_progress_seconds,
+                max_wall_seconds=max_wall_seconds,
             )
             call_event["status"] = "completed"
             call_event["response_characters"] = len(value)
@@ -297,12 +295,28 @@ def generate_llm_response(
             call_event["elapsed_seconds"] = round(time.monotonic() - started, 3)
 
     try:
-        if route.provider == "openai":
+        if route.transport == "account":
+            from tech_connector.services.authenticated_provider_service import (
+                query_account_provider,
+            )
+
+            account_provider = "google" if route.provider == "gemini" else route.provider
+            value = query_account_provider(
+                account_provider,
+                route.model,
+                prompt,
+                system,
+                response_format,
+                timeout,
+            )
+        elif route.provider == "openai":
             value = _query_openai(route.model, route.api_key, prompt, system, response_format, options, timeout)
         elif route.provider == "anthropic":
             value = _query_anthropic(route.model, route.api_key, prompt, system, response_format, options, timeout)
         elif route.provider == "gemini":
             value = _query_gemini(route.model, route.api_key, prompt, system, response_format, options, timeout)
+        elif route.provider == "x":
+            value = _query_xai(route.model, route.api_key, prompt, system, response_format, options, timeout)
         else:
             raise ValueError(f"Unsupported cloud provider: {route.provider}")
         call_event["status"] = "completed"
@@ -312,20 +326,26 @@ def generate_llm_response(
         call_event["status"] = "failed"
         call_event["error_type"] = type(e).__name__
         if allow_cloud_fallback:
-            local_fallback_model = settings.get("fallback_general_model", "qwen2.5-coder:latest")
+            local_fallback_model = settings.get("fallback_general_model", "qwen3:4b-instruct")
             print(
                 f"[LLMRouter] Explicit cloud fallback enabled after {route.provider} "
                 f"failure: {e}",
                 file=sys.stderr,
                 flush=True,
             )
-            return _query_ollama(local_fallback_model, prompt, system, response_format, options, timeout)
+            return _query_ollama(
+                local_fallback_model,
+                prompt,
+                system,
+                response_format,
+                options,
+                timeout,
+            )
         message = (
             f"{route.provider}:{route.model} failed; provider lock prevented "
             f"a local fallback: {e}"
         )
-        if _ACTIVE_PROVIDER_ROUTE.get() is not None:
-            _ACTIVE_PROVIDER_FAILURE.set(message)
+        mark_model_provider_failed(message)
         raise LLMCloudProviderError(message) from e
     finally:
         call_event["elapsed_seconds"] = round(time.monotonic() - started, 3)
@@ -347,7 +367,7 @@ def query_structured_llm_until_complete(
     provider_route: Optional[LLMProviderRoute] = None,
 ) -> str:
     """Run structured generation on one frozen cloud route or local Ollama."""
-    active_route = current_llm_provider_route()
+    active_route = current_model_provider_route()
     route = (
         provider_route
         if provider_route is not None and provider_route.cloud_active
@@ -392,7 +412,14 @@ def query_structured_llm_until_complete(
         max_wall_seconds=max_wall_seconds,
     )
 
+_INFERENCE_METRICS_BY_THREAD: dict[int, dict[str, Any]] = {}
 
+
+def pop_last_inference_metrics() -> dict[str, Any]:
+    """Return and clear inference metrics owned by the current calling thread."""
+    import threading
+
+    return dict(_INFERENCE_METRICS_BY_THREAD.pop(threading.get_ident(), {}) or {})
 
 
 def _query_ollama(
@@ -401,40 +428,230 @@ def _query_ollama(
     system: Optional[str] = None,
     response_format: Optional[str] = None,
     options: Optional[dict[str, Any]] = None,
-    timeout: int = 45
+    timeout: int = 300,
+    *,
+    no_progress_seconds: int | None = None,
+    max_wall_seconds: int | None = None,
 ) -> str:
-    """Fallback local Ollama call."""
-    from tech_connector.services.ollama_service import OLLAMA_BASE_URL, ensure_ollama_server, normalize_ollama_model_name
-    ensure_ollama_server()
+    """Generate locally through Ollama using streamed NDJSON responses.
 
-    payload_dict = {
-        "model": normalize_ollama_model_name(model),
+    Stream events without generated text do not count as progress. A hard
+    wall-clock ceiling prevents an active-but-unproductive stream from blocking
+    the owning workflow indefinitely.
+    """
+    from tech_connector.services.ollama_service import (
+        OLLAMA_BASE_URL,
+        ensure_ollama_server,
+        resolve_ollama_model_name,
+    )
+
+    ok, message = ensure_ollama_server()
+    if not ok:
+        raise RuntimeError(message)
+
+    effective_options = dict(options or {})
+    effective_options.setdefault("num_ctx", 4096)
+    think = effective_options.pop("think", None)
+
+    resolved_model = resolve_ollama_model_name(model)
+
+    payload_dict: dict[str, Any] = {
+        "model": resolved_model,
         "prompt": prompt,
-        "stream": False,
+        "stream": True,
+        "keep_alive": os.environ.get("AI_STUDIO_OLLAMA_KEEP_ALIVE", "15m"),
+        "options": effective_options,
     }
     if system:
         payload_dict["system"] = system
+    if think is not None:
+        payload_dict["think"] = bool(think)
     if response_format == "json":
         payload_dict["format"] = "json"
     elif isinstance(response_format, dict):
         payload_dict["format"] = response_format
-    if options:
-        payload_dict["options"] = options
 
     payload = json.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/generate",
         data=payload,
         headers={"Content-Type": "application/json"},
-        method="POST"
+        method="POST",
     )
-    
-    proxy_handler = urllib.request.ProxyHandler({})
-    opener = urllib.request.build_opener(proxy_handler)
-    with opener.open(req, timeout=timeout) as response:
-        resp = json.loads(response.read().decode("utf-8"))
-        return str(resp.get("response") or "")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+    import queue
+    import threading
+
+    owner_thread_id = threading.get_ident()
+    _INFERENCE_METRICS_BY_THREAD.pop(owner_thread_id, None)
+    total_timeout = max(30, int(max_wall_seconds or timeout or 300))
+    progress_timeout = max(
+        15,
+        int(no_progress_seconds or min(60, total_timeout)),
+    )
+    socket_timeout = min(total_timeout, max(30, progress_timeout))
+    started = time.monotonic()
+    state: dict[str, Any] = {
+        "last_text_progress": started,
+        "has_text": False,
+        "first_text_at": None,
+        "final_event": {},
+        "response": None,
+    }
+    outcome: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def read_stream() -> None:
+        chunks: list[str] = []
+        try:
+            with opener.open(req, timeout=socket_timeout) as response:
+                state["response"] = response
+                while True:
+                    raw_line = response.readline()
+                    if not raw_line:
+                        break
+
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+
+                    event = json.loads(line)
+                    if event.get("error"):
+                        raise RuntimeError(str(event["error"]))
+
+                    text = event.get("response")
+                    if text:
+                        chunks.append(str(text))
+                        if state["first_text_at"] is None:
+                            state["first_text_at"] = time.monotonic()
+                        state["has_text"] = True
+                        state["last_text_progress"] = time.monotonic()
+
+                    if event.get("done"):
+                        state["final_event"] = dict(event)
+                        break
+            outcome.put(("ok", "".join(chunks)))
+        except BaseException as exc:
+            outcome.put(("error", exc))
+
+    worker = threading.Thread(
+        target=read_stream,
+        name=f"ollama-{resolved_model}-stream",
+        daemon=True,
+    )
+    worker.start()
+    timeout_error = ""
+    while worker.is_alive():
+        worker.join(timeout=0.25)
+        now = time.monotonic()
+        if now - started >= total_timeout:
+            timeout_error = (
+                f"Ollama call exceeded its {total_timeout}-second wall-clock "
+                f"ceiling for {resolved_model}."
+            )
+            break
+        allowed_silence = (
+            progress_timeout
+            if state["has_text"]
+            else min(total_timeout, max(90, progress_timeout * 2))
+        )
+        if now - float(state["last_text_progress"]) >= allowed_silence:
+            timeout_error = (
+                f"Ollama produced no generated text for {allowed_silence} "
+                f"seconds while running {resolved_model}."
+            )
+            break
+    if timeout_error:
+        _INFERENCE_METRICS_BY_THREAD[owner_thread_id] = {
+            "model": resolved_model,
+            "time_to_first_token_ms": (
+                round(
+                    (
+                        float(state["first_text_at"]) - started
+                    )
+                    * 1000.0,
+                    2,
+                )
+                if state["first_text_at"] is not None
+                else None
+            ),
+            "wall_elapsed_ms": round((time.monotonic() - started) * 1000.0, 2),
+            "timed_out": True,
+            "input_chars": len(prompt) + len(system or ""),
+        }
+        active_response = state.get("response")
+        if active_response is not None:
+            while True:
+                try:
+                    active_response.close()
+                except Exception:
+                    pass
+                finally:
+                    break
+        raise TimeoutError(timeout_error)
+
+    try:
+        status, value = outcome.get_nowait()
+    except queue.Empty as exc:
+        raise RuntimeError(
+            f"Ollama stream ended without a result for {resolved_model}."
+        ) from exc
+    if status == "ok":
+        final_event = dict(state.get("final_event") or {})
+        prompt_tokens = int(final_event.get("prompt_eval_count") or 0)
+        output_tokens = int(final_event.get("eval_count") or 0)
+        prompt_ingestion_ns = int(final_event.get("prompt_eval_duration") or 0)
+        generation_ns = int(final_event.get("eval_duration") or 0)
+        _INFERENCE_METRICS_BY_THREAD[owner_thread_id] = {
+            "model": resolved_model,
+            "time_to_first_token_ms": (
+                round(
+                    (
+                        float(state["first_text_at"]) - started
+                    )
+                    * 1000.0,
+                    2,
+                )
+                if state["first_text_at"] is not None
+                else None
+            ),
+            "prompt_ingestion_ms": round(prompt_ingestion_ns / 1_000_000.0, 2),
+            "generation_ms": round(generation_ns / 1_000_000.0, 2),
+            "wall_elapsed_ms": round((time.monotonic() - started) * 1000.0, 2),
+            "input_tokens": prompt_tokens,
+            "output_tokens": output_tokens,
+            "tokens_per_second": (
+                round(output_tokens / (generation_ns / 1_000_000_000.0), 2)
+                if output_tokens and generation_ns
+                else 0.0
+            ),
+            "input_chars": len(prompt) + len(system or ""),
+            "output_chars": len(str(value)),
+            "timed_out": False,
+        }
+        return str(value)
+    exc = value
+    if isinstance(exc, urllib.error.HTTPError):
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        if exc.code == 404:
+            raise RuntimeError(
+                f"Ollama model '{resolved_model}' not found. "
+                f"Response: {detail or exc.reason}"
+            ) from exc
+        raise RuntimeError(
+            f"Ollama request failed with HTTP {exc.code} for '{resolved_model}': "
+            f"{detail or exc.reason}"
+        ) from exc
+    if isinstance(exc, TimeoutError):
+        raise TimeoutError(
+            f"Ollama generation timed out while running "
+            f"{payload_dict['model']}: {exc}"
+        ) from exc
+    raise exc
 
 def _query_openai(
     model: str,
@@ -505,6 +722,52 @@ def _query_openai(
             
         suffix = f": {detail[:500]}" if detail else ""
         raise RuntimeError(f"OpenAI API HTTP {exc.code}{suffix}") from exc
+
+
+def _query_xai(
+    model: str,
+    api_key: str,
+    prompt: str,
+    system: Optional[str] = None,
+    response_format: Optional[dict | str] = None,
+    options: Optional[dict[str, Any]] = None,
+    timeout: int = 45,
+) -> str:
+    """Generate through xAI's documented Responses API."""
+    payload_dict: dict[str, Any] = {"model": model, "input": prompt}
+    if system:
+        payload_dict["instructions"] = system
+    if isinstance(response_format, dict):
+        payload_dict["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": "tech_connector_response",
+                "schema": response_format,
+            }
+        }
+    payload = json.dumps(payload_dict).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.x.ai/v1/responses",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if isinstance(result.get("output_text"), str):
+        return result["output_text"]
+    chunks = []
+    for item in result.get("output") or []:
+        for content in item.get("content") or []:
+            text = content.get("text")
+            if text:
+                chunks.append(str(text))
+    if chunks:
+        return "".join(chunks)
+    raise RuntimeError("xAI returned no response text.")
 
 
 def _query_anthropic(
@@ -655,3 +918,63 @@ def _query_gemini(
             
         suffix = f": {detail[:500]}" if detail else ""
         raise RuntimeError(f"Gemini API HTTP {exc.code}{suffix}") from exc
+
+# Generation-time evidence pause/resume integration.
+if not getattr(generate_llm_response, "_tech_connector_evidence_wrapped", False):
+    import inspect as _evidence_inspect
+
+    _TECH_CONNECTOR_EVIDENCE_ROUTER_WRAPPED = True
+    _generate_llm_response_without_evidence_resume = generate_llm_response
+    _generate_llm_response_signature = _evidence_inspect.signature(
+        _generate_llm_response_without_evidence_resume
+    )
+
+    def generate_llm_response(*args, **kwargs):
+        """Generate a response and resume focused evidence requests in-place."""
+
+        response = _generate_llm_response_without_evidence_resume(*args, **kwargs)
+        try:
+            bound = _generate_llm_response_signature.bind_partial(*args, **kwargs)
+        except TypeError:
+            return response
+        prompt_key = next(
+            (
+                key
+                for key in ("prompt", "messages", "user_prompt")
+                if key in bound.arguments
+            ),
+            "",
+        )
+        if not prompt_key:
+            return response
+        original_prompt = bound.arguments[prompt_key]
+
+        def invoke_model(replacement_prompt):
+            replacement_kwargs = dict(kwargs)
+            replacement_args = list(args)
+            if prompt_key in replacement_kwargs:
+                replacement_kwargs[prompt_key] = replacement_prompt
+            else:
+                parameter_names = list(
+                    _generate_llm_response_signature.parameters
+                )
+                prompt_index = parameter_names.index(prompt_key)
+                if prompt_index >= len(replacement_args):
+                    replacement_kwargs[prompt_key] = replacement_prompt
+                else:
+                    replacement_args[prompt_index] = replacement_prompt
+            return _generate_llm_response_without_evidence_resume(
+                *replacement_args,
+                **replacement_kwargs,
+            )
+
+        from tech_connector.services.generation_evidence_request_service import (
+            resolve_and_resume_generation_response,
+        )
+        return resolve_and_resume_generation_response(
+            response,
+            invoke_model=invoke_model,
+            original_prompt=original_prompt,
+        )
+    generate_llm_response._tech_connector_evidence_wrapped = True
+

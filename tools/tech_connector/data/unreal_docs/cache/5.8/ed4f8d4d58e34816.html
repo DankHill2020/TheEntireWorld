@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.AssetTools &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.AssetToolsHelpers" href="AssetToolsHelpers.html" />
+    <link rel="prev" title="unreal.AssetThumbnailWidget" href="AssetThumbnailWidget.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="AssetToolsHelpers.html" title="unreal.AssetToolsHelpers"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="AssetThumbnailWidget.html" title="unreal.AssetThumbnailWidget"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetTools</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-assettools">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.AssetTools</span></code><a class="headerlink" href="#unreal-assettools" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.AssetTools">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">AssetTools</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetTools" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="Interface.html#unreal.Interface" title="unreal.Interface"><code class="xref py py-class docutils literal notranslate"><span class="pre">Interface</span></code></a></p>
+<p>Asset Tools</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: AssetTools</p></li>
+<li><p><strong>File</strong>: IAssetTools.h</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.begin_advanced_copy_packages">
+<span class="sig-name descname"><span class="pre">begin_advanced_copy_packages</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_names_to_copy</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">on_copy_complete</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.begin_advanced_copy_packages" title="Link to this definition">¶</a></dt>
+<dd><p>Begin Advanced Copy Packages</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>input_names_to_copy</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a><em>]</em>)</p></li>
+<li><p><strong>target_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>on_copy_complete</strong> (<a class="reference internal" href="AdvancedCopyCompletedEvent.html#unreal.AdvancedCopyCompletedEvent" title="unreal.AdvancedCopyCompletedEvent"><em>AdvancedCopyCompletedEvent</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.create_asset">
+<span class="sig-name descname"><span class="pre">create_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">factory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calling_context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'None'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite_existing</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.create_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Creates an asset with the specified name, path, and factory</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – the name of the new asset</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – the package that will contain the new asset</p></li>
+<li><p><strong>asset_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – the class of the new asset</p></li>
+<li><p><strong>factory</strong> (<a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory"><em>Factory</em></a>) – the factory that will build the new asset</p></li>
+<li><p><strong>calling_context</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – optional name of the module or method calling CreateAsset() - this is passed to the factory</p></li>
+<li><p><strong>overwrite_existing</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – if set to true, this will overwrite an existing object without prompting</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>the new asset or NULL if it fails</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.create_asset_async">
+<span class="sig-name descname"><span class="pre">create_asset_async</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">factory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">on_complete</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">on_cancelled</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calling_context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'None'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite_existing</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.create_asset_async" title="Link to this definition">¶</a></dt>
+<dd><p>Creates an asset with the specified name, path, and factory asynchronously</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – the name of the new asset</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – the package that will contain the new asset</p></li>
+<li><p><strong>asset_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – the class of the new asset</p></li>
+<li><p><strong>factory</strong> (<a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory"><em>Factory</em></a>) – the factory that will build the new asset</p></li>
+<li><p><strong>on_complete</strong> (<a class="reference internal" href="AssetCreateCompleteDynamic.html#unreal.AssetCreateCompleteDynamic" title="unreal.AssetCreateCompleteDynamic"><em>AssetCreateCompleteDynamic</em></a>) – called when the factory has successfully created the asset</p></li>
+<li><p><strong>on_cancelled</strong> (<a class="reference internal" href="AssetCreateCancelledDynamic.html#unreal.AssetCreateCancelledDynamic" title="unreal.AssetCreateCancelledDynamic"><em>AssetCreateCancelledDynamic</em></a>) – called if the asynchronous method is cancelled</p></li>
+<li><p><strong>calling_context</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – optional name of the module or method calling CreateAsset() - this is passed to the factory</p></li>
+<li><p><strong>overwrite_existing</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – if set to true, this will overwrite an existing object without prompting</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>the new asset or NULL if it fails</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.create_asset_with_dialog">
+<span class="sig-name descname"><span class="pre">create_asset_with_dialog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">factory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calling_context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'None'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">call_configure_properties</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.create_asset_with_dialog" title="Link to this definition">¶</a></dt>
+<dd><p>Opens an asset picker dialog and creates an asset with the specified name and path</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>asset_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>)</p></li>
+<li><p><strong>factory</strong> (<a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory"><em>Factory</em></a>)</p></li>
+<li><p><strong>calling_context</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>call_configure_properties</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.create_asset_with_dialog_async">
+<span class="sig-name descname"><span class="pre">create_asset_with_dialog_async</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">factory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">on_complete</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">on_cancelled</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calling_context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.create_asset_with_dialog_async" title="Link to this definition">¶</a></dt>
+<dd><p>Opens an async dialog to create an asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>asset_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>)</p></li>
+<li><p><strong>factory</strong> (<a class="reference internal" href="Factory.html#unreal.Factory" title="unreal.Factory"><em>Factory</em></a>)</p></li>
+<li><p><strong>on_complete</strong> (<a class="reference internal" href="AssetCreateCompleteDynamic.html#unreal.AssetCreateCompleteDynamic" title="unreal.AssetCreateCompleteDynamic"><em>AssetCreateCompleteDynamic</em></a>)</p></li>
+<li><p><strong>on_cancelled</strong> (<a class="reference internal" href="AssetCreateCancelledDynamic.html#unreal.AssetCreateCancelledDynamic" title="unreal.AssetCreateCancelledDynamic"><em>AssetCreateCancelledDynamic</em></a>)</p></li>
+<li><p><strong>calling_context</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>true if the process was started successfully.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.create_unique_asset_name">
+<span class="sig-name descname"><span class="pre">create_unique_asset_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base_package_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suffix)</span> <span class="pre">-&gt;</span> <span class="pre">(out_package_name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_asset_name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetTools.create_unique_asset_name" title="Link to this definition">¶</a></dt>
+<dd><p>Creates a unique package and asset name taking the form InBasePackageName+InSuffix</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>base_package_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>suffix</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>out_package_name (str):</p>
+<p>out_asset_name (str):</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.diff_against_depot">
+<span class="sig-name descname"><span class="pre">diff_against_depot</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.diff_against_depot" title="Link to this definition">¶</a></dt>
+<dd><p>Try to diff the local version of an asset against the latest one from the depot</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>) – The object we want to compare against the depot</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The fullpath to the package</p></li>
+<li><p><strong>package_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The name of the package</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.diff_assets">
+<span class="sig-name descname"><span class="pre">diff_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">old_asset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_asset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">old_revision</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_revision</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.diff_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Try and diff two assets using class-specific tool. Will do nothing if either asset is NULL, or they are not the same class.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>old_asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+<li><p><strong>new_asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+<li><p><strong>old_revision</strong> (<a class="reference internal" href="RevisionInfo.html#unreal.RevisionInfo" title="unreal.RevisionInfo"><em>RevisionInfo</em></a>)</p></li>
+<li><p><strong>new_revision</strong> (<a class="reference internal" href="RevisionInfo.html#unreal.RevisionInfo" title="unreal.RevisionInfo"><em>RevisionInfo</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.duplicate_asset">
+<span class="sig-name descname"><span class="pre">duplicate_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">original_object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.duplicate_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Creates an asset with the specified name and path. Uses OriginalObject as the duplication source.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>original_object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.duplicate_asset_with_dialog">
+<span class="sig-name descname"><span class="pre">duplicate_asset_with_dialog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">original_object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.duplicate_asset_with_dialog" title="Link to this definition">¶</a></dt>
+<dd><p>Opens an asset picker dialog and creates an asset with the specified name and path. Uses OriginalObject as the duplication source.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>original_object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.duplicate_asset_with_dialog_and_title">
+<span class="sig-name descname"><span class="pre">duplicate_asset_with_dialog_and_title</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">original_object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dialog_title</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.duplicate_asset_with_dialog_and_title" title="Link to this definition">¶</a></dt>
+<dd><p>Opens an asset picker dialog and creates an asset with the specified name and path.
+Uses OriginalObject as the duplication source.
+Uses DialogTitle as the dialog’s title.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>asset_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>package_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>original_object</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p></li>
+<li><p><strong>dialog_title</strong> (<a class="reference internal" href="Text.html#unreal.Text" title="unreal.Text"><em>Text</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.export_assets">
+<span class="sig-name descname"><span class="pre">export_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_to_export</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">export_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.export_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Exports the specified objects to file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets_to_export</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a><em>]</em>) – List of full asset names (e.g /Game/Path/Asset) to export</p></li>
+<li><p><strong>export_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – The directory path to export to.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.export_assets_with_dialog">
+<span class="sig-name descname"><span class="pre">export_assets_with_dialog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_to_export</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prompt_for_individual_filenames</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.export_assets_with_dialog" title="Link to this definition">¶</a></dt>
+<dd><p>Exports the specified objects to file. First prompting the user to pick an export directory and optionally prompting the user to pick a unique directory per file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets_to_export</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a><em>]</em>) – List of assets to export</p></li>
+<li><p><strong>prompt_for_individual_filenames</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.find_soft_references_to_object">
+<span class="sig-name descname"><span class="pre">find_soft_references_to_object</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">target_object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTools.find_soft_references_to_object" title="Link to this definition">¶</a></dt>
+<dd><p>Returns list of objects that soft reference the given soft object path. This will load assets into memory to verify</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>target_object</strong> (<a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>referencing_objects (Array[Object]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.import_asset_tasks">
+<span class="sig-name descname"><span class="pre">import_asset_tasks</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">import_tasks</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.import_asset_tasks" title="Link to this definition">¶</a></dt>
+<dd><p>Imports assets using tasks specified.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>import_tasks</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetImportTask.html#unreal.AssetImportTask" title="unreal.AssetImportTask"><em>AssetImportTask</em></a><em>]</em>) – Tasks that specify how to import each file</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.import_assets_automated">
+<span class="sig-name descname"><span class="pre">import_assets_automated</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">import_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTools.import_assets_automated" title="Link to this definition">¶</a></dt>
+<dd><p>Imports assets using data specified completely up front.  Does not ever ask any questions of the user or show any modal error messages</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>import_data</strong> (<a class="reference internal" href="AutomatedAssetImportData.html#unreal.AutomatedAssetImportData" title="unreal.AutomatedAssetImportData"><em>AutomatedAssetImportData</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of successfully imported assets</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.import_assets_with_dialog">
+<span class="sig-name descname"><span class="pre">import_assets_with_dialog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">destination_path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.AssetTools.import_assets_with_dialog" title="Link to this definition">¶</a></dt>
+<dd><p>Opens a file open dialog to choose files to import to the destination path.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>destination_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Path to import files to</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of successfully imported assets</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.is_asset_read_only">
+<span class="sig-name descname"><span class="pre">is_asset_read_only</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset_data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.is_asset_read_only" title="Link to this definition">¶</a></dt>
+<dd><p>Determines whether an asset is considered read-only for editing, based on its flags and the current permissions (
+see: GetWritableFolderPermissionList).
+note: This does not check the read-only state of the file itself or anything regarding source control, as it’s only checking if the asset can be edited in-memory, not that any edits can be saved to disk.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset_data</strong> (<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><em>AssetData</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.migrate_packages">
+<span class="sig-name descname"><span class="pre">migrate_packages</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package_names_to_migrate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destination_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">options</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[False,</span> <span class="pre">False,</span> <span class="pre">AssetMigrationConflict.SKIP,</span> <span class="pre">'']</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.migrate_packages" title="Link to this definition">¶</a></dt>
+<dd><p>Migrate packages and dependencies to another folder</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>package_names_to_migrate</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a><em>]</em>)</p></li>
+<li><p><strong>destination_path</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>)</p></li>
+<li><p><strong>options</strong> (<a class="reference internal" href="MigrationOptions.html#unreal.MigrationOptions" title="unreal.MigrationOptions"><em>MigrationOptions</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.open_editor_for_assets">
+<span class="sig-name descname"><span class="pre">open_editor_for_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.open_editor_for_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Opens editor for assets
+deprecated: Please use UAssetEditorSubsystem::OpenEditorForAssets instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>assets</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.rename_assets">
+<span class="sig-name descname"><span class="pre">rename_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_and_names</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.rename_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Renames assets using the specified names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>assets_and_names</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetRenameData.html#unreal.AssetRenameData" title="unreal.AssetRenameData"><em>AssetRenameData</em></a><em>]</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.rename_assets_with_dialog">
+<span class="sig-name descname"><span class="pre">rename_assets_with_dialog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets_and_names</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">auto_checkout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AssetRenameResult.html#unreal.AssetRenameResult" title="unreal.AssetRenameResult"><span class="pre">AssetRenameResult</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.rename_assets_with_dialog" title="Link to this definition">¶</a></dt>
+<dd><p>Renames assets using the specified names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets_and_names</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="AssetRenameData.html#unreal.AssetRenameData" title="unreal.AssetRenameData"><em>AssetRenameData</em></a><em>]</em>)</p></li>
+<li><p><strong>auto_checkout</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AssetRenameResult.html#unreal.AssetRenameResult" title="unreal.AssetRenameResult">AssetRenameResult</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetTools.rename_referencing_soft_object_paths">
+<span class="sig-name descname"><span class="pre">rename_referencing_soft_object_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packages_to_check</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asset_redirector_map</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.AssetTools.rename_referencing_soft_object_paths" title="Link to this definition">¶</a></dt>
+<dd><p>Function that renames all FSoftObjectPath object with the old asset path to the new one.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>packages_to_check</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Package.html#unreal.Package" title="unreal.Package"><em>Package</em></a><em>]</em>) – Packages to check for referencing FSoftObjectPath.</p></li>
+<li><p><strong>asset_redirector_map</strong> (<a class="reference internal" href="Map.html#unreal.Map" title="unreal.Map"><em>Map</em></a><em>[</em><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a><em>, </em><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath"><em>SoftObjectPath</em></a><em>]</em>) – Map from old asset path to new asset path</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.AssetTools</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetTools"><code class="docutils literal notranslate"><span class="pre">AssetTools</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetTools.begin_advanced_copy_packages"><code class="docutils literal notranslate"><span class="pre">AssetTools.begin_advanced_copy_packages()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.create_asset"><code class="docutils literal notranslate"><span class="pre">AssetTools.create_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.create_asset_async"><code class="docutils literal notranslate"><span class="pre">AssetTools.create_asset_async()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.create_asset_with_dialog"><code class="docutils literal notranslate"><span class="pre">AssetTools.create_asset_with_dialog()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.create_asset_with_dialog_async"><code class="docutils literal notranslate"><span class="pre">AssetTools.create_asset_with_dialog_async()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.create_unique_asset_name"><code class="docutils literal notranslate"><span class="pre">AssetTools.create_unique_asset_name()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.diff_against_depot"><code class="docutils literal notranslate"><span class="pre">AssetTools.diff_against_depot()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.diff_assets"><code class="docutils literal notranslate"><span class="pre">AssetTools.diff_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.duplicate_asset"><code class="docutils literal notranslate"><span class="pre">AssetTools.duplicate_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.duplicate_asset_with_dialog"><code class="docutils literal notranslate"><span class="pre">AssetTools.duplicate_asset_with_dialog()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.duplicate_asset_with_dialog_and_title"><code class="docutils literal notranslate"><span class="pre">AssetTools.duplicate_asset_with_dialog_and_title()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.export_assets"><code class="docutils literal notranslate"><span class="pre">AssetTools.export_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.export_assets_with_dialog"><code class="docutils literal notranslate"><span class="pre">AssetTools.export_assets_with_dialog()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.find_soft_references_to_object"><code class="docutils literal notranslate"><span class="pre">AssetTools.find_soft_references_to_object()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.import_asset_tasks"><code class="docutils literal notranslate"><span class="pre">AssetTools.import_asset_tasks()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.import_assets_automated"><code class="docutils literal notranslate"><span class="pre">AssetTools.import_assets_automated()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.import_assets_with_dialog"><code class="docutils literal notranslate"><span class="pre">AssetTools.import_assets_with_dialog()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.is_asset_read_only"><code class="docutils literal notranslate"><span class="pre">AssetTools.is_asset_read_only()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.migrate_packages"><code class="docutils literal notranslate"><span class="pre">AssetTools.migrate_packages()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.open_editor_for_assets"><code class="docutils literal notranslate"><span class="pre">AssetTools.open_editor_for_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.rename_assets"><code class="docutils literal notranslate"><span class="pre">AssetTools.rename_assets()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.rename_assets_with_dialog"><code class="docutils literal notranslate"><span class="pre">AssetTools.rename_assets_with_dialog()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetTools.rename_referencing_soft_object_paths"><code class="docutils literal notranslate"><span class="pre">AssetTools.rename_referencing_soft_object_paths()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="AssetThumbnailWidget.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetThumbnailWidget</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="AssetToolsHelpers.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetToolsHelpers</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="AssetToolsHelpers.html" title="unreal.AssetToolsHelpers"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="AssetThumbnailWidget.html" title="unreal.AssetThumbnailWidget"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetTools</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2206a40ab55f787',t:'MTc4NTIwNTMzNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

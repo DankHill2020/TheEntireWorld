@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.MaterialEditingLibrary &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.MaterialEditorInstanceConstant" href="MaterialEditorInstanceConstant.html" />
+    <link rel="prev" title="unreal.MaterialCacheVirtualTextureTagFactory" href="MaterialCacheVirtualTextureTagFactory.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="MaterialEditorInstanceConstant.html" title="unreal.MaterialEditorInstanceConstant"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="MaterialCacheVirtualTextureTagFactory.html" title="unreal.MaterialCacheVirtualTextureTagFactory"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.MaterialEditingLibrary</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-materialeditinglibrary">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.MaterialEditingLibrary</span></code><a class="headerlink" href="#unreal-materialeditinglibrary" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">MaterialEditingLibrary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.MaterialEditingLibrary" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="BlueprintFunctionLibrary.html#unreal.BlueprintFunctionLibrary" title="unreal.BlueprintFunctionLibrary"><code class="xref py py-class docutils literal notranslate"><span class="pre">BlueprintFunctionLibrary</span></code></a></p>
+<p>Blueprint library for creating/editing Materials</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: MaterialEditor</p></li>
+<li><p><strong>File</strong>: MaterialEditingLibrary.h</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.clear_all_material_instance_parameters">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">clear_all_material_instance_parameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.clear_all_material_instance_parameters" title="Link to this definition">¶</a></dt>
+<dd><p>Clears all material parameters set by this Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.connect_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">connect_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">from_expression</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_output_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_expression</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_input_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.connect_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Create connection between two material expressions</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>from_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>) – Expression to make connection from</p></li>
+<li><p><strong>from_output_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Name of output of FromExpression to make connection from. Leave empty to use first output.</p></li>
+<li><p><strong>to_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>) – Expression to make connection to</p></li>
+<li><p><strong>to_input_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Name of input of ToExpression to make connection to. Leave empty to use first input.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.connect_material_property">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">connect_material_property</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">from_expression</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_output_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">property_</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.connect_material_property" title="Link to this definition">¶</a></dt>
+<dd><p>Connect a material expression output to one of the material property inputs (e.g. diffuse color, opacity etc)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>from_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>) – Expression to make connection from</p></li>
+<li><p><strong>from_output_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Name of output of FromExpression to make connection from</p></li>
+<li><p><strong>property</strong> (<a class="reference internal" href="MaterialProperty.html#unreal.MaterialProperty" title="unreal.MaterialProperty"><em>MaterialProperty</em></a>) – Property input on material to make connection to</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.create_material_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">create_material_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expression_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_pos_x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_pos_y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.create_material_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Create a new material expression node within the supplied material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material asset to add an expression to</p></li>
+<li><p><strong>expression_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – Class of expression to add</p></li>
+<li><p><strong>node_pos_x</strong> (<em>int32</em>) – X position of new expression node</p></li>
+<li><p><strong>node_pos_y</strong> (<em>int32</em>) – Y position of new expression node</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.create_material_expression_in_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">create_material_expression_in_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expression_class</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_pos_x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_pos_y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.create_material_expression_in_function" title="Link to this definition">¶</a></dt>
+<dd><p>Create a new material expression node within the supplied material function</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>) – Material function asset to add an expression to</p></li>
+<li><p><strong>expression_class</strong> (<a class="reference internal" href="AIESelectionSetItemName.html#unreal.AIESelectionSetItemName.type" title="unreal.AIESelectionSetItemName.type"><em>type</em></a><em>(</em><a class="reference internal" href="Class.html#unreal.Class" title="unreal.Class"><em>Class</em></a><em>)</em>) – Class of expression to add</p></li>
+<li><p><strong>node_pos_x</strong> (<em>int32</em>) – X position of new expression node</p></li>
+<li><p><strong>node_pos_y</strong> (<em>int32</em>) – Y position of new expression node</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.delete_all_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delete_all_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.delete_all_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Delete all material expressions in the supplied material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.delete_all_material_expressions_in_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delete_all_material_expressions_in_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.delete_all_material_expressions_in_function" title="Link to this definition">¶</a></dt>
+<dd><p>Delete all material expressions in the supplied material function</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.delete_material_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delete_material_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.delete_material_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Delete a specific expression from a material. Will disconnect from other expressions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.delete_material_expression_in_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delete_material_expression_in_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.delete_material_expression_in_function" title="Link to this definition">¶</a></dt>
+<dd><p>Delete a specific expression from a material function. Will disconnect from other expressions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p></li>
+<li><p><strong>expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.delete_unused_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">delete_unused_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.delete_unused_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Delete all expressions not reachable from any material output. Call recompile afterwards.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.disconnect_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">disconnect_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">to_expression</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_input_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.disconnect_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Disconnect the input pin of a material expression, removing whatever is currently connected to it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>to_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>) – Expression whose input pin should be disconnected</p></li>
+<li><p><strong>to_input_name</strong> (<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><em>str</em></a>) – Name of the input pin to disconnect.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>true if a connection was broken, false if the pin was already disconnected or not found</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.disconnect_material_property">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">disconnect_material_property</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">property_</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.disconnect_material_property" title="Link to this definition">¶</a></dt>
+<dd><p>Disconnect the expression node currently connected to a material property input (e.g. base color, roughness).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material asset to modify</p></li>
+<li><p><strong>property</strong> (<a class="reference internal" href="MaterialProperty.html#unreal.MaterialProperty" title="unreal.MaterialProperty"><em>MaterialProperty</em></a>) – Property input on material to disconnect</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>true if a connection was broken, false if the input was already disconnected</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.duplicate_material_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">duplicate_material_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.duplicate_material_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Duplicates the provided material expression adding it to the same material / material function, and copying parameters.
+Note: Does not duplicate transient properties (Ex: GraphNode).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material asset to add an expression to</p></li>
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>) – Specified if adding an expression to a MaterialFunction, used as Outer for new expression object</p></li>
+<li><p><strong>expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_child_instances">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_child_instances</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parent</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_child_instances" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all direct child mat instances</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>parent</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>child_instances (Array[AssetData]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_input_node_output_name_for_material_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_input_node_output_name_for_material_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_node</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_input_node_output_name_for_material_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Get the output name of input node connected to MaterialExpression from an active material editor</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+<li><p><strong>input_node</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>output_name (str):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_inputs_for_material_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_inputs_for_material_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_inputs_for_material_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Get the set of nodes acting as inputs to a node from an active material editor</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_inputs_for_material_function_expression">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_inputs_for_material_function_expression</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_inputs_for_material_function_expression" title="Link to this definition">¶</a></dt>
+<dd><p>Get the set of nodes acting as inputs to a node in a material function graph</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p></li>
+<li><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_default_scalar_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_default_scalar_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_default_scalar_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the default scalar (float) parameter value from a Material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_default_static_switch_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_default_static_switch_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_default_static_switch_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the default static switch parameter value from a Material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_default_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_default_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><span class="pre">Texture</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_default_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the default texture parameter value from a Material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture">Texture</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_default_vector_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_default_vector_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="LinearColor.html#unreal.LinearColor" title="unreal.LinearColor"><span class="pre">LinearColor</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_default_vector_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the default vector parameter value from a Material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="LinearColor.html#unreal.LinearColor" title="unreal.LinearColor">LinearColor</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_expression_input_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_expression_input_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_expression_input_names" title="Link to this definition">¶</a></dt>
+<dd><p>Get the array of input pin names for a material expression</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_expression_input_types">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_expression_input_types</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><span class="pre">int32</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_expression_input_types" title="Link to this definition">¶</a></dt>
+<dd><p>Get the array of input pin types for a material expression</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[int32]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_expression_node_position">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_expression_node_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_expression)</span> <span class="pre">-&gt;</span> <span class="pre">(node_pos_x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">int32</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_pos_y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">int32</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_expression_node_position" title="Link to this definition">¶</a></dt>
+<dd><p>Get the position of the MaterialExpression node.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>node_pos_x (int32):</p>
+<p>node_pos_y (int32):</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_expression_output_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_expression_output_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_expression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_expression_output_names" title="Link to this definition">¶</a></dt>
+<dd><p>Get the array of output pin names for a material expression</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_expression</strong> (<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><em>MaterialExpression</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>returns the Expressions contained in this Material. Does not include nested Expressions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_function_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_function_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_function_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>returns the Expressions contained in this Material Function. Does not include nested Expressions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_runtime_virtual_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_runtime_virtual_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="RuntimeVirtualTexture.html#unreal.RuntimeVirtualTexture" title="unreal.RuntimeVirtualTexture"><span class="pre">RuntimeVirtualTexture</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_runtime_virtual_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current texture parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="RuntimeVirtualTexture.html#unreal.RuntimeVirtualTexture" title="unreal.RuntimeVirtualTexture">RuntimeVirtualTexture</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_scalar_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_scalar_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><span class="pre">float</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_scalar_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current scalar (float) parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float">float</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_sparse_volume_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_sparse_volume_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="SparseVolumeTexture.html#unreal.SparseVolumeTexture" title="unreal.SparseVolumeTexture"><span class="pre">SparseVolumeTexture</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_sparse_volume_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current texture parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="SparseVolumeTexture.html#unreal.SparseVolumeTexture" title="unreal.SparseVolumeTexture">SparseVolumeTexture</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_static_switch_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_static_switch_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_static_switch_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current static switch parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><span class="pre">Texture</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current texture parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture">Texture</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_instance_vector_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_instance_vector_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="LinearColor.html#unreal.LinearColor" title="unreal.LinearColor"><span class="pre">LinearColor</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_instance_vector_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Get the current vector parameter value from a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="LinearColor.html#unreal.LinearColor" title="unreal.LinearColor">LinearColor</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_property_input_node">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_property_input_node</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">property_</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression"><span class="pre">MaterialExpression</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_property_input_node" title="Link to this definition">¶</a></dt>
+<dd><p>Get the node providing the output for a given material property from an active material editor</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>property</strong> (<a class="reference internal" href="MaterialProperty.html#unreal.MaterialProperty" title="unreal.MaterialProperty"><em>MaterialProperty</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialExpression.html#unreal.MaterialExpression" title="unreal.MaterialExpression">MaterialExpression</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_property_input_node_output_name">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_property_input_node_output_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">property_</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_property_input_node_output_name" title="Link to this definition">¶</a></dt>
+<dd><p>Get the node output name providing the output for a given material property from an active material editor</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+<li><p><strong>property</strong> (<a class="reference internal" href="MaterialProperty.html#unreal.MaterialProperty" title="unreal.MaterialProperty"><em>MaterialProperty</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_selected_nodes">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_selected_nodes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Set.html#unreal.Set" title="unreal.Set"><span class="pre">Set</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_selected_nodes" title="Link to this definition">¶</a></dt>
+<dd><p>Get the set of selected nodes from an active material editor</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Set.html#unreal.Set" title="unreal.Set">Set</a>[<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object">Object</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_material_used_textures">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_material_used_textures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_interface</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><span class="pre">Texture</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_material_used_textures" title="Link to this definition">¶</a></dt>
+<dd><p>Get the list of textures used by a material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_interface</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture">Texture</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_materials_referencing_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_materials_referencing_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData"><span class="pre">AssetData</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_materials_referencing_function" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all materials that use a material function</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>out_materials (Array[AssetData]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="AssetData.html#unreal.AssetData" title="unreal.AssetData">AssetData</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_nanite_override_material">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_nanite_override_material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><span class="pre">MaterialInterface</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_nanite_override_material" title="Link to this definition">¶</a></dt>
+<dd><p>Returns any nanite override material for the given material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface">MaterialInterface</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_num_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_num_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_num_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Returns number of material expressions in the supplied material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_num_material_expressions_in_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_num_material_expressions_in_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_num_material_expressions_in_function" title="Link to this definition">¶</a></dt>
+<dd><p>Returns number of material expressions in the supplied material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_num_shader_types">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_num_shader_types</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_num_shader_types" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the number of shader types (including pipeline shader types) for the given material.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_scalar_parameter_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_scalar_parameter_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_scalar_parameter_names" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all scalar parameter names</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>parameter_names (Array[Name]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_scalar_parameter_source">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_scalar_parameter_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SoftObjectPath</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_scalar_parameter_source" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the path of the asset where the parameter originated, as well as true/false if it was found</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>) – The material or material instance you want to look up a parameter from</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The parameter name</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>Whether or not the parameter was found in this material</p>
+<p>parameter_source (SoftObjectPath): The soft object path of the asset the parameter originates in</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath">SoftObjectPath</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_static_switch_parameter_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_static_switch_parameter_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_static_switch_parameter_names" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all static switch parameter names</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>parameter_names (Array[Name]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_static_switch_parameter_source">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_static_switch_parameter_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SoftObjectPath</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_static_switch_parameter_source" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the path of the asset where the parameter originated, as well as true/false if it was found</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>) – The material or material instance you want to look up a parameter from</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The parameter name</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>Whether or not the parameter was found in this material</p>
+<p>parameter_source (SoftObjectPath): The soft object path of the asset the parameter originates in</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath">SoftObjectPath</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_statistics">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_statistics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="MaterialStatistics.html#unreal.MaterialStatistics" title="unreal.MaterialStatistics"><span class="pre">MaterialStatistics</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_statistics" title="Link to this definition">¶</a></dt>
+<dd><p>Returns statistics about the given material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="MaterialStatistics.html#unreal.MaterialStatistics" title="unreal.MaterialStatistics">MaterialStatistics</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_texture_parameter_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_texture_parameter_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_texture_parameter_names" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all texture parameter names</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>parameter_names (Array[Name]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_texture_parameter_source">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_texture_parameter_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SoftObjectPath</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_texture_parameter_source" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the path of the asset where the parameter originated, as well as true/false if it was found</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>) – The material or material instance you want to look up a parameter from</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The parameter name</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>Whether or not the parameter was found in this material</p>
+<p>parameter_source (SoftObjectPath): The soft object path of the asset the parameter originates in</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath">SoftObjectPath</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_used_textures">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_used_textures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><span class="pre">Texture</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_used_textures" title="Link to this definition">¶</a></dt>
+<dd><p>Get the list of textures used by a material
+deprecated: Use GetMaterialUsedTextures instead since it works with Material Instances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture">Texture</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_vector_parameter_names">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_vector_parameter_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_vector_parameter_names" title="Link to this definition">¶</a></dt>
+<dd><p>Gets all vector parameter names</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>parameter_names (Array[Name]):</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name">Name</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.get_vector_parameter_source">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">get_vector_parameter_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SoftObjectPath</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.get_vector_parameter_source" title="Link to this definition">¶</a></dt>
+<dd><p>Returns the path of the asset where the parameter originated, as well as true/false if it was found</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>) – The material or material instance you want to look up a parameter from</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The parameter name</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><p>Whether or not the parameter was found in this material</p>
+<p>parameter_source (SoftObjectPath): The soft object path of the asset the parameter originates in</p>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="SoftObjectPath.html#unreal.SoftObjectPath" title="unreal.SoftObjectPath">SoftObjectPath</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.has_material_usage">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">has_material_usage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.has_material_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Check if a particular usage is enabled for the supplied material (e.g. SkeletalMesh, ParticleSprite etc)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>) – Material to check usage for</p></li>
+<li><p><strong>usage</strong> (<a class="reference internal" href="MaterialUsage.html#unreal.MaterialUsage" title="unreal.MaterialUsage"><em>MaterialUsage</em></a>) – Usage type to check for this material</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.has_material_usage_override">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">has_material_usage_override</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.has_material_usage_override" title="Link to this definition">¶</a></dt>
+<dd><p>Check if a if the supplied material instance has an override for the particular usage</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>) – Material instance to check override for</p></li>
+<li><p><strong>usage</strong> (<a class="reference internal" href="MaterialUsage.html#unreal.MaterialUsage" title="unreal.MaterialUsage"><em>MaterialUsage</em></a>) – Usage type to check for this material</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.is_material_instance_parameter_overridden">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_material_instance_parameter_overridden</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.is_material_instance_parameter_overridden" title="Link to this definition">¶</a></dt>
+<dd><p>Check whether a parameter is overridden in this Material Instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>) – Material Instance to query</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – Name of the parameter</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>) – Parameter association type</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Whether the parameter is overridden in this instance</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.layout_material_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">layout_material_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.layout_material_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Layouts the expressions in a grid pattern</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.layout_material_function_expressions">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">layout_material_function_expressions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.layout_material_function_expressions" title="Link to this definition">¶</a></dt>
+<dd><p>Layouts the expressions in a grid pattern</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.list_shaders">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">list_shaders</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="DebugShaderInfo.html#unreal.DebugShaderInfo" title="unreal.DebugShaderInfo"><span class="pre">DebugShaderInfo</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.list_shaders" title="Link to this definition">¶</a></dt>
+<dd><p>Returns a list of all the shaders contained in this material.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference internal" href="DebugShaderInfo.html#unreal.DebugShaderInfo" title="unreal.DebugShaderInfo">DebugShaderInfo</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.recompile_material">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">recompile_material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><span class="pre">Array</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.recompile_material" title="Link to this definition">¶</a></dt>
+<dd><p>Trigger a recompile of a material. Must be performed after making changes to the graph to have changes reflected.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Any compiler error messages produced during compilation. Empty if compilation succeeded.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array">Array</a>[<a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)">str</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.refresh_material_editor">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">refresh_material_editor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.refresh_material_editor" title="Link to this definition">¶</a></dt>
+<dd><p>Refresh an open Material Editor’s preview from its source asset. Call after script-driven edits
+so the editor reflects the change. No-op if no editor is open for the asset. Discards any
+in-editor edits not yet applied back to the asset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material whose open editor should be refreshed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.refresh_material_function_editor">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">refresh_material_function_editor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.refresh_material_function_editor" title="Link to this definition">¶</a></dt>
+<dd><p>Refresh an open Material Function Editor’s preview from its source asset. Same semantics as
+RefreshMaterialEditor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunction.html#unreal.MaterialFunction" title="unreal.MaterialFunction"><em>MaterialFunction</em></a>) – MaterialFunction whose open editor should be refreshed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.refresh_material_instance_editor">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">refresh_material_instance_editor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.refresh_material_instance_editor" title="Link to this definition">¶</a></dt>
+<dd><p>Refresh an open Material Instance Editor’s parameter and inheritance views. Call after
+script-driven edits so the editor reflects the change. No-op if no editor is open for
+the instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>) – Material Instance whose open editor should be refreshed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.rename_material_function_parameter_group">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">rename_material_function_parameter_group</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">old_group_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_group_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.rename_material_function_parameter_group" title="Link to this definition">¶</a></dt>
+<dd><p>Renames a material parameter group within the specified material function.</p>
+<p>This function allows you to rename an existing parameter group in a material function.
+It iterates all parameters within the material function, finds all the one belonging
+to the <cite>OldGroupName</cite> group and switches those parameters to be in the <cite>NewGroupName</cite>
+group.  This function only affects parameters that belong to the specified group.
+To remove the groups from the parameters the new group name can be ‘None’.  If the
+OldGroupName does not exist in the material, the function will return false.   If the
+NewGroupName already exists, the parameters will be “merged” into the existing group.
+see: RenameMaterialParameterGroup</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunctionInterface.html#unreal.MaterialFunctionInterface" title="unreal.MaterialFunctionInterface"><em>MaterialFunctionInterface</em></a>) – The material function asset in which the parameter group resides.</p></li>
+<li><p><strong>old_group_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The current name of the parameter group to rename.</p></li>
+<li><p><strong>new_group_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The new name to assign to the parameter group.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>true if the rename operation was successful; false otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.rename_material_parameter_group">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">rename_material_parameter_group</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">old_group_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_group_name</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.rename_material_parameter_group" title="Link to this definition">¶</a></dt>
+<dd><p>Renames a material parameter group within the specified material.</p>
+<p>This function allows you to rename an existing parameter group in a material.
+It iterates all parameters within the material, finds all the one belonging
+to the <cite>OldGroupName</cite> group and switches those parameters to be in the <cite>NewGroupName</cite>
+group.  This function only affects parameters that belong to the specified group.
+To remove the groups from the parameters the new group name can be ‘None’.  If the
+OldGroupName does not exist in the material, the function will return false.   If
+the NewGroupName already exists, the parameters will be “merged” into the existing group.
+see: RenameMaterialFunctionParameterGroup</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – The material asset in which the parameter group resides.</p></li>
+<li><p><strong>old_group_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The current name of the parameter group to rename.</p></li>
+<li><p><strong>new_group_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – The new name to assign to the parameter group.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>true if the rename operation was successful; false otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_base_material_usage">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_base_material_usage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_base_material_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Enable or disable a particular usage for the supplied material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material to change usage for</p></li>
+<li><p><strong>usage</strong> (<a class="reference internal" href="MaterialUsage.html#unreal.MaterialUsage" title="unreal.MaterialUsage"><em>MaterialUsage</em></a>) – Usage type</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Whether to enable the usage</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_parameter_override">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_parameter_override</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">override</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_parameter_override" title="Link to this definition">¶</a></dt>
+<dd><p>Set whether a parameter override is enabled in this Material Instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>) – Material Instance to modify</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>) – Name of the parameter</p></li>
+<li><p><strong>override</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Whether the parameter should be overridden</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>) – Parameter association type</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Whether the operation succeeded (false if Instance is null or the parameter was not found)</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_parent">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_parent</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_parent</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_parent" title="Link to this definition">¶</a></dt>
+<dd><p>Set the parent Material or Material Instance to use for this Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>new_parent</strong> (<a class="reference internal" href="MaterialInterface.html#unreal.MaterialInterface" title="unreal.MaterialInterface"><em>MaterialInterface</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_runtime_virtual_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_runtime_virtual_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_runtime_virtual_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the texture parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="RuntimeVirtualTexture.html#unreal.RuntimeVirtualTexture" title="unreal.RuntimeVirtualTexture"><em>RuntimeVirtualTexture</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_scalar_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_scalar_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_scalar_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the scalar (float) parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="AnimDetailsFloat.html#unreal.AnimDetailsFloat.float" title="unreal.AnimDetailsFloat.float"><em>float</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_sparse_volume_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_sparse_volume_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_sparse_volume_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the texture parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="SparseVolumeTexture.html#unreal.SparseVolumeTexture" title="unreal.SparseVolumeTexture"><em>SparseVolumeTexture</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_static_switch_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_static_switch_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">update_material_instance</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_static_switch_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the static switch parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+<li><p><strong>update_material_instance</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_texture_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the texture parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><em>Texture</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_instance_vector_parameter_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">association</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">MaterialParameterAssociation.GLOBAL_PARAMETER</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value" title="Link to this definition">¶</a></dt>
+<dd><p>Set the vector parameter value for a Material Instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p></li>
+<li><p><strong>parameter_name</strong> (<a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><em>Name</em></a>)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="LinearColor.html#unreal.LinearColor" title="unreal.LinearColor"><em>LinearColor</em></a>)</p></li>
+<li><p><strong>association</strong> (<a class="reference internal" href="MaterialParameterAssociation.html#unreal.MaterialParameterAssociation" title="unreal.MaterialParameterAssociation"><em>MaterialParameterAssociation</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_usage">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_usage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span> <span class="pre">or</span> <span class="pre">None</span></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Enable a particular usage for the supplied material (e.g. SkeletalMesh, ParticleSprite etc)
+deprecated: Use SetBaseMaterialUsage instead</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>) – Material to change usage for</p></li>
+<li><p><strong>usage</strong> (<a class="reference internal" href="MaterialUsage.html#unreal.MaterialUsage" title="unreal.MaterialUsage"><em>MaterialUsage</em></a>) – New usage type to enable for this material</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>needs_recompile (bool): Returned to indicate if material needs recompiling after this change</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a> or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.set_material_usage_override">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">set_material_usage_override</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_instance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">override</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.set_material_usage_override" title="Link to this definition">¶</a></dt>
+<dd><p>Set the material usage override for the supplied material instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>) – Material instance to change usage for</p></li>
+<li><p><strong>usage</strong> (<a class="reference internal" href="MaterialUsage.html#unreal.MaterialUsage" title="unreal.MaterialUsage"><em>MaterialUsage</em></a>) – Usage type</p></li>
+<li><p><strong>override</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Whether to enable the override (set to false to default to Parent setting)</p></li>
+<li><p><strong>value</strong> (<a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><em>bool</em></a>) – Whether to enable the usage (only if bOverride is true)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.update_material_function">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">update_material_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_function</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preview_material</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.update_material_function" title="Link to this definition">¶</a></dt>
+<dd><p>Update a Material Function after edits have been made.
+Will recompile any Materials that use the supplied Material Function.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_function</strong> (<a class="reference internal" href="MaterialFunctionInterface.html#unreal.MaterialFunctionInterface" title="unreal.MaterialFunctionInterface"><em>MaterialFunctionInterface</em></a>)</p></li>
+<li><p><strong>preview_material</strong> (<a class="reference internal" href="Material.html#unreal.Material" title="unreal.Material"><em>Material</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.MaterialEditingLibrary.update_material_instance">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">update_material_instance</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#unreal.MaterialEditingLibrary.update_material_instance" title="Link to this definition">¶</a></dt>
+<dd><p>Called after making modifications to a Material Instance to recompile shaders etc.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>instance</strong> (<a class="reference internal" href="MaterialInstanceConstant.html#unreal.MaterialInstanceConstant" title="unreal.MaterialInstanceConstant"><em>MaterialInstanceConstant</em></a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.MaterialEditingLibrary</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.clear_all_material_instance_parameters"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.clear_all_material_instance_parameters()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.connect_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.connect_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.connect_material_property"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.connect_material_property()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.create_material_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.create_material_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.create_material_expression_in_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.create_material_expression_in_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.delete_all_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.delete_all_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.delete_all_material_expressions_in_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.delete_all_material_expressions_in_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.delete_material_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.delete_material_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.delete_material_expression_in_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.delete_material_expression_in_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.delete_unused_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.delete_unused_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.disconnect_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.disconnect_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.disconnect_material_property"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.disconnect_material_property()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.duplicate_material_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.duplicate_material_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_child_instances"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_child_instances()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_input_node_output_name_for_material_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_input_node_output_name_for_material_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_inputs_for_material_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_inputs_for_material_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_inputs_for_material_function_expression"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_inputs_for_material_function_expression()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_default_scalar_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_default_scalar_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_default_static_switch_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_default_static_switch_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_default_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_default_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_default_vector_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_default_vector_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_expression_input_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_expression_input_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_expression_input_types"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_expression_input_types()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_expression_node_position"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_expression_node_position()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_expression_output_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_expression_output_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_function_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_function_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_runtime_virtual_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_runtime_virtual_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_scalar_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_scalar_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_sparse_volume_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_sparse_volume_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_static_switch_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_static_switch_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_instance_vector_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_instance_vector_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_property_input_node"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_property_input_node()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_property_input_node_output_name"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_property_input_node_output_name()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_selected_nodes"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_selected_nodes()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_material_used_textures"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_material_used_textures()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_materials_referencing_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_materials_referencing_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_nanite_override_material"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_nanite_override_material()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_num_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_num_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_num_material_expressions_in_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_num_material_expressions_in_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_num_shader_types"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_num_shader_types()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_scalar_parameter_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_scalar_parameter_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_scalar_parameter_source"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_scalar_parameter_source()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_static_switch_parameter_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_static_switch_parameter_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_static_switch_parameter_source"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_static_switch_parameter_source()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_statistics"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_statistics()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_texture_parameter_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_texture_parameter_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_texture_parameter_source"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_texture_parameter_source()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_used_textures"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_used_textures()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_vector_parameter_names"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_vector_parameter_names()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.get_vector_parameter_source"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.get_vector_parameter_source()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.has_material_usage"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.has_material_usage()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.has_material_usage_override"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.has_material_usage_override()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.is_material_instance_parameter_overridden"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.is_material_instance_parameter_overridden()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.layout_material_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.layout_material_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.layout_material_function_expressions"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.layout_material_function_expressions()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.list_shaders"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.list_shaders()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.recompile_material"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.recompile_material()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.refresh_material_editor"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.refresh_material_editor()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.refresh_material_function_editor"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.refresh_material_function_editor()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.refresh_material_instance_editor"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.refresh_material_instance_editor()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.rename_material_function_parameter_group"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.rename_material_function_parameter_group()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.rename_material_parameter_group"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.rename_material_parameter_group()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_base_material_usage"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_base_material_usage()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_parameter_override"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_parameter_override()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_parent"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_parent()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_runtime_virtual_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_runtime_virtual_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_scalar_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_scalar_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_sparse_volume_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_sparse_volume_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_static_switch_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_static_switch_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_texture_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_instance_vector_parameter_value()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_usage"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_usage()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.set_material_usage_override"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.set_material_usage_override()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.update_material_function"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.update_material_function()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.MaterialEditingLibrary.update_material_instance"><code class="docutils literal notranslate"><span class="pre">MaterialEditingLibrary.update_material_instance()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="MaterialCacheVirtualTextureTagFactory.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.MaterialCacheVirtualTextureTagFactory</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="MaterialEditorInstanceConstant.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.MaterialEditorInstanceConstant</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="MaterialEditorInstanceConstant.html" title="unreal.MaterialEditorInstanceConstant"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="MaterialCacheVirtualTextureTagFactory.html" title="unreal.MaterialCacheVirtualTextureTagFactory"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.MaterialEditingLibrary</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22079de9c795d06',t:'MTc4NTIwNTk3NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

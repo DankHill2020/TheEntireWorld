@@ -1,91 +1,20 @@
-"""Cheap request-context snapshot for the Intelligence Engine.
-
-This module deliberately avoids project searches, large file reads, or DCC calls.
-It only snapshots already-known UI state so the UI can update context labels
-without freezing.
-"""
+"""Tech Connector UI snapshot helpers backed by runtime RequestContext."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from typing import Any
 
-
-_SENSITIVE_CONTEXT_KEY = re.compile(
-    r"(?:^|_)(?:api_?key|access_?key|secret|token|password|credential|"
-    r"authorization|cookie|private_?key)(?:$|_)",
-    re.IGNORECASE,
+from reasoning_runtime.engine.request_context import (
+    RequestContext,
+    explicitly_requests_open_file_context,
+    sanitize_prompt_context,
 )
-
-
-def sanitize_prompt_context(value: Any) -> Any:
-    """Copy prompt context while removing credentials at the UI boundary."""
-    if isinstance(value, dict):
-        return {
-            str(key): sanitize_prompt_context(item)
-            for key, item in value.items()
-            if not _SENSITIVE_CONTEXT_KEY.search(str(key))
-        }
-    if isinstance(value, list):
-        return [sanitize_prompt_context(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(sanitize_prompt_context(item) for item in value)
-    return value
-
-
-@dataclass(frozen=True)
-class RequestContext:
-    text: str
-    active_tab: str = "Chat"
-    current_file_path: str = ""
-    open_file_paths: tuple[str, ...] = ()
-    selection_text: str = ""
-    project_roots: tuple[str, ...] = ()
-    attached_images: tuple[str, ...] = ()
-    model: str = ""
-    index_state: str = "unknown"
-    extras: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def has_selection(self) -> bool:
-        return bool(self.selection_text.strip())
-
-    @property
-    def current_file_name(self) -> str:
-        return Path(self.current_file_path).name if self.current_file_path else ""
-
-    def context_label(self) -> str:
-        parts = [self.active_tab or "Chat"]
-        if self.current_file_name:
-            parts.append(self.current_file_name)
-        elif self.open_file_paths:
-            parts.append(f"Open files {len(self.open_file_paths)}")
-        if self.has_selection:
-            parts.append(f"Selection {len(self.selection_text.splitlines())} lines")
-        if self.project_roots:
-            parts.append("Project")
-        if self.index_state:
-            parts.append(self.index_state)
-        if self.model:
-            parts.append(self.model.replace("ollama:", ""))
-        return "Context: " + " - ".join(parts)
-
-
-def explicitly_requests_open_file_context(text: str) -> bool:
-    """Return True when the user is clearly asking about open/current files."""
-    lower = (text or "").lower()
-    return bool(
-        re.search(r"\b(this|current|active|open|selected)\s+(?:file|script|module|code)\b", lower)
-        or re.search(r"\b(in|from|inside)\s+(?:this|the current|the active|the open)\s+(?:file|script|module)\b", lower)
-        or re.search(r"\b(open|opened)\s+files?\b", lower)
-        or re.search(r"\bcurrent\s+selection\b", lower)
-    )
 
 
 def should_prioritize_open_file_context(window: Any, text: str = "") -> bool:
     """Decide whether already-open editor files should get ranking weight."""
+
     if explicitly_requests_open_file_context(text):
         return True
     try:
@@ -103,6 +32,7 @@ def should_prioritize_open_file_context(window: Any, text: str = "") -> bool:
 
 def open_file_paths_from_window(window: Any) -> tuple[str, ...]:
     """Return already-known open editor paths without touching the filesystem."""
+
     paths: list[str] = []
     current = str(getattr(window, "current_file_path", "") or "")
     if current:
@@ -134,9 +64,11 @@ def open_file_paths_from_window(window: Any) -> tuple[str, ...]:
 def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
     """Build a cheap context snapshot from the MainWindow.
 
-    Safe rule: this function must not query SQLite, walk folders, read large files,
-    or call live DCC bridges.
+    Safe rule: this function must not query SQLite, walk folders, read large
+    files, or call live DCC bridges. Tech Connector-specific status helpers are
+    sampled only through already-known UI state and non-live checks.
     """
+
     active_tab = "Chat"
     try:
         if hasattr(window, "workspace_tabs"):
@@ -169,6 +101,17 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
         images = [str(p) for p in getattr(window, "attached_images", [])]
     except Exception:
         images = []
+    files: list[str] = []
+    try:
+        files = [str(p) for p in getattr(window, "attached_files", [])]
+    except Exception:
+        files = []
+    video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+    videos = [
+        path
+        for path in [*images, *files]
+        if Path(str(path)).suffix.lower() in video_exts
+    ]
 
     model = ""
     try:
@@ -185,13 +128,18 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
             index_state = "Index synced"
         else:
             from tech_connector.models.constants import project_index_db_path
+
             index_state = "Index ready" if project_index_db_path().exists() else "Index missing"
     except Exception:
         index_state = "Index unknown"
 
     extras: dict[str, Any] = {}
-    # Previous route decisions are intentionally excluded. They are outputs of
-    # the worker, not input context for a new request.
+    if files:
+        extras["attached_files"] = tuple(files)
+    if images:
+        extras["attached_images"] = tuple(images)
+    if videos:
+        extras["attached_videos"] = tuple(videos)
     try:
         workspace = getattr(window, "_active_conversation_workspace", None)
         if isinstance(workspace, dict):
@@ -239,6 +187,7 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
         snapshot_str = getattr(window, "unreal_project_snapshot", None)
         if snapshot_str:
             import json
+
             snapshot_data = json.loads(snapshot_str)
             data = snapshot_data.get("data") or {}
             folders = data.get("selected_folders") or (snapshot_data.get("health") or {}).get("selected_folders")
@@ -259,3 +208,13 @@ def snapshot_from_window(window: Any, text: str = "") -> RequestContext:
         index_state=index_state,
         extras=sanitize_prompt_context(extras),
     )
+
+
+__all__ = [
+    "RequestContext",
+    "explicitly_requests_open_file_context",
+    "open_file_paths_from_window",
+    "sanitize_prompt_context",
+    "should_prioritize_open_file_context",
+    "snapshot_from_window",
+]

@@ -808,9 +808,15 @@ def _desired_outcome(
     if deliverables == ["implementation_plan"]:
         return f"The user receives an evidence-grounded, approval-ready implementation plan for '{subject}' and no project mutation occurs."
     if action_mode == "mutate":
-        return f"The requested change to '{subject}' is applied narrowly and verified."
+        return (
+            f"Success requires the requested change to '{subject}' to be implemented "
+            "narrowly and to pass every required validation gate."
+        )
     if action_mode == "execute":
-        return f"The resolved operation for '{subject}' is executed and its resulting state is verified."
+        return (
+            f"Success requires the resolved operation for '{subject}' to execute "
+            "successfully and its resulting state to pass the required validation."
+        )
     return f"The response directly resolves '{subject}'."
 
 

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.DecalBlendMode &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.DeformableExecutionModel" href="DeformableExecutionModel.html" />
+    <link rel="prev" title="unreal.DebugTypeEnum" href="DebugTypeEnum.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="DeformableExecutionModel.html" title="unreal.DeformableExecutionModel"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="DebugTypeEnum.html" title="unreal.DebugTypeEnum"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.DecalBlendMode</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-decalblendmode">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.DecalBlendMode</span></code><a class="headerlink" href="#unreal-decalblendmode" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">DecalBlendMode</span></span><a class="headerlink" href="#unreal.DecalBlendMode" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="EnumBase.html#unreal.EnumBase" title="unreal.EnumBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">EnumBase</span></code></a></p>
+<p>Defines how the GBuffer channels are getting manipulated by a decal material pass. Actual index is used to control shader parameters so don’t change order.</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: Material.h</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_ALPHA_COMPOSITE">
+<span class="sig-name descname"><span class="pre">DBM_ALPHA_COMPOSITE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_ALPHA_COMPOSITE" title="Link to this definition">¶</a></dt>
+<dd><p>Blend with existing scene color. Decal color is already pre-multiplied by alpha.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>15</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_AMBIENT_OCCLUSION">
+<span class="sig-name descname"><span class="pre">DBM_AMBIENT_OCCLUSION</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_AMBIENT_OCCLUSION" title="Link to this definition">¶</a></dt>
+<dd><p>Ambient occlusion.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>16</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_COLOR">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_COLOR</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>5</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_COLOR_NORMAL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well (becomes DBM_DBuffer_Color if normal is not hooked up).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>6</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL_ROUGHNESS">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_COLOR_NORMAL_ROUGHNESS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL_ROUGHNESS" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well (becomes DBM_TranslucentNormal if normal is not hooked up).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>4</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_ROUGHNESS">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_COLOR_ROUGHNESS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_ROUGHNESS" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>7</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_NORMAL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>8</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL_ROUGHNESS">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_NORMAL_ROUGHNESS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL_ROUGHNESS" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well (becomes DBM_DBuffer_Roughness if normal is not hooked up).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>9</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_D_BUFFER_ROUGHNESS">
+<span class="sig-name descname"><span class="pre">DBM_D_BUFFER_ROUGHNESS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_D_BUFFER_ROUGHNESS" title="Link to this definition">¶</a></dt>
+<dd><p>Put into DBuffer to work for baked lighting as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>10</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_EMISSIVE">
+<span class="sig-name descname"><span class="pre">DBM_EMISSIVE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_EMISSIVE" title="Link to this definition">¶</a></dt>
+<dd><p>Additive emissive only.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>3</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_NORMAL">
+<span class="sig-name descname"><span class="pre">DBM_NORMAL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_NORMAL" title="Link to this definition">¶</a></dt>
+<dd><p>Only blend normal, updating the GBuffer, does not work for baked lighting.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>2</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_STAIN">
+<span class="sig-name descname"><span class="pre">DBM_STAIN</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_STAIN" title="Link to this definition">¶</a></dt>
+<dd><p>Modulate BaseColor, blend rest, updating the GBuffer, does not work for baked lighting. Does not work in DBuffer mode (approximated as Translucent).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>1</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_TRANSLUCENT">
+<span class="sig-name descname"><span class="pre">DBM_TRANSLUCENT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_TRANSLUCENT" title="Link to this definition">¶</a></dt>
+<dd><p>Blend full material, updating the GBuffer, does not work for baked lighting.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>0</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="unreal.DecalBlendMode.DBM_VOLUMETRIC_DISTANCE_FUNCTION">
+<span class="sig-name descname"><span class="pre">DBM_VOLUMETRIC_DISTANCE_FUNCTION</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#unreal.DecalBlendMode" title="unreal.DecalBlendMode"><span class="pre">DecalBlendMode</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">Ellipsis</span></span><a class="headerlink" href="#unreal.DecalBlendMode.DBM_VOLUMETRIC_DISTANCE_FUNCTION" title="Link to this definition">¶</a></dt>
+<dd><p>Can be costly, no shadow casting but receiving, no per pixel normal yet, no quality settings yet</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>14</p>
+</dd>
+<dt class="field-even">Type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Output signed distance in Opacity depending on LightVector. Note</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.DecalBlendMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.DecalBlendMode"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_ALPHA_COMPOSITE"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_ALPHA_COMPOSITE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_AMBIENT_OCCLUSION"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_AMBIENT_OCCLUSION</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_COLOR</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL_ROUGHNESS"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_COLOR_NORMAL_ROUGHNESS</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_COLOR_ROUGHNESS"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_COLOR_ROUGHNESS</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_NORMAL</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_NORMAL_ROUGHNESS"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_NORMAL_ROUGHNESS</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_D_BUFFER_ROUGHNESS"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_D_BUFFER_ROUGHNESS</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_EMISSIVE"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_EMISSIVE</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_NORMAL"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_NORMAL</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_STAIN"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_STAIN</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_TRANSLUCENT"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_TRANSLUCENT</span></code></a></li>
+<li><a class="reference internal" href="#unreal.DecalBlendMode.DBM_VOLUMETRIC_DISTANCE_FUNCTION"><code class="docutils literal notranslate"><span class="pre">DecalBlendMode.DBM_VOLUMETRIC_DISTANCE_FUNCTION</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="DebugTypeEnum.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.DebugTypeEnum</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="DeformableExecutionModel.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.DeformableExecutionModel</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="DeformableExecutionModel.html" title="unreal.DeformableExecutionModel"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="DebugTypeEnum.html" title="unreal.DebugTypeEnum"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.DecalBlendMode</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a220cb274ae427e0',t:'MTc4NTIwOTMwNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

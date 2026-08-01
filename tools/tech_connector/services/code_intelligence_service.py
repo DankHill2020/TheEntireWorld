@@ -259,6 +259,9 @@ def audit_python_package_layout(
     }
 
 
+from reasoning_runtime.project_analysis import audit_python_package_layout as audit_python_package_layout
+
+
 def analyze_service_cleanup_candidates(
     project_root: str | Path,
     *,
@@ -520,6 +523,7 @@ def build_code_intelligence_packet(
     objective: str,
     *,
     active_path: str | None = None,
+    project_root: str | None = None,
     limit: int = 20,
     include_repo_map: bool = True,
 ) -> dict[str, Any]:
@@ -528,29 +532,133 @@ def build_code_intelligence_packet(
         settings = load_settings()
         custom_module = settings.get("code_intel_provider_module")
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.build_code_intelligence_packet",
+                resolve_custom_provider_binding("code_intel_module", custom_module, "build_code_intelligence_packet", settings),
                 _build_code_intelligence_packet_impl,
                 objective,
                 active_path=active_path,
+                project_root=project_root,
                 limit=limit,
                 include_repo_map=include_repo_map
             )
     except Exception as e:
         print(f"Error calling custom build_code_intelligence_packet: {e}", flush=True)
-    return _build_code_intelligence_packet_impl(objective, active_path=active_path, limit=limit, include_repo_map=include_repo_map)
+    return _build_code_intelligence_packet_impl(objective, active_path=active_path, project_root=project_root, limit=limit, include_repo_map=include_repo_map)
+
+_TRANSIENT_EVIDENCE_PATH_PARTS = {
+    ".codex_stress",
+    ".codex_tmp",
+    "workflow_checkpoints",
+}
+
+
+def _rank_intelligence_search_terms(
+    objective: str,
+    extracted_terms: Any,
+) -> tuple[str, ...]:
+    """Prioritize symbol-shaped retrieval terms over generic prose/path words."""
+
+    import re
+
+    text = str(objective or "")
+    explicit_terms = [
+        *re.findall(
+            r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b",
+            text,
+        ),
+        *re.findall(r"\b[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*\b", text),
+        *re.findall(r"\b[a-z_][A-Za-z0-9_]*_[A-Za-z0-9_]+\b", text),
+        *re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", text),
+    ]
+    candidates = list(dict.fromkeys([
+        *explicit_terms,
+        *(str(item) for item in extracted_terms if str(item).strip()),
+    ]))
+    generic = {
+        "add",
+        "class",
+        "create",
+        "file",
+        "implement",
+        "new",
+        "plan",
+        "tool",
+        "using",
+        "validation",
+        "with",
+    }
+
+    def score(term: str) -> tuple[int, int]:
+        value = term.strip()
+        lowered = value.casefold()
+        points = 0
+        if "." in value and not lowered.endswith(".py"):
+            points += 120
+        if re.search(r"[a-z][A-Z]|[A-Z].*[A-Z]", value):
+            points += 95
+        if "_" in value and not lowered.endswith(".py"):
+            points += 70
+        if re.search(rf"\b{re.escape(value)}\s*\(", text):
+            points += 55
+        if len(value) >= 12:
+            points += 25
+        if lowered.endswith(".py") or "/" in value or "\\" in value:
+            points -= 100
+        if lowered in generic:
+            points -= 80
+        return points, len(value)
+
+    return tuple(sorted(candidates, key=score, reverse=True)[:12])
+
+
+def _is_transient_evidence_path(value: Any) -> bool:
+    text = str(value or "").replace("\\", "/")
+    parts = {part.casefold() for part in text.split("/") if part}
+    return bool(parts & _TRANSIENT_EVIDENCE_PATH_PARTS)
+
+
+def _filter_transient_evidence(value: Any) -> Any:
+    if isinstance(value, dict):
+        if _is_transient_evidence_path(value.get("path") or value.get("file")):
+            return None
+        return {
+            key: filtered
+            for key, item in value.items()
+            if (filtered := _filter_transient_evidence(item)) is not None
+        }
+    if isinstance(value, (list, tuple)):
+        filtered_items = [
+            filtered
+            for item in value
+            if (filtered := _filter_transient_evidence(item)) is not None
+        ]
+        return type(value)(filtered_items)
+    if isinstance(value, str) and "\n" in value:
+        return "\n".join(
+            line
+            for line in value.splitlines()
+            if not _is_transient_evidence_path(line)
+        )
+    return value
+
 
 def _build_code_intelligence_packet_impl(
     objective: str,
     *,
     active_path: str | None = None,
+    project_root: str | None = None,
     limit: int = 20,
     include_repo_map: bool = True,
 ) -> dict[str, Any]:
     """Gather deterministic IDE-agent context for code/search/edit prompts."""
 
-    from tech_connector.knowledge.search import extract_code_search_terms, search_index_symbols, search_index_usages
+    from tech_connector.knowledge.search import (
+        SOURCE_ALL,
+        extract_code_search_terms,
+        search_index_symbols,
+        search_index_usages,
+    )
     from tech_connector.services.project_search_service import (
         build_deterministic_project_search_answer,
         detect_project_search_mode,
@@ -563,8 +671,18 @@ def _build_code_intelligence_packet_impl(
     text = objective or ""
     scope = detect_search_scope(text)
     mode = detect_project_search_mode(text)
-    terms = tuple(extract_code_search_terms(text)[:12])
-    project_context = gather_project_search_context(text, active_path=active_path, limit=limit, scope=scope)
+    terms = _rank_intelligence_search_terms(
+        text,
+        extract_code_search_terms(text)[:40],
+    )
+    project_context = _filter_transient_evidence(
+        gather_project_search_context(
+            text,
+            active_path=active_path,
+            limit=limit,
+            scope=scope,
+        )
+    )
     sufficiency = evaluate_project_rag_sufficiency(
         text,
         project_context,
@@ -573,35 +691,48 @@ def _build_code_intelligence_packet_impl(
     deterministic_answer = ""
     if sufficiency.answerable:
         deterministic_answer = build_deterministic_project_search_answer(text, active_path, project_context)
-    project_roots = _project_roots_from_context(project_context)
-    symbols = tuple(
+    project_roots = (
+        [str(Path(project_root).expanduser().resolve())]
+        if project_root
+        else _project_roots_from_context(project_context)
+    )
+    symbol_query_limit = min(limit, 20)
+    filtered_symbols = _filter_transient_evidence(
         search_index_symbols(
             list(terms),
-            limit=min(limit, 20),
+            limit=symbol_query_limit,
             active_path=active_path,
-            scope=scope,
+            scope=SOURCE_ALL,
             project_roots=project_roots,
+            project_root=project_roots[0] if project_roots else None,
         )
         if terms
         else []
-    )
-    usages = search_index_usages(
-        text,
-        limit=min(max(limit, 10), 50),
-        active_path=active_path,
-        scope=scope,
-        project_roots=project_roots,
-    )
+    ) or []
+    symbols = tuple(filtered_symbols[: min(limit, 20)])
+    usage_query_limit = min(max(limit, 10), 50)
+    usages = _filter_transient_evidence(
+        search_index_usages(
+            text,
+            limit=usage_query_limit,
+            active_path=active_path,
+            scope=SOURCE_ALL,
+            project_roots=project_roots,
+            project_root=project_roots[0] if project_roots else None,
+        )
+    ) or {}
     repo_map = {}
     if include_repo_map:
         from tech_connector.services.repo_map_service import build_repo_map
 
-        repo_map = build_repo_map(
-            project_root=project_roots[0] if project_roots else None,
-            scope=scope,
-            max_dirs=12,
-            max_files=16,
-        )
+        repo_map = _filter_transient_evidence(
+            build_repo_map(
+                project_root=project_roots[0] if project_roots else None,
+                scope=scope,
+                max_dirs=12,
+                max_files=16,
+            )
+        ) or {}
     validation_paths = _candidate_paths(symbols, usages, active_path=active_path)
     validation_plan = tuple(
         plan_validation_for_paths(
@@ -631,9 +762,9 @@ def render_code_intelligence_packet(packet: dict[str, Any] | None, *, max_contex
         settings = load_settings()
         custom_module = settings.get("code_intel_provider_module")
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.render_code_intelligence_packet",
+                resolve_custom_provider_binding("code_intel_module", custom_module, "render_code_intelligence_packet", settings),
                 _render_code_intelligence_packet_impl,
                 packet,
                 max_context_chars=max_context_chars

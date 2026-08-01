@@ -155,6 +155,7 @@ def build_execution_contract(
         stop_conditions.append("Stop after returning evidence-backed findings; do not mutate files or host state.")
     elif mutation:
         expected_outputs.append("A previewable, reversible change within the declared scope.")
+        expected_outputs.append("Validation strategy and test execution evidence (commands + observed result) for requested behavior.")
         stop_conditions.append("Stop if the target is ambiguous or the requested scope cannot be honored safely.")
         stop_conditions.append("Stop after required validation passes for the allowed changes.")
 

@@ -302,6 +302,7 @@ def validate_patch_in_temp_workspace(
     module_prelude: str = "",
     validation_commands: list[list[str] | str] | None = None,
     copy_paths: list[str] | None = None,
+    additional_python_paths: list[str] | None = None,
     timeout_seconds: int = 30,
     keep_workspace: bool = True,
 ) -> dict[str, Any]:
@@ -366,9 +367,25 @@ def validate_patch_in_temp_workspace(
             if args and args[0] == "python":
                 args = [sys.executable, *args[1:]]
             try:
+                command_env = os.environ.copy()
+                command_env.setdefault("QT_QPA_PLATFORM", "offscreen")
+                command_env["PYTHONPATH"] = os.pathsep.join(
+                    value
+                    for value in (
+                        str(temp_root),
+                        *[
+                            str(Path(path).resolve())
+                            for path in additional_python_paths or []
+                            if str(path or "").strip()
+                        ],
+                        command_env.get("PYTHONPATH", ""),
+                    )
+                    if value
+                )
                 completed = subprocess.run(
                     args,
                     cwd=temp_root,
+                    env=command_env,
                     capture_output=True,
                     text=True,
                     timeout=max(1, int(timeout_seconds)),

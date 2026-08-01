@@ -784,6 +784,8 @@ def narrate_progress_message(
         return _message_for_phase(data, "searching") or "Gathering the evidence needed to answer the request..."
     if "project evidence gathered" in lower or "index answer ready" in lower:
         return _message_for_phase(data, "comparing") or "Comparing the strongest candidate evidence..."
+    if "edit prompt ready" in lower:
+        return raw
     if "answer ready" in lower or lower.endswith(" ready"):
         return _message_for_phase(data, "reporting") or "Preparing the evidence-backed answer..."
     if "validat" in lower or "compile" in lower or "test" in lower:

@@ -505,6 +505,32 @@ class IntelligenceStore:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def get_python_api_exact(
+        self,
+        project_id: int,
+        dcc: str,
+        qualified_names: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return exact qualified API rows for one batched validation pass."""
+
+        names = list(dict.fromkeys(
+            _norm_key(name) for name in qualified_names if _norm_key(name)
+        ))
+        if not names:
+            return []
+        placeholders = ",".join("?" for _name in names)
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM python_api
+            WHERE (project_id=? OR project_id IS NULL)
+              AND dcc=?
+              AND lower(qualified_name) IN ({placeholders})
+            ORDER BY length(qualified_name) ASC
+            """,
+            (project_id, dcc, *names),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def search_python_api_fts(
         self,
         project_id: int,

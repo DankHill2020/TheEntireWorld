@@ -1,4 +1,4 @@
-# Morning Deterministic Interaction Updates
+﻿# Morning Deterministic Interaction Updates
 
 Date: 2026-07-10
 
@@ -141,22 +141,22 @@ Make project, DCC, Unreal, clarification, and pipeline-related chat operations m
 Commands run from `C:\depot\tools\tech_connector`:
 
 ```powershell
-python -m py_compile .\services\choice_provider_service.py .\services\interaction_quality_service.py .\services\recovery_action_service.py .\app\main_window_chat_runtime.py ..\examples\tech_connector\tests\test_choice_provider_service.py ..\examples\tech_connector\tests\test_interaction_quality_service.py ..\examples\tech_connector\tests\test_recovery_action_service.py
+python -m py_compile .\services\choice_provider_service.py .\services\interaction_quality_service.py .\services\recovery_action_service.py .\app\main_window_chat_runtime.py .\examples\tests\test_choice_provider_service.py .\examples\tests\test_interaction_quality_service.py .\examples\tests\test_recovery_action_service.py
 ```
 
 Result: passed.
 
 ```powershell
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_choice_provider_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_interaction_quality_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_recovery_action_service.py"
-python -m unittest discover -s ..\examples\tech_connector\tests -p "test_prompt_dispatch_service.py"
+python -m unittest discover -s .\examples\tests -p "test_choice_provider_service.py"
+python -m unittest discover -s .\examples\tests -p "test_interaction_quality_service.py"
+python -m unittest discover -s .\examples\tests -p "test_recovery_action_service.py"
+python -m unittest discover -s .\examples\tests -p "test_prompt_dispatch_service.py"
 ```
 
 Result: 26 tests passed.
 
 ```powershell
-python -m unittest discover -s ..\examples\tech_connector\tests
+python -m unittest discover -s .\examples\tests
 ```
 
 Result: 105 tests passed.

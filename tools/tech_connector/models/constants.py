@@ -1,8 +1,11 @@
 """Application-wide constants."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -38,15 +41,36 @@ HISTORY_DIR = SCRATCHES_DIR / "chat_history"
 CODE_SNIPPETS_DIR = SCRATCHES_DIR / "code_snippets"
 IMAGE_DIR = APP_DIR / "images"
 SETTINGS_PATH = APP_DIR / "settings.json"
+
+
+def _default_temp_root() -> Path:
+    return Path(tempfile.gettempdir()) / "tech_connector"
+
+
+TEMP_DIR = Path(os.environ.get("TECH_CONNECTOR_TEMP_DIR", str(_default_temp_root()))).expanduser()
+
+
+def temp_output_path(name: str | os.PathLike[str], *, subdir: str = "run_outputs") -> Path:
+    """Return a project-external path for disposable logs, reports, and traces."""
+    raw_name = Path(str(name or "output")).name
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw_name).strip("._") or "output"
+    safe_subdir = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(subdir or "run_outputs")).strip("._") or "run_outputs"
+    root = TEMP_DIR / safe_subdir
+    root.mkdir(parents=True, exist_ok=True)
+    return root / safe_name
+
+
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 CODE_SNIPPETS_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 TOOLS_ROOT = _detect_tools_root()
 EXTERNAL_TOOLS_DIR = TOOLS_ROOT / "external_tools"
+DATA_DIR = APP_ROOT / "data"
 KNOWLEDGE_DIR = APP_ROOT / "knowledge"
 PROJECT_ROOT_ENV = "TECH_CONNECTOR_PROJECT_ROOT"
 PROJECT_KNOWLEDGE_RELATIVE = Path("tech_connector") / "knowledge" / "index"
+CAPABILITY_REGISTRY_RELATIVE = Path("tech_connector") / "data" / "capability_registry.json"
 
 
 def active_project_root(project_root: str | os.PathLike[str] | None = None) -> Path:
@@ -75,7 +99,24 @@ def set_active_project_root(project_root: str | os.PathLike[str] | None) -> Path
 
 def project_index_db_path(project_root: str | os.PathLike[str] | None = None) -> Path:
     """Return the stable per-project knowledge-index database path."""
-    return active_project_root(project_root) / PROJECT_KNOWLEDGE_RELATIVE / "knowledge_index_v2.sqlite"
+    root = active_project_root(project_root)
+    if root == APP_ROOT:
+        return APP_ROOT / "knowledge" / "index" / "knowledge_index_v2.sqlite"
+    return root / PROJECT_KNOWLEDGE_RELATIVE / "knowledge_index_v2.sqlite"
+
+
+def capability_registry_path(project_root: str | os.PathLike[str] | None = None) -> Path:
+    """Return the canonical Tech Connector capability registry path.
+
+    For the tools workspace this resolves to
+    ``C:/depot/tools/tech_connector/data/capability_registry.json`` instead of
+    escaping to ``C:/depot/data``.
+    """
+
+    root = active_project_root(project_root)
+    if (root / "tech_connector").exists():
+        return root / CAPABILITY_REGISTRY_RELATIVE
+    return APP_ROOT / "data" / "capability_registry.json"
 
 
 # Compatibility for external callers. Internal code resolves the path at use time.
@@ -116,7 +157,7 @@ DEFAULT_UNITY_PORT = 7071
 DEFAULT_MOTIONBUILDER_PORT = 7051
 
 DEFAULT_MCPHOST = os.path.join(os.path.expanduser("~"), "go", "bin", "mcphost.exe")
-DEFAULT_MODEL = "ollama:qwen2.5-coder:1.5b"
+DEFAULT_MODEL = "ollama:qwen2.5-coder:3b"
 DEFAULT_CONFIGS = [
     str(APP_ROOT / "knowledge" / "mcp_unreal_maya_knowledge_config.json"),
 ]

@@ -2,6 +2,7 @@
 
 import ast
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 
@@ -116,7 +117,8 @@ def _return_outputs(node, return_annotation: str) -> list[dict]:
     return outputs
 
 
-_SYMBOL_CACHE = {}
+_SYMBOL_CACHE_MAX_ENTRIES = 4096
+_SYMBOL_CACHE = OrderedDict()
 
 
 def extract_symbols_from_file(file_path: Path) -> list[dict]:
@@ -126,11 +128,13 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
     try:
         mtime = file_path.stat().st_mtime
     except Exception:
+        _SYMBOL_CACHE.pop(file_path_str, None)
         return []
         
     if file_path_str in _SYMBOL_CACHE:
         cached_mtime, cached_symbols = _SYMBOL_CACHE[file_path_str]
         if cached_mtime == mtime:
+            _SYMBOL_CACHE.move_to_end(file_path_str)
             return cached_symbols
 
     symbols = []
@@ -147,17 +151,44 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
     lines = content.splitlines(keepends=True)
 
     class SymbolVisitor(ast.NodeVisitor):
+        def __init__(self):
+            super().__init__()
+            self.scope_stack = []
+
         def visit_FunctionDef(self, node):
             self.add_node(node, "function")
-            self.generic_visit(node)
+            self.scope_stack.append(("function", node.name))
+            try:
+                self.generic_visit(node)
+            finally:
+                self.scope_stack.pop()
 
         def visit_AsyncFunctionDef(self, node):
             self.add_node(node, "function")
-            self.generic_visit(node)
+            self.scope_stack.append(("function", node.name))
+            try:
+                self.generic_visit(node)
+            finally:
+                self.scope_stack.pop()
 
         def visit_ClassDef(self, node):
             self.add_node(node, "class")
-            self.generic_visit(node)
+            self.scope_stack.append(("class", node.name))
+            try:
+                self.generic_visit(node)
+            finally:
+                self.scope_stack.pop()
+
+        @staticmethod
+        def decorator_name(decorator):
+            if isinstance(decorator, ast.Call):
+                return SymbolVisitor.decorator_name(decorator.func)
+            if isinstance(decorator, ast.Name):
+                return decorator.id
+            if isinstance(decorator, ast.Attribute):
+                prefix = SymbolVisitor.decorator_name(decorator.value)
+                return f"{prefix}.{decorator.attr}" if prefix else decorator.attr
+            return ""
 
         def add_node(self, node, kind):
             try:
@@ -173,8 +204,47 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
                     
                 is_func = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 return_anno = _annotation_text(getattr(node, "returns", None))
+                qualified_name = ".".join(
+                    [scope_name for _scope_kind, scope_name in self.scope_stack]
+                    + [node.name]
+                )
+                class_name = next(
+                    (
+                        scope_name
+                        for scope_kind, scope_name in reversed(self.scope_stack)
+                        if scope_kind == "class"
+                    ),
+                    "",
+                )
+                parent_function = next(
+                    (
+                        scope_name
+                        for scope_kind, scope_name in reversed(self.scope_stack)
+                        if scope_kind == "function"
+                    ),
+                    "",
+                )
+                decorator_names = {
+                    self.decorator_name(decorator).rsplit(".", 1)[-1]
+                    for decorator in getattr(node, "decorator_list", [])
+                }
+                if not is_func:
+                    callable_scope = "class"
+                elif parent_function:
+                    callable_scope = "nested_function"
+                elif class_name and "staticmethod" in decorator_names:
+                    callable_scope = "static_method"
+                elif class_name and "classmethod" in decorator_names:
+                    callable_scope = "class_method"
+                elif class_name:
+                    callable_scope = "instance_method"
+                else:
+                    callable_scope = "module_function"
                 symbols.append({
                     "name": node.name,
+                    "qualified_name": qualified_name,
+                    "class_name": class_name,
+                    "callable_scope": callable_scope,
                     "file_path": str(file_path),
                     "kind": kind,
                     "lineno": getattr(node, "lineno", 0),
@@ -193,6 +263,9 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
     visitor = SymbolVisitor()
     visitor.visit(tree)
     _SYMBOL_CACHE[file_path_str] = (mtime, symbols)
+    _SYMBOL_CACHE.move_to_end(file_path_str)
+    while len(_SYMBOL_CACHE) > _SYMBOL_CACHE_MAX_ENTRIES:
+        _SYMBOL_CACHE.popitem(last=False)
     return symbols
 
 

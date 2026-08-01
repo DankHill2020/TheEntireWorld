@@ -57,9 +57,9 @@ def parse_github_repo_reference(repo_ref: str) -> GitHubRepoRef:
         settings = load_settings()
         custom_module = _get_github_ingest_module_path(settings)
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.parse_github_repo_reference",
+                resolve_custom_provider_binding("github_ingest_module", custom_module, "parse_github_repo_reference", settings),
                 _parse_github_repo_reference_impl,
                 repo_ref
             )
@@ -113,6 +113,119 @@ def _parse_github_repo_reference_impl(repo_ref: str) -> GitHubRepoRef:
 
 def _utc_now() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _repository_license(repo_dir: Path) -> tuple[str, str]:
+    """Return a conservative license label and relative evidence path."""
+
+    candidates = sorted(
+        (
+            path
+            for path in repo_dir.rglob("*")
+            if path.is_file()
+            and (
+                path.name.casefold().startswith("license")
+                or path.name.casefold() in {"copying", "copying.txt", "unlicense"}
+            )
+        ),
+        key=lambda path: (len(path.relative_to(repo_dir).parts), str(path)),
+    )
+    if not candidates:
+        return "Unknown - review required", ""
+    path = candidates[0]
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:32_000]
+    except OSError:
+        text = ""
+    lowered = text.casefold()
+    markers = (
+        ("mit license", "MIT"),
+        ("apache license", "Apache-2.0"),
+        ("gnu lesser general public license", "LGPL"),
+        ("gnu general public license", "GPL"),
+        ("mozilla public license", "MPL-2.0"),
+        ("bsd license", "BSD"),
+        ("the unlicense", "Unlicense"),
+        ("cc0", "CC0"),
+    )
+    license_name = next(
+        (label for marker, label in markers if marker in lowered),
+        "Present - review required",
+    )
+    return license_name, str(path.relative_to(repo_dir)).replace("\\", "/")
+
+
+def write_repository_attribution(
+    repo_dir: Path,
+    repo_ref: GitHubRepoRef,
+    *,
+    archive_url: str = "",
+    archive_sha256: str = "",
+) -> dict:
+    """Write mandatory local credit metadata for downloaded source code."""
+
+    repo_dir = Path(repo_dir)
+    license_name, license_file = _repository_license(repo_dir)
+    verified_license = license_name not in {
+        "Unknown - review required",
+        "Present - review required",
+    }
+    payload = {
+        "schema": "tech_connector.third_party_source_attribution.v1",
+        "source_type": "github_repository",
+        "repository": repo_ref.full_name,
+        "creator": repo_ref.owner,
+        "repository_url": repo_ref.clean_url,
+        "requested_ref": repo_ref.ref or "",
+        "requested_ref_kind": repo_ref.ref_kind or "",
+        "archive_url": archive_url,
+        "archive_sha256": archive_sha256,
+        "downloaded_at": _utc_now(),
+        "license": license_name,
+        "license_file": license_file,
+        "license_verified": verified_license,
+        "attribution": (
+            f"Third-party source from {repo_ref.full_name} "
+            f"({repo_ref.clean_url}); retain its license and source credit."
+        ),
+        "usage_policy": (
+            "Downloaded source is review-only until a callable is AST-verified "
+            "and license terms are accepted."
+        ),
+    }
+    manifest_path = repo_dir / "TECH_CONNECTOR_ATTRIBUTION.json"
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    payload["manifest_path"] = str(manifest_path)
+
+    if verified_license:
+        try:
+            from tech_connector.services.knowledge_credits_service import (
+                register_open_knowledge_sources,
+            )
+            credit_result = register_open_knowledge_sources(
+                [{
+                    "title": repo_ref.full_name,
+                    "creator": repo_ref.owner,
+                    "url": repo_ref.clean_url,
+                    "license": license_name,
+                    "attribution": payload["attribution"],
+                    "public_access": True,
+                    "access": "public",
+                }],
+                what_learned="Reviewed source repository acquired for callable discovery.",
+                domains=["third_party_code", "capability_acquisition"],
+            )
+            payload["credits_registry"] = str(credit_result.get("path") or "")
+        except Exception as exc:
+            payload["credits_error"] = f"{type(exc).__name__}: {exc}"
+        manifest_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    return payload
 
 
 def _write_ingest_log(target_dir: Path, events: list[dict]) -> None:
@@ -230,9 +343,9 @@ def github_api_repo_url(repo_ref: str) -> str:
         settings = load_settings()
         custom_module = _get_github_ingest_module_path(settings)
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.github_api_repo_url",
+                resolve_custom_provider_binding("github_ingest_module", custom_module, "github_api_repo_url", settings),
                 _github_api_repo_url_impl,
                 repo_ref
             )
@@ -262,16 +375,23 @@ def download_and_extract_repo(repo_name: str, repo_url: str, target_parent_dir: 
         settings = load_settings()
         custom_module = _get_github_ingest_module_path(settings)
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
-            return invoke_custom_provider(
-                f"{custom_module}.download_and_extract_repo",
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
+            downloaded_path = Path(invoke_custom_provider(
+                resolve_custom_provider_binding("github_ingest_module", custom_module, "download_and_extract_repo", settings),
                 _download_and_extract_repo_impl,
                 repo_name,
                 repo_url,
                 target_parent_dir,
                 progress_cb,
                 allow_fallback=False,
-            )
+            ))
+            attribution_path = downloaded_path / "TECH_CONNECTOR_ATTRIBUTION.json"
+            if not attribution_path.exists():
+                write_repository_attribution(
+                    downloaded_path,
+                    parse_github_repo_reference(repo_url),
+                )
+            return downloaded_path
     except Exception as e:
         if custom_module and custom_module != "default":
             raise
@@ -327,6 +447,9 @@ def _download_and_extract_repo_impl(repo_name: str, repo_url: str, target_parent
     if not zip_data:
         _log_event(events, target_dir, "ingest_failed", error=str(last_err))
         raise IOError(f"Failed to download repository from candidates {zip_urls}. Error: {last_err}")
+    import hashlib
+    archive_sha256 = hashlib.sha256(zip_data).hexdigest()
+    archive_url = url
         
     _emit_progress(progress_cb, "Extracting repository preserving structure...", 0, 0)
         
@@ -346,7 +469,21 @@ def _download_and_extract_repo_impl(repo_name: str, repo_url: str, target_parent
         shutil.move(str(extracted), str(destination))
     shutil.rmtree(temp_dir)
 
+    attribution = write_repository_attribution(
+        target_dir,
+        parse_github_repo_reference(repo_url),
+        archive_url=archive_url,
+        archive_sha256=archive_sha256,
+    )
     _log_event(events, target_dir, "extract_finished", files=extracted_files)
+    _log_event(
+        events,
+        target_dir,
+        "attribution_written",
+        manifest=attribution.get("manifest_path"),
+        license=attribution.get("license"),
+        license_verified=attribution.get("license_verified"),
+    )
     _log_event(events, target_dir, "ingest_finished", path=str(target_dir))
     _emit_progress(progress_cb, f"Ingest complete: {target_dir}", 1, 1)
                 
@@ -360,14 +497,33 @@ def ingest_github_repo(repo_ref: GitHubRepoRef, target_dir: Path, progress_cb=No
         settings = load_settings()
         custom_module = _get_github_ingest_module_path(settings)
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
-            return invoke_custom_provider(
-                f"{custom_module}.ingest_github_repo",
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
+            result = invoke_custom_provider(
+                resolve_custom_provider_binding("github_ingest_module", custom_module, "ingest_github_repo", settings),
                 _ingest_github_repo_impl,
                 repo_ref,
                 target_dir,
                 progress_cb
             )
+            if isinstance(result, dict) and result.get("ok") and result.get("path"):
+                downloaded_path = Path(result["path"])
+                attribution_path = (
+                    downloaded_path / "TECH_CONNECTOR_ATTRIBUTION.json"
+                )
+                if attribution_path.exists():
+                    try:
+                        attribution = json.loads(
+                            attribution_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, ValueError, TypeError):
+                        attribution = {}
+                else:
+                    attribution = write_repository_attribution(
+                        downloaded_path,
+                        repo_ref,
+                    )
+                result = {**result, "attribution": attribution}
+            return result
     except Exception as e:
         if custom_module and custom_module != "default":
             return {"ok": False, "error": str(e), "provider": custom_module}
@@ -402,15 +558,26 @@ def _ingest_github_repo_impl(repo_ref: GitHubRepoRef, target_dir: Path, progress
                         progress_cb("Triggering custom asset optimization hook...", 95, 100)
                     except Exception:
                         pass
-                from tech_connector.services.modular_provider_utils import invoke_custom_provider
+                from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
                 invoke_custom_provider(
-                    f"{opt_module}.optimize_assets",
+                    resolve_custom_provider_binding("asset_optimizer_module", opt_module, "optimize_assets", settings),
                     lambda path: None,
                     local_path
                 )
         except Exception as opt_err:
             print(f"[Optimizer] Warning: Custom optimizer failed: {opt_err}", flush=True)
 
-        return {"ok": True, "path": str(local_path)}
+        attribution_path = Path(local_path) / "TECH_CONNECTOR_ATTRIBUTION.json"
+        try:
+            attribution = json.loads(
+                attribution_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, TypeError):
+            attribution = {}
+        return {
+            "ok": True,
+            "path": str(local_path),
+            "attribution": attribution,
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

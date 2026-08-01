@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.Texture2D &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.Texture2DArray" href="Texture2DArray.html" />
+    <link rel="prev" title="unreal.Texture" href="Texture.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="Texture2DArray.html" title="unreal.Texture2DArray"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="Texture.html" title="unreal.Texture"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Texture2D</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-texture2d">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.Texture2D</span></code><a class="headerlink" href="#unreal-texture2d" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.Texture2D">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">Texture2D</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.Texture2D" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="Texture.html#unreal.Texture" title="unreal.Texture"><code class="xref py py-class docutils literal notranslate"><span class="pre">Texture</span></code></a></p>
+<p>Texture 2D</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Engine</p></li>
+<li><p><strong>File</strong>: Texture2D.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">address_x</span></code> (TextureAddress):  [Read-Write] The addressing mode to use for the X axis.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">address_y</span></code> (TextureAddress):  [Read-Write] The addressing mode to use for the Y axis.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_brightness</span></code> (float):  [Read-Write] Static texture brightness adjustment (scales HSV value.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_brightness_curve</span></code> (float):  [Read-Write] Static texture curve adjustment (raises HSV value to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_hue</span></code> (float):  [Read-Write] Static texture hue adjustment (0 - 360) (offsets HSV hue by value in degrees.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_max_alpha</span></code> (float):  [Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 1 (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_min_alpha</span></code> (float):  [Read-Write] Remaps the alpha to the specified min/max range, defines the new value of 0 (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_rgb_curve</span></code> (float):  [Read-Write] Static texture RGB curve adjustment (raises linear-space RGB color to the specified power.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_saturation</span></code> (float):  [Read-Write] Static texture saturation adjustment (scales HSV saturation.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">adjust_vibrance</span></code> (float):  [Read-Write] Static texture “vibrance” adjustment (0 - 1) (HSV saturation algorithm adjustment.)  (Non-destructive; Requires texture source art to be available.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">alpha_coverage_thresholds</span></code> (Vector4):  [Read-Write] Alpha values per channel to compare to when preserving alpha coverage. 0 means disable channel.  Typical good values in 0.5 - 0.9, not 1.0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_import_data</span></code> (AssetImportData):  [Read-Only]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">asset_user_data</span></code> (Array[AssetUserData]):  [Read-Write] Array of user data stored with the asset</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">availability</span></code> (TextureAvailability):  [Read-Write] Whether the texture will be encoded to a gpu format and uploaded to the graphics card, or kept on the CPU for access by gamecode / blueprint.
+For CPU availability, the texture will still upload a tiny black texture as a placeholder. Only applies to 2d textures.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_color</span></code> (Color):  [Read-Write] The color that will be replaced with transparent black if chroma keying is enabled</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_texture</span></code> (bool):  [Read-Write] Whether to chroma key the image, replacing any pixels that match ChromaKeyColor with transparent black</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma_key_threshold</span></code> (float):  [Read-Write] The threshold that components have to match for the texel to be considered equal to the ChromaKeyColor when chroma keying (&lt;=, set to 0 to require a perfect exact match)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_power</span></code> (float):  [Read-Write] default 1, high values result in a stronger effect e.g 1, 2, 4, 8
+this is not a slider because the texture update would not be fast enough</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_texture</span></code> (Texture):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">composite_texture_mode</span></code> (CompositeTextureMode):  [Read-Write] defines how the CompositeTexture is applied, e.g. CTM_RoughnessFromNormalAlpha</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compress_final</span></code> (bool):  [Read-Write] If enabled, compress with Final quality during this Editor session.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_cache_id</span></code> (Guid):  [Read-Write] Change this optional ID to force the texture to be recompressed by changing its cache key.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_no_alpha</span></code> (bool):  [Read-Write] If enabled, the texture’s alpha channel will be forced to opaque for any compressed texture output format.  Does not apply if output format is uncompressed RGBA.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_quality</span></code> (TextureCompressionQuality):  [Read-Write] The compression quality for generated ASTC textures (i.e. mobile platform textures).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compression_settings</span></code> (TextureCompressionSettings):  [Read-Write] Compression settings to use when building the texture.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cook_platform_tiling_settings</span></code> (TextureCookPlatformTilingSettings):  [Read-Write] If the platform supports it, tile the texture when cooking, or keep it linear and tile it when it’s actually submitted to the GPU.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">defer_compression</span></code> (bool):  [Read-Write] If enabled, defer compression of the texture until save or manually compressed in the texture editor.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">do_scale_mips_for_alpha_coverage</span></code> (bool):  [Read-Write] Whether mip RGBA should be scaled to preserve the number of pixels with Value &gt;= AlphaCoverageThresholds.  AlphaCoverageThresholds are ignored if this is off.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">downscale</span></code> (PerPlatformFloat):  [Read-Write] Downscale source texture, applied only to 2d textures without mips
+&lt; 1.0 - use scale value from texture group
+1.0 - do not scale texture
+&gt; 1.0 - scale texure</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">downscale_options</span></code> (TextureDownscaleOptions):  [Read-Write] Texture downscaling options</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">filter</span></code> (TextureFilter):  [Read-Write] The texture filtering mode to use when sampling this texture.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flip_green_channel</span></code> (bool):  [Read-Write] When true the texture’s green channel will be inverted. This is useful for some normal maps.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">global_force_mip_levels_to_be_resident</span></code> (bool):  [Read-Write] Global and serialized version of ForceMiplevelsToBeResident.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_bias</span></code> (int32):  [Read-Write] A bias to the index of the top mip level to use.  That is, number of mip levels to drop when cooking.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lod_group</span></code> (TextureGroup):  [Read-Write] Texture group this texture belongs to</p></li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">lossy_compression_amount</span></code> (TextureLossyCompressionAmount):  [Read-Write] How aggressively should any relevant lossy compression be applied. For compressors that support EncodeSpeed (i.e. Oodle), this is only</dt><dd><p>applied if enabled (see Project Settings -&gt; Texture Encoding). Note that this is <em>in addition</em> to any
+unavoidable loss due to the target format - selecting “No Lossy Compression” will not result in zero distortion for BCn formats.</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_texture_size</span></code> (int32):  [Read-Write] The maximum resolution for generated textures. A value of 0 means the maximum size for the format on each platform.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mip_gen_settings</span></code> (TextureMipGenSettings):  [Read-Write] Per asset specific setting to define the mip-map generation properties like sharpening and kernel size.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mip_load_options</span></code> (TextureMipLoadOptions):  [Read-Write] The texture mip load options.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">never_stream</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">normalize_normals</span></code> (bool):  [Read-Write] Normalize colors in Normal Maps after mip generation for better and sharper quality; recommended on if not required to match legacy behavior.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_cinematic_mip_levels</span></code> (int32):  [Read-Write] Number of mip-levels to use for cinematic quality.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">oodle_preserve_extremes</span></code> (bool):  [Read-Write] If set to true, then Oodle encoder preserves 0 and 255 (0.0 and 1.0) values exactly in alpha channel for BC3/BC7 and in all channels for BC4/BC5.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">oodle_texture_sdk_version</span></code> (Name):  [Read-Write] Oodle Texture SDK Version to encode with.  Enter ‘latest’ to update; ‘None’ preserves legacy encoding to avoid patches.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pad_with_border_color</span></code> (bool):  [Read-Write] If set to true, texture padding will be performed using colors of the border pixels. This can be used to improve quality of the generated mipmaps for padded textures.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">padding_color</span></code> (Color):  [Read-Write] The color used to pad the texture out if it is padded due to PowerOfTwoMode</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">power_of_two_mode</span></code> (TexturePowerOfTwoSetting):  [Read-Write] How to pad the texture to a power of 2 size (if necessary)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">preserve_border</span></code> (bool):  [Read-Write] When true the texture’s border will be preserved during mipmap generation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resize_during_build_x</span></code> (int32):  [Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original width will be used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resize_during_build_y</span></code> (int32):  [Read-Write] Width of the resized texture when using “Resize To Specific Resolution” padding and resizing option. If set to zero, original height will be used.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">source_color_settings</span></code> (TextureSourceColorSettings):  [Read-Write] Texture color management settings: source encoding and color space.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">srgb</span></code> (bool):  [Read-Write] Whether Texture and its source are in SRGB Gamma color space.  Can only be used with 8-bit and compressed formats.  This should be unchecked if using alpha channels individually as masks.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_legacy_gamma</span></code> (bool):  [Read-Write] A flag for using the simplified legacy gamma space e.g pow(color,1/2.2) for converting from FColor to FLinearColor, if we’re doing sRGB.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_new_mip_filter</span></code> (bool):  [Read-Write] Disable for legacy compatibility.  New and changed textures should set this to use modern improved image processing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">use_virtual_texture_streaming_priority</span></code> (bool):  [Read-Write] Override the virtual texture streaming priority set on this texture by the texture LOD group.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_prefetch_mips</span></code> (uint8):  [Read-Write] The number of mips that a virtual texture can stream using the traditional CPU texture streaming system.
+In most cases this should be 0 because the virtual texture GPU feedback is sufficient and will minimize memory usage.
+But CPU prefetching can be used in some cases to avoid late appearance of mips.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_streaming</span></code> (bool):  [Read-Write] Is this texture streamed in using VT</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">virtual_texture_streaming_priority</span></code> (VTProducerPriority):  [Read-Write] Priority to use when using virtual texture streaming for this texture.</p></li>
+</ul>
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture2D.address_x">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">address_x</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureAddress.html#unreal.TextureAddress" title="unreal.TextureAddress"><span class="pre">TextureAddress</span></a></span><a class="headerlink" href="#unreal.Texture2D.address_x" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The addressing mode to use for the X axis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureAddress.html#unreal.TextureAddress" title="unreal.TextureAddress">TextureAddress</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.Texture2D.address_y">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">address_y</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="TextureAddress.html#unreal.TextureAddress" title="unreal.TextureAddress"><span class="pre">TextureAddress</span></a></span><a class="headerlink" href="#unreal.Texture2D.address_y" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] The addressing mode to use for the Y axis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="TextureAddress.html#unreal.TextureAddress" title="unreal.TextureAddress">TextureAddress</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture2D.blueprint_get_cpu_copy">
+<span class="sig-name descname"><span class="pre">blueprint_get_cpu_copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="SharedImageConstRefBlueprint.html#unreal.SharedImageConstRefBlueprint" title="unreal.SharedImageConstRefBlueprint"><span class="pre">SharedImageConstRefBlueprint</span></a></span></span><a class="headerlink" href="#unreal.Texture2D.blueprint_get_cpu_copy" title="Link to this definition">¶</a></dt>
+<dd><p>GetCPUCopy</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="SharedImageConstRefBlueprint.html#unreal.SharedImageConstRefBlueprint" title="unreal.SharedImageConstRefBlueprint">SharedImageConstRefBlueprint</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture2D.blueprint_get_size_x">
+<span class="sig-name descname"><span class="pre">blueprint_get_size_x</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.Texture2D.blueprint_get_size_x" title="Link to this definition">¶</a></dt>
+<dd><p>Gets the X size of the texture, in pixels</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.Texture2D.blueprint_get_size_y">
+<span class="sig-name descname"><span class="pre">blueprint_get_size_y</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.Texture2D.blueprint_get_size_y" title="Link to this definition">¶</a></dt>
+<dd><p>Gets the Y size of the texture, in pixels</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.Texture2D</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Texture2D"><code class="docutils literal notranslate"><span class="pre">Texture2D</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.Texture2D.address_x"><code class="docutils literal notranslate"><span class="pre">Texture2D.address_x</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture2D.address_y"><code class="docutils literal notranslate"><span class="pre">Texture2D.address_y</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture2D.blueprint_get_cpu_copy"><code class="docutils literal notranslate"><span class="pre">Texture2D.blueprint_get_cpu_copy()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture2D.blueprint_get_size_x"><code class="docutils literal notranslate"><span class="pre">Texture2D.blueprint_get_size_x()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.Texture2D.blueprint_get_size_y"><code class="docutils literal notranslate"><span class="pre">Texture2D.blueprint_get_size_y()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="Texture.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.Texture</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="Texture2DArray.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.Texture2DArray</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="Texture2DArray.html" title="unreal.Texture2DArray"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="Texture.html" title="unreal.Texture"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.Texture2D</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2242f8f7f5b8d34',t:'MTc4NTI0NDg3NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

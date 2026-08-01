@@ -1,9 +1,10 @@
+from __future__ import annotations
 import sys
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 import json
 
@@ -2281,6 +2282,17 @@ class MainWindowDccMixin:
 
     def launch_houdini(self):
         self.launch_dcc("houdini")
+
+    def show_dcc_driver_dialog(self, host: str = ""):
+        try:
+            from tech_connector.ui.dcc_driver_widget import open_dcc_driver_dialog
+        except Exception as exc:
+            QMessageBox.warning(self, "DCC Driver unavailable", str(exc))
+            return None
+        return open_dcc_driver_dialog(self, initial_host=host or "")
+
+    def show_substance_painter_driver_dialog(self):
+        return self.show_dcc_driver_dialog("substance_painter")
 
     def launch_dcc(self, host: str):
         unreal_uproject = None

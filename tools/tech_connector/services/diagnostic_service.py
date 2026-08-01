@@ -9,11 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tech_connector.models.constants import APP_ROOT
+from tech_connector.models.constants import temp_output_path
 
 
-BACKEND_LOG_DIR = APP_ROOT / ".ai_studio" / "backend_logs"
-BACKEND_LOG_PATH = BACKEND_LOG_DIR / "backend.jsonl"
+BACKEND_LOG_PATH = temp_output_path("backend.jsonl", subdir="backend_logs")
+BACKEND_LOG_DIR = BACKEND_LOG_PATH.parent
 
 
 def _clip(value: Any, limit: int = 6000) -> str:
@@ -113,8 +113,8 @@ def clear_backend_log() -> None:
         pass
 
 
-DIAGNOSTIC_DIR = APP_ROOT / ".ai_studio" / "diagnostics"
-DIAGNOSTIC_PATH = DIAGNOSTIC_DIR / "ui_diagnostics.jsonl"
+DIAGNOSTIC_PATH = temp_output_path("ui_diagnostics.jsonl", subdir="diagnostics")
+DIAGNOSTIC_DIR = DIAGNOSTIC_PATH.parent
 
 
 def log_ui_event(event: str, *, enabled: bool = True, **details: Any) -> None:

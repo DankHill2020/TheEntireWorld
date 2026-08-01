@@ -16,6 +16,7 @@ from tech_connector.models.constants import (
 
 
 _RELOCATABLE_SETTINGS = {"config", "model_cache_dir", "db_path", "index_cache_dir"}
+_RESOURCE_PROFILE_VERSION = 2
 
 
 def _relocate_legacy_app_path(value: object) -> object:
@@ -42,6 +43,25 @@ def _relocate_saved_settings(data: dict) -> dict:
             _relocate_legacy_app_path(value) for value in extra_dirs
         ]
     return relocated
+
+
+def _apply_resource_profile_migration(settings: dict, saved: dict) -> dict:
+    """Move existing installs to lazy local-model startup once."""
+    migrated = dict(settings)
+    try:
+        version = int(saved.get("resource_profile_version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < _RESOURCE_PROFILE_VERSION:
+        migrated["ollama_lazy_start"] = True
+        migrated["ollama_preload_on_startup"] = False
+        migrated["ollama_unload_on_idle"] = True
+        migrated["ollama_idle_unload_minutes"] = 10
+        migrated["ollama_cleanup_model_processes_on_idle"] = True
+        migrated["autostart_mcphost_on_startup"] = False
+        migrated["ollama_preload_models"] = []
+        migrated["resource_profile_version"] = _RESOURCE_PROFILE_VERSION
+    return migrated
 
 
 def best_config() -> str:
@@ -112,6 +132,12 @@ def load_settings() -> dict:
         "tech_connector_allow_offline_community": False,
         "tech_connector_account_email": "",
         "tech_connector_license_token": "",
+        "tos_accepted": False,
+        "tos_version": "v2026.1",
+        "activation_log_endpoint": "",
+        "telemetry_opt_in": False,
+        "unreal_auto_snapshot_on_connect": False,
+        "unreal_auto_reflect_on_connect": False,
         "github_username": "",
         "github_token": "",
         "p4_port": "",
@@ -164,11 +190,21 @@ def load_settings() -> dict:
             "enable_unreal_context_toggle": True
         },
         "router_embed": "nomic-embed-text",
-        "router_local_code": "qwen2.5-coder:14b",
-        "router_local_plan": "qwen3:14b",
-        "router_local_deep": "qwen3:14b",
-        "router_fast_llm_model": "qwen3:14b",
+        "router_local_code": "qwen2.5-coder:7b",
+        "router_local_plan": "qwen3:4b-instruct",
+        "router_local_deep": "qwen3:4b-instruct",
+        "router_visual_media": "qwen3:4b-instruct",
+        "router_fast_llm_model": "qwen3:4b-instruct",
         "ollama_keep_alive": "10m",
+        "ollama_lazy_start": True,
+        "ollama_preload_on_startup": False,
+        "ollama_unload_on_idle": True,
+        "ollama_idle_unload_minutes": 10,
+        "ollama_cleanup_model_processes_on_idle": True,
+        "autostart_mcphost_on_startup": False,
+        "dcc_active_poll_interval_ms": 10000,
+        "dcc_idle_poll_interval_ms": 30000,
+        "dcc_setup_cache_seconds": 300,
         "ollama_num_thread": max(1, min(8, (os.cpu_count() or 4) - 2)),
         "ollama_num_gpu": "",
         "ollama_temperature": 0.2,
@@ -176,14 +212,20 @@ def load_settings() -> dict:
         "deep_route_scope": "engine_complex_only",
         "deep_code_complexity_threshold": 7,
         "allow_30b_deep_route": False,
-        "semantic_intent_model": "qwen2.5:1.5b",
-        "fast_general_model": "qwen3:14b",
-        "fast_code_model": "qwen2.5-coder:14b",
+        "semantic_intent_model": "qwen3:4b-instruct",
+        "semantic_verifier_model": "qwen3:4b-instruct",
+        "semantic_alignment_model": "qwen3:4b-instruct",
+        "causal_repair_model": "qwen3:4b-instruct",
+        "fast_general_model": "qwen3:4b-instruct",
+        "visual_media_model": "qwen3:4b-instruct",
+        "fast_code_model": "qwen2.5-coder:7b",
         "embedding_model": "nomic-embed-text:latest",
-        "fallback_general_model": "qwen2.5-coder:latest",
-        "fallback_semantic_intent_model": "qwen2.5:1.5b",
-        "fallback_code_model": "qwen2.5-coder:latest",
+        "fallback_general_model": "qwen3:4b-instruct",
+        "fallback_semantic_intent_model": "qwen3:4b-instruct",
+        "fallback_code_model": "qwen2.5-coder:7b",
+        "ollama_preload_models": [],
         "custom_model_mappings": {},
+        "custom_provider_function_bindings": {},
         "github_ingest_provider_module": "default",
         "code_intel_provider_module": "default",
         "cognitive_routing_provider_module": "default",
@@ -198,11 +240,14 @@ def load_settings() -> dict:
         "openai_api_key": "",
         "anthropic_api_key": "",
         "gemini_api_key": "",
+        "xai_api_key": "",
+        "provider_executables": {},
         "cloud_provider_model": "gpt-4o",
         "asset_optimizer_provider_module": "default",
         "use_websocket_bridge": False,
         "chatbot_provider_module": "default",
         "skip_splash_video": False,
+        "window_state": {},
     }
     if SETTINGS_PATH.exists():
         try:
@@ -214,11 +259,12 @@ def load_settings() -> dict:
                 data["config"] = best_config()
             merged = dict(defaults)
             merged.update(data)
+            merged = _apply_resource_profile_migration(merged, data)
             if (
                 not bool(merged.get("allow_30b_deep_route", False))
-                and str(merged.get("router_local_deep", "")).strip() == "qwen3:30b"
+                and str(merged.get("router_local_deep", "")).strip() == "qwen3:4b-instruct"
             ):
-                merged["router_local_deep"] = "qwen3:14b"
+                merged["router_local_deep"] = "qwen3:4b-instruct"
             return merged
         except Exception:
             pass

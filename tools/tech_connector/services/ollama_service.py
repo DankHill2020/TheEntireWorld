@@ -15,23 +15,24 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
 OLLAMA_BASE_URL = f"http://{OLLAMA_HOST}"
 
 
-FAST_GENERAL_MODEL = "qwen3:14b"
-FALLBACK_GENERAL_MODEL = "qwen2.5-coder:latest"
+FAST_GENERAL_MODEL = "qwen3:4b-instruct"
+FALLBACK_GENERAL_MODEL = "qwen3:4b-instruct"
+VISUAL_MEDIA_MODEL = os.environ.get("AI_STUDIO_VISUAL_MEDIA_MODEL", "qwen3:4b-instruct")
 
 # The semantic pass is intentionally small and cheap. A separate planning pass
 # receives its hypothesis plus resolved context and performs the deeper reasoning.
-SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_INTENT_MODEL", "qwen2.5:1.5b")
-FALLBACK_SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_VERIFY_MODEL", "qwen2.5:3b")
-SEMANTIC_ALIGNMENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_ALIGNMENT_MODEL", "qwen3:8b")
+SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_INTENT_MODEL", "qwen3:4b-instruct")
+FALLBACK_SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_VERIFY_MODEL", "qwen3:4b-instruct")
+SEMANTIC_ALIGNMENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_ALIGNMENT_MODEL", "qwen3:4b-instruct")
 
-FAST_CODE_MODEL = "qwen2.5-coder:14b"
-FALLBACK_CODE_MODEL = "qwen2.5-coder:latest"
+FAST_CODE_MODEL = os.environ.get("AI_STUDIO_FAST_CODE_MODEL", "qwen2.5-coder:7b")
+FALLBACK_CODE_MODEL = "qwen2.5-coder:7b"
 CODE_MODEL_PROFILES = {
-    "micro": os.environ.get("AI_STUDIO_MICRO_CODE_MODEL", "qwen2.5-coder:1.5b"),
+    "micro": os.environ.get("AI_STUDIO_MICRO_CODE_MODEL", "qwen2.5-coder:3b"),
     "small": os.environ.get("AI_STUDIO_SMALL_CODE_MODEL", "qwen2.5-coder:3b"),
     "standard": os.environ.get("AI_STUDIO_STANDARD_CODE_MODEL", "qwen2.5-coder:7b"),
-    "quality": os.environ.get("AI_STUDIO_QUALITY_CODE_MODEL", FAST_CODE_MODEL),
-    "deep": os.environ.get("AI_STUDIO_DEEP_CODE_MODEL", "qwen3-coder:30b"),
+    "quality": os.environ.get("AI_STUDIO_QUALITY_CODE_MODEL", "qwen2.5-coder:7b"),
+    "deep": os.environ.get("AI_STUDIO_DEEP_CODE_MODEL", "qwen2.5-coder:7b"),
 }
 
 EMBEDDING_MODEL = "nomic-embed-text:latest"
@@ -47,6 +48,11 @@ AI_MODELS = {
     "general": FAST_GENERAL_MODEL,
     "plan": FAST_GENERAL_MODEL,
     "docs": FAST_GENERAL_MODEL,
+    "visual": VISUAL_MEDIA_MODEL,
+    "visual_media": VISUAL_MEDIA_MODEL,
+    "image": VISUAL_MEDIA_MODEL,
+    "video": VISUAL_MEDIA_MODEL,
+    "camera": VISUAL_MEDIA_MODEL,
     "code": FAST_CODE_MODEL,
     "debug": FAST_CODE_MODEL,
     "dcc": FAST_CODE_MODEL,
@@ -66,6 +72,7 @@ REQUIRED_SEMANTIC_MODELS = [
 REQUIRED_CHAT_MODELS = [
     FAST_GENERAL_MODEL,
     FALLBACK_GENERAL_MODEL,
+    VISUAL_MEDIA_MODEL,
     CODE_MODEL_PROFILES["standard"],
 ]
 
@@ -85,6 +92,98 @@ def normalize_ollama_model_name(model):
     if model.startswith("ollama:"):
         model = model.replace("ollama:", "", 1)
     return model
+
+
+def _parse_ollama_model_size(model_name: str) -> float:
+    name = str(model_name or "").strip().lower()
+    match = re.search(r"(?<!\d)(\d+(?:\.\d+)?)\s*[bB]\b", name)
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return 0.0
+
+
+def _build_local_model_candidates(model_name: str) -> list[str]:
+    requested = normalize_ollama_model_name(model_name).lower()
+    requested_size = _parse_ollama_model_size(requested)
+    size_token = None if requested_size == 0.0 else str(requested_size).rstrip("0").rstrip(".") + "b"
+
+    aliases = {
+        "1.5b": "qwen2.5-coder:3b",
+        "3b": "qwen2.5-coder:3b",
+        "7b": "qwen2.5-coder:7b",
+        "14b": "qwen2.5-coder:7b",
+        "30b": "qwen2.5-coder:7b",
+    }
+    if requested in aliases:
+        return [aliases[requested]]
+
+    if requested in {"qwen2.5-coder:3b", "qwen2.5-coder:3b", "qwen2.5-coder:7b", "qwen2.5-coder:7b", "qwen2.5-coder:30b"}:
+        return [requested]
+
+    families = ["qwen2.5-coder", "qwen2.5", "qwen3-coder", "qwen3", "qwen"]
+    if "qwen2.5" in requested:
+        families = ["qwen2.5", "qwen2.5-coder", "qwen3-coder", "qwen3", "qwen"]
+    elif "qwen3" in requested:
+        families = ["qwen3", "qwen3-coder", "qwen2.5-coder", "qwen2.5", "qwen"]
+
+    candidates = [requested]
+    if size_token:
+        for family in families:
+            candidates.append(f"{family}:{size_token}")
+            candidates.append(f"{family}:{size_token.replace('.', '')}b")
+        candidates.extend([
+            "qwen2.5-coder:7b",
+            "qwen2.5:latest",
+            "qwen3-coder:latest",
+            "qwen3:latest",
+            FALLBACK_CODE_MODEL,
+        ])
+    else:
+        candidates.append(FALLBACK_CODE_MODEL)
+    return list(dict.fromkeys(candidates))
+
+
+def resolve_ollama_model_name(model):
+    """Resolve short/approximate Ollama model names to an installed local candidate."""
+    requested = normalize_ollama_model_name(model)
+    installed = installed_ollama_models()
+    if not requested:
+        return requested
+    if not installed:
+        return requested
+
+    normalized_installed = {name.lower(): name for name in installed}
+    if requested.lower() in normalized_installed:
+        return normalized_installed[requested.lower()]
+
+    for candidate in _build_local_model_candidates(requested):
+        lookup = candidate.lower()
+        if lookup in normalized_installed:
+            return normalized_installed[lookup]
+
+    # Keep size-only style aliases even if not yet installed; they will
+    # trigger a clear install/runtime error instead of silently switching.
+    return requested
+
+
+def estimated_ollama_generation_timeout(model: str) -> int:
+    size = _parse_ollama_model_size(model)
+    if size <= 0.0:
+        return 150
+    if size <= 1.6:
+        return 120
+    if size <= 3.0:
+        return 150
+    if size <= 7.0:
+        return 210
+    if size <= 14.0:
+        return 240
+    if size <= 30.0:
+        return 300
+    return 420
 
 
 def as_mcphost_model(model):
@@ -119,6 +218,8 @@ def model_for_role(role, default=None):
             model_key = "semantic_intent_model"
         elif normalized_role in ("general", "plan", "docs"):
             model_key = "fast_general_model"
+        elif normalized_role in ("visual", "visual_media", "image", "video", "camera"):
+            model_key = "visual_media_model"
         elif normalized_role in ("code", "debug", "dcc", "maya", "unreal", "blender", "substance_painter", "motionbuilder"):
             model_key = "fast_code_model"
         elif normalized_role == "embed":
@@ -239,8 +340,6 @@ def ensure_ollama_server(wait_seconds=8):
 
 
 def installed_ollama_models():
-    ensure_ollama_server()
-
     try:
         result = subprocess.run(
             ["ollama", "list"],
@@ -355,42 +454,118 @@ def unload_ollama_models(models):
 
 
 def warm_required_models_async(keep_alive="10m"):
+    """Warm at most one model in the background.
+
+    Multiple concurrent warm requests caused Ollama to load and evict models on
+    8 GB GPUs. Explicit preloads still win, but only the first configured model
+    is warmed. Otherwise the semantic-alignment model is warmed.
+    """
+
     def run():
+        try:
+            from tech_connector.services.settings_service import load_settings
+
+            settings = load_settings()
+            if not bool(settings.get("ollama_preload_on_startup", False)):
+                return
+        except Exception:
+            settings = {}
+
         ok, msg = ensure_ollama_server()
         if not ok:
             print(f"[Ollama] {msg}", flush=True)
             return
 
         try:
-            from tech_connector.services.settings_service import load_settings
-
-            settings = load_settings()
-            configured_preloads = list(settings.get("ollama_preload_models") or [])
-            warm_alignment = bool(settings.get("warm_semantic_alignment_model", True))
+            configured_preloads = [
+                normalize_ollama_model_name(model)
+                for model in list(settings.get("ollama_preload_models") or [])
+                if str(model or "").strip()
+            ]
+            warm_alignment = bool(
+                settings.get("warm_semantic_alignment_model", True)
+            )
         except Exception:
             configured_preloads = []
             warm_alignment = True
 
-        # Only explicitly resident models are warmed. Installed quality and
-        # escalation models remain cold so they cannot evict the fast planner.
-        models = set()
-        models.update(
-            normalize_ollama_model_name(model)
-            for model in configured_preloads
-            if str(model or "").strip()
+        primary_model = configured_preloads[0] if configured_preloads else ""
+        if not primary_model and warm_alignment:
+            primary_model = normalize_ollama_model_name(semantic_alignment_model())
+
+        if not primary_model:
+            return
+
+        success = warm_ollama_model(primary_model, keep_alive)
+        print(
+            f"[Ollama] Warm {'completed' if success else 'failed'}: {primary_model}",
+            flush=True,
         )
-        if warm_alignment:
-            models.add(normalize_ollama_model_name(semantic_alignment_model()))
-        # Warm independently so a cold quality model does not postpone the fast
-        # planner becoming available during application startup.
-        for model in sorted(models):
-            threading.Thread(
-                target=warm_ollama_model,
-                args=(model, keep_alive),
-                daemon=True,
-            ).start()
 
     threading.Thread(target=run, daemon=True).start()
+
+
+def terminate_orphan_model_runtime_processes(include_ollama_server: bool = False) -> dict:
+    """Stop known local model helper processes after owned sessions are idle."""
+    targets = {"llama-server", "llama_cpp_server", "mcphost"}
+    if include_ollama_server:
+        targets.update({"ollama", "ollama app"})
+    target_keys = {name.casefold() for name in targets}
+    stopped = []
+    errors = []
+    try:
+        if os.name == "nt":
+            rows = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                check=False,
+                creationflags=_creationflags(),
+            )
+            for raw in rows.stdout.splitlines():
+                parts = [part.strip('"') for part in raw.split('","')]
+                if len(parts) < 2:
+                    continue
+                image, pid = parts[0], parts[1]
+                stem = os.path.splitext(image)[0].casefold()
+                if stem not in target_keys:
+                    continue
+                result = subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", pid],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    creationflags=_creationflags(),
+                )
+                if result.returncode == 0:
+                    stopped.append({"pid": pid, "process": image})
+                else:
+                    errors.append({"pid": pid, "process": image, "error": result.stderr.strip()})
+        else:
+            import signal
+
+            rows = subprocess.run(
+                ["ps", "-A", "-o", "pid=,comm="],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            for line in rows.stdout.splitlines():
+                fields = line.strip().split(None, 1)
+                if len(fields) != 2:
+                    continue
+                pid, command = fields
+                stem = os.path.basename(command).casefold()
+                if stem not in target_keys:
+                    continue
+                try:
+                    os.kill(int(pid), signal.SIGTERM)
+                    stopped.append({"pid": pid, "process": command})
+                except Exception as exc:
+                    errors.append({"pid": pid, "process": command, "error": str(exc)})
+    except Exception as exc:
+        errors.append({"error": str(exc)})
+    return {"ok": not errors, "stopped": stopped, "errors": errors}
 
 
 class ModelInstallWorker(QThread):

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.EditorUtilityProgressBar &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.EditorUtilityScrollBar" href="EditorUtilityScrollBar.html" />
+    <link rel="prev" title="unreal.EditorUtilityObject" href="EditorUtilityObject.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="EditorUtilityScrollBar.html" title="unreal.EditorUtilityScrollBar"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="EditorUtilityObject.html" title="unreal.EditorUtilityObject"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityProgressBar</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-editorutilityprogressbar">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityProgressBar</span></code><a class="headerlink" href="#unreal-editorutilityprogressbar" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.EditorUtilityProgressBar">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">EditorUtilityProgressBar</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.EditorUtilityProgressBar" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="ProgressBar.html#unreal.ProgressBar" title="unreal.ProgressBar"><code class="xref py py-class docutils literal notranslate"><span class="pre">ProgressBar</span></code></a></p>
+<p>Editor Utility Progress Bar</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: Blutility</p></li>
+<li><p><strong>File</strong>: EditorUtilityWidgetComponents.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">accessible_behavior</span></code> (SlateAccessibleBehavior):  [Read-Write] Whether or not the widget is accessible, and how to describe it. If set to custom, additional customization options will appear.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">accessible_summary_behavior</span></code> (SlateAccessibleBehavior):  [Read-Write] How to describe this widget when it’s being presented through a summary of a parent widget. If set to custom, additional customization options will appear.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">accessible_summary_text</span></code> (Text):  [Read-Write] When AccessibleSummaryBehavior is set to Custom, this is the text that will be used to describe the widget.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">accessible_text</span></code> (Text):  [Read-Write] When AccessibleBehavior is set to Custom, this is the text that will be used to describe the widget.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bar_fill_style</span></code> (ProgressBarFillStyle):  [Read-Write] Defines the visual style of the progress bar fill - scale or mask</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bar_fill_type</span></code> (ProgressBarFillType):  [Read-Write] Defines the direction in which the progress bar fills</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">border_padding</span></code> (Vector2D):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">can_children_be_accessible</span></code> (bool):  [Read-Write] Whether or not children of this widget can appear as distinct accessible widgets.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clipping</span></code> (WidgetClipping):  [Read-Write] Controls how the clipping behavior of this widget.  Normally content that overflows the
+bounds of the widget continues rendering.  Enabling clipping prevents that overflowing content
+from being seen.</p>
+<p>NOTE: Elements in different clipping spaces can not be batched together, and so there is a
+performance cost to clipping.  Do not enable clipping unless a panel actually needs to prevent
+content from showing up outside its bounds.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cursor</span></code> (MouseCursor):  [Read-Write] The cursor to show when the mouse is over the widget</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fill_color_and_opacity</span></code> (LinearColor):  [Read-Write] Fill Color and Opacity</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flow_direction_preference</span></code> (FlowDirectionPreference):  [Read-Write] Allows you to set a new flow direction</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_enabled</span></code> (bool):  [Read-Write] Sets whether this widget can be modified interactively by the user</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_marquee</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_volatile</span></code> (bool):  [Read-Write] If true prevents the widget or its child’s geometry or layout information from being cached.  If this widget
+changes every frame, but you want it to still be in an invalidation panel you should make it as volatile
+instead of invalidating it every frame, which would prevent the invalidation panel from actually
+ever caching anything.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">navigation</span></code> (WidgetNavigation):  [Read-Write] The navigation object for this widget is optionally created if the user has configured custom
+navigation rules for this widget in the widget designer.  Those rules determine how navigation transitions
+can occur between widgets.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">override_accessible_defaults</span></code> (bool):  [Read-Write] Override all of the default accessibility behavior and text for this widget.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">override_cursor</span></code> (bool):  [Read-Write]</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">percent</span></code> (float):  [Read-Write] Used to determine the fill position of the progress bar ranging 0..1</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_snapping</span></code> (WidgetPixelSnapping):  [Read-Write] If the widget will draw snapped to the nearest pixel.  Improves clarity but might cause visibile stepping in animation</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">render_opacity</span></code> (float):  [Read-Write] The opacity of the widget</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">render_transform</span></code> (WidgetTransform):  [Read-Write] The render transform of the widget allows for arbitrary 2D transforms to be applied to the widget.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">render_transform_pivot</span></code> (Vector2D):  [Read-Write] The render transform pivot controls the location about which transforms are applied.
+This value is a normalized coordinate about which things like rotations will occur.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">slot</span></code> (PanelSlot):  [Read-Write] The parent slot of the UWidget.  Allows us to easily inline edit the layout controlling this widget.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tool_tip_text</span></code> (Text):  [Read-Write] Tooltip text to show when the user hovers over the widget with the mouse</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tool_tip_widget</span></code> (Widget):  [Read-Only] Tooltip widget to show when the user hovers over the widget with the mouse</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">visibility</span></code> (SlateVisibility):  [Read-Write] The visibility of the widget</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">widget_style</span></code> (ProgressBarStyle):  [Read-Write] The progress bar style</p></li>
+</ul>
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityProgressBar</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.EditorUtilityProgressBar"><code class="docutils literal notranslate"><span class="pre">EditorUtilityProgressBar</span></code></a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="EditorUtilityObject.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityObject</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="EditorUtilityScrollBar.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityScrollBar</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="EditorUtilityScrollBar.html" title="unreal.EditorUtilityScrollBar"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="EditorUtilityObject.html" title="unreal.EditorUtilityObject"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.EditorUtilityProgressBar</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a220b2afe91c55d3',t:'MTc4NTIwODMwMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

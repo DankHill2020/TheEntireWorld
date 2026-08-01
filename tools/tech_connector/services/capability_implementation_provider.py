@@ -1,4 +1,4 @@
-"""Grounded model-backed implementation for capability-acquisition jobs."""
+﻿"""Grounded model-backed implementation for capability-acquisition jobs."""
 
 from __future__ import annotations
 
@@ -1409,7 +1409,7 @@ class ModelBackedCapabilityImplementationProvider:
             ]
             directives.append(
                 "- Add or update a focused unittest in this exact evidence-backed test owner: "
-                + (str(test_paths[0]) if test_paths else "examples/tech_connector/tests")
+                + (str(test_paths[0]) if test_paths else "tech_connector/examples/tests")
             )
             directives.append("- The returned changes array is invalid unless it includes that focused test change.")
         if "indexed python symbol was not found" in lowered:
@@ -1711,7 +1711,7 @@ class ModelBackedCapabilityImplementationProvider:
         ]
         if focused_tests:
             commands.append(["python", "-m", "unittest", *focused_tests])
-        copy_paths = ["tech_connector", "unreal_tools", "examples/tech_connector/tests"]
+        copy_paths = ["tech_connector", "unreal_tools", "tech_connector/examples/tests"]
         timeout_seconds = 30
         if cpp_paths:
             run_uat = self._unreal_run_uat()

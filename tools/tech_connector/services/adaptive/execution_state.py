@@ -349,7 +349,7 @@ class AdaptiveExecutionState:
         goal_id = str(goal.get("goal_id") or self.current_goal_id or "")
         if not goal_id:
             raise ValueError("Cannot commit a goal result without a goal id")
-        from tech_connector.services.reasoning.answer_sufficiency_service import validate_answer_sufficiency
+        from reasoning_runtime.reasoning.answer_sufficiency_service import validate_answer_sufficiency
 
         adequacy = validate_answer_sufficiency(self, result, goal=goal)
         externally_valid = True if validated is None else bool(validated)

@@ -39,9 +39,9 @@ class ModelTiers:
     `active` is whatever model the user currently has selected in the UI.
     """
     embed: str      = "nomic-embed-text"
-    local_code: str = "qwen2.5-coder:1.5b"
-    local_plan: str = "llama3:latest"
-    local_deep: str = "qwen3:14b"
+    local_code: str = "qwen2.5-coder:3b"
+    local_plan: str = "qwen3:4b-instruct"
+    local_deep: str = "qwen3:4b-instruct"
     active: str     = ""             # set at runtime to the UI-selected model
 
     def __post_init__(self):

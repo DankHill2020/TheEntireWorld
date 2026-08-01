@@ -684,6 +684,33 @@ print(json.dumps(result))
         normalized["fallback_from"] = failures
         return normalized
 
+    def get_scene_snapshot_code(self, *, selected_only: bool = False, limit: int = 500, **_kwargs) -> str:
+        from tech_connector.services.dcc.scene_snapshot_provider import unreal_scene_snapshot_code
+
+        return unreal_scene_snapshot_code(selected_only=selected_only, limit=limit)
+
+    def get_scene_snapshot(
+        self,
+        *,
+        selected_only: bool = False,
+        limit: int = 500,
+        timeout: float = 30.0,
+        **_kwargs,
+    ) -> tuple:
+        from tech_connector.services.dcc.scene_snapshot_provider import parse_scene_snapshot_output
+
+        response = self.execute_python(
+            self.get_scene_snapshot_code(selected_only=selected_only, limit=limit),
+            timeout=timeout,
+            reset_globals=True,
+        )
+        if not response.get("ok"):
+            return False, response.get("error") or response.get("raw") or str(response)
+        raw = response.get("stdout") or response.get("output") or response.get("result") or response.get("raw") or ""
+        if isinstance(raw, dict):
+            raw = raw.get("stdout") or raw.get("output") or raw.get("result") or json.dumps(raw)
+        return parse_scene_snapshot_output(str(raw).strip(), "unreal")
+
     def execute_context_call(
         self,
         call_name: str,

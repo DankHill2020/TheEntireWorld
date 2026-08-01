@@ -113,9 +113,9 @@ def create_default_project_ai(project_root: str) -> Path:
         "asset_index.json": json.dumps({"_note": "Auto-populated by the Unreal scanner."}, indent=2),
         "model_routing.json": json.dumps({
             "embed":       "nomic-embed-text",
-            "local_code":  "qwen2.5-coder:1.5b",
-            "local_plan":  "llama3:latest",
-            "local_deep":  "qwen3:30b",
+            "local_code":  "qwen2.5-coder:3b",
+            "local_plan":  "qwen3:4b-instruct",
+            "local_deep":  "qwen3:4b-instruct",
             "active":      "auto",
         }, indent=2),
         "safety_rules.json": json.dumps({

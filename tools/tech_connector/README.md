@@ -37,6 +37,7 @@ Architecture notes:
 - `docs/DIRECT_DCC_BRIDGE.md` covers direct Maya, Unreal, Blender, Substance Painter, Unity, and MotionBuilder calls.
 - `docs/LIVE_SOURCE_INGESTION.md` covers local-only versus live web/GitHub sourcing.
 - `docs/HEADLESS_API.md` covers licensed API/function access without starting the UI.
+- `docs/REASONING_RUNTIME_API.md` explains reasoning requests, contextual threads, progress events, runtime tools, modular features, and extensions with runnable examples.
 - `docs/MODEL_PROVIDERS.md` covers OpenAI/Google/Anthropic/local model routing.
 - `docs/UNREAL_SMART_OPERATIONS.md` covers project-aware Unreal scans, navigation, capability validation, and safe prototype operations.
 - `docs/ROUTING_ENTRYPOINT_AUDIT.md` and `docs/ENTERPRISE_INTERACTION_BYPASS_AUDIT.md` cover deterministic routing and remaining migration targets.

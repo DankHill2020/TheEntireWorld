@@ -9,7 +9,7 @@ Pipeline:
   4. AcquisitionEngine       — discover + rank strategies for missing capabilities
 
 Fast path (< 5ms): keyword heuristics for simple/known prompts.
-Fallback path: local Ollama model (qwen2.5-coder:14b) for complex decomposition.
+Fallback path: local Ollama model (qwen2.5-coder:7b) for complex decomposition.
 
 This module runs as a pre-dispatch gate in main_window_chat_runtime.py.
 If no gaps are detected it returns immediately with zero UI impact.
@@ -157,7 +157,7 @@ def decompose_tasks_keywords(prompt: str) -> list:
 
 
 def decompose_tasks_llm(prompt: str) -> list:
-    """Fallback: use qwen2.5-coder:14b via Ollama to decompose complex prompts."""
+    """Fallback: use qwen2.5-coder:7b via Ollama to decompose complex prompts."""
     try:
         import urllib.request
         import json

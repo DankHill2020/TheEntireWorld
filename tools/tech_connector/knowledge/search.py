@@ -43,7 +43,7 @@ def resolve_installed_ollama_model(
 
     requested = (model or "").replace("ollama:", "", 1).strip()
     if not installed:
-        return requested or "qwen2.5-coder:1.5b"
+        return requested or "qwen2.5-coder:3b"
 
     installed_names = [m.lower() for m in installed]
     req_lower = requested.lower()
@@ -1016,7 +1016,7 @@ def local_answer_about_file(path: str, question: str, text: str = None, query_ll
             patch = None
             
             if use_llm:
-                model = settings.get("model") or "qwen2.5-coder:14b"
+                model = settings.get("model") or "qwen2.5-coder:7b"
 
                 if not edit_mode:
                     system_prompt = (
@@ -1241,15 +1241,15 @@ def find_in_project(roots: list[str], query: str, max_results: int = 250) -> lis
 # Project-wide indexed search primitives
 # ---------------------------------------------------------------------------
 
-def _index_db_path():
+def _index_db_path(project_root: str | None = None):
     from tech_connector.models.constants import project_index_db_path
-    return project_index_db_path()
+    return project_index_db_path(project_root)
 
 
 @contextmanager
-def _connect_index():
+def _connect_index(project_root: str | None = None):
     import sqlite3
-    db = _index_db_path()
+    db = _index_db_path(project_root)
     if not db.exists():
         raise FileNotFoundError(f"Knowledge index not found: {db}")
     uri = db.resolve().as_uri() + "?mode=ro&immutable=1"
@@ -1609,11 +1609,18 @@ def _where_like(columns: list[str], terms: list[str]) -> tuple[str, list[str]]:
     return " OR ".join(parts), params
 
 
-def search_index_symbols(terms: list[str], *, limit: int = 80, active_path: str | None = None, class_bias: bool = False, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+_TRANSIENT_INDEX_PATH_SQL = """
+ AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_stress/') = 0
+ AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_tmp/') = 0
+ AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), 'workflow_checkpoints/') = 0
+"""
+
+
+def search_index_symbols(terms: list[str], *, limit: int = 80, active_path: str | None = None, class_bias: bool = False, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search symbol rows by name, signature, docstring, source, searchable text, and path."""
     if not terms:
         return []
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         where, params = _where_like(
             ["s.name", "s.qualname", "s.parent_qualname", "s.signature", "s.docstring", "s.searchable_text", "s.source", "f.path"],
@@ -1622,11 +1629,12 @@ def search_index_symbols(terms: list[str], *, limit: int = 80, active_path: str 
         query = """
             SELECT
                 s.name, s.qualname, s.parent_qualname, s.parent_kind, s.kind, s.signature, s.docstring,
-                s.start_line, s.end_line, s.source, f.path, f.source_scope
+                s.start_line, s.end_line, s.source, s.decorators_json, f.path, f.source_scope
             FROM symbols s
             JOIN files f ON f.id = s.file_id
             WHERE
         """ + where
+        query += _TRANSIENT_INDEX_PATH_SQL
         scope_sql, scope_params = _scope_sql_filter(scope)
         query += scope_sql
         params.extend(scope_params)
@@ -1635,16 +1643,64 @@ def search_index_symbols(terms: list[str], *, limit: int = 80, active_path: str 
             order.append("CASE WHEN s.kind = 'class' THEN 0 WHEN s.kind = 'method' THEN 1 ELSE 2 END")
         order.extend(["f.path", "s.start_line"])
         query += " ORDER BY " + ", ".join(order) + " LIMIT ?"
-        params.append(max(int(limit) * 100, 3000))
+        params.append(max(int(limit) * 20, 400))
         rows = _as_dict_rows(cur.execute(query, params).fetchall())
         return _rank_scoped_rows(rows, active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_chunks(terms: list[str], *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+def search_index_owner_members(
+    owner_qualname: str,
+    *,
+    owner_path: str | None = None,
+    limit: int = 80,
+    active_path: str | None = None,
+    scope: str = SOURCE_PROJECT,
+    project_roots: list[str] | None = None,
+    project_root: str | None = None,
+) -> list[dict]:
+    """Return exact indexed declarations owned by a class or other symbol."""
+
+    owner = str(owner_qualname or "").strip()
+    if not owner:
+        return []
+    with _connect_index(project_root) as conn:
+        cur = conn.cursor()
+        params: list[object] = [owner, f"{owner}.%"]
+        query = """
+            SELECT
+                s.name, s.qualname, s.parent_qualname, s.parent_kind, s.kind,
+                s.signature, s.docstring, s.start_line, s.end_line, s.source,
+                s.decorators_json,
+                s.decorators_json,
+                f.path, f.source_scope
+            FROM symbols s
+            JOIN files f ON f.id = s.file_id
+            WHERE (s.parent_qualname = ? OR s.qualname LIKE ?)
+        """
+        if owner_path:
+            query += " AND LOWER(REPLACE(f.path, CHAR(92), '/')) = ?"
+            params.append(str(owner_path).replace("\\", "/").casefold())
+        query += _TRANSIENT_INDEX_PATH_SQL
+        scope_sql, scope_params = _scope_sql_filter(scope)
+        query += scope_sql
+        params.extend(scope_params)
+        query += " ORDER BY f.path, s.start_line LIMIT ?"
+        params.append(max(int(limit) * 20, 400))
+        rows = _as_dict_rows(cur.execute(query, params).fetchall())
+        return _rank_scoped_rows(
+            rows,
+            active_path=active_path,
+            project_roots=project_roots,
+            scope=scope,
+            limit=limit,
+        )
+
+
+def search_index_chunks(terms: list[str], *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search chunk rows by raw text/path. This catches uses inside methods."""
     if not terms:
         return []
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         where, params = _where_like(["c.text", "f.path"], terms)
         query = """
@@ -1653,20 +1709,21 @@ def search_index_chunks(terms: list[str], *, limit: int = 80, active_path: str |
             JOIN files f ON f.id = c.file_id
             WHERE
         """ + where
+        query += _TRANSIENT_INDEX_PATH_SQL
         scope_sql, scope_params = _scope_sql_filter(scope)
         query += scope_sql
         params.extend(scope_params)
         query += " ORDER BY f.path, c.chunk_index LIMIT ?"
-        params.append(max(int(limit) * 100, 3000))
+        params.append(max(int(limit) * 20, 400))
         rows = _as_dict_rows(cur.execute(query, params).fetchall())
         return _rank_scoped_rows(rows, active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_imports(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+def search_index_imports(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search indexed import rows for an import name."""
     if not term:
         return []
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         rows = cur.execute(
             """
@@ -1674,7 +1731,10 @@ def search_index_imports(term: str, *, limit: int = 80, active_path: str | None 
                    f.path, f.source_scope
             FROM imports i
             JOIN files f ON f.id = i.file_id
-            WHERE i.import_name LIKE ? OR i.module LIKE ? OR i.name LIKE ? OR i.alias LIKE ? OR f.path LIKE ?
+            WHERE (i.import_name LIKE ? OR i.module LIKE ? OR i.name LIKE ? OR i.alias LIKE ? OR f.path LIKE ?)
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_stress/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_tmp/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), 'workflow_checkpoints/') = 0
             ORDER BY f.path, i.lineno, i.col_offset, i.import_name
             LIMIT ?
             """,
@@ -1683,11 +1743,11 @@ def search_index_imports(term: str, *, limit: int = 80, active_path: str | None 
         return _rank_scoped_rows(_as_dict_rows(rows), active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_calls(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+def search_index_calls(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search indexed call rows for a call name."""
     if not term:
         return []
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         rows = cur.execute(
             """
@@ -1696,7 +1756,10 @@ def search_index_calls(term: str, *, limit: int = 80, active_path: str | None = 
             FROM symbol_calls sc
             JOIN symbols s ON s.id = sc.symbol_id
             JOIN files f ON f.id = s.file_id
-            WHERE sc.call_name LIKE ? OR s.source LIKE ? OR s.searchable_text LIKE ?
+            WHERE (sc.call_name LIKE ? OR s.source LIKE ? OR s.searchable_text LIKE ?)
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_stress/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_tmp/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), 'workflow_checkpoints/') = 0
             ORDER BY f.path, s.start_line
             LIMIT ?
             """,
@@ -1705,7 +1768,7 @@ def search_index_calls(term: str, *, limit: int = 80, active_path: str | None = 
         return _rank_scoped_rows(_as_dict_rows(rows), active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_call_names(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+def search_index_call_names(term: str, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search indexed call rows by call name only.
 
     This is the fast path for prompts like "classes that open QFileDialog"; it
@@ -1714,7 +1777,7 @@ def search_index_call_names(term: str, *, limit: int = 80, active_path: str | No
     """
     if not term:
         return []
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         rows = cur.execute(
             """
@@ -1724,6 +1787,9 @@ def search_index_call_names(term: str, *, limit: int = 80, active_path: str | No
             JOIN symbols s ON s.id = sc.symbol_id
             JOIN files f ON f.id = s.file_id
             WHERE sc.call_name LIKE ?
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_stress/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), '.codex_tmp/') = 0
+              AND INSTR(LOWER(REPLACE(f.path, CHAR(92), '/')), 'workflow_checkpoints/') = 0
             ORDER BY f.path, s.start_line
             LIMIT ?
             """,
@@ -1732,21 +1798,23 @@ def search_index_call_names(term: str, *, limit: int = 80, active_path: str | No
         return _rank_scoped_rows(_as_dict_rows(rows), active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_classes(base_class: str | None = None, terms: list[str] | None = None, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> list[dict]:
+def search_index_classes(base_class: str | None = None, terms: list[str] | None = None, *, limit: int = 80, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> list[dict]:
     """Search indexed class symbols, optionally by base class or additional terms."""
     query_terms = list(terms or [])
     if base_class:
         query_terms.append(base_class)
-    with _connect_index() as conn:
+    with _connect_index(project_root) as conn:
         cur = conn.cursor()
         params: list[str] = []
         query = """
             SELECT s.name, s.qualname, s.parent_qualname, s.parent_kind, s.kind, s.signature, s.docstring,
-                   s.start_line, s.end_line, s.source, f.path, f.source_scope
+                s.start_line, s.end_line, s.source, s.decorators_json,
+                f.path, f.source_scope
             FROM symbols s
             JOIN files f ON f.id = s.file_id
             WHERE s.kind = 'class'
         """
+        query += _TRANSIENT_INDEX_PATH_SQL
         if query_terms:
             where, params = _where_like(["s.name", "s.qualname", "s.parent_qualname", "s.signature", "s.docstring", "s.searchable_text", "s.source", "f.path"], query_terms)
             query += " AND (" + where + ")"
@@ -1765,27 +1833,27 @@ def search_index_classes(base_class: str | None = None, terms: list[str] | None 
         return _rank_scoped_rows(rows, active_path=active_path, project_roots=project_roots, scope=scope, limit=limit)
 
 
-def search_index_usages(query_or_symbol: str, *, limit: int = 100, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None) -> dict:
+def search_index_usages(query_or_symbol: str, *, limit: int = 100, active_path: str | None = None, scope: str = SOURCE_PROJECT, project_roots: list[str] | None = None, project_root: str | None = None) -> dict:
     """Project-wide usage search with exact, import, call, chunk, and related fallback results."""
     exact_terms = extract_code_search_terms(query_or_symbol)
     related_terms = related_code_search_terms(query_or_symbol, exact_terms)
     lower = (query_or_symbol or "").lower()
     class_bias = bool(re.search(r"\b(class|classes|widget|widgets|dialog|dialogs)\b", lower))
 
-    exact_symbols = search_index_symbols(exact_terms, limit=limit, active_path=active_path, class_bias=class_bias, scope=scope, project_roots=project_roots)
-    exact_chunks = search_index_chunks(exact_terms, limit=min(40, limit), active_path=active_path, scope=scope, project_roots=project_roots)
+    exact_symbols = search_index_symbols(exact_terms, limit=limit, active_path=active_path, class_bias=class_bias, scope=scope, project_roots=project_roots, project_root=project_root)
+    exact_chunks = search_index_chunks(exact_terms, limit=min(40, limit), active_path=active_path, scope=scope, project_roots=project_roots, project_root=project_root)
     exact_imports = []
     exact_calls = []
     for term in exact_terms[:8]:
-        exact_imports.extend(search_index_imports(term, limit=20, active_path=active_path, scope=scope, project_roots=project_roots))
-        exact_calls.extend(search_index_calls(term, limit=20, active_path=active_path, scope=scope, project_roots=project_roots))
+        exact_imports.extend(search_index_imports(term, limit=20, active_path=active_path, scope=scope, project_roots=project_roots, project_root=project_root))
+        exact_calls.extend(search_index_calls(term, limit=20, active_path=active_path, scope=scope, project_roots=project_roots, project_root=project_root))
 
     related_symbols = []
     related_chunks = []
     if related_terms:
-        related_symbols = search_index_symbols(related_terms, limit=40, active_path=active_path, class_bias=class_bias, scope=scope, project_roots=project_roots)
+        related_symbols = search_index_symbols(related_terms, limit=40, active_path=active_path, class_bias=class_bias, scope=scope, project_roots=project_roots, project_root=project_root)
         if not exact_symbols and not exact_chunks:
-            related_chunks = search_index_chunks(related_terms, limit=30, active_path=active_path, scope=scope, project_roots=project_roots)
+            related_chunks = search_index_chunks(related_terms, limit=30, active_path=active_path, scope=scope, project_roots=project_roots, project_root=project_root)
 
     def dedupe(items, key_fields):
         seen = set()

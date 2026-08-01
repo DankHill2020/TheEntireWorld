@@ -132,7 +132,7 @@ def _select_behavior_reasoning_model(
     preferred = str(settings.get("behavior_reasoning_model") or "").replace("ollama:", "", 1).strip()
     if preferred and preferred in installed:
         return preferred
-    requested = str(settings.get("router_local_plan") or settings.get("router_fast_llm_model") or settings.get("general_model") or "qwen3:8b")
+    requested = str(settings.get("router_local_plan") or settings.get("router_fast_llm_model") or settings.get("general_model") or "qwen3:4b-instruct")
     # Multi-behavior gameplay contracts need the planning model. A small fast
     # model is appropriate for one compact mechanic, but it routinely drops
     # guards, sibling behaviors, and failure clauses from compound requests.

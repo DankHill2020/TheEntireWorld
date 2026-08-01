@@ -9,16 +9,14 @@ import threading
 import time
 from typing import Any
 
-from tech_connector.models.constants import APP_DIR
+from tech_connector.models.constants import temp_output_path
 
 
 class BehaviorStageTrace:
     def __init__(self, prompt: str, path: str | Path | None = None):
-        trace_dir = APP_DIR / "traces"
-        trace_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S")
         digest = hashlib.sha256(str(prompt or "").encode("utf-8")).hexdigest()[:10]
-        self.path = Path(path) if path else trace_dir / f"behavior_{stamp}_{digest}.jsonl"
+        self.path = Path(path) if path else temp_output_path(f"behavior_{stamp}_{digest}.jsonl", subdir="traces")
         self._lock = threading.Lock()
         self._last_stream_size = 0
         self.emit("trace_started", prompt=prompt, prompt_sha256=digest)

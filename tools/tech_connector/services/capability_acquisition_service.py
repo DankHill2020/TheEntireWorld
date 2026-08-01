@@ -527,6 +527,80 @@ class AcquisitionEngine:
         progress_cb("Indexing symbols...")
         actual_dir = Path(result.get("path") or target_dir)
         symbols = list_ingested_tools(actual_dir)
+        attribution = dict(result.get("attribution") or {})
+        if not attribution.get("license_verified"):
+            return AcquisitionResult(
+                strategy_id=strategy.id,
+                success=False,
+                message=(
+                    "Repository downloaded and credited, but its license is not "
+                    "verified. Review "
+                    f"{attribution.get('manifest_path') or actual_dir} before "
+                    "promoting any callable into planning evidence."
+                ),
+                registered_capability_ids=[],
+                local_path=str(actual_dir),
+            )
+
+        from tech_connector.services.external_tool_service import (
+            verify_external_tool_for_pipeline,
+        )
+        verification = verify_external_tool_for_pipeline(
+            actual_dir,
+            " ".join(strategy.capabilities_provided),
+            symbols=symbols,
+            repo_info={
+                "full_name": ref.full_name,
+                "html_url": ref.clean_url,
+                "license": {"name": attribution.get("license")},
+            },
+            limit=8,
+        )
+        verified_candidates = list(verification.get("candidates") or [])
+        if not verified_candidates:
+            return AcquisitionResult(
+                strategy_id=strategy.id,
+                success=False,
+                message=(
+                    "Repository downloaded and credited, but no AST-verified "
+                    "callable matches the missing capability. Select another "
+                    "reviewed candidate."
+                ),
+                registered_capability_ids=[],
+                local_path=str(actual_dir),
+            )
+
+        progress_cb("Refreshing canonical symbol and capability indexes...")
+        try:
+            from tech_connector.knowledge.build_knowledge_index_v2 import (
+                close_index_db,
+                connect_index_db,
+                index_file,
+            )
+            connection = connect_index_db()
+            try:
+                for source_file in actual_dir.rglob("*.py"):
+                    index_file(
+                        connection,
+                        actual_dir,
+                        source_file,
+                        symbols_only=False,
+                    )
+                connection.commit()
+            finally:
+                close_index_db(connection)
+        except Exception as exc:
+            return AcquisitionResult(
+                strategy_id=strategy.id,
+                success=False,
+                message=(
+                    "Repository and callable were verified, but canonical "
+                    f"reindexing failed: {type(exc).__name__}: {exc}"
+                ),
+                registered_capability_ids=[],
+                local_path=str(actual_dir),
+            )
+
         entries = self._registry.register_ingested_tool(
             repo_name=ref.repo,
             repo_url=ref.clean_url,
@@ -538,10 +612,19 @@ class AcquisitionEngine:
 
         registered_ids = [e.id for e in entries]
         progress_cb(f"Registered {len(registered_ids)} capabilities from {ref.repo}.")
+        verified_names = ", ".join(
+            str(item.get("entry_point") or item.get("name") or "")
+            for item in verified_candidates[:5]
+        )
         return AcquisitionResult(
             strategy_id=strategy.id,
             success=True,
-            message=f"Ingested {ref.full_name}: {len(registered_ids)} capabilities registered.",
+            message=(
+                f"Ingested and credited {ref.full_name}: "
+                f"{len(registered_ids)} capabilities registered. "
+                f"Verified callable candidates: {verified_names}. "
+                f"Attribution: {attribution.get('manifest_path') or actual_dir}"
+            ),
             registered_capability_ids=registered_ids,
             local_path=str(actual_dir),
         )

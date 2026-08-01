@@ -4,9 +4,9 @@ import os
 import sys
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 import json
 import re
@@ -565,19 +565,80 @@ class MainWindowHistoryAssetsMixin:
             )
         )
 
+    def _thread_history_title(self, session=None):
+        """Derive a readable title from the latest substantive user request."""
+        candidates = []
+        for message in list(session or self.current_session or []):
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "").lower()
+            if "user" not in role:
+                continue
+            content = self._history_content_to_text(message.get("content", ""))
+            content = re.sub(r"\s+", " ", content).strip()
+            if len(content) >= 12:
+                candidates.append(content)
+
+        title = candidates[-1] if candidates else "New Conversation"
+        title = re.sub(
+            r"^(?:please\s+|can\s+we\s+|could\s+we\s+|let(?:'s|s)\s+|"
+            r"i\s+(?:also\s+)?think\s+|i(?:'d|\s+would)\s+like\s+(?:to\s+)?|"
+            r"we\s+(?:also\s+)?need\s+to\s+)",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        ).strip(" .,:;-")
+        title = re.split(r"(?:\.\.\.|[.!?]\s)", title, maxsplit=1)[0].strip()
+        if len(title) > 72:
+            title = title[:72].rsplit(" ", 1)[0].rstrip(" .,:;-")
+        return title[:1].upper() + title[1:] if title else "New Conversation"
+
+    def _thread_history_filename(self, session=None):
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        title = self._thread_history_title(session)
+        slug = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
+        if len(slug) > 64:
+            slug = slug[:64].rsplit("_", 1)[0]
+        return f"chat_{timestamp}_{slug or 'conversation'}.json"
+
+    def _history_display_name(self, path):
+        match = re.match(
+            r"^chat_(\d{8})_(\d{6})(?:_(.+))?$",
+            path.stem,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return path.stem.replace("_", " ").strip().title()
+        date_text, time_text, slug = match.groups()
+        if slug:
+            return slug.replace("_", " ").strip().title()
+        try:
+            parsed = time.strptime(date_text + time_text, "%Y%m%d%H%M%S")
+            return time.strftime("Conversation - %b %d, %Y %I:%M %p", parsed)
+        except ValueError:
+            return path.stem
+
+    def _history_item_filename(self, item):
+        if item is None:
+            return ""
+        return str(item.data(Qt.UserRole) or item.text() or "")
+
     def refresh_history(self):
         self.history.clear()
         for idx, p in enumerate(sorted(HISTORY_DIR.glob("*.json"), reverse=True)):
             if idx >= 200:
                 self.history.addItem("... older history omitted at startup ...")
                 break
-            self.history.addItem(p.name)
+            item = QListWidgetItem(self._history_display_name(p))
+            item.setData(Qt.UserRole, p.name)
+            item.setToolTip(p.name)
+            self.history.addItem(item)
 
     def save_history(self):
-        p = HISTORY_DIR / f"chat_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        p = HISTORY_DIR / self._thread_history_filename(self.current_session)
         p.write_text(json.dumps(self.current_session, indent=2), encoding="utf-8")
         self.refresh_history()
-        self.append(f"\n[Saved chat: {p}]\n")
+        self.append(f"\n[Saved chat: {self._thread_history_title(self.current_session)}]\n")
 
     def _history_content_to_text(self, content):
         if isinstance(content, str):
@@ -652,7 +713,7 @@ class MainWindowHistoryAssetsMixin:
             self.set_live_process("New chat ready")
 
     def load_history_item(self, item):
-        p = HISTORY_DIR / item.text()
+        p = HISTORY_DIR / self._history_item_filename(item)
         try:
             self.current_session = json.loads(p.read_text(encoding="utf-8"))
             self.service.current_session = self.current_session
@@ -670,6 +731,8 @@ class MainWindowHistoryAssetsMixin:
         self.code_list.clear()
 
         self.chat_history_raw = self._history_session_to_transcript(self.current_session)
+        if hasattr(self, "_trim_visible_chat_history"):
+            self._trim_visible_chat_history()
         if hasattr(self, "extract_code_blocks"):
             self.extract_code_blocks(self.chat_history_raw)
         if hasattr(self, "render_chat_history"):
@@ -694,7 +757,7 @@ class MainWindowHistoryAssetsMixin:
         if action == load_act and item:
             self.load_history_item(item)
         elif action == delete_act and item:
-            filename = item.text()
+            filename = self._history_item_filename(item)
             p = HISTORY_DIR / filename
             try:
                 if p.exists():
@@ -823,6 +886,54 @@ class MainWindowHistoryAssetsMixin:
         seen_models.add(model)
         self.model_box.addItem(f"{label} - {model}", model)
 
+    def refresh_model_options_for_provider(
+        self,
+        provider_id=None,
+        *,
+        selected_model=None,
+    ):
+        """Rebuild the model dropdown with only one provider category."""
+        from tech_connector.services.model_provider_service import (
+            models_for_provider,
+            provider_for_model,
+        )
+
+        provider_box = getattr(self, "model_provider_box", None)
+        provider_id = str(
+            provider_id
+            or (provider_box.currentData() if provider_box is not None else "")
+            or "ollama"
+        )
+        selected_model = str(
+            selected_model or self.settings.get("model") or ""
+        ).strip()
+        if selected_model and provider_for_model(selected_model) != provider_id:
+            selected_model = ""
+
+        self.model_box.blockSignals(True)
+        self.model_box.clear()
+        self._seen_models = set()
+        if provider_id == "ollama":
+            for label, model in getattr(self, "_local_model_options", []):
+                self.add_model_option(label, model, self._seen_models)
+            for model in getattr(self, "_installed_ollama_models", []):
+                self.add_model_option("Installed", model, self._seen_models)
+        else:
+            provider = PROVIDERS[provider_id]
+            for model in models_for_provider(provider_id):
+                self.add_model_option(provider.display_name, model, self._seen_models)
+
+        index = self.model_box.findData(selected_model)
+        self.model_box.setCurrentIndex(index if index >= 0 else 0)
+        self.model_box.blockSignals(False)
+
+    def on_model_provider_changed(self):
+        """Filter models and persist the newly selected provider category."""
+        provider_id = self.model_provider_box.currentData() or "ollama"
+        self.settings["model_provider_category"] = provider_id
+        self.refresh_model_options_for_provider(provider_id)
+        self.on_model_changed()
+
     def selected_mcphost_model(self):
         model = self.model_box.currentData()
         if isinstance(model, str) and model.strip():
@@ -852,20 +963,24 @@ class MainWindowHistoryAssetsMixin:
             dialog = CredentialsPromptDialog(self, model, provider_id)
             if dialog.exec():
                 key = dialog.api_key
-                self.settings[f"{provider_id}_api_key"] = key
-                if provider_id in {"google", "gemini"}:
+                if key:
+                    self.settings[f"{provider_id}_api_key"] = key
+                if key and provider_id in {"google", "gemini"}:
                     self.settings["gemini_api_key"] = key
                     self.settings["google_api_key"] = key
                     os.environ["GOOGLE_API_KEY"] = key
                     os.environ["GEMINI_API_KEY"] = key
-                elif provider_id == "openai":
+                elif key and provider_id == "openai":
                     os.environ["OPENAI_API_KEY"] = key
-                elif provider_id == "anthropic":
+                elif key and provider_id == "anthropic":
                     os.environ["ANTHROPIC_API_KEY"] = key
+                elif key and provider_id == "x":
+                    self.settings["xai_api_key"] = key
+                    os.environ["XAI_API_KEY"] = key
 
                 self.service.save_settings(self.settings)
                 self.append(
-                    f"\n[Settings] Saved API Key for {provider_id.upper()} and activated model {model}.\n"
+                    f"\n[Settings] Connected {provider_id.upper()} and activated model {model}.\n"
                 )
             else:
                 self.model_box.blockSignals(True)
@@ -1101,18 +1216,55 @@ class MainWindowHistoryAssetsMixin:
         source_row.addWidget(source_box, 1)
         layout.addLayout(source_row)
 
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(QLabel("Provider:"))
+        provider_box = QComboBox()
+        from tech_connector.services.model_provider_service import (
+            PROVIDER_ORDER,
+            models_for_provider,
+            provider_for_model,
+        )
+        for provider_id in PROVIDER_ORDER:
+            provider_box.addItem(PROVIDERS[provider_id].display_name, provider_id)
+        provider_row.addWidget(provider_box, 1)
+        layout.addLayout(provider_row)
+
         model_row = QHBoxLayout()
         model_row.addWidget(QLabel("Model:"))
         model_box = QComboBox()
-        model_box.setEditable(True)
-        for i in range(self.model_box.count()):
-            model_box.addItem(self.model_box.itemText(i), self.model_box.itemData(i))
+        model_box.setEditable(False)
         selected = self.selected_mcphost_model()
-        idx = model_box.findData(selected)
-        if idx >= 0:
-            model_box.setCurrentIndex(idx)
-        else:
-            model_box.setEditText(selected)
+
+        provider_index = provider_box.findData(provider_for_model(selected))
+        if provider_index >= 0:
+            provider_box.setCurrentIndex(provider_index)
+
+        def populate_settings_models():
+            provider_id = provider_box.currentData() or "ollama"
+            model_box.clear()
+            seen = set()
+            if provider_id == "ollama":
+                choices = list(getattr(self, "_local_model_options", []))
+                choices.extend(
+                    ("Installed", model)
+                    for model in getattr(self, "_installed_ollama_models", [])
+                )
+            else:
+                choices = [
+                    (PROVIDERS[provider_id].display_name, model)
+                    for model in models_for_provider(provider_id)
+                ]
+            for label, model in choices:
+                if model and model not in seen:
+                    seen.add(model)
+                    model_box.addItem(f"{label} - {model}", model)
+            index = model_box.findData(selected)
+            model_box.setCurrentIndex(index if index >= 0 else 0)
+
+        populate_settings_models()
+        provider_box.currentIndexChanged.connect(
+            lambda _index: populate_settings_models()
+        )
         model_row.addWidget(model_box, 1)
         layout.addLayout(model_row)
 
@@ -1465,9 +1617,41 @@ class MainWindowHistoryAssetsMixin:
         vcs_row.addWidget(vcs_login_btn)
         layout.addLayout(vcs_row)
 
+        account_row = QHBoxLayout()
+        account_row.addWidget(QLabel("Account login:"))
+        for provider_id in ("openai", "x", "google", "anthropic"):
+            provider = PROVIDERS[provider_id]
+            button = QPushButton(provider.display_name)
+            button.setToolTip(
+                f"Launch {provider.display_name}'s official account login."
+            )
+
+            def launch_login(_checked=False, selected_provider=provider_id):
+                from tech_connector.services.authenticated_provider_service import (
+                    begin_provider_login,
+                )
+
+                try:
+                    begin_provider_login(selected_provider)
+                    self.append(
+                        f"\n[Model Provider] Opened official {selected_provider} login. "
+                        "Complete login, then select the provider model again.\n"
+                    )
+                except (OSError, ValueError) as exc:
+                    QMessageBox.warning(dialog, "Provider Login", str(exc))
+
+            button.clicked.connect(launch_login)
+            account_row.addWidget(button)
+        account_row.addStretch(1)
+        layout.addLayout(account_row)
+
+        advanced_key_toggle = QCheckBox("Advanced: show direct API-key fallbacks")
+        advanced_key_toggle.setChecked(False)
+        layout.addWidget(advanced_key_toggle)
+
         # Gemini Row
         gemini_row = QHBoxLayout()
-        gemini_lbl = QLabel("Gemini API Key:")
+        gemini_lbl = QLabel("Google API Key:")
         gemini_lbl.setMinimumWidth(100)
         gemini_row.addWidget(gemini_lbl)
 
@@ -1533,6 +1717,41 @@ class MainWindowHistoryAssetsMixin:
         anthropic_row.addWidget(anthropic_key_edit, 1)
         layout.addLayout(anthropic_row)
 
+        # X Row
+        xai_row = QHBoxLayout()
+        xai_lbl = QLabel("X API Key:")
+        xai_lbl.setMinimumWidth(100)
+        xai_row.addWidget(xai_lbl)
+        xai_key_edit = QLineEdit()
+        xai_key_edit.setEchoMode(QLineEdit.Password)
+        xai_key_edit.setStyleSheet(
+            "QLineEdit { background: #0b0f14; border: 1px solid #1e9bff; color: #d7dde5; padding: 4px; }"
+        )
+        xai_key_edit.setText(self.settings.get("xai_api_key", ""))
+        xai_row.addWidget(xai_key_edit, 1)
+        layout.addLayout(xai_row)
+
+        advanced_key_widgets = (
+            gemini_lbl,
+            gemini_key_edit,
+            google_signin_btn,
+            google_status,
+            openai_lbl,
+            openai_key_edit,
+            anthropic_lbl,
+            anthropic_key_edit,
+            xai_lbl,
+            xai_key_edit,
+        )
+        for advanced_widget in advanced_key_widgets:
+            advanced_widget.setVisible(False)
+
+        def show_advanced_keys(visible):
+            for advanced_widget in advanced_key_widgets:
+                advanced_widget.setVisible(bool(visible))
+
+        advanced_key_toggle.toggled.connect(show_advanced_keys)
+
         layout.addStretch(1)
 
         buttons = QHBoxLayout()
@@ -1553,11 +1772,13 @@ class MainWindowHistoryAssetsMixin:
             gemini_key = gemini_key_edit.text().strip()
             openai_key = openai_key_edit.text().strip()
             anthropic_key = anthropic_key_edit.text().strip()
+            xai_key = xai_key_edit.text().strip()
 
             self.settings["gemini_api_key"] = gemini_key
             self.settings["google_api_key"] = gemini_key
             self.settings["openai_api_key"] = openai_key
             self.settings["anthropic_api_key"] = anthropic_key
+            self.settings["xai_api_key"] = xai_key
 
             if gemini_key:
                 os.environ["GEMINI_API_KEY"] = gemini_key
@@ -1566,6 +1787,8 @@ class MainWindowHistoryAssetsMixin:
                 os.environ["OPENAI_API_KEY"] = openai_key
             if anthropic_key:
                 os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+            if xai_key:
+                os.environ["XAI_API_KEY"] = xai_key
 
             self.service.set_model_source_mode(mode)
             self.settings = self.service.settings
@@ -1631,9 +1854,9 @@ class MainWindowHistoryAssetsMixin:
             )
             if (
                 not self.settings["allow_30b_deep_route"]
-                and str(self.settings.get("router_local_deep", "")).strip() == "qwen3:30b"
+                and str(self.settings.get("router_local_deep", "")).strip() == "qwen3:4b-instruct"
             ):
-                self.settings["router_local_deep"] = "qwen3:14b"
+                self.settings["router_local_deep"] = "qwen3:4b-instruct"
             self.settings["ai_work_memory_enabled"] = (
                 ai_work_memory_checkbox.isChecked()
             )
@@ -1703,9 +1926,12 @@ class MainWindowHistoryAssetsMixin:
         from tech_connector.models.constants import DEFAULT_MODEL
 
         selected_model = self.settings.get("model", DEFAULT_MODEL)
-        for m in models:
-            self.add_model_option("Installed", as_mcphost_model(m), self._seen_models)
-        for i in range(self.model_box.count()):
-            if self.model_box.itemData(i) == selected_model:
-                self.model_box.setCurrentIndex(i)
-                break
+        self._installed_ollama_models = [as_mcphost_model(model) for model in models]
+        if (
+            hasattr(self, "model_provider_box")
+            and self.model_provider_box.currentData() == "ollama"
+        ):
+            self.refresh_model_options_for_provider(
+                "ollama",
+                selected_model=selected_model,
+            )

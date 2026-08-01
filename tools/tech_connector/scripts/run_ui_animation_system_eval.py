@@ -10,6 +10,20 @@ from typing import Any
 
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
 from tech_connector.services.application_service import ApplicationService
+from tech_connector.models.constants import TOOLS_ROOT, active_project_root, temp_output_path
+
+
+def _resolve_unreal_project_path(project_root: Path) -> str:
+    for candidate in (
+        project_root / "Time_Fighters.uproject",
+        project_root / f"{project_root.name}.uproject",
+    ):
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    for candidate in project_root.glob("*.uproject"):
+        if candidate.is_file():
+            return str(candidate)
+    return str(project_root / "Time_Fighters.uproject")
 
 
 CASES = [
@@ -82,14 +96,26 @@ print(json.dumps({'count': len(rows), 'ai_studio': [row for row in rows if row['
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", choices=[row["key"] for row in CASES] + ["all"], default="all")
-    parser.add_argument("--output", type=Path, default=Path(".ai_studio/intelligence/ui_animation_system_eval.json"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=temp_output_path("ui_animation_system_eval.json", subdir="eval_reports"),
+    )
     args = parser.parse_args()
     chosen = CASES if args.case == "all" else [row for row in CASES if row["key"] == args.case]
+    project_root = active_project_root()
+    extra_dirs = [str(TOOLS_ROOT)]
+    project_art_source = project_root / "ArtSource"
+    if project_art_source.exists():
+        extra_dirs.append(str(project_art_source))
+    project_parent_art_source = project_root.parent / "ArtSource"
+    if project_parent_art_source.exists() and str(project_parent_art_source) != str(project_art_source):
+        extra_dirs.append(str(project_parent_art_source))
     settings = {
-        "active_project": r"C:\depot\Time_Fighters 5.8",
-        "extra_dirs": [r"C:\depot\tools", r"C:\depot\ArtSource"],
-        "unreal_uproject_path": r"C:\depot\Time_Fighters 5.8\Time_Fighters.uproject",
-        "model": "ollama:qwen3:14b",
+        "active_project": str(project_root),
+        "extra_dirs": extra_dirs,
+        "unreal_uproject_path": _resolve_unreal_project_path(project_root),
+        "model": "ollama:qwen3:4b-instruct",
         "model_source_mode": "local_only",
         "enable_live_sources": True,
         "research_project_snapshot": True,

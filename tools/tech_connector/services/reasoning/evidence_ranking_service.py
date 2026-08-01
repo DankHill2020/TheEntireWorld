@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable
 
 from tech_connector.services.context_momentum_service import ContextMomentum
-from tech_connector.services.reasoning.target_entity_service import TargetEntity, extract_target_entities
+from reasoning_runtime.reasoning.target_entity_service import TargetEntity, extract_target_entities
 
 
 HARD_EXCLUDED_PARTS = {
@@ -121,7 +121,11 @@ def rank_target_candidates(
         p = Path(path)
         signals: list[EvidenceSignal] = []
         score = 0.0
-        excluded, exclusion_reason = _is_excluded(path, explicit_files)
+        excluded, exclusion_reason = _is_excluded(
+            path,
+            explicit_files,
+            allowed_roots=allowed_roots,
+        )
 
         for entity in explicit_files:
             entity_norm = _norm(entity.normalized or entity.value).casefold()
@@ -391,12 +395,30 @@ def _best_prompt_fragment(prompt: str, reason: str) -> str:
     return " ".join(words[:6])
 
 
-def _is_excluded(path: str, explicit_files: list[TargetEntity]) -> tuple[bool, str]:
+def _is_excluded(
+    path: str,
+    explicit_files: list[TargetEntity],
+    *,
+    allowed_roots: Iterable[str] = (),
+) -> tuple[bool, str]:
     norm_parts = {part.casefold() for part in re.split(r"[\\/]", path) if part}
     explicitly_named = any(Path(item.value).name.casefold() == Path(path).name.casefold() for item in explicit_files)
     if explicitly_named:
         return False, ""
     hard = norm_parts.intersection({part.casefold() for part in HARD_EXCLUDED_PARTS})
+    normalized_path = _norm(path).casefold()
+    for root in allowed_roots:
+        normalized_root = _norm(str(root)).casefold()
+        if (
+            normalized_path == normalized_root
+            or normalized_path.startswith(normalized_root + "/")
+        ):
+            root_parts = {
+                part.casefold()
+                for part in re.split(r"[\\/]", str(root))
+                if part
+            }
+            hard.difference_update(root_parts)
     if hard:
         return True, f"Excluded infrastructure path component: {sorted(hard)[0]}"
     soft = norm_parts.intersection({part.casefold() for part in SOFT_EXCLUDED_PARTS})

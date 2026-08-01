@@ -7,7 +7,7 @@ Seeded from tool_discovery_service on first run. Supports:
 - Fast keyword lookup (< 5ms)
 - Semantic lookup via nomic-embed-text embeddings (Ollama)
 - Dependency graph traversal
-- JSON persistence to data/capability_registry.json
+- JSON persistence to tech_connector/data/capability_registry.json
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+
+from tech_connector.services.capability_registry_storage import load_capability_registry_payload
 
 
 REGISTRY_SCHEMA_VERSION = "1.0"
@@ -97,6 +99,7 @@ class CapabilityRegistry:
     def __init__(self, registry_path: Path) -> None:
         self._path = Path(registry_path)
         self._entries: dict = {}
+        self._diagnostics: list[dict] = []
         self._seeded = False
         if self._path.exists():
             self.load()
@@ -107,12 +110,16 @@ class CapabilityRegistry:
 
     def load(self) -> None:
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
+            data = load_capability_registry_payload(self._path)
             for item in data.get("entries", []):
                 entry = CapabilityEntry.from_dict(item)
                 self._entries[entry.id] = entry
-        except Exception:
-            pass
+        except Exception as exc:
+            self._diagnostics.append({
+                "stage": "load",
+                "path": str(self._path),
+                "error": f"{type(exc).__name__}: {exc}",
+            })
 
     def save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +275,29 @@ class CapabilityRegistry:
         keyword_results = [e for _, e in scored[:limit]]
 
         if len(keyword_results) < 3:
-            semantic = self._semantic_lookup(requirement, limit=limit)
+            # Never embed the complete registry at request time. Restrict the
+            # semantic fallback to entries sharing a host, category, keyword,
+            # or symbol fragment with the contextual requirement.
+            requirement_lower = requirement.lower()
+            semantic_pool = [
+                entry
+                for entry in self._entries.values()
+                if entry.enabled
+                and (
+                    any(token in entry.name.lower() for token in tokens)
+                    or any(token in entry.category.lower() for token in tokens)
+                    or bool(tokens & {value.lower() for value in entry.keywords})
+                    or any(
+                        host != "*" and host.lower() in requirement_lower
+                        for host in entry.dcc_hosts
+                    )
+                )
+            ]
+            semantic = self._semantic_lookup(
+                requirement,
+                limit=limit,
+                candidates=semantic_pool[:64],
+            )
             seen_ids = {e.id for e in keyword_results}
             for e in semantic:
                 if e.id not in seen_ids:
@@ -277,7 +306,12 @@ class CapabilityRegistry:
 
         return keyword_results[:limit]
 
-    def _semantic_lookup(self, requirement: str, limit: int = 5) -> list:
+    def _semantic_lookup(
+        self,
+        requirement: str,
+        limit: int = 5,
+        candidates: Optional[list] = None,
+    ) -> list:
         """Semantic similarity lookup via nomic-embed-text."""
         try:
             req_embedding = _get_embedding(requirement)
@@ -285,7 +319,7 @@ class CapabilityRegistry:
                 return []
 
             scored = []
-            for entry in self._entries.values():
+            for entry in candidates or []:
                 if not entry.enabled:
                     continue
                 text = f"{entry.name} {entry.notes} {' '.join(entry.keywords[:10])}"
@@ -361,7 +395,13 @@ class CapabilityRegistry:
             "enabled": sum(1 for e in entries if e.enabled),
             "by_category": by_cat,
             "by_source": by_source,
+            "diagnostics": list(self._diagnostics),
         }
+
+    def diagnostics(self) -> list[dict]:
+        """Return non-fatal registry failures recorded by this instance."""
+
+        return list(self._diagnostics)
 
 
 # ---------------------------------------------------------------------------

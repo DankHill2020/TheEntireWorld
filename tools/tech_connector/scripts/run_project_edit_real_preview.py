@@ -11,8 +11,10 @@ import sys
 import time
 
 
-ROOT = Path("C:/depot/tools").resolve()
-OUT = ROOT / ".codex_stress" / "project_edit_real_preview"
+from tech_connector.models.constants import TOOLS_ROOT, temp_output_path
+
+ROOT = TOOLS_ROOT
+OUT = temp_output_path("workspace", subdir="project_edit_real_preview")
 
 
 def _write(path: Path, text: str) -> None:

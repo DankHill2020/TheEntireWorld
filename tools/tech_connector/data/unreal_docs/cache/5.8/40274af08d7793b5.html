@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>unreal.AssetEditorSubsystem &#8212; Unreal Python 5.8 (Experimental) documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../_static/ue_api.css?v=ff563fc6" />
+    
+    <script src="../_static/documentation_options.js?v=292b7b46"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unreal.AssetEditorToolkitMenuContext" href="AssetEditorToolkitMenuContext.html" />
+    <link rel="prev" title="unreal.AssetEditorContextInterface" href="AssetEditorContextInterface.html" /> 
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&uj=true" async defer></script></head><body>
+<script>window.__tracking_base = 'https://tracking.unrealengine.com';</script>
+<script src="https://tracking.unrealengine.com/tracking.js" async></script>
+<div id="head"></div>
+<script>
+$(document).ready(function () {
+    $.ajax({
+        url: "https://www.unrealengine.com/epic-games-header?useServerUrl=true&lang=en-US",
+        context: document.body
+    }).done(function (data) {
+        $("#head").html(data);
+    }).fail(function( jqXHR, textStatus, errorThrown ) {
+	});
+});
+
+window._egNavAfterConfigSet = function() {
+	_epicGamesNav.hideSignIn = true;
+	_epicGamesNav.hideLocale = true;
+};
+</script>
+
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="AssetEditorToolkitMenuContext.html" title="unreal.AssetEditorToolkitMenuContext"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="AssetEditorContextInterface.html" title="unreal.AssetEditorContextInterface"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorSubsystem</span></code></a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="unreal-asseteditorsubsystem">
+<h1><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorSubsystem</span></code><a class="headerlink" href="#unreal-asseteditorsubsystem" title="Link to this heading">¶</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="unreal.AssetEditorSubsystem">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">unreal.</span></span><span class="sig-name descname"><span class="pre">AssetEditorSubsystem</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><span class="pre">Object</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/constants.html#None" title="(in Python v2.7)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="Name.html#unreal.Name" title="unreal.Name"><span class="pre">Name</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/2/library/functions.html#str" title="(in Python v2.7)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'None'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#unreal.AssetEditorSubsystem" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="EditorSubsystem.html#unreal.EditorSubsystem" title="unreal.EditorSubsystem"><code class="xref py py-class docutils literal notranslate"><span class="pre">EditorSubsystem</span></code></a></p>
+<p>UAssetEditorSubsystem</p>
+<p><strong>C++ Source:</strong></p>
+<ul class="simple">
+<li><p><strong>Module</strong>: UnrealEd</p></li>
+<li><p><strong>File</strong>: AssetEditorSubsystem.h</p></li>
+</ul>
+<p><strong>Editor Properties:</strong> (see get_editor_property/set_editor_property)</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">debug_object_delegate</span></code> (AssetEditorOpenDebugObjectDynamic):  [Read-Write] Callbacks to open specific debug objects exposed to blueprint.</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetEditorSubsystem.close_all_editors_for_asset">
+<span class="sig-name descname"><span class="pre">close_all_editors_for_asset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asset</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int32</span></span></span><a class="headerlink" href="#unreal.AssetEditorSubsystem.close_all_editors_for_asset" title="Link to this definition">¶</a></dt>
+<dd><p>Close all active editors for the supplied asset and return the number of asset editors that were closed</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>asset</strong> (<a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int32</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="unreal.AssetEditorSubsystem.debug_object_delegate">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">debug_object_delegate</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="AssetEditorOpenDebugObjectDynamic.html#unreal.AssetEditorOpenDebugObjectDynamic" title="unreal.AssetEditorOpenDebugObjectDynamic"><span class="pre">AssetEditorOpenDebugObjectDynamic</span></a></span><a class="headerlink" href="#unreal.AssetEditorSubsystem.debug_object_delegate" title="Link to this definition">¶</a></dt>
+<dd><p>[Read-Write] Callbacks to open specific debug objects exposed to blueprint.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="AssetEditorOpenDebugObjectDynamic.html#unreal.AssetEditorOpenDebugObjectDynamic" title="unreal.AssetEditorOpenDebugObjectDynamic">AssetEditorOpenDebugObjectDynamic</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="unreal.AssetEditorSubsystem.open_editor_for_assets">
+<span class="sig-name descname"><span class="pre">open_editor_for_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">assets</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">opened_method</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">AssetTypeActivationOpenedMethod.EDIT</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool"><span class="pre">bool</span></a></span></span><a class="headerlink" href="#unreal.AssetEditorSubsystem.open_editor_for_assets" title="Link to this definition">¶</a></dt>
+<dd><p>Tries to open an editor for all of the specified assets.
+If any of the assets are already open, it will not create a new editor for them.
+If all assets are of the same type, the supporting AssetTypeAction (if it exists) is responsible for the details of how to handle opening multiple assets at once.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>assets</strong> (<a class="reference internal" href="Array.html#unreal.Array" title="unreal.Array"><em>Array</em></a><em>[</em><a class="reference internal" href="Object.html#unreal.Object" title="unreal.Object"><em>Object</em></a><em>]</em>)</p></li>
+<li><p><strong>opened_method</strong> (<a class="reference internal" href="AssetTypeActivationOpenedMethod.html#unreal.AssetTypeActivationOpenedMethod" title="unreal.AssetTypeActivationOpenedMethod"><em>AssetTypeActivationOpenedMethod</em></a>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="AnimDetailsBool.html#unreal.AnimDetailsBool.bool" title="unreal.AnimDetailsBool.bool">bool</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetEditorSubsystem"><code class="docutils literal notranslate"><span class="pre">AssetEditorSubsystem</span></code></a><ul>
+<li><a class="reference internal" href="#unreal.AssetEditorSubsystem.close_all_editors_for_asset"><code class="docutils literal notranslate"><span class="pre">AssetEditorSubsystem.close_all_editors_for_asset()</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetEditorSubsystem.debug_object_delegate"><code class="docutils literal notranslate"><span class="pre">AssetEditorSubsystem.debug_object_delegate</span></code></a></li>
+<li><a class="reference internal" href="#unreal.AssetEditorSubsystem.open_editor_for_assets"><code class="docutils literal notranslate"><span class="pre">AssetEditorSubsystem.open_editor_for_assets()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="AssetEditorContextInterface.html"
+                          title="previous chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorContextInterface</span></code></a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="AssetEditorToolkitMenuContext.html"
+                          title="next chapter"><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorToolkitMenuContext</span></code></a></p>
+  </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="AssetEditorToolkitMenuContext.html" title="unreal.AssetEditorToolkitMenuContext"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="AssetEditorContextInterface.html" title="unreal.AssetEditorContextInterface"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Unreal Python 5.8 (Experimental) documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href=""><code class="docutils literal notranslate"><span class="pre">unreal.AssetEditorSubsystem</span></code></a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright ©, Epic Games, Inc. All rights reserved. Unreal and its logo are Epic’s trademarks or registered trademarks in the US and elsewhere.
+    </div>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22389e82a86b13c',t:'MTc4NTIzODA4OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

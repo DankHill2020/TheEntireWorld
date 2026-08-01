@@ -226,6 +226,9 @@ def align_clavicle_Y_by_rotateY(clavicle_joint, sample_range=30.0, step=0.1):
     :param step: how small of increments to test
     :return:
     """
+    if not clavicle_joint or not cmds.objExists(clavicle_joint):
+        return
+
     children = cmds.listRelatives(clavicle_joint, type="joint", children=True, fullPath=True)
     if not children:
         print(f"No child joint found for {clavicle_joint}")
@@ -256,28 +259,33 @@ def align_clavicle_Y_by_rotateY(clavicle_joint, sample_range=30.0, step=0.1):
 
 def aim_joint_x_axis_to_world_x(joint_name):
     """
-    Aligns the joint to +X or -X
-    :param joint_name: joint to align
-    :return:
+    Aligns the joint X-axis pointing towards the world X direction (+X for left side, -X for right side).
     """
-    dup_joint = cmds.duplicate(joint_name, parentOnly=True, name=joint_name + "_worldAlignTemp")[0]
+    if not joint_name or not cmds.objExists(joint_name):
+        return
 
+    name_lower = joint_name.lower().split("|")[-1].split(":")[-1]
+    is_right = any(tok in name_lower for tok in ["r_", "_r", "right"]) or name_lower.startswith("r")
+
+    dup_joint = cmds.duplicate(joint_name, parentOnly=True, name=joint_name + "_worldAlignTemp")[0]
     cmds.parent(dup_joint, world=True)
 
-
     joint_pos = cmds.xform(dup_joint, q=True, ws=True, t=True)
-    aim_target = [joint_pos[0] + 1, joint_pos[1], joint_pos[2]]
+
+    # Left arm points to +X, Right arm points to -X
+    x_offset = -10.0 if is_right else 10.0
+    aim_target = [joint_pos[0] + x_offset, joint_pos[1], joint_pos[2]]
 
     aim_loc = cmds.spaceLocator(name="aim_target_loc")[0]
     cmds.xform(aim_loc, ws=True, t=aim_target)
 
-    val = -1
-    if "r_" in joint_name:
-        val = 1
+    up_val = 1 if is_right else -1
+    aim_vec = [-1, 0, 0] if is_right else [1, 0, 0]
+
     aim_constraint = cmds.aimConstraint(
         aim_loc, dup_joint,
-        aimVector=[1, 0, 0],
-        upVector=[0, 0, val],
+        aimVector=aim_vec,
+        upVector=[0, 0, up_val],
         worldUpType="vector", worldUpVector=[0, 1, 0]
     )
 
@@ -305,26 +313,60 @@ def aim_joint_x_axis_to_world_x(joint_name):
                  math.degrees(local_rot.y),
                  math.degrees(local_rot.z))
 
-
     cmds.delete(dup_joint)
 
-def t_pose_character(l_upperarm, r_upperarm, l_clav, r_clav, l_elbow, r_elbow, l_hand, r_hand):
+
+def set_t_pose(l_upperarm=None, r_upperarm=None, l_clav=None, r_clav=None, l_elbow=None, r_elbow=None, l_hand=None, r_hand=None, joint_map=None):
     """
-    Tposes the arms, currently pointed down X
-    :param l_upperarm: actual joint name for slot
-    :param r_upperarm: actual joint name for slot
-    :param l_clav: actual joint name for slot
-    :param r_clav: actual joint name for slot
-    :param l_elbow: actual joint name for slot
-    :param r_elbow: actual joint name for slot
-    :param l_hand: actual joint name for slot
-    :param r_hand: actual joint name for slot
-    :return:
+    T-poses character arms (aligned to X axis). Accepts individual joint names,
+    a list of joint names, or a joint_map dictionary. Auto-detects from scene if unmapped.
     """
-    align_clavicle_Y_by_rotateY(l_clav)
-    align_clavicle_Y_by_rotateY(r_clav)
-    aim_joint_x_axis_to_world_x(l_upperarm)
-    aim_joint_x_axis_to_world_x(r_upperarm)
+    if not joint_map and not (l_upperarm or r_upperarm):
+        try:
+            top_joints = joints_util.find_skinned_or_top_joints(namespace='')
+            if top_joints:
+                joint_map = guess_joint_map_from_root(top_joints[0])
+        except Exception:
+            pass
+
+    if joint_map and isinstance(joint_map, dict):
+        def _extract(*slots):
+            for slot in slots:
+                val = joint_map.get(slot)
+                if val:
+                    if isinstance(val, (list, tuple)) and val:
+                        return val[0]
+                    elif isinstance(val, dict):
+                        j = val.get("joint")
+                        if j:
+                            return j
+                    elif isinstance(val, str):
+                        return val
+            return None
+
+        l_upperarm = l_upperarm or _extract("LeftArm", "LeftArmJoint", "l_upperarm", "arm_l")
+        r_upperarm = r_upperarm or _extract("RightArm", "RightArmJoint", "r_upperarm", "arm_r")
+        l_clav = l_clav or _extract("LeftShoulder", "LeftClavicle", "l_clavicle", "clavicle_l")
+        r_clav = r_clav or _extract("RightShoulder", "RightClavicle", "r_clavicle", "clavicle_r")
+        l_elbow = l_elbow or _extract("LeftForeArm", "LeftElbow", "l_lowerarm", "forearm_l")
+        r_elbow = r_elbow or _extract("RightForeArm", "RightElbow", "r_lowerarm", "forearm_r")
+        l_hand = l_hand or _extract("LeftHand", "LeftWrist", "l_hand", "hand_l")
+        r_hand = r_hand or _extract("RightHand", "RightWrist", "r_hand", "hand_r")
+
+    print("[setup_hik.set_t_pose] Executing T-pose alignment:")
+    print(f"  Left Arm: clav={l_clav}, upperarm={l_upperarm}, elbow={l_elbow}, hand={l_hand}")
+    print(f"  Right Arm: clav={r_clav}, upperarm={r_upperarm}, elbow={r_elbow}, hand={r_hand}")
+
+    if l_clav and cmds.objExists(l_clav):
+        align_clavicle_Y_by_rotateY(l_clav)
+    if r_clav and cmds.objExists(r_clav):
+        align_clavicle_Y_by_rotateY(r_clav)
+
+    if l_upperarm and cmds.objExists(l_upperarm):
+        aim_joint_x_axis_to_world_x(l_upperarm)
+    if r_upperarm and cmds.objExists(r_upperarm):
+        aim_joint_x_axis_to_world_x(r_upperarm)
+
     joint_names = {
         "l_elbow": l_elbow,
         "r_elbow": r_elbow,
@@ -333,12 +375,19 @@ def t_pose_character(l_upperarm, r_upperarm, l_clav, r_clav, l_elbow, r_elbow, l
     }
 
     for label, joint in joint_names.items():
-        if cmds.objExists(joint):
+        if joint and cmds.objExists(joint):
             for axis in ["X", "Y", "Z"]:
                 attr = f"{joint}.rotate{axis}"
-                cmds.setAttr(attr, 0)
+                try:
+                    cmds.setAttr(attr, 0)
+                except Exception as exc:
+                    print(f"Could not zero rotation for {attr}: {exc}")
         else:
-            print(f"{label} not found: {joint}")
+            if joint:
+                print(f"{label} not found: {joint}")
+
+
+t_pose_character = set_t_pose
 
 
 def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):

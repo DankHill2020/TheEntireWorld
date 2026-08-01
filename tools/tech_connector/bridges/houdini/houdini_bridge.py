@@ -43,7 +43,10 @@ def _port_files():
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         files.append(Path(local_app_data) / "TA_AI_Studio_MCPHost" / "houdini_port.txt")
-    files.append(Path(r"C:\\depot\\tools\\houdini_port.txt"))
+    tools_root = Path(os.environ["TOOLSROOT"]).expanduser() if os.environ.get("TOOLSROOT") else Path(__file__).resolve().parents[3] if "__file__" in globals() else Path.cwd()
+    if not tools_root.exists():
+        tools_root = Path.cwd()
+    files.append(Path(tools_root) / "houdini_port.txt")
     return files
 
 
@@ -285,6 +288,51 @@ class HoudiniBridge(DCCBridgeDelegateMixin):
 
     def get_scene_objects_code(self) -> str:
         return "import hou\nprint([n.name() for n in hou.node('/').allSubChildren()][:500])"
+
+    def get_scene_snapshot_code(
+        self,
+        *,
+        selected_only: bool = False,
+        include_geometry: bool = True,
+        limit: int = 500,
+        max_vertices_per_object: int = 50000,
+        max_faces_per_object: int = 50000,
+    ) -> str:
+        from tech_connector.services.dcc.scene_snapshot_provider import houdini_scene_snapshot_code
+
+        return houdini_scene_snapshot_code(
+            selected_only=selected_only,
+            include_geometry=include_geometry,
+            limit=limit,
+            max_vertices_per_object=max_vertices_per_object,
+            max_faces_per_object=max_faces_per_object,
+        )
+
+    def get_scene_snapshot(
+        self,
+        *,
+        selected_only: bool = False,
+        include_geometry: bool = True,
+        limit: int = 500,
+        max_vertices_per_object: int = 50000,
+        max_faces_per_object: int = 50000,
+        timeout: float = 10.0,
+    ) -> tuple:
+        from tech_connector.services.dcc.scene_snapshot_provider import parse_scene_snapshot_output
+
+        ok, raw = self.execute(
+            self.get_scene_snapshot_code(
+                selected_only=selected_only,
+                include_geometry=include_geometry,
+                limit=limit,
+                max_vertices_per_object=max_vertices_per_object,
+                max_faces_per_object=max_faces_per_object,
+            ),
+            timeout=timeout,
+        )
+        if not ok:
+            return False, raw
+        return parse_scene_snapshot_output(raw, "houdini")
 
     def get_selection_code(self) -> str:
         return "import hou\nprint([n.name() for n in hou.selectedNodes()])"

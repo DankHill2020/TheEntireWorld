@@ -337,11 +337,12 @@ class CredentialsPromptDialog(QDialog):
     def __init__(self, parent, model_name, provider_id):
         super().__init__(parent)
         self.setWindowTitle("Authentication Required")
-        self.resize(450, 220)
+        self.resize(520, 320)
         self.model_name = model_name
         self.provider_id = provider_id
         self.success = False
         self.api_key = ""
+        self.auth_method = ""
         self.user_email = ""
 
         self.setStyleSheet("""
@@ -387,46 +388,61 @@ class CredentialsPromptDialog(QDialog):
         layout.addWidget(title)
 
         desc = QLabel(
-            f"This model runs via {provider_id.upper()}. Please enter your API Key below."
+            "Use the provider's official account login. Tech Connector launches the "
+            "official client and never reads its browser cookies or saved tokens."
         )
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
-        key_layout = QHBoxLayout()
+        self.status_lbl = QLabel()
+        self.status_lbl.setWordWrap(True)
+        self.status_lbl.setStyleSheet("color: #a5d6a7; font-size: 11px;")
+        layout.addWidget(self.status_lbl)
+
+        account_actions = QHBoxLayout()
+        self.sign_in_btn = QPushButton("Sign in with provider")
+        self.sign_in_btn.clicked.connect(self.begin_login)
+        account_actions.addWidget(self.sign_in_btn)
+        refresh_btn = QPushButton("Refresh status")
+        refresh_btn.clicked.connect(lambda: self.refresh_status(refresh=True))
+        account_actions.addWidget(refresh_btn)
+        account_actions.addStretch(1)
+        layout.addLayout(account_actions)
+
+        self.advanced_key_toggle = QCheckBox("Advanced: use a direct API key instead")
+        layout.addWidget(self.advanced_key_toggle)
+
+        self.key_row = QWidget()
+        key_layout = QHBoxLayout(self.key_row)
+        key_layout.setContentsMargins(0, 0, 0, 0)
         key_layout.addWidget(QLabel("API Key:"))
         self.key_edit = QLineEdit()
         self.key_edit.setEchoMode(QLineEdit.Password)
 
         stored_key = parent.settings.get(f"{provider_id}_api_key", "")
-        if not stored_key and provider_id == "gemini":
+        if not stored_key and provider_id in {"gemini", "google"}:
             stored_key = parent.settings.get("google_api_key", "")
+        if not stored_key and provider_id == "x":
+            stored_key = parent.settings.get("xai_api_key", "")
         self.key_edit.setText(stored_key)
         key_layout.addWidget(self.key_edit, 1)
-        layout.addLayout(key_layout)
-
-        self.google_btn = None
-        if provider_id in {"gemini", "google"}:
-            self.google_btn = QPushButton("Open Google AI Studio Keys")
-            self.google_btn.clicked.connect(self.open_google_key_page)
-            self.google_btn.setStyleSheet(
-                "background-color: #0f141c; border: 1px solid #1f6f45; color: #a5d6a7;"
-            )
-            layout.addWidget(self.google_btn)
-
-            self.status_lbl = QLabel(
-                "Gemini uses API keys in Tech Connector. Create/copy a key, then paste it above."
-            )
-            self.status_lbl.setStyleSheet("color: #a5d6a7; font-size: 11px;")
-            layout.addWidget(self.status_lbl)
+        layout.addWidget(self.key_row)
+        self.key_row.setVisible(False)
+        self.advanced_key_toggle.toggled.connect(self.key_row.setVisible)
+        self.advanced_key_toggle.toggled.connect(
+            lambda visible: self.connect_btn.setEnabled(bool(visible))
+            if visible
+            else self.refresh_status()
+        )
 
         layout.addStretch(1)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
 
-        save_btn = QPushButton("Save & Connect")
-        save_btn.clicked.connect(self.on_save)
-        actions.addWidget(save_btn)
+        self.connect_btn = QPushButton("Use Connected Account")
+        self.connect_btn.clicked.connect(self.on_save)
+        actions.addWidget(self.connect_btn)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancel")
@@ -434,19 +450,70 @@ class CredentialsPromptDialog(QDialog):
         actions.addWidget(cancel_btn)
 
         layout.addLayout(actions)
+        self.refresh_status()
 
-    def open_google_key_page(self):
-        QDesktopServices.openUrl(QUrl("https://aistudio.google.com/app/apikey"))
+    def refresh_status(self, refresh=False):
+        from tech_connector.services.authenticated_provider_service import (
+            provider_account_status,
+        )
+
+        status = provider_account_status(
+            self.provider_id,
+            refresh=refresh,
+            timeout=3,
+        )
+        self.connect_btn.setEnabled(status.connected or self.advanced_key_toggle.isChecked())
+        if status.connected:
+            self.status_lbl.setText(f"Connected. {status.detail}")
+        elif status.installed:
+            self.status_lbl.setText(f"Installed, but not connected. {status.detail}")
+        else:
+            self.status_lbl.setText(
+                "Official command-line client not found. Install it or configure its "
+                "executable path in provider settings."
+            )
+
+    def begin_login(self):
+        from tech_connector.services.authenticated_provider_service import (
+            begin_provider_login,
+        )
+
+        try:
+            begin_provider_login(self.provider_id)
+            self.status_lbl.setText(
+                "Login opened in a provider-owned terminal. Complete sign-in, then click Refresh status."
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Provider Login", str(exc))
 
     def on_save(self):
-        self.api_key = self.key_edit.text().strip()
-        if not self.api_key:
+        if self.advanced_key_toggle.isChecked():
+            self.api_key = self.key_edit.text().strip()
+            if not self.api_key:
+                QMessageBox.information(
+                    self,
+                    "Key Required",
+                    "Enter an API key or turn off the advanced fallback and sign in.",
+                )
+                return
+            self.auth_method = "api_key"
+            self.success = True
+            self.accept()
+            return
+
+        from tech_connector.services.authenticated_provider_service import (
+            provider_account_status,
+        )
+
+        status = provider_account_status(self.provider_id, refresh=True, timeout=3)
+        if not status.connected:
             QMessageBox.information(
                 self,
-                "Key Required",
-                "Please enter an API key. Use the Google AI Studio button to create one.",
+                "Sign In Required",
+                "Complete provider sign-in, then refresh the connection status.",
             )
             return
+        self.auth_method = "account"
         self.success = True
         self.accept()
 

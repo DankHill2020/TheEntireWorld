@@ -423,9 +423,9 @@ def upgrade_route_decision(prompt: str, baseline: PromptRouteDecision, **kwargs)
         settings = load_settings()
         custom_module = settings.get("cognitive_routing_provider_module")
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.upgrade_route_decision",
+                resolve_custom_provider_binding("routing_module", custom_module, "upgrade_route_decision", settings),
                 _upgrade_route_decision_impl,
                 prompt,
                 baseline,

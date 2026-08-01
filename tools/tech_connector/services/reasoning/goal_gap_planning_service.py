@@ -1,4 +1,4 @@
-"""Goal-driven capability gap planning.
+﻿"""Goal-driven capability gap planning.
 
 This service is deterministic and intentionally lightweight. It does not execute
 work or perform research. It turns a user goal into capability nodes, missing
@@ -1921,7 +1921,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
                     "purpose": "Add OperationRunnerPanel to the app/tab layout without duplicating existing workflow UI.",
                 },
                 {
-                    "path": "examples/tech_connector/tests/test_operation_runner_panel.py",
+                    "path": "tech_connector/examples/tests/test_operation_runner_panel.py",
                     "purpose": "Focused tests for catalog loading, JSON template generation, and worker payload creation.",
                 },
             ],
@@ -2303,7 +2303,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
             "expected_files": [
                 {"path": "tech_connector/services/project_edit_transaction_service.py", "purpose": "Integrate journal creation, snapshots, and rollback into multi-file edit transactions."},
                 {"path": "tech_connector/services/project_edit_rollback_journal_service.py", "purpose": "Typed rollback journal records and recovery helpers."},
-                {"path": "examples/tech_connector/tests/test_project_edit_rollback_journal_service.py", "purpose": "Regression coverage for failed write recovery and multi-file rollback."},
+                {"path": "tech_connector/examples/tests/test_project_edit_rollback_journal_service.py", "purpose": "Regression coverage for failed write recovery and multi-file rollback."},
             ],
             "expected_imports": ["dataclasses.dataclass", "pathlib.Path", "json", "time", "typing.Any"],
             "expected_classes": [
@@ -2365,7 +2365,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
             "repo_grounding": [
                 {"purpose": "Edit transaction boundary", "source": "code.inspect_symbols result for apply_patch/project edit services"},
                 {"purpose": "Existing result shape", "source": "neighboring service functions returning structured dict status"},
-                {"purpose": "Test style", "source": "focused unittest modules under examples/tech_connector/tests"},
+                {"purpose": "Test style", "source": "focused unittest modules under tech_connector/examples/tests"},
             ],
             "pre_patch_review": [
                 "Every mutated path is resolved under the active project root before snapshot or restore.",
@@ -2404,8 +2404,8 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
             "expected_files": [
                 {"path": "tech_connector/services/prompt/prompt_route_service.py", "purpose": "Emit deterministic route evidence and ambiguity metadata."},
                 {"path": "tech_connector/services/reasoning/evidence_ranking_service.py", "purpose": "Return structured attribution paths for target ranking."},
-                {"path": "examples/tech_connector/tests/fixtures/prompt_route_fuzz_cases.json", "purpose": "Deterministic fuzz regression corpus."},
-                {"path": "examples/tech_connector/tests/test_prompt_route_fuzz_corpus.py", "purpose": "Stable regression tests for fuzzy prompt routing."},
+                {"path": "tech_connector/examples/tests/fixtures/prompt_route_fuzz_cases.json", "purpose": "Deterministic fuzz regression corpus."},
+                {"path": "tech_connector/examples/tests/test_prompt_route_fuzz_corpus.py", "purpose": "Stable regression tests for fuzzy prompt routing."},
             ],
             "expected_imports": ["dataclasses.dataclass", "json", "typing.Any"],
             "expected_classes": [
@@ -2461,7 +2461,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
             "repo_grounding": [
                 {"purpose": "Router implementation", "source": "tech_connector/services/prompt/prompt_route_service.py"},
                 {"purpose": "Ranking implementation", "source": "tech_connector/services/reasoning/evidence_ranking_service.py"},
-                {"purpose": "Regression corpus", "source": "examples/tech_connector/tests/fixtures/prompt_route_fuzz_cases.json"},
+                {"purpose": "Regression corpus", "source": "tech_connector/examples/tests/fixtures/prompt_route_fuzz_cases.json"},
             ],
             "pre_patch_review": [
                 "Ollama/generated fuzzing is optional and never required for normal deterministic tests.",
@@ -2648,7 +2648,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
                     [
                         "tech_connector/ui/operation_runner_panel.py",
                         "tech_connector/app/main_window_ui.py or existing tab registration module",
-                        "examples/tech_connector/tests/test_operation_runner_panel.py",
+                        "tech_connector/examples/tests/test_operation_runner_panel.py",
                     ]
                     if wants_qt_operation_runner
                     else "resolved from code.inspect_symbols"
@@ -3076,7 +3076,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
                             ),
                         },
                         {
-                            "path": "examples/tech_connector/tests/test_operation_runner_panel.py",
+                            "path": "tech_connector/examples/tests/test_operation_runner_panel.py",
                             "content": (
                                 "import os\n"
                                 "import unittest\n\n"
@@ -3142,7 +3142,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
                 "representative_code": expected_code_payload.get("representative_code", ""),
                 "validation_commands": (
                     [
-                        ["python", "-m", "py_compile", "tech_connector/ui/operation_runner_panel.py", "examples/tech_connector/tests/test_operation_runner_panel.py"],
+                        ["python", "-m", "py_compile", "tech_connector/ui/operation_runner_panel.py", "tech_connector/examples/tests/test_operation_runner_panel.py"],
                         ["python", "-m", "unittest", "examples.tech_connector.tests.test_operation_runner_panel"],
                     ]
                     if wants_qt_operation_runner
@@ -3443,7 +3443,7 @@ def _planned_call_for_action(item: dict[str, Any], decision: dict[str, Any]) -> 
             "arguments": {
                 "metahuman_dna_path": "resolved DNA file",
                 "animation_or_scene_delta": "Maya facial adjustment output",
-                "tool_root": "C:/depot/tools/external_tools/MetaHumanDNA if available",
+                "tool_root": "available external_tools/MetaHumanDNA under the configured tools root",
                 "output_path": "job_workspace/exports/metahuman_dna_update",
                 "skip_if_unavailable": True,
             },
@@ -3765,7 +3765,7 @@ def _mixed_operation_graph(contracts: list[dict[str, Any]]) -> dict[str, Any]:
             )
     return {
         "framework": "mixed_operation_graph_v1",
-        "base_graph": "tech_connector.services.action_graph_service.ActionGraph",
+        "base_graph": "reasoning_runtime.action.action_graph_service.ActionGraph",
         "supports": [
             "typed_artifact_edges",
             "conditionals",
@@ -3859,7 +3859,7 @@ def _canonical_action_graph(
         actions.append(action)
         previous_id = action_id
     try:
-        from tech_connector.services.action_graph_service import normalize_action_graph, validate_action_graph
+        from reasoning_runtime.action.action_graph_service import normalize_action_graph, validate_action_graph
 
         data = normalize_action_graph(
             {
@@ -4108,7 +4108,7 @@ def _pipeline_materialization_plan(
     generated = [item for item in candidates if item["materializable"] and not item["registered_callable"]]
     return {
         "framework": "mixed_operation_materializer_v1",
-        "base_graph": graph.get("base_graph", "tech_connector.services.action_graph_service.ActionGraph"),
+        "base_graph": graph.get("base_graph", "reasoning_runtime.action.action_graph_service.ActionGraph"),
         "convertible": True,
         "status": "planned_not_written",
         "generated_function_root": "tool_output/generated_functions",
@@ -4150,7 +4150,7 @@ def _pipeline_materialization_plan(
             "Rollback and validation steps survive conversion from mixed operation to pipeline.",
         ],
         "canonical_action_graph": {
-            "framework": "tech_connector.services.action_graph_service.ActionGraph",
+            "framework": "reasoning_runtime.action.action_graph_service.ActionGraph",
             "action_count": len((canonical_graph or {}).get("actions") or []),
             "validation": (canonical_graph or {}).get("validation", {}),
         },
@@ -4290,9 +4290,9 @@ def build_goal_gap_plan(prompt: str, decision: dict[str, Any] | None = None) -> 
         settings = load_settings()
         custom_module = settings.get("planning_provider_module")
         if custom_module and custom_module != "default":
-            from tech_connector.services.modular_provider_utils import invoke_custom_provider
+            from tech_connector.services.modular_provider_utils import invoke_custom_provider, resolve_custom_provider_binding
             return invoke_custom_provider(
-                f"{custom_module}.build_goal_gap_plan",
+                resolve_custom_provider_binding("planning_module", custom_module, "build_goal_gap_plan", settings),
                 _build_goal_gap_plan_impl,
                 prompt,
                 decision
@@ -4428,7 +4428,7 @@ def _build_goal_gap_plan_impl(prompt: str, decision: dict[str, Any] | None = Non
         pipeline_materialization_plan,
     )
     pipeline_materialization_plan["canonical_action_graph"] = {
-        "framework": "tech_connector.services.action_graph_service.ActionGraph",
+        "framework": "reasoning_runtime.action.action_graph_service.ActionGraph",
         "intent": canonical_action_graph.get("intent", ""),
         "planner": canonical_action_graph.get("planner", ""),
         "action_count": len(canonical_action_graph.get("actions") or []),
@@ -4779,7 +4779,7 @@ def compact_goal_gap_plan(
             "supports": list((plan.get("mixed_operation_graph") or {}).get("supports") or [])[:8],
         },
         "canonical_action_graph": {
-            "framework": "tech_connector.services.action_graph_service.ActionGraph",
+            "framework": "reasoning_runtime.action.action_graph_service.ActionGraph",
             "intent": (plan.get("canonical_action_graph") or {}).get("intent", ""),
             "planner": (plan.get("canonical_action_graph") or {}).get("planner", ""),
             "action_count": len((plan.get("canonical_action_graph") or {}).get("actions") or []),

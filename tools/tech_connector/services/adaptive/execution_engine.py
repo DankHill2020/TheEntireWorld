@@ -144,7 +144,7 @@ class AdaptiveExecutionEngine:
         if not goal_id:
             raise ValueError("Cannot commit a goal result without a goal_id or id")
 
-        from tech_connector.services.reasoning.answer_sufficiency_service import validate_answer_sufficiency
+        from reasoning_runtime.reasoning.answer_sufficiency_service import validate_answer_sufficiency
 
         adequacy = validate_answer_sufficiency(state, result, goal=goal_data)
         externally_valid = True if validated is None else bool(validated)

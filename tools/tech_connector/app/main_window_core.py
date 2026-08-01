@@ -6,9 +6,9 @@ import threading
 import time
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 import re
 from datetime import datetime
@@ -202,8 +202,10 @@ class MainWindowCoreMixin:
             return widget
         return self.fallback_editor
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, preload_for_splash: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._preload_for_splash = bool(preload_for_splash)
+        self._deferred_startup_model_install_missing = None
 
         self.service = ApplicationService()
         self.setWindowTitle(f"{APP_DISPLAY_NAME} {APP_VERSION}")
@@ -220,6 +222,7 @@ class MainWindowCoreMixin:
             self.response_started.connect(self._mark_response_started)
             self.dcc_statuses_ready.connect(self._apply_dcc_statuses)
             self.vcs_status_ready.connect(self._apply_vcs_status_card)
+            self.integrations_status_ready.connect(self._apply_integrations_status_card)
             self.autocomplete_suggestions_ready.connect(self._apply_autocomplete_suggestions)
         except Exception:
             pass
@@ -250,7 +253,7 @@ class MainWindowCoreMixin:
         except Exception:
             pass
         self.last_selected_model = self.settings.get(
-            "model", "ollama:qwen2.5-coder:14b"
+            "model", "ollama:qwen2.5-coder:7b"
         )
         self._cached_discovered_symbols = []
         for env_key in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]:
@@ -287,9 +290,18 @@ class MainWindowCoreMixin:
 
         self._status_once = set()
         self._last_project_panel_width = 360
-        self._last_live_process = ""
+        self._last_live_process = "Startup: constructing window" if self._preload_for_splash else ""
         self._last_live_process_at = 0.0
         self._startup_defer_expensive_status = True
+        self._startup_warmup_complete = False
+        self._startup_background_work_enabled = not self._preload_for_splash
+        self._last_completed_startup_stage = ""
+        self._last_completed_startup_stage_at = 0.0
+        self._deferred_terms_prompt = False
+        self._deferred_first_run_prompt = False
+        self._restoring_window_state = False
+        self._window_state_save_pending = False
+        self._restore_window_show_mode = ""
 
         self.editor_status_timer = QTimer(self)
         self.editor_status_timer.setSingleShot(True)
@@ -300,6 +312,7 @@ class MainWindowCoreMixin:
         self.chat_render_timer.timeout.connect(self.render_chat_history)
 
         self._ui_heartbeat_last = time.time()
+        self._ui_heartbeat_seen = False
         self._ui_heartbeat_last_warning = 0.0
         self._ui_heartbeat_timer = QTimer(self)
         self._ui_heartbeat_timer.setInterval(500)
@@ -327,13 +340,19 @@ class MainWindowCoreMixin:
 
         self.setStyleSheet(application_stylesheet())
         self.install_prompt_context_hooks()
+        self.restore_window_state_preferences()
 
         self.update_initial_status_cards()
         self.status.setText("Loading workspace...")
 
-        QTimer.singleShot(250, self.run_after_first_paint_startup)
-        QTimer.singleShot(12000, self.ensure_required_models_on_startup)
-        QTimer.singleShot(18000, self.ensure_dcc_bridge_setup_on_startup)
+        first_paint_delay = 0 if self._preload_for_splash else 250
+        model_check_delay = 1500 if self._preload_for_splash else 12000
+        dcc_setup_delay = 2500 if self._preload_for_splash else 18000
+        self._schedule_startup_step("first paint startup", first_paint_delay, self.run_after_first_paint_startup)
+        self._schedule_startup_step("model availability check", model_check_delay, self.ensure_required_models_on_startup)
+        self._schedule_startup_step("DCC bridge setup check", dcc_setup_delay, self.ensure_dcc_bridge_setup_on_startup)
+        if self._preload_for_splash:
+            self._last_live_process = "Startup: waiting for hidden warmup"
 
     def start_mobile_second_screen(self):
         try:
@@ -398,6 +417,7 @@ class MainWindowCoreMixin:
         pass
 
     def _record_ui_heartbeat(self):
+        self._ui_heartbeat_seen = True
         self._ui_heartbeat_last = time.time()
 
     def _start_ui_heartbeat_watchdog(self):
@@ -409,6 +429,8 @@ class MainWindowCoreMixin:
             while True:
                 time.sleep(1.0)
                 try:
+                    if not bool(getattr(self, "_ui_heartbeat_seen", False)):
+                        continue
                     last = float(getattr(self, "_ui_heartbeat_last", 0.0) or 0.0)
                     lag = time.time() - last
                     if lag < 3.0:
@@ -417,7 +439,12 @@ class MainWindowCoreMixin:
                     if time.time() - previous < 10.0:
                         continue
                     self._ui_heartbeat_last_warning = time.time()
-                    stage = getattr(self, "_last_live_process", "") or "unknown"
+                    stage = getattr(self, "_last_live_process", "") or ""
+                    if stage == "Startup: waiting for hidden warmup":
+                        completed_at = float(getattr(self, "_last_completed_startup_stage_at", 0.0) or 0.0)
+                        if time.time() - completed_at < 8.0:
+                            stage = getattr(self, "_last_completed_startup_stage", "") or stage
+                    stage = stage or "unknown"
                     message = (
                         f"\n[UI Watchdog] Main Qt heartbeat delayed {lag:.1f}s while active stage was: {stage}.\n"
                     )
@@ -458,24 +485,45 @@ class MainWindowCoreMixin:
             pass
 
     def run_after_first_paint_startup(self):
+        preload = bool(getattr(self, "_preload_for_splash", False))
+        scale = 0.35 if preload else 1.0
         self._schedule_startup_step("history", 0, self.refresh_history)
-        self._schedule_startup_step("snippets", 150, self.refresh_snippets_list)
-        self._schedule_startup_step("project tree", 350, self.load_project_tree_lazy)
-        self._schedule_startup_step("editor restore", 700, self.restore_editor_state)
-        self._schedule_startup_step("integration status", 1100, self.update_integrations_status_card)
-        self._schedule_startup_step("vcs status", 1500, self.update_vcs_status_card)
-        QTimer.singleShot(1900, lambda: setattr(self, "_startup_defer_expensive_status", False))
-        self._schedule_startup_step("symbol cache", 9000, self.start_async_symbol_indexing)
+        self._schedule_startup_step("snippets", int(150 * scale), self.refresh_snippets_list)
+        self._schedule_startup_step("project tree", int(350 * scale), self.load_project_tree_lazy)
+        self._schedule_startup_step("editor restore", int(700 * scale), self.restore_editor_state)
+        self._schedule_startup_step("integration status", int(1100 * scale), self.update_integrations_status_card)
+        self._schedule_startup_step("vcs status", int(1500 * scale), self.update_vcs_status_card)
+        QTimer.singleShot(int(1900 * scale), lambda: setattr(self, "_startup_defer_expensive_status", False))
+        self._schedule_startup_step("symbol cache", 5000 if preload else 9000, self.start_async_symbol_indexing)
         self.status.setText("Ready")
+        if not self.settings.get("tos_accepted", False):
+            if preload:
+                self._deferred_terms_prompt = True
+            else:
+                QTimer.singleShot(900, lambda: self.show_terms_if_needed() and self.run_deferred_startup_prompts())
         if not self.settings.get("first_run_complete"):
-            QTimer.singleShot(1800, self.show_first_run)
+            if preload:
+                self._deferred_first_run_prompt = True
+            elif not self.settings.get("tos_accepted", False):
+                self._deferred_first_run_prompt = True
+            else:
+                QTimer.singleShot(1800, self.show_first_run)
         elif not project_index_db_path().exists():
             self.set_card("knowledge", "warn", "Index missing")
             if hasattr(self, "index_status"):
                 self.index_status.setText("Knowledge: index missing")
-        QTimer.singleShot(15000, self.start_mcphost)
-        QTimer.singleShot(22000, self.start_unreal_daemon_on_startup)
-        QTimer.singleShot(26000, self.start_project_index_change_watcher_late)
+        if (
+            bool(self.settings.get("autostart_mcphost_on_startup", False))
+            and not bool(self.settings.get("ollama_lazy_start", True))
+        ):
+            self._schedule_startup_step("MCPHost startup", 6500 if preload else 15000, self.start_mcphost)
+        self._schedule_startup_step("Unreal daemon startup", 7500 if preload else 22000, self.start_unreal_daemon_on_startup)
+        self._schedule_startup_step("project watcher startup", 8500 if preload else 26000, self.start_project_index_change_watcher_late)
+        self._schedule_startup_step("project index status timer", 9000 if preload else 27000, self.start_project_index_status_timer)
+        if preload:
+            self._schedule_startup_step("hidden first-show polish", 9200, self._prepare_hidden_first_show)
+            self._schedule_startup_step("hidden startup warmup complete", 9800, self._mark_startup_warmup_complete)
+            self._schedule_startup_step("enable deferred background work", 13500, self._enable_startup_background_work)
 
         import time
         self.last_chat_activity_time = time.time()
@@ -486,29 +534,115 @@ class MainWindowCoreMixin:
 
     def _schedule_startup_step(self, label, delay_ms, fn):
         def run_step():
-            started = time.monotonic()
-            previous_stage = getattr(self, "_last_live_process", "")
-            self._last_live_process = f"Startup: {label}"
-            try:
-                fn()
-            finally:
-                self._last_live_process = previous_stage
-                duration_ms = int((time.monotonic() - started) * 1000)
-                if duration_ms >= 250:
-                    print(f"[Startup] {label} took {duration_ms}ms", flush=True)
-                    try:
-                        from tech_connector.services.diagnostic_service import log_ui_event
-
-                        log_ui_event(
-                            "startup_step_slow",
-                            enabled=bool(self.settings.get("ui_diagnostic_mode", False)),
-                            label=label,
-                            duration_ms=duration_ms,
-                        )
-                    except Exception:
-                        pass
+            self._run_startup_stage(label, fn)
 
         QTimer.singleShot(int(delay_ms), run_step)
+
+    def _run_startup_stage(self, label, fn):
+        started = time.monotonic()
+        previous_stage = getattr(self, "_last_live_process", "")
+        self._last_live_process = f"Startup: {label}"
+        try:
+            return fn()
+        finally:
+            completed_stage = f"Startup: {label}"
+            self._last_completed_startup_stage = completed_stage
+            self._last_completed_startup_stage_at = time.time()
+            if (
+                bool(getattr(self, "_preload_for_splash", False))
+                and not bool(getattr(self, "_startup_warmup_complete", False))
+                and not self.isVisible()
+            ):
+                self._last_live_process = "Startup: waiting for hidden warmup"
+            elif label == "hidden startup warmup complete":
+                self._last_live_process = "Startup: hidden warmup complete"
+            else:
+                self._last_live_process = previous_stage
+            duration_ms = int((time.monotonic() - started) * 1000)
+            if duration_ms >= 250:
+                print(f"[Startup] {label} took {duration_ms}ms", flush=True)
+                try:
+                    from tech_connector.services.diagnostic_service import log_ui_event
+
+                    log_ui_event(
+                        "startup_step_slow",
+                        enabled=bool(self.settings.get("ui_diagnostic_mode", False)),
+                        label=label,
+                        duration_ms=duration_ms,
+                    )
+                except Exception:
+                    pass
+
+    def _mark_startup_warmup_complete(self):
+        if bool(getattr(self, "_startup_warmup_complete", False)):
+            return
+        self._startup_warmup_complete = True
+        if bool(getattr(self, "_preload_for_splash", False)) and not self.isVisible():
+            self._last_live_process = "Startup: hidden warmup complete"
+        try:
+            self.startup_warmup_finished.emit()
+        except Exception:
+            pass
+
+    def _enable_startup_background_work(self):
+        self._startup_background_work_enabled = True
+        try:
+            self._last_live_process = ""
+        except Exception:
+            pass
+
+    def run_deferred_startup_prompts(self):
+        if bool(getattr(self, "_deferred_terms_prompt", False)):
+            self._deferred_terms_prompt = False
+            if not self.show_terms_if_needed():
+                return
+        if bool(getattr(self, "_deferred_first_run_prompt", False)):
+            self._deferred_first_run_prompt = False
+            QTimer.singleShot(0, self.show_first_run)
+
+    def show_terms_if_needed(self) -> bool:
+        try:
+            from tech_connector.app.tos_dialog import ensure_tos_accepted
+            accepted = bool(ensure_tos_accepted(self))
+            if accepted:
+                try:
+                    self.settings["tos_accepted"] = True
+                    self.settings["tos_version"] = "v2026.1"
+                except Exception:
+                    pass
+            return accepted
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[Startup] Terms dialog failed: {exc}", flush=True)
+            return True
+
+    def _prepare_hidden_first_show(self):
+        if self.isVisible():
+            return
+        try:
+            self.ensurePolished()
+        except Exception:
+            pass
+        try:
+            layout = self.layout()
+            if layout is not None:
+                layout.activate()
+        except Exception:
+            pass
+        try:
+            for widget in (
+                getattr(self, "workspace_tabs", None),
+                getattr(self, "editor_tabs", None),
+                getattr(self, "wf_stack", None),
+            ):
+                if widget is not None:
+                    widget.ensurePolished()
+                    layout = widget.layout()
+                    if layout is not None:
+                        layout.activate()
+        except Exception:
+            pass
 
     def start_project_index_change_watcher_late(self):
         def run():
@@ -521,6 +655,56 @@ class MainWindowCoreMixin:
                 self._project_index_change_watcher = None
 
         threading.Thread(target=run, daemon=True, name="project-index-watch-startup").start()
+
+    def start_project_index_status_timer(self):
+        if getattr(self, "_project_index_status_timer", None) is not None:
+            return
+        timer = QTimer(self)
+        timer.timeout.connect(self.update_project_index_daemon_status)
+        self._project_index_status_timer = timer
+        timer.start(15000)
+        self.update_project_index_daemon_status()
+
+    def update_project_index_daemon_status(self):
+        try:
+            from tech_connector.services.project_service import project_index_daemon_status
+
+            status = project_index_daemon_status()
+        except Exception:
+            return
+        mode = str(status.get("mode") or "idle")
+        pending = int(status.get("pending") or 0)
+        detail = str(status.get("detail") or "")
+        last_error = str(status.get("last_error") or "")
+        if pending:
+            label = f"Knowledge: queued {pending} file(s)"
+            card_state, card_text = "busy", f"Queued {pending}"
+        elif mode == "updating":
+            label = "Knowledge: updating changed files"
+            card_state, card_text = "busy", "Updating"
+        elif "error" in mode:
+            label = (
+                "Knowledge: exact update failed"
+                if "exact index" in f"{last_error} {detail}".casefold()
+                else "Knowledge: watcher issue"
+            )
+            card_state, card_text = "warn", last_error or detail or "Watcher issue"
+        elif mode == "polling":
+            label = "Knowledge: watching via polling"
+            card_state, card_text = "ok", "Polling watcher"
+        elif mode == "watching":
+            label = "Knowledge: watching project"
+            card_state, card_text = "ok", "Watching"
+        elif project_index_db_path().exists():
+            label = "Knowledge: index ready"
+            card_state, card_text = "ok", "Index ready"
+        else:
+            label = "Knowledge: index missing"
+            card_state, card_text = "warn", "Index missing"
+        if hasattr(self, "index_status"):
+            self.index_status.setText(label)
+            self.index_status.setToolTip(detail or last_error)
+        self.set_card("knowledge", card_state, card_text[:100])
 
     def start_unreal_daemon_on_startup(self):
         try:
@@ -566,10 +750,10 @@ class MainWindowCoreMixin:
         try:
             idle_minutes = max(
                 1,
-                int(self.settings.get("ollama_idle_unload_minutes", 15) or 15),
+                int(self.settings.get("ollama_idle_unload_minutes", 10) or 10),
             )
         except (TypeError, ValueError):
-            idle_minutes = 15
+            idle_minutes = 10
         if unload_on_idle and time.time() - last_active > idle_minutes * 60:
             if not getattr(self, "ollama_is_idle", False):
                 self.ollama_is_idle = True
@@ -580,10 +764,24 @@ class MainWindowCoreMixin:
                 )
                 def unload():
                     try:
+                        self.stop_mcphost()
+                        if hasattr(self, "mcphost_manager"):
+                            self.mcphost_manager.stop_all()
+                        if hasattr(self, "service") and self.service:
+                            self.service.stop_mcphost()
                         unload_all_ollama_models()
+                        if bool(self.settings.get("ollama_cleanup_model_processes_on_idle", True)):
+                            from tech_connector.services.ollama_service import terminate_orphan_model_runtime_processes
+
+                            terminate_orphan_model_runtime_processes(
+                                include_ollama_server=bool(self.settings.get("ollama_stop_server_on_idle", False))
+                            )
                     except Exception:
                         pass
                 threading.Thread(target=unload, daemon=True).start()
+            return
+
+        if not bool(self.settings.get("ollama_preload_on_startup", False)):
             return
 
         models = list(self.settings.get("ollama_preload_models") or [])
@@ -656,10 +854,12 @@ class MainWindowCoreMixin:
             self.update_dcc_statuses()
             return
         self._dcc_status_polling_started = True
+        self._last_dcc_statuses = {}
+        self._dcc_setup_status_cache = {}
         self.update_dcc_statuses()
         self.status_poll_timer = QTimer(self)
         self.status_poll_timer.timeout.connect(self.update_dcc_statuses)
-        self.status_poll_timer.start(10000)
+        self.status_poll_timer.start(int(self.settings.get("dcc_idle_poll_interval_ms", 30000) or 30000))
 
     def confirm_and_run_first_time_dcc_installers(self):
         pending = pending_first_time_dcc_installers(self.settings)
@@ -738,6 +938,18 @@ class MainWindowCoreMixin:
 
         def run_polling():
             statuses = {}
+            setup_cache_ttl = float(self.settings.get("dcc_setup_cache_seconds", 300) or 300)
+
+            def cached_setup_status(key: str, compute):
+                cache = getattr(self, "_dcc_setup_status_cache", {}) or {}
+                now = time.time()
+                cached_at, cached_value = cache.get(key, (0.0, None))
+                if cached_value is not None and now - float(cached_at or 0.0) < setup_cache_ttl:
+                    return cached_value
+                value = compute()
+                cache[key] = (now, value)
+                self._dcc_setup_status_cache = cache
+                return value
 
             # 1. Maya
             try:
@@ -795,19 +1007,21 @@ class MainWindowCoreMixin:
                     if is_process_running("blender.exe"):
                         statuses["blender"] = ("warn", "Open (Bridge offline)")
                     else:
-                        from installers.install_blender_bridge import (
-                            blender_user_root,
-                            select_versions,
-                            version_needs_install,
-                        )
+                        def compute_blender_setup():
+                            from installers.install_blender_bridge import (
+                                blender_user_root,
+                                select_versions,
+                                version_needs_install,
+                            )
 
-                        root = blender_user_root()
-                        versions = select_versions(root, all_versions=True)
-                        needs_setup = False
-                        for v in versions:
-                            if version_needs_install(root / v):
-                                needs_setup = True
-                                break
+                            root = blender_user_root()
+                            versions = select_versions(root, all_versions=True)
+                            for v in versions:
+                                if version_needs_install(root / v):
+                                    return True
+                            return False
+
+                        needs_setup = cached_setup_status("blender", compute_blender_setup)
                         statuses["blender"] = (
                             ("off", "Setup available")
                             if needs_setup
@@ -850,13 +1064,15 @@ class MainWindowCoreMixin:
                         is_process_running("painter.exe")):
                         statuses["substance_painter"] = ("warn", "Open (Bridge offline)")
                     else:
-                        from tech_connector.bridges.substance_painter.install_substance_painter_bridge import (
-                            default_plugin_dir,
-                            plugin_needs_install,
-                        )
+                        def compute_substance_setup():
+                            from tech_connector.bridges.substance_painter.install_substance_painter_bridge import (
+                                default_plugin_dir,
+                                plugin_needs_install,
+                            )
 
-                        plugin_dir = default_plugin_dir()
-                        if plugin_needs_install(plugin_dir):
+                            return bool(plugin_needs_install(default_plugin_dir()))
+
+                        if cached_setup_status("substance_painter", compute_substance_setup):
                             statuses["substance_painter"] = ("off", "Setup available")
                         else:
                             statuses["substance_painter"] = ("unknown", "Not running")
@@ -886,11 +1102,16 @@ class MainWindowCoreMixin:
         self._dcc_poll_thread.start()
 
     def _apply_dcc_statuses(self, statuses):
+        previous = dict(getattr(self, "_last_dcc_statuses", {}) or {})
+        self._last_dcc_statuses = dict(statuses or {})
         for key, (state, detail) in statuses.items():
-            self.set_card(key, state, detail)
+            if previous.get(key) != (state, detail):
+                self.set_card(key, state, detail)
+        self._update_passive_dcc_poll_interval(statuses)
         unreal_state, unreal_detail = statuses.get("unreal", ("unknown", ""))
-        self.maybe_auto_snapshot_unreal(unreal_state, unreal_detail)
-        self.maybe_auto_reflect_unreal(unreal_state, unreal_detail)
+        if bool(getattr(self, "_startup_background_work_enabled", True)):
+            self.maybe_auto_snapshot_unreal(unreal_state, unreal_detail)
+            self.maybe_auto_reflect_unreal(unreal_state, unreal_detail)
 
         # Check daemon state directly to toggle button
         daemon_active = False
@@ -912,7 +1133,24 @@ class MainWindowCoreMixin:
                 if hasattr(self, "unreal_docs_btn") and self.unreal_docs_btn:
                     self.unreal_docs_btn.setEnabled(False)
 
+    def _update_passive_dcc_poll_interval(self, statuses):
+        timer = getattr(self, "status_poll_timer", None)
+        if timer is None:
+            return
+        values = list((statuses or {}).values())
+        any_connected = any(state == "ok" for state, _detail in values)
+        any_open_offline = any(state == "warn" for state, _detail in values)
+        if any_connected or any_open_offline:
+            target_ms = int(self.settings.get("dcc_active_poll_interval_ms", 10000) or 10000)
+        else:
+            target_ms = int(self.settings.get("dcc_idle_poll_interval_ms", 30000) or 30000)
+        target_ms = max(5000, target_ms)
+        if timer.interval() != target_ms:
+            timer.setInterval(target_ms)
+
     def maybe_auto_snapshot_unreal(self, state, detail):
+        if not bool(self.settings.get("unreal_auto_snapshot_on_connect", False)):
+            return
         if state != "ok":
             self._last_unreal_snapshot_port = None
             return
@@ -954,6 +1192,8 @@ class MainWindowCoreMixin:
             )
 
     def maybe_auto_reflect_unreal(self, state, detail):
+        if not bool(self.settings.get("unreal_auto_reflect_on_connect", False)):
+            return
         if state != "ok":
             self._last_unreal_reflection_port = None
             return
@@ -1185,6 +1425,12 @@ class MainWindowCoreMixin:
         self.show_update_result(title, result)
 
     def ensure_required_models_on_startup(self):
+        if (
+            bool(self.settings.get("ollama_lazy_start", True))
+            and not bool(self.settings.get("ollama_preload_on_startup", False))
+        ):
+            self.set_card("ollama", "off", "Lazy start")
+            return
         if not should_use_local_runtime(self.selected_mcphost_model(), self.settings):
             self.set_card("ollama", "off", "Cloud selected")
             return
@@ -1212,7 +1458,13 @@ class MainWindowCoreMixin:
 
         if not missing:
             self.set_card("ollama", "ok", "Models ready")
-            QTimer.singleShot(1000, warm_required_models_async)
+            if bool(self.settings.get("ollama_preload_on_startup", False)):
+                QTimer.singleShot(1000, warm_required_models_async)
+            return
+
+        if bool(getattr(self, "_preload_for_splash", False)) and not self.isVisible():
+            self._deferred_startup_model_install_missing = list(missing)
+            self.set_card("ollama", "warn", f"Missing {len(missing)} model(s)")
             return
 
         reply = QMessageBox.question(
@@ -1231,6 +1483,13 @@ class MainWindowCoreMixin:
             return
 
         self.show_model_install_dialog(missing)
+
+    def prompt_deferred_startup_model_install(self):
+        missing = getattr(self, "_deferred_startup_model_install_missing", None)
+        if not missing:
+            return
+        self._deferred_startup_model_install_missing = None
+        self.on_required_models_checked(list(missing))
 
     def show_model_install_dialog(self, models):
         self.model_install_dialog = QDialog(self)
@@ -1289,7 +1548,8 @@ class MainWindowCoreMixin:
         )
 
         if ok:
-            QTimer.singleShot(1000, warm_required_models_async)
+            if bool(self.settings.get("ollama_preload_on_startup", False)):
+                QTimer.singleShot(1000, warm_required_models_async)
             QTimer.singleShot(1200, self.model_install_dialog.accept)
 
     def all_roots(self):
@@ -1304,6 +1564,12 @@ class MainWindowCoreMixin:
             return
         if not hasattr(self, "_status_card_states"):
             self._status_card_states = {}
+        previous = self._status_card_states.get(str(key)) or {}
+        if (
+            previous.get("status") == str(state or "unknown")
+            and previous.get("detail") == str(detail or "")
+        ):
+            return
         self._status_card_states[str(key)] = {
             "id": str(key),
             "status": str(state or "unknown"),
@@ -1679,35 +1945,226 @@ class MainWindowCoreMixin:
         self.update_integrations_status_card()
 
     def update_integrations_status_card(self):
-        try:
-            from tech_connector.services.integration_package_service import (
-                ensure_integration_bridge_manifests,
-                summarize_integration_packages,
-            )
+        import threading
 
-            ensure_integration_bridge_manifests()
-            summary = summarize_integration_packages()
-            total = int(summary.get("total") or 0)
-            if not total:
-                self.set_card("integrations", "off", "None")
-                return
-            connected = int(summary.get("connected") or 0)
-            validated = int(summary.get("validated") or 0)
-            trusted = int(summary.get("trusted") or 0)
-            if trusted:
-                state = "ok"
-            elif validated or connected:
-                state = "warn"
-            else:
-                state = "unknown"
-            detail = f"{total} pkg / {validated} validated / {trusted} trusted"
-            if connected and not validated:
-                detail = f"{total} pkg / {connected} connected"
-            self.set_card("integrations", state, detail)
+        if getattr(self, "_integrations_status_thread", None) is not None and self._integrations_status_thread.is_alive():
+            return
+
+        def run():
+            try:
+                from tech_connector.services.integration_package_service import (
+                    ensure_integration_bridge_manifests,
+                    summarize_integration_packages,
+                )
+
+                ensure_integration_bridge_manifests()
+                summary = summarize_integration_packages()
+                total = int(summary.get("total") or 0)
+                if not total:
+                    payload = ("off", "None")
+                else:
+                    connected = int(summary.get("connected") or 0)
+                    validated = int(summary.get("validated") or 0)
+                    trusted = int(summary.get("trusted") or 0)
+                    if trusted:
+                        state = "ok"
+                    elif validated or connected:
+                        state = "warn"
+                    else:
+                        state = "unknown"
+                    detail = f"{total} pkg / {validated} validated / {trusted} trusted"
+                    if connected and not validated:
+                        detail = f"{total} pkg / {connected} connected"
+                    payload = (state, detail)
+            except Exception:
+                payload = ("warn", "Status unavailable")
+
+            try:
+                self.integrations_status_ready.emit(payload)
+            except Exception:
+                pass
+
+        self._integrations_status_thread = threading.Thread(target=run, daemon=True, name="integrations-status-card")
+        self._integrations_status_thread.start()
+
+    def _apply_integrations_status_card(self, payload):
+        try:
+            state, detail = payload
         except Exception:
-            self.set_card("integrations", "warn", "Status unavailable")
+            state, detail = "warn", "Status unavailable"
+        self.set_card("integrations", state, detail)
+
+    def schedule_window_state_save(self):
+        if bool(getattr(self, "_restoring_window_state", False)):
+            return
+        if bool(getattr(self, "_window_state_save_pending", False)):
+            return
+        self._window_state_save_pending = True
+
+        def save_later():
+            self._window_state_save_pending = False
+            self.save_window_state_preferences()
+
+        QTimer.singleShot(750, save_later)
+
+    def _splitter_sizes_for_state(self, attr: str) -> list[int]:
+        splitter = getattr(self, attr, None)
+        if splitter is None or not hasattr(splitter, "sizes"):
+            return []
+        try:
+            return [int(value) for value in splitter.sizes()]
+        except Exception:
+            return []
+
+    def _set_splitter_sizes_from_state(self, attr: str, values) -> None:
+        if not isinstance(values, list) or not values:
+            return
+        splitter = getattr(self, attr, None)
+        if splitter is None or not hasattr(splitter, "setSizes"):
+            return
+        try:
+            sizes = [max(0, int(value)) for value in values]
+        except Exception:
+            return
+        if sizes:
+            splitter.setSizes(sizes)
+
+    def _workspace_visibility_state(self) -> dict:
+        result = {}
+        try:
+            for title in self.workspace_tab_titles():
+                result[str(title)] = bool(self.is_workspace_tab_visible(title))
+        except Exception:
+            pass
+        return result
+
+    def _anchored_workspace_titles(self) -> list[str]:
+        tabs = getattr(self, "workspace_anchor_tabs", None)
+        if tabs is None:
+            return []
+        try:
+            return [tabs.tabText(index) for index in range(tabs.count()) if tabs.tabText(index)]
+        except Exception:
+            return []
+
+    def save_window_state_preferences(self):
+        if not hasattr(self, "settings"):
+            return
+        try:
+            geometry = self.normalGeometry() if (self.isMaximized() or self.isFullScreen()) else self.geometry()
+        except Exception:
+            geometry = self.geometry()
+        state = {
+            "schema": 1,
+            "geometry": {
+                "x": int(geometry.x()),
+                "y": int(geometry.y()),
+                "width": int(geometry.width()),
+                "height": int(geometry.height()),
+            },
+            "maximized": bool(self.isMaximized()),
+            "fullscreen": bool(self.isFullScreen()),
+            "active_workspace": str(self.active_workspace_title() if hasattr(self, "active_workspace_title") else "Chat"),
+            "workspace_visibility": self._workspace_visibility_state(),
+            "anchored_workspace_tabs": self._anchored_workspace_titles(),
+            "splitters": {
+                "main": self._splitter_sizes_for_state("main_splitter"),
+                "workspace_area": self._splitter_sizes_for_state("workspace_area_splitter"),
+                "pipeline_graph": self._splitter_sizes_for_state("wf_graph_splitter"),
+            },
+            "toggles": {},
+        }
+        for key, attr in {
+            "local_only_model": "_chk_local_only",
+            "allow_project_modifications": "_chk_allow_modifications",
+            "require_confirmation": "_chk_require_confirm",
+            "github_tool_search": "_chk_github_search",
+            "show_system_status": "bottom_system_status_toggle_btn",
+        }.items():
+            widget = getattr(self, attr, None)
+            if widget is not None and hasattr(widget, "isChecked"):
+                try:
+                    state["toggles"][key] = bool(widget.isChecked())
+                except Exception:
+                    pass
+        self.settings["window_state"] = state
+        try:
+            if hasattr(self, "service") and self.service:
+                self.service.save_settings(self.settings)
+        except Exception:
+            pass
+
+    def restore_window_state_preferences(self):
+        state = dict((getattr(self, "settings", {}) or {}).get("window_state") or {})
+        if not state:
+            return
+        self._restoring_window_state = True
+        try:
+            geometry = dict(state.get("geometry") or {})
+            width = int(geometry.get("width") or 0)
+            height = int(geometry.get("height") or 0)
+            if width >= 900 and height >= 600:
+                x = int(geometry.get("x") or 0)
+                y = int(geometry.get("y") or 0)
+                self.setGeometry(x, y, width, height)
+
+            splitters = dict(state.get("splitters") or {})
+            self._set_splitter_sizes_from_state("main_splitter", splitters.get("main"))
+            self._set_splitter_sizes_from_state("workspace_area_splitter", splitters.get("workspace_area"))
+            self._set_splitter_sizes_from_state("wf_graph_splitter", splitters.get("pipeline_graph"))
+
+            visibility = dict(state.get("workspace_visibility") or {})
+            for title, visible in visibility.items():
+                if str(title).strip().casefold() == "chat":
+                    visible = True
+                if hasattr(self, "set_workspace_tab_visible"):
+                    self.set_workspace_tab_visible(str(title), bool(visible))
+
+            for title in list(state.get("anchored_workspace_tabs") or []):
+                try:
+                    for index in range(self.workspace_tabs.count()):
+                        if self.workspace_tabs.tabText(index) == title:
+                            self.workspace_anchor_tabs.move_tab_from_container(self.workspace_tabs, index)
+                            break
+                except Exception:
+                    pass
+            if hasattr(self, "_update_workspace_anchor_visibility"):
+                self._update_workspace_anchor_visibility()
+            self._set_splitter_sizes_from_state("workspace_area_splitter", splitters.get("workspace_area"))
+
+            active = str(state.get("active_workspace") or "Chat")
+            if hasattr(self, "workspace_tabs"):
+                for index in range(self.workspace_tabs.count()):
+                    if self.workspace_tabs.tabText(index) == active:
+                        self.workspace_tabs.setCurrentIndex(index)
+                        break
+
+            toggles = dict(state.get("toggles") or {})
+            for key, attr in {
+                "local_only_model": "_chk_local_only",
+                "allow_project_modifications": "_chk_allow_modifications",
+                "require_confirmation": "_chk_require_confirm",
+                "github_tool_search": "_chk_github_search",
+                "show_system_status": "bottom_system_status_toggle_btn",
+            }.items():
+                widget = getattr(self, attr, None)
+                if key in toggles and widget is not None and hasattr(widget, "setChecked"):
+                    widget.setChecked(bool(toggles[key]))
+
+            if bool(state.get("fullscreen")):
+                self._restore_window_show_mode = "fullscreen"
+            elif bool(state.get("maximized")):
+                self._restore_window_show_mode = "maximized"
+        except Exception as exc:
+            print(f"[UI] Window state restore failed: {exc}", flush=True)
+        finally:
+            self._restoring_window_state = False
 
     def closeEvent(self, event):
+        try:
+            self.save_window_state_preferences()
+        except Exception:
+            pass
         if hasattr(self, "intel_service") and self.intel_service:
             try:
                 self.intel_service.stop_daemon()
@@ -1728,7 +2185,7 @@ class MainWindowCoreMixin:
             try:
                 from tech_connector.services.ollama_service import unload_all_ollama_models
 
-                if bool(self.settings.get("ollama_unload_all_on_exit", False)):
+                if bool(self.settings.get("ollama_unload_all_on_exit", True)):
                     unload_all_ollama_models()
                 else:
                     if hasattr(self, "mcphost_manager"):
@@ -1817,6 +2274,8 @@ class MainWindowCoreMixin:
 
         Ctrl+S: save current file
         Ctrl+T: trim trailing spaces
+        Ctrl+Alt+L: reformat current file
+        Alt+Enter: apply safe fixes for current file
         Ctrl+F: find in current file
         Ctrl+B: find uses in current file
         Ctrl+N: find uses in project
@@ -1844,6 +2303,8 @@ class MainWindowCoreMixin:
 
             _bind("shortcut_save_file_final", "Ctrl+S", "save_current_file")
             _bind("shortcut_trim_spaces_final", "Ctrl+T", "trim_trailing_spaces")
+            _bind("shortcut_reformat_file_final", "Ctrl+Alt+L", "reformat_current_editor_file")
+            _bind("shortcut_fix_issues_final", "Alt+Enter", "fix_current_editor_quality_issues")
             _bind("shortcut_find_file_final", "Ctrl+F", "find_in_current_file_from_shortcut")
             _bind("shortcut_file_uses_final", "Ctrl+B", "find_uses_in_current_file_from_shortcut")
             _bind("shortcut_project_uses_final", "Ctrl+N", "find_uses_in_project_from_shortcut")
@@ -1853,7 +2314,7 @@ class MainWindowCoreMixin:
                 app.installEventFilter(self)
 
             if hasattr(self, "append"):
-                self.append("\n[Editor Hotkeys] Installed: Ctrl+S Save, Ctrl+T Trim Spaces, Ctrl+F Find, Ctrl+B Uses in File, Ctrl+N Uses in Project.\n")
+                self.append("\n[Editor Hotkeys] Installed: Ctrl+S Save, Ctrl+Alt+L Reformat, Alt+Enter Fix Issues, Ctrl+T Trim Spaces, Ctrl+F Find, Ctrl+B Uses in File, Ctrl+N Uses in Project.\n")
         except Exception as exc:
             if hasattr(self, "append"):
                 self.append(f"\n[Editor Hotkeys] install failed: {exc}\n")
@@ -1882,8 +2343,13 @@ class MainWindowCoreMixin:
                 Qt.Key_B: "find_uses_in_current_file_from_shortcut",
                 Qt.Key_N: "find_uses_in_project_from_shortcut",
             }.get(key)
+            if key == Qt.Key_L and (modifiers & Qt.AltModifier):
+                route = "reformat_current_editor_file"
             if not route:
-                return False
+                if key in (Qt.Key_Return, Qt.Key_Enter) and (modifiers & Qt.AltModifier):
+                    route = "fix_current_editor_quality_issues"
+                if not route:
+                    return False
             callback = getattr(self, route, None)
             if callable(callback):
                 callback()

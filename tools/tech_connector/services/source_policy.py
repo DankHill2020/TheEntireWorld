@@ -29,6 +29,8 @@ Research mode:
 DCC_ENGINE_GROUNDING_POLICY = """
 DCC / engine development grounding:
 - For Unreal, Maya, Blender, Houdini, MotionBuilder, Substance Painter, Unity, or other host-app development, never invent an API, command, node, plugin, asset path, or execution workflow when local project knowledge cannot verify it.
+- REAL EXECUTABLE DCC LOGIC: All UI handlers and functions targeting host DCCs MUST call real, functional DCC Python APIs (e.g. `unreal.EditorAssetLibrary`, `unreal.EditorUtilityLibrary.rename_asset`, `maya.cmds.rename`). Never use print() statements or mock loops as a substitute for real DCC operations.
+- CROSS-DCC BRIDGE MANDATE: Multi-DCC tools spanning multiple applications (e.g. Unreal + Maya) MUST NOT mix direct inline calls to mutually exclusive DCC modules (`unreal` and `maya.cmds`) in the same execution thread. Cross-DCC workflows MUST use project DCC bridges (`tech_connector.bridges.host_bridge` or socket/RPC bridge adapters) to dispatch commands safely across host processes.
 - First use local bridge capabilities, registered operations, indexed project code, ingested tools, and host snapshots.
 - If the needed host API/tool/workflow is not known locally and live sources are enabled, search official docs or primary repositories before proposing or executing a solution.
 - If live sources are disabled or the user cancels search, stop and say what is missing instead of fabricating a plausible implementation.

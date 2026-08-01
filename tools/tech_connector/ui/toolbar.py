@@ -9,6 +9,11 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from tech_connector.models.constants import DEFAULT_CONFIGS, DEFAULT_MODEL
+from tech_connector.services.model_provider_service import (
+    PROVIDER_ORDER,
+    PROVIDERS,
+    provider_for_model,
+)
 from tech_connector.services.settings_service import best_config
 
 
@@ -46,12 +51,32 @@ def build_compact_toolbar(window) -> QWidget:
     window.model_source_mode_box.currentIndexChanged.connect(window.on_model_source_mode_changed)
     controls.addWidget(window.model_source_mode_box)
 
+    selected = window.settings.get("model", DEFAULT_MODEL)
+    controls.addWidget(QLabel("Provider:"))
+    window.model_provider_box = QComboBox()
+    for provider_id in PROVIDER_ORDER:
+        window.model_provider_box.addItem(
+            PROVIDERS[provider_id].display_name,
+            provider_id,
+        )
+    provider_index = window.model_provider_box.findData(provider_for_model(selected))
+    if provider_index >= 0:
+        window.model_provider_box.setCurrentIndex(provider_index)
+    controls.addWidget(window.model_provider_box)
+
     controls.addWidget(QLabel("Model:"))
     window.model_box = QComboBox()
-    window.model_box.setEditable(True)
-    selected = window.settings.get("model", DEFAULT_MODEL)
-    window.model_box.addItem(f"Saved - {selected}", selected)
+    window.model_box.setEditable(False)
+    window._local_model_options = [("Saved", selected), ("Default", DEFAULT_MODEL)]
+    window._installed_ollama_models = []
+    window.refresh_model_options_for_provider(
+        window.model_provider_box.currentData(),
+        selected_model=selected,
+    )
     window.model_box.currentIndexChanged.connect(window.on_model_changed)
+    window.model_provider_box.currentIndexChanged.connect(
+        window.on_model_provider_changed
+    )
     controls.addWidget(window.model_box, 2)
 
     controls.addWidget(QLabel("Config:"))

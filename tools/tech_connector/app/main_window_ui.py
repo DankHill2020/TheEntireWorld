@@ -4,9 +4,9 @@
 import sys
 from pathlib import Path
 
-_ROOT = next(candidate for candidate in Path(__file__).resolve().parents if candidate.name.lower() == "tools")
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from tech_connector.path_bootstrap import ensure_tools_root_on_path
+
+ensure_tools_root_on_path(__file__)
 
 from PySide6.QtCore import QRect, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
@@ -68,7 +68,9 @@ from tech_connector.models.constants import (
 )
 
 from tech_connector.services.model_provider_service import (
+    PROVIDER_ORDER,
     PROVIDERS,
+    provider_for_model,
 )
 from tech_connector.services.ollama_service import (
     AI_MODELS,
@@ -168,6 +170,27 @@ class MainWindowUiMixin:
         self.model_source_mode_box.setFixedWidth(180)
         controls.addWidget(self.model_source_mode_box)
 
+        selected_model = self.settings.get("model", DEFAULT_MODEL)
+
+        provider_label = QLabel("Provider:")
+        provider_label.setFixedWidth(58)
+        provider_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        controls.addWidget(provider_label)
+        self.model_provider_box = QComboBox()
+        for provider_id in PROVIDER_ORDER:
+            self.model_provider_box.addItem(PROVIDERS[provider_id].display_name, provider_id)
+        provider_index = self.model_provider_box.findData(
+            provider_for_model(selected_model)
+        )
+        if provider_index >= 0:
+            self.model_provider_box.setCurrentIndex(provider_index)
+        self.model_provider_box.setToolTip(
+            "Choose Local, OpenAI, X, Google, or Anthropic. "
+            "The model list only shows models from this provider."
+        )
+        self.model_provider_box.setFixedWidth(112)
+        controls.addWidget(self.model_provider_box)
+
         model_label = QLabel("Model:")
         model_label.setFixedWidth(52)
         model_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -176,32 +199,20 @@ class MainWindowUiMixin:
         self.model_box.setEditable(False)
 
         self._seen_models = set()
-        selected_model = self.settings.get("model", DEFAULT_MODEL)
-        self.add_model_option(
-            "General", as_mcphost_model(AI_MODELS["plan"]), self._seen_models
+        self._installed_ollama_models = []
+        self._local_model_options = [
+            ("Planning", as_mcphost_model(AI_MODELS["plan"])),
+            ("Code 7B", as_mcphost_model(AI_MODELS["code"])),
+            ("DCC", as_mcphost_model(AI_MODELS["dcc"])),
+            ("Mechanical 3B", "ollama:qwen2.5-coder:3b"),
+            ("Fallback Gen", as_mcphost_model(FALLBACK_GENERAL_MODEL)),
+            ("Fallback Code", as_mcphost_model(FALLBACK_CODE_MODEL)),
+            ("Default", DEFAULT_MODEL),
+        ]
+        self.refresh_model_options_for_provider(
+            self.model_provider_box.currentData(),
+            selected_model=selected_model,
         )
-        self.add_model_option(
-            "Code", as_mcphost_model(AI_MODELS["code"]), self._seen_models
-        )
-        self.add_model_option(
-            "DCC", as_mcphost_model(AI_MODELS["dcc"]), self._seen_models
-        )
-        self.add_model_option("Deep Unreal", "ollama:qwen3:14b", self._seen_models)
-        self.add_model_option("Experimental 30B", "ollama:qwen3:30b", self._seen_models)
-        self.add_model_option(
-            "Fallback Gen", as_mcphost_model(FALLBACK_GENERAL_MODEL), self._seen_models
-        )
-        self.add_model_option(
-            "Fallback Code", as_mcphost_model(FALLBACK_CODE_MODEL), self._seen_models
-        )
-        self.add_model_option("Saved Manual", selected_model, self._seen_models)
-        self.add_model_option("Default", DEFAULT_MODEL, self._seen_models)
-        self.add_model_option("Small Fast", "ollama:qwen2.5:7b", self._seen_models)
-        for provider in PROVIDERS.values():
-            if provider.id == "ollama":
-                continue
-            for model in provider.example_models:
-                self.add_model_option(provider.display_name, model, self._seen_models)
 
         # Dynamic Ollama Installed Models - Non-blocking
         self.dynamic_models_loaded.connect(self._on_dynamic_models_loaded)
@@ -225,6 +236,9 @@ class MainWindowUiMixin:
                 self.model_box.setCurrentIndex(i)
                 break
         self.model_box.currentIndexChanged.connect(self.on_model_changed)
+        self.model_provider_box.currentIndexChanged.connect(
+            self.on_model_provider_changed
+        )
         self.model_box.setMinimumWidth(360)
         self.model_box.setMaximumWidth(560)
         controls.addWidget(self.model_box, 1)
@@ -648,6 +662,9 @@ class MainWindowUiMixin:
         self.workspace_tabs.tabActivated.connect(self.on_workspace_tab_activated)
         self.workspace_tabs.tabVisibilityChanged.connect(lambda *_args: self.schedule_unified_prompt_context_label_update())
         self.workspace_tabs.tabDetachedChanged.connect(lambda *_args: self.schedule_unified_prompt_context_label_update())
+        self.workspace_tabs.currentChanged.connect(lambda *_args: self.schedule_window_state_save())
+        self.workspace_tabs.tabVisibilityChanged.connect(lambda *_args: self.schedule_window_state_save())
+        self.workspace_tabs.tabDetachedChanged.connect(lambda *_args: self.schedule_window_state_save())
         self.workspace_tabs.containerEmptied.connect(lambda _container: self._update_workspace_anchor_visibility())
 
         self.workspace_anchor_tabs = DetachableTabWidget(
@@ -657,6 +674,9 @@ class MainWindowUiMixin:
         )
         self.workspace_anchor_tabs.setToolTip("Anchored feature tabs. Drag compatible feature tabs here or use Window > Anchor Current Tab Right.")
         self.workspace_anchor_tabs.tabActivated.connect(self.on_workspace_tab_activated)
+        self.workspace_anchor_tabs.tabActivated.connect(lambda *_args: self.schedule_window_state_save())
+        self.workspace_anchor_tabs.tabVisibilityChanged.connect(lambda *_args: self.schedule_window_state_save())
+        self.workspace_anchor_tabs.tabDetachedChanged.connect(lambda *_args: self.schedule_window_state_save())
         self.workspace_anchor_tabs.containerEmptied.connect(lambda _container: self._update_workspace_anchor_visibility())
         self.workspace_anchor_close_btn = QPushButton("Close")
         self.workspace_anchor_close_btn.setToolTip("Move anchored tabs back to the main feature tab container")
@@ -696,6 +716,14 @@ class MainWindowUiMixin:
         self.copy_thread_header_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
         self.copy_thread_header_btn.clicked.connect(self.copy_full_log)
         chat_top.addWidget(self.copy_thread_header_btn)
+
+        self.full_thread_header_btn = QPushButton("Full Thread")
+        self.full_thread_header_btn.setToolTip(
+            "View the complete canonical conversation, including messages outside the recent render window"
+        )
+        self.full_thread_header_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.full_thread_header_btn.clicked.connect(self.show_full_thread)
+        chat_top.addWidget(self.full_thread_header_btn)
 
         self.undo_header_btn = QPushButton("↩️ Undo Last Change")
         self.undo_header_btn.setStyleSheet(
@@ -806,6 +834,21 @@ class MainWindowUiMixin:
         self.save_file_btn.clicked.connect(self.save_code_file)
         editor_tools.addWidget(self.save_file_btn)
 
+        self.editor_analyze_btn = QPushButton("Analyze")
+        self.editor_analyze_btn.setToolTip("Run Python syntax, style, and standards checks for the current file.")
+        self.editor_analyze_btn.clicked.connect(self.analyze_current_editor_file)
+        editor_tools.addWidget(self.editor_analyze_btn)
+
+        self.editor_reformat_btn = QPushButton("Reformat")
+        self.editor_reformat_btn.setToolTip("Reformat the current Python file. Uses Black when available; otherwise fixes whitespace/indentation basics.")
+        self.editor_reformat_btn.clicked.connect(self.reformat_current_editor_file)
+        editor_tools.addWidget(self.editor_reformat_btn)
+
+        self.editor_fix_btn = QPushButton("Fix Issues")
+        self.editor_fix_btn.setToolTip("Apply safe automated code-quality fixes. Uses Ruff when available, then formatting cleanup.")
+        self.editor_fix_btn.clicked.connect(self.fix_current_editor_quality_issues)
+        editor_tools.addWidget(self.editor_fix_btn)
+
         self.editor_fullscreen_btn = QPushButton("Full Screen")
         self.editor_fullscreen_btn.setVisible(False)
 
@@ -868,6 +911,14 @@ class MainWindowUiMixin:
 
         self.editor_status_label = QLabel("Line 1, Col 1")
         normal_layout.addWidget(self.editor_status_label)
+
+        self.editor_problems_list = QListWidget()
+        self.editor_problems_list.setMaximumHeight(96)
+        self.editor_problems_list.setAlternatingRowColors(True)
+        self.editor_problems_list.setToolTip("Python problems and style warnings. Double-click a row to jump to the line.")
+        self.editor_problems_list.itemDoubleClicked.connect(self.jump_to_editor_problem_item)
+        self.editor_problems_list.setVisible(False)
+        normal_layout.addWidget(self.editor_problems_list)
 
         # The old editor-specific prompt row has been collapsed into the single
         # global Ask line at the bottom of the window. These widgets remain as
@@ -990,12 +1041,18 @@ class MainWindowUiMixin:
         left_wf_layout.addWidget(QLabel("Name:"))
         self.wf_build_name = QLineEdit()
         self.wf_build_name.setPlaceholderText("e.g. character_exporter")
+        self.wf_build_name.textEdited.connect(
+            lambda text: self._mark_pipeline_metadata_user_edited("name", text)
+        )
         self.wf_build_name.textChanged.connect(self.update_builder_code_preview)
         left_wf_layout.addWidget(self.wf_build_name)
 
         left_wf_layout.addWidget(QLabel("Pipeline Goal / Description:"))
         self.wf_build_goal = QLineEdit()
         self.wf_build_goal.setPlaceholderText("Describe the goal of this pipeline...")
+        self.wf_build_goal.textEdited.connect(
+            lambda text: self._mark_pipeline_metadata_user_edited("goal", text)
+        )
         self.wf_build_goal.textChanged.connect(self.update_builder_code_preview)
         left_wf_layout.addWidget(self.wf_build_goal)
 
@@ -1327,6 +1384,7 @@ class MainWindowUiMixin:
         graph_splitter.addWidget(self.wf_node_view)
         graph_splitter.addWidget(self.wf_attribute_editor)
         graph_splitter.setSizes([820, 260])
+        graph_splitter.splitterMoved.connect(lambda *_args: self.schedule_window_state_save())
         graph_mode_layout.addWidget(graph_splitter, 1)
 
         try:
@@ -1337,10 +1395,18 @@ class MainWindowUiMixin:
             self.wf_node_view.literalChanged.connect(self._handle_pipeline_attribute_literal_changed)
             self.wf_node_view.nodeDeleted.connect(self._handle_pipeline_node_deleted)
             self.wf_node_view.toolNodeRequested.connect(lambda symbol: self.add_builder_step(custom_sym=symbol))
-            self.wf_node_view.graphInteractionRequested.connect(self.ensure_pipeline_graph_interaction_ready)
             self.wf_node_view.statusMessage.connect(self._report_workflow_builder_event)
         except Exception:
             pass
+        try:
+            self.wf_node_view.graphInteractionRequested.connect(
+                self.ensure_pipeline_graph_interaction_ready
+            )
+            self._refresh_pipeline_node_view_tool_symbols()
+        except Exception as exc:
+            self._report_workflow_builder_event(
+                f"Could not connect graph tool inventory: {exc}"
+            )
         try:
             self._wire_pipeline_attribute_editor_once()
         except Exception:
@@ -1417,6 +1483,7 @@ class MainWindowUiMixin:
         self.workspace_area_splitter.addWidget(self.workspace_tabs)
         self.workspace_area_splitter.addWidget(self.workspace_anchor_tabs)
         self.workspace_area_splitter.setSizes([1000, 0])
+        self.workspace_area_splitter.splitterMoved.connect(lambda *_args: self.schedule_window_state_save())
         main_layout.addWidget(self.workspace_area_splitter, 1)
         QTimer.singleShot(0, self.install_editor_navigation_hotkeys)
 
@@ -1498,377 +1565,6 @@ class MainWindowUiMixin:
         self.workflow_action_btn.setMenu(self.add_editor_answer_workflow_menu)
         self.add_editor_answer_workflow_btn = self.workflow_action_btn
 
-        tools_menu_btn = QToolButton()
-        tools_menu_btn.setText("Tools")
-        tools_menu_btn.setToolTip("Open Tech Connector tools, connected applications, community tools, diagnostics, and updates.")
-        tools_menu_btn.setPopupMode(QToolButton.InstantPopup)
-        tools_menu = QMenu(tools_menu_btn)
-
-        studio_menu = tools_menu.addMenu("Tech Connector Tools")
-        studio_menu.addAction("Settings", self.show_settings_dialog)
-        studio_menu.addAction("Health Check", self.health_check)
-        studio_menu.addAction("Start MCPHost", self.start_mcphost)
-        studio_menu.addAction("Stop MCPHost", self.stop_mcphost)
-        studio_menu.addAction("Prime Models", lambda: self.send_raw(PRIME_PROMPT, "Prime"))
-        studio_menu.addAction("Add Missing Docstrings", self.add_docstrings_to_current_file)
-
-        safety_menu = tools_menu.addMenu("Model & Safety")  # settings-style shortcuts
-        safety_menu.addAction("Open Settings", self.show_settings_dialog)
-        local_only_action = safety_menu.addAction("Local model only")
-        local_only_action.setCheckable(True)
-        local_only_action.setChecked(getattr(self, "_chk_local_only", None).isChecked() if getattr(self, "_chk_local_only", None) else False)
-        local_only_action.toggled.connect(lambda checked: self._chk_local_only.setChecked(checked) if getattr(self, "_chk_local_only", None) else None)
-        allow_better_action = safety_menu.addAction("Allow better model for complex tasks")
-        allow_better_action.setCheckable(True)
-        allow_better_action.setChecked(getattr(self, "_chk_allow_better", None).isChecked() if getattr(self, "_chk_allow_better", None) else True)
-        allow_better_action.toggled.connect(lambda checked: self._chk_allow_better.setChecked(checked) if getattr(self, "_chk_allow_better", None) else None)
-        allow_mods_action = safety_menu.addAction("Allow project modifications")
-        allow_mods_action.setCheckable(True)
-        allow_mods_action.setChecked(getattr(self, "_chk_allow_modifications", None).isChecked() if getattr(self, "_chk_allow_modifications", None) else True)
-        allow_mods_action.toggled.connect(lambda checked: self._chk_allow_modifications.setChecked(checked) if getattr(self, "_chk_allow_modifications", None) else None)
-        require_confirm_action = safety_menu.addAction("Require confirmation before changes")
-        require_confirm_action.setCheckable(True)
-        require_confirm_action.setChecked(getattr(self, "_chk_require_confirm", None).isChecked() if getattr(self, "_chk_require_confirm", None) else True)
-        require_confirm_action.toggled.connect(lambda checked: self._chk_require_confirm.setChecked(checked) if getattr(self, "_chk_require_confirm", None) else None)
-        github_search_action = safety_menu.addAction("Allow GitHub / Community Tool Search")
-        github_search_action.setCheckable(True)
-        github_search_action.setChecked(getattr(self, "_chk_github_search", None).isChecked() if getattr(self, "_chk_github_search", None) else False)
-        github_search_action.toggled.connect(lambda checked: self._chk_github_search.setChecked(checked) if getattr(self, "_chk_github_search", None) else None)
-
-        knowledge_menu = tools_menu.addMenu("Knowledge")
-        knowledge_menu.addAction("/tools", lambda: self.send_raw("/tools", "/tools"))
-        knowledge_menu.addAction(
-            "Index Stats",
-            lambda: self.send_raw(
-                "Call knowledge__index_stats and show the raw response.", "Index Stats"
-            ),
-        )
-        knowledge_menu.addAction(
-            "Symbol Search",
-            lambda: self.send_raw(
-                'Call knowledge__symbol_search with query "brow eyebrow facial rig" domain "maya_tools" '
-                "max_results 20 include_source false. Show raw results first.",
-                "Symbol Search",
-            ),
-        )
-        knowledge_menu.addAction(
-            "Read Symbol",
-            lambda: self.send_raw(
-                'Call knowledge__read_symbol_source with name "create_brow_main_setup" domain "maya_tools" '
-                "max_results 5. Show raw results first.",
-                "Read Symbol",
-            ),
-        )
-        knowledge_menu.addAction(
-            "Find Callers",
-            lambda: self.send_raw(
-                'Call knowledge__find_callers with call_name "create_brow_main_setup" domain "maya_tools" '
-                "max_results 20. Show raw results first.",
-                "Find Callers",
-            ),
-        )
-
-        community_menu = tools_menu.addMenu("Community Tools")
-        community_menu.setToolTip("Discover, install, share, and launch tools created outside the Tech Connector core. Community Tools can come from GitHub, local folders, or other developers and can be used in projects and pipelines.")
-        community_menu.addAction("Browse / Import from GitHub...", self.trigger_web_import)
-        community_menu.addAction("Install Local Tool...", self.trigger_web_import)
-        community_menu.addAction("Add Integration Package...", self.show_add_integration_package_dialog)
-        community_menu.addAction("Installed Community Tools", self.trigger_web_import)
-        tools_menu.addAction("VCS Accounts / Login", self.show_vcs_accounts_dialog)
-        tools_menu.addAction("Backend Operation Log...", self.show_backend_log_dialog)
-        diagnostic_mode_action = tools_menu.addAction("UI Diagnostic Mode")
-        diagnostic_mode_action.setCheckable(True)
-        diagnostic_mode_action.setChecked(bool(self.settings.get("ui_diagnostic_mode", False)))
-        diagnostic_mode_action.toggled.connect(self.set_ui_diagnostic_mode)
-        tools_menu.addAction("Show UI Diagnostic Report...", self.show_ui_diagnostic_report)
-        tools_menu.addAction("Clear UI Diagnostic Report", self.clear_ui_diagnostic_report)
-        tools_menu.addAction(
-            "Create Changelist from Updated Files...",
-            self.create_vcs_changelist_dialog,
-        )
-        tools_menu.addAction(
-            "View Current Changelists...",
-            self.show_vcs_changelists_dialog,
-        )
-        tools_menu.addAction(
-            "Lock AI Knowledge Snapshot", self.lock_ai_knowledge_snapshot
-        )
-        tools_menu.addAction(
-            "Show AI Knowledge Summary", self.show_ai_knowledge_summary
-        )
-
-        auto_checkout_action = tools_menu.addAction("Auto Checkout on Change")
-        auto_checkout_action.setCheckable(True)
-        auto_checkout_action.setChecked(
-            self.settings.get("auto_checkout_on_change", True)
-        )
-        auto_checkout_action.toggled.connect(self.toggle_auto_checkout)
-
-        provider_menu = tools_menu.addMenu("Model Providers")
-        provider_menu.addAction(
-            "Setup Notes", lambda: self.show_model_provider_setup("openai")
-        )
-        for provider_id, provider in PROVIDERS.items():
-            if provider_id == "ollama":
-                continue
-            label = f"Open {provider.display_name} Setup"
-            provider_menu.addAction(
-                label,
-                lambda _checked=False, p=provider_id: self.open_model_provider_setup(p),
-            )
-
-        updates_menu = tools_menu.addMenu("App Updates")
-        tools_menu.addSeparator()
-
-        dcc_menu = tools_menu.addMenu("Connected Applications")
-        dcc_menu.setToolTip("Direct connections to external creative and development applications that Tech Connector can inspect, control, or automate.")
-        dcc_group = dcc_menu.addMenu("DCC")
-        engine_group = dcc_menu.addMenu("Engine")
-        ops_group = dcc_menu.addMenu("Ops")
-        messaging_group = dcc_menu.addMenu("Messaging")
-        dcc_menu.addAction("Capability Status...", self.show_connected_application_status_dialog)
-        ops_group.addAction("Add Integration Package...", self.show_add_integration_package_dialog)
-        ops_group.addAction("GitHub Login...", self.show_github_login_dialog)
-        ops_group.addAction("Notification Outputs...", self.show_notification_outputs_dialog)
-        ops_group.addAction("Atlassian Settings...", self.show_atlassian_settings_dialog)
-        ops_group.addAction("Create Jira Task from Prompt...", self.show_create_jira_task_from_prompt_dialog)
-        ops_group.addAction("Upload to Confluence...", self.show_upload_to_confluence_dialog)
-        ops_group.addAction("Backend Operation Log...", self.show_backend_log_dialog)
-        messaging_group.addAction("Add Messaging Integration...", self.show_add_integration_package_dialog)
-        messaging_group.addAction("Slack Login...", self.show_slack_login_dialog)
-        messaging_group.addAction("Discord Login...", self.show_discord_login_dialog)
-        messaging_group.addAction("Notification Outputs...", self.show_notification_outputs_dialog)
-
-        maya = self.command_router.maya
-        maya_menu = dcc_group.addMenu("Maya")
-        maya_menu.addAction("Open Maya", self.launch_maya)
-        maya_menu.addSeparator()
-        maya_menu.addAction("Selection", self.direct_maya_selection)
-        maya_menu.addAction("Current File", self.direct_maya_file)
-        maya_menu.addAction("Scene Objects", self.direct_maya_scene_objects)
-        maya_menu.addAction(
-            "Debug Scene / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "maya",
-                "debug",
-                self.input.text().strip()
-                or "Maya debug current scene and tell me what is broken",
-            ),
-        )
-        maya_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "maya",
-                "prototype",
-                self.input.text().strip()
-                or "Maya prototype a scene tool using current selection",
-            ),
-        )
-        maya_menu.addAction("Call / Execute", self.direct_maya_call_from_text)
-        maya_menu.addAction("Undo Last Command", self.direct_maya_undo)
-
-        unreal_menu = engine_group.addMenu("Unreal Engine")
-        unreal_menu.addAction("Open Unreal Engine", self.launch_unreal)
-        unreal_menu.addSeparator()
-        unreal_menu.addAction("Start / Stop Unreal Indexer", self.toggle_unreal_daemon)
-        unreal_menu.addAction("Scan Project", self.trigger_daemon_scan)
-        unreal_menu.addAction("Index Unreal Docs", self.refresh_unreal_docs_cache)
-        unreal_menu.addSeparator()
-        unreal_menu.addAction("Project Snapshot", self.direct_unreal_project_snapshot)
-        unreal_menu.addAction("Project Asset Scan", self.direct_unreal_project_scan)
-        unreal_menu.addAction(
-            "Debug Project / Find Broken",
-            lambda: self.direct_unreal_debug_from_text(
-                self.input.text().strip()
-                or "Unreal debug full project and tell me what is broken"
-            ),
-        )
-        unreal_menu.addAction("Loaded Level Scan", self.direct_unreal_level_scan)
-        unreal_menu.addAction(
-            "Inspect Asset / Blueprint", self.direct_unreal_inspect_asset_from_text
-        )
-        unreal_menu.addAction(
-            "Create Python Wrapper from C++",
-            self.direct_unreal_create_cpp_wrapper_from_text,
-        )
-        unreal_menu.addAction("Skeletons", self.direct_unreal_get_skeletons)
-        unreal_menu.addAction("Meshes", self.direct_unreal_get_static_meshes)
-        unreal_menu.addAction(
-            "Show Safe Operation Catalog", self.show_unreal_operation_catalog
-        )
-        unreal_menu.addAction(
-            "Capability Validation", self.show_unreal_capability_validation
-        )
-        unreal_menu.addAction("Call Function", self.direct_unreal_call_from_text)
-        unreal_menu.addAction("Undo Last Command", self.direct_unreal_undo)
-
-        blender_menu = dcc_group.addMenu("Blender")
-        blender_menu.addAction("Open Blender", self.launch_blender)
-        blender_menu.addSeparator()
-        blender_menu.addAction(
-            "Install Startup Bridge", self.install_blender_bridge_from_menu
-        )
-        blender_menu.addAction(
-            "Copy Script Editor Setup Snippet", self.copy_blender_script_editor_setup
-        )
-        blender_menu.addSeparator()
-        blender_menu.addAction("Selection", self.direct_blender_selection)
-        blender_menu.addAction("Current File", self.direct_blender_file)
-        blender_menu.addAction("Scene Objects", self.direct_blender_scene_objects)
-        blender_menu.addAction(
-            "Debug Scene / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "blender",
-                "debug",
-                self.input.text().strip()
-                or "Blender debug current scene and tell me what is broken",
-            ),
-        )
-        blender_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "blender",
-                "prototype",
-                self.input.text().strip()
-                or "Blender prototype a scene tool using current selection",
-            ),
-        )
-        blender_menu.addAction("Call / Execute", self.direct_blender_call_from_text)
-        blender_menu.addAction("Undo Last Command", self.direct_blender_undo)
-
-        houdini_menu = dcc_group.addMenu("Houdini")
-        houdini_menu.addAction("Open Houdini", self.launch_houdini)
-        houdini_menu.addSeparator()
-        houdini_menu.addAction("Selection", self.direct_houdini_selection)
-        houdini_menu.addAction("Current File", self.direct_houdini_file)
-        houdini_menu.addAction("Scene Nodes", self.direct_houdini_scene_objects)
-        houdini_menu.addAction("Context Summary", self.direct_houdini_context_summary)
-        houdini_menu.addAction(
-            "Debug Scene / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "houdini",
-                "debug",
-                self.input.text().strip()
-                or "Houdini debug current scene and tell me what is broken",
-            ),
-        )
-        houdini_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "houdini",
-                "prototype",
-                self.input.text().strip()
-                or "Houdini prototype a procedural node network using current selection",
-            ),
-        )
-        houdini_menu.addAction("Call / Execute", self.direct_houdini_call_from_text)
-        houdini_menu.addAction("Undo Last Command", self.direct_houdini_undo)
-
-        substance_menu = dcc_group.addMenu("Substance Painter")
-        substance_menu.addAction("Open Substance Painter", self.launch_substance_painter)
-        substance_menu.addSeparator()
-        substance_menu.addAction(
-            "Install Startup Bridge", self.install_substance_painter_bridge_from_menu
-        )
-        substance_menu.addAction(
-            "Copy Script Editor Setup Snippet",
-            self.copy_substance_painter_script_editor_setup,
-        )
-        substance_menu.addSeparator()
-        substance_menu.addAction("Project File", self.direct_substance_painter_project)
-        substance_menu.addAction("Project Status", self.direct_substance_painter_status)
-        substance_menu.addAction(
-            "Texture Sets", self.direct_substance_painter_texture_sets
-        )
-        substance_menu.addAction(
-            "Debug Project / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "substance_painter",
-                "debug",
-                self.input.text().strip()
-                or "Substance Painter debug current project and tell me what is broken",
-            ),
-        )
-        substance_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "substance_painter",
-                "prototype",
-                self.input.text().strip()
-                or "Substance Painter prototype a material or texture pipeline",
-            ),
-        )
-        substance_menu.addAction(
-            "Call / Execute", self.direct_substance_painter_call_from_text
-        )
-        substance_menu.addAction(
-            "Undo Last Command", self.direct_substance_painter_undo
-        )
-
-        unity_menu = engine_group.addMenu("Unity")
-        unity_menu.addAction("Open Unity", self.launch_unity)
-        unity_menu.addSeparator()
-        unity_menu.addAction("Selection", self.direct_unity_selection)
-        unity_menu.addAction("Current Scene", self.direct_unity_scene)
-        unity_menu.addAction("Scene GameObjects", self.direct_unity_scene_objects)
-        unity_menu.addAction(
-            "Debug Project / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "unity",
-                "debug",
-                self.input.text().strip()
-                or "Unity debug current project and tell me what is broken",
-            ),
-        )
-        unity_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "unity",
-                "prototype",
-                self.input.text().strip()
-                or "Unity prototype a gameplay feature using current scene",
-            ),
-        )
-        unity_menu.addAction("Call / Execute", self.direct_unity_call_from_text)
-        unity_menu.addAction("Undo Last Command", self.direct_unity_undo)
-
-        mobu_menu = dcc_group.addMenu("MotionBuilder")
-        mobu_menu.addAction("Open MotionBuilder", self.launch_motionbuilder)
-        mobu_menu.addSeparator()
-        mobu_menu.addAction("Selection", self.direct_motionbuilder_selection)
-        mobu_menu.addAction("Current File", self.direct_motionbuilder_file)
-        mobu_menu.addAction("Scene Objects", self.direct_motionbuilder_scene_objects)
-        mobu_menu.addAction("Takes", self.direct_motionbuilder_takes)
-        mobu_menu.addAction("Characters", self.direct_motionbuilder_characters)
-        mobu_menu.addAction(
-            "Context Summary", self.direct_motionbuilder_context_summary
-        )
-        mobu_menu.addAction(
-            "Debug Scene / Find Broken",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "motionbuilder",
-                "debug",
-                self.input.text().strip()
-                or "MotionBuilder debug current scene and tell me what is broken",
-            ),
-        )
-        mobu_menu.addAction(
-            "Prototype / Create / Implement",
-            lambda: self.direct_dcc_editor_operation_from_text(
-                "motionbuilder",
-                "prototype",
-                self.input.text().strip()
-                or "MotionBuilder prototype an animation pipeline using current character",
-            ),
-        )
-        mobu_menu.addAction("Call / Execute", self.direct_motionbuilder_call_from_text)
-        mobu_menu.addAction("Undo Last Command", self.direct_motionbuilder_undo)
-
-        tools_menu.addSeparator()
-        tools_menu.addAction("Settings", self.show_settings_dialog)
-
-        tools_menu_btn.setMenu(tools_menu)
-        compact_actions.addWidget(tools_menu_btn)
         compact_actions.addStretch(1)
         bottom_layout.addLayout(compact_actions)
 
@@ -2000,6 +1696,7 @@ class MainWindowUiMixin:
                 self.service.save_settings(self.settings)
             except Exception:
                 pass
+            self.schedule_window_state_save()
 
         self.bottom_system_status_toggle_btn.toggled.connect(_toggle_bottom_status)
         initial_status_visible = bool(self.settings.get("show_system_status", True))
@@ -2054,6 +1751,7 @@ class MainWindowUiMixin:
                 self._chk_github_search,
         ):
             chk.setStyleSheet(_ms_chk_style)
+            chk.stateChanged.connect(lambda *_args: self.schedule_window_state_save())
             ms_bar_layout.addWidget(chk)
 
         ms_bar_layout.addStretch(1)
@@ -2064,6 +1762,7 @@ class MainWindowUiMixin:
 
         self.main_splitter.addWidget(main)
         self.main_splitter.setSizes([360, 1180])
+        self.main_splitter.splitterMoved.connect(lambda *_args: self.schedule_window_state_save())
         root.addWidget(self.main_splitter, 1)
     def get_file_context(self, file_path: str):
         service = self._get_project_intelligence_service()
@@ -2153,6 +1852,7 @@ class MainWindowUiMixin:
         if hasattr(self, "workspace_tabs") and hasattr(self.workspace_tabs, "set_tab_visible"):
             self.workspace_tabs.set_tab_visible(title, visible)
             self.update_unified_prompt_context_label()
+            self.schedule_window_state_save()
 
     def is_workspace_tab_visible(self, title):
         if hasattr(self, "workspace_tabs") and hasattr(self.workspace_tabs, "is_tab_visible"):
@@ -2174,6 +1874,7 @@ class MainWindowUiMixin:
         self.workspace_anchor_tabs.setVisible(True)
         self.workspace_anchor_tabs.move_tab_from_container(source, index)
         self._update_workspace_anchor_visibility()
+        self.schedule_window_state_save()
 
     def close_workspace_anchor(self):
         if not hasattr(self, "workspace_tabs") or not hasattr(self, "workspace_anchor_tabs"):
@@ -2181,6 +1882,7 @@ class MainWindowUiMixin:
         while self.workspace_anchor_tabs.count():
             self.workspace_tabs.move_tab_from_container(self.workspace_anchor_tabs, 0)
         self._update_workspace_anchor_visibility()
+        self.schedule_window_state_save()
 
     def _update_workspace_anchor_visibility(self):
         if not hasattr(self, "workspace_anchor_tabs"):
@@ -2201,24 +1903,24 @@ class MainWindowUiMixin:
             if hasattr(self, "workspace_anchor_tabs"):
                 self.close_workspace_anchor()
             self.update_unified_prompt_context_label()
+            self.schedule_window_state_save()
 
     def show_all_workspace_tabs(self):
         if hasattr(self, "workspace_tabs") and hasattr(self.workspace_tabs, "show_all_tabs"):
             self.workspace_tabs.show_all_tabs()
             self.update_unified_prompt_context_label()
+            self.schedule_window_state_save()
 
     def on_workspace_tab_changed(self, index):
         title = self.workspace_tabs.tabText(index)
         self._active_workspace_title = title or "Chat"
         self.schedule_unified_prompt_context_label_update()
-        if hasattr(self, "set_live_process"):
-            self.set_live_process(f"Context changed: {title}")
+        self.schedule_window_state_save()
 
     def on_workspace_tab_activated(self, title, widget, container):
         self._active_workspace_title = title or "Chat"
         self.schedule_unified_prompt_context_label_update()
-        if hasattr(self, "set_live_process"):
-            self.set_live_process(f"Context changed: {self._active_workspace_title}")
+        self.schedule_window_state_save()
 
     def active_workspace_title(self):
         active = getattr(self, "_active_workspace_title", "")

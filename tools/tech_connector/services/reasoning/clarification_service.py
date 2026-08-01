@@ -12,7 +12,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from tech_connector.engine.request_context import RequestContext
+from reasoning_runtime.engine.request_context import RequestContext
 
 
 SLOT_CLARIFICATION = "slot"

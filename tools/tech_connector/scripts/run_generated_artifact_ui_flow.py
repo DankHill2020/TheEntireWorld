@@ -7,6 +7,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from tech_connector.models.constants import TOOLS_ROOT, temp_output_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,11 +36,10 @@ DEFAULT_PROMPT = (
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
-    parser.add_argument("--project-root", default="C:/depot/tools")
+    parser.add_argument("--project-root", default=str(TOOLS_ROOT))
     parser.add_argument(
         "--report",
-        default="C:/depot/tools/tech_connector/reports/runtime/"
-        "random_merkle_snapshot_official_ui_flow_v5.json",
+        default=str(temp_output_path("random_merkle_snapshot_official_ui_flow_v5.json", subdir="reports")),
     )
     args = parser.parse_args()
 

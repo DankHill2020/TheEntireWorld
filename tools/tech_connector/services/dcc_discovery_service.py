@@ -10,7 +10,7 @@ from contextlib import closing
 from typing import Any, Callable
 
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
-from tech_connector.engine.progress_events import ActivityEvent, ProgressEvent
+from reasoning_runtime.engine.progress_events import ActivityEvent, ProgressEvent
 
 ProgressCallback = Callable[[ProgressEvent], None]
 ActivityCallback = Callable[[ActivityEvent], None]

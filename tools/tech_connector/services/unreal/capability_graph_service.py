@@ -548,6 +548,69 @@ def resolve_unreal_graph_item(
         store.close()
 
 
+def validate_unreal_api_paths(
+    api_paths: list[str],
+    project_root: str | None = None,
+) -> dict[str, bool | None]:
+    """Validate exact Unreal Python paths in one read-only store session."""
+
+    requested = list(dict.fromkeys(
+        str(path or "").strip() for path in api_paths if str(path or "").strip()
+    ))
+    results: dict[str, bool | None] = {path: None for path in requested}
+    if not requested:
+        return results
+    store = open_store(project_root)
+    try:
+        project = ensure_project(store, project_root)
+        variants_by_path = {
+            path: {
+                path.lower(),
+                path.removeprefix("unreal.").lower(),
+            }
+            for path in requested
+        }
+        exact_rows = store.get_python_api_exact(
+            project.id,
+            DCC,
+            sorted({
+                variant
+                for variants in variants_by_path.values()
+                for variant in variants
+            }),
+        )
+        indexed_names = {
+            str(row.get("qualified_name") or "").strip().lower()
+            for row in exact_rows
+            if str(row.get("qualified_name") or "").strip()
+        }
+        for path, variants in variants_by_path.items():
+            if indexed_names.intersection(variants):
+                results[path] = True
+        for path in requested:
+            if results[path] is True:
+                continue
+            candidates = store.search_python_api_names(
+                project.id,
+                DCC,
+                path,
+                limit=10,
+            )
+            target = path.lower()
+            target_without_root = path.removeprefix("unreal.").lower()
+            if any(
+                str(row.get("qualified_name") or "").strip().lower()
+                in {target, target_without_root}
+                for row in candidates
+            ):
+                results[path] = True
+    except Exception:
+        return results
+    finally:
+        store.close()
+    return results
+
+
 def resolve_unreal_capability(
     request: str,
     project_root: str | None = None,

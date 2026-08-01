@@ -3,7 +3,7 @@
     "C:/depot/tools"
   ],
   "first_run_complete": true,
-  "model": "ollama:qwen2.5-coder:14b",
+  "model": "ollama:qwen2.5-coder:7b",
   "config": "C:\\depot\\tools\\tech_connector\\knowledge\\mcp_unreal_maya_knowledge_config.json",
   "auto_index_on_first_run": true,
   "auto_approve_edit_plans": false,
@@ -29,11 +29,11 @@
   "expert_memory_max_experts": 4,
   "expert_memory_max_playbooks": 2,
   "expert_memory_max_work_items": 4,
-  "active_project": "C:\\depot\\Time_Fighters 5.8",
+  "active_project": "C:\\depot\\tools",
   "unreal_uproject_path": "C:\\depot\\Time_Fighters 5.8\\Time_Fighters.uproject",
   "recent_projects": [
-    "C:\\depot\\Time_Fighters 5.8",
-    "C:\\depot\\tools"
+    "C:\\depot\\tools",
+    "C:\\depot\\Time_Fighters 5.8"
   ],
   "model_source_mode": "local_only",
   "cloud_model_unavailable": false,
@@ -67,6 +67,12 @@
   "tech_connector_allow_offline_community": false,
   "tech_connector_account_email": "",
   "tech_connector_license_token": "",
+  "tos_accepted": true,
+  "tos_version": "v2026.1",
+  "activation_log_endpoint": "",
+  "telemetry_opt_in": false,
+  "unreal_auto_snapshot_on_connect": false,
+  "unreal_auto_reflect_on_connect": false,
   "github_username": "",
   "github_token": "",
   "p4_port": "",
@@ -96,7 +102,7 @@
   "email_to": "",
   "email_use_tls": true,
   "email_use_ssl": false,
-  "atlassian_site_url": "",
+  "atlassian_site_url": "https://theentireworldstudios.atlassian.net",
   "atlassian_email": "",
   "atlassian_api_token": "",
   "jira_project_key": "",
@@ -107,7 +113,7 @@
   "confluence_parent_id": "",
   "confluence_spaces": [],
   "atlassian_users": [],
-  "embedding_model": "all-MiniLM-L6-v2",
+  "embedding_model": "nomic-embed-text:latest",
   "model_cache_dir": "C:\\depot\\tools\\tech_connector\\data\\model_cache",
   "db_path": "C:\\depot\\tools\\tech_connector\\data\\ai_intel.db",
   "daemon": {
@@ -119,10 +125,11 @@
     "enable_unreal_context_toggle": true
   },
   "router_embed": "nomic-embed-text",
-  "router_local_code": "qwen2.5-coder:14b",
-  "router_local_plan": "qwen3:14b",
-  "router_local_deep": "qwen3:14b",
-  "router_fast_llm_model": "qwen3:14b",
+  "router_local_code": "qwen2.5-coder:7b",
+  "router_local_plan": "qwen3:4b-instruct",
+  "router_local_deep": "qwen3:4b-instruct",
+  "router_visual_media": "qwen3:4b-instruct",
+  "router_fast_llm_model": "qwen3:4b-instruct",
   "ollama_keep_alive": "10m",
   "ollama_num_thread": 8,
   "ollama_num_gpu": "",
@@ -131,13 +138,23 @@
   "deep_route_scope": "engine_complex_only",
   "deep_code_complexity_threshold": 7,
   "allow_30b_deep_route": false,
-  "semantic_intent_model": "qwen2.5:1.5b",
-  "fast_general_model": "qwen3:14b",
-  "fast_code_model": "qwen2.5-coder:14b",
-  "fallback_general_model": "qwen2.5-coder:latest",
-  "fallback_semantic_intent_model": "qwen2.5:1.5b",
-  "fallback_code_model": "qwen2.5-coder:latest",
+  "semantic_intent_model": "qwen3:4b-instruct",
+  "semantic_verifier_model": "qwen3:4b-instruct",
+  "semantic_alignment_model": "qwen3:4b-instruct",
+  "causal_repair_model": "qwen3:4b-instruct",
+  "fast_general_model": "qwen3:4b-instruct",
+  "visual_media_model": "qwen3:4b-instruct",
+  "fast_code_model": "qwen2.5-coder:7b",
+  "fallback_general_model": "qwen2.5-coder:7b",
+  "fallback_semantic_intent_model": "qwen3:4b-instruct",
+  "fallback_code_model": "qwen2.5-coder:7b",
+  "ollama_preload_models": [
+    "qwen2.5-coder:3b",
+    "qwen2.5-coder:7b",
+    "qwen3:4b-instruct"
+  ],
   "custom_model_mappings": {},
+  "custom_provider_function_bindings": {},
   "github_ingest_provider_module": "default",
   "code_intel_provider_module": "default",
   "cognitive_routing_provider_module": "default",
@@ -149,23 +166,63 @@
   "github_ingest_provider_type": "default",
   "mod_tech_labs_api_key": "",
   "mod_tech_labs_workflow_id": "",
-  "openai_api_key": "",
+  "openai_api_key": "test-key",
   "anthropic_api_key": "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",
   "gemini_api_key": "",
-  "cloud_provider_model": "anthropic:claude-3-5-sonnet-latest",
+  "xai_api_key": "",
+  "provider_executables": {},
+  "cloud_provider_model": "gpt-4o",
   "asset_optimizer_provider_module": "default",
   "use_websocket_bridge": false,
   "chatbot_provider_module": "default",
   "skip_splash_video": false,
+  "window_state": {
+    "schema": 1,
+    "geometry": {
+      "x": 2214,
+      "y": 161,
+      "width": 1540,
+      "height": 960
+    },
+    "maximized": true,
+    "fullscreen": false,
+    "active_workspace": "Chat",
+    "workspace_visibility": {
+      "Chat": true,
+      "Editor": true,
+      "Search / Symbols": true,
+      "Pipelines": true
+    },
+    "anchored_workspace_tabs": [],
+    "splitters": {
+      "main": [
+        507,
+        1381
+      ],
+      "workspace_area": [
+        1363,
+        0
+      ],
+      "pipeline_graph": [
+        481,
+        153
+      ]
+    },
+    "toggles": {
+      "local_only_model": false,
+      "allow_project_modifications": true,
+      "require_confirmation": true,
+      "github_tool_search": false,
+      "show_system_status": false
+    }
+  },
   "execution_approval_mode": "always_ask",
   "ollama_unload_on_idle": true,
   "ollama_unload_on_exit": true,
   "ollama_unload_all_on_exit": false,
   "ollama_idle_unload_minutes": 15,
-  "semantic_verifier_model": "qwen2.5:3b",
-  "semantic_alignment_model": "qwen3:8b",
   "warm_semantic_alignment_model": true,
-  "show_system_status": true,
+  "show_system_status": false,
   "open_files": [
     "C:\\depot\\tools\\custom_qt\\custom_widgets.py",
     "C:\\depot\\tools\\maya_tools\\Rigging\\mocap\\setup_hik.py"
@@ -175,5 +232,7 @@
     "C:\\depot\\tools\\maya_tools\\Rigging\\mocap\\setup_hik.py",
     "C:\\depot\\tools\\custom_qt\\custom_widgets.py"
   ],
-  "google_api_key": "AQ.Ab8RN6KBBzkzQh8R2tBRuvQ6LFngqCy_GgPjr_s2HmTO-L76og"
+  "google_api_key": "AQ.Ab8RN6KBBzkzQh8R2tBRuvQ6LFngqCy_GgPjr_s2HmTO-L76og",
+  "model_provider_category": "ollama",
+  "atlassian_project_key": "KAN"
 }

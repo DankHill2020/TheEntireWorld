@@ -354,7 +354,7 @@ class CommandRouter:
             return "DCC Operation", False, f"Registered DCC operation execution is not wired for host: {host}"
 
         try:
-            from tech_connector.engine.request_context import RequestContext
+            from reasoning_runtime.engine.request_context import RequestContext
             from tech_connector.services.dcc.dcc_execution_service import (
                 DccExecutionRequest,
                 default_dcc_execution_adapters,

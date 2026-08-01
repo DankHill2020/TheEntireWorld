@@ -3,6 +3,11 @@
 Tech Connector can be used without the Qt desktop UI through the official
 headless Python API:
 
+For a concept-first explanation of API version 2 reasoning, contextual threads,
+progress events, runtime tools, modular feature discovery, extensions, and
+complete examples, read
+[REASONING_RUNTIME_API.md](REASONING_RUNTIME_API.md).
+
 ```python
 from tech_connector.api import TechConnectorHeadlessAPI
 
@@ -24,6 +29,142 @@ The same process can run with or without the desktop UI. The UI is the visual
 front end for review, confirmation, node editing, and status. The headless API
 uses the same planner, action graph, DCC bridge, execution, repair, and
 provenance stack for scripts, CI, local services, or another application.
+
+## Reasoning Runtime API
+
+API version 2 exposes the same shared reasoning runtime used by Tech Connector's
+request engine:
+
+```python
+events = []
+result = api.reasoning.run(
+    "Find the rig export implementation and explain its dependencies",
+    context={
+        "active_tab": "Editor",
+        "current_file_path": "C:/project/tools/exporter.py",
+        "open_file_paths": ["C:/project/tools/exporter.py"],
+        "selection_text": "def export_fbx(...): ...",
+        "thread": [
+            {"role": "user", "content": "We are improving the rig exporter."},
+            {"role": "assistant", "content": "The Maya export path is the current focus."},
+        ],
+    },
+    progress_callback=events.append,
+)
+
+print(result.result["response"]["action"])
+print(result.result["runtime"]["model_route"])
+```
+
+The `thread` or `messages` collection is canonical request context. It is
+independent of any UI render limit and is sanitized before entering the runtime.
+Credential-like keys such as API keys, passwords, cookies, and tokens are
+removed from context automatically.
+
+Runtime discovery and preparation are available separately:
+
+```python
+features = api.reasoning.capabilities()
+snapshot = api.reasoning.snapshot("Inspect the current project")
+prepared = api.reasoning.prepare(
+    "Explain this function",
+    context={"current_file_path": "C:/project/tool.py"},
+)
+tools = api.reasoning.tools()
+```
+
+`api.runtime` is an alias for `api.reasoning`. Module-level helpers are also
+available:
+
+```python
+from tech_connector.api import (
+    prepare_reasoning_request,
+    reason,
+    reasoning_capabilities,
+    reasoning_snapshot,
+)
+
+result = reason("Find function create_rig_mapping()", settings=settings)
+```
+
+Registered runtime tools preserve their mutability and risk contracts. Read-only
+tools may execute directly. Mutating tools require explicit approval:
+
+```python
+preview = api.reasoning.execute_tool(
+    "dcc.execute",
+    {"host": "maya", "operation": "create_locator"},
+    dry_run=True,
+)
+
+executed = api.reasoning.execute_tool(
+    "dcc.execute",
+    {"host": "maya", "operation": "create_locator"},
+    approved=True,
+)
+```
+
+Every reasoning response is an `APIResult`. Its `result` includes the stable
+schema, serialized response, integer progress events, activity events, and the
+reasoning-runtime snapshot. No Qt objects or UI modules are required.
+
+### Modular Feature Registry
+
+Capabilities are registered at feature and runtime-adapter granularity rather
+than maintained as one hardcoded list:
+
+```python
+manifest = api.features.manifest()
+context_features = api.features.list(category="runtime.context")
+index_features = api.features.list(category="runtime.index")
+
+tech_context = api.features.invoke(
+    "runtime.context.tech_connector_context",
+    "active_context",
+)
+```
+
+Each descriptor includes:
+
+- `feature_id`
+- `category`
+- `version`
+- `description`
+- `operations`
+- `dependencies`
+- `permissions`
+- `available`
+- `source`
+- per-operation schemas and metadata
+
+Installed reasoning-runtime adapters are discovered from the actual kernel.
+Context, reasoning, capability, validation, code-policy, and rule adapters
+register their directly invokable operations. Code-understanding, knowledge,
+index, symbol-lookup, and escalation adapters are exposed as independently
+discoverable modules and identify the higher-level runtime operation that owns
+their typed execution.
+
+External packages can register features without modifying Tech Connector:
+
+```python
+from tech_connector.services.api_feature_registry_service import APIFeatureDescriptor
+
+api.features.register(
+    APIFeatureDescriptor(
+        feature_id="studio.asset_review",
+        category="studio",
+        version="1.0",
+        description="Review an asset against studio rules.",
+        operations=("review",),
+        source="studio_tools.asset_review",
+    ),
+    {"review": review_asset},
+)
+```
+
+Only operations declared by the descriptor can be invoked. Registration rejects
+undeclared handlers and duplicate feature IDs unless replacement is explicitly
+requested.
 
 ## Running Prompt Chains
 
