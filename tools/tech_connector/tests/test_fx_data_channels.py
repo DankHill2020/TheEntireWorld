@@ -9,6 +9,7 @@ from tech_connector.game_engine.runtime.tc_fx_data_channel_service import (
     FxChannelField,
     FxDataChannel,
     FxDataChannelBinding,
+    FxDataChannelConsumer,
     FxDataChannelSchema,
     FxGraphConnection,
     FxGraphNode,
@@ -110,3 +111,26 @@ def test_runtime_channel_commands_are_tick_deterministic_and_profiled() -> None:
     assert not second.diagnostics["gpu_resident"]
     assert second.diagnostics["last_execution"]["elapsed_ms"] >= 0.0
     assert second.diagnostics["data_channels"]["fx.impacts"]["published"] == 1
+
+
+def test_shared_channel_consumer_spawns_one_listener_system_for_many_impacts() -> None:
+    world = create_effect_world("sparks", quality="low")
+    system = world.effect_system
+    for emitter in system.emitters:
+        emitter.spawn_rate = 0.0
+        emitter.burst_count = 0
+    channel = impact_data_channel()
+    system.data_channels[channel.schema.channel_id] = channel
+    system.data_channel_consumers.append(FxDataChannelConsumer(
+        channel.schema.channel_id, system.emitters[0].emitter_id, spawn_count=3,
+    ))
+    runtime = SimulationRuntimeInstance(world, backend="reference_cpu")
+    runtime.queue_data_channel("fx.impacts", {
+        "position": (4, 5, 6), "velocity": (1, 0, 0), "normal": (0, 1, 0),
+        "magnitude": 1, "surface": "metal", "source_id": "impact_1",
+    }, tick=1)
+
+    packet = runtime.advance(1 / 60)
+
+    assert packet.diagnostics["alive_particles"] == 3
+    assert system.data_channel_cursors["fx.impacts"] == 0

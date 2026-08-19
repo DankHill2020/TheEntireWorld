@@ -338,21 +338,26 @@ def execute_compiled_simulation(compiled: CompiledSimulationIR, world: Any, dt: 
         execution_backend = "reference_cpu"
     if executor is None:
         raise RuntimeError(f"No runtime executor is registered for {compiled.backend.backend_id}.")
-    actual_capabilities = BACKENDS.get(execution_backend, BACKENDS["reference_cpu"])
-    compiled.metadata["execution_backend"] = execution_backend
-    compiled.metadata["gpu_resident"] = bool(actual_capabilities.execution_device == "gpu")
-    if execution_backend != compiled.backend.backend_id and not any(
-        item.get("code") == "runtime_backend_fallback" for item in compiled.diagnostics
-    ):
-        compiled.diagnostics.append({
-            "severity": "warning",
-            "code": "runtime_backend_fallback",
-            "message": f"Executed on {execution_backend}; {compiled.backend.backend_id} has no available executor.",
-        })
     started = time.perf_counter()
     result = executor(compiled, world, float(dt))
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     backend_receipt = dict(result or {}) if isinstance(result, dict) else {}
+    execution_backend = str(backend_receipt.get("execution_backend") or execution_backend)
+    actual_capabilities = BACKENDS.get(execution_backend, BACKENDS["reference_cpu"])
+    compiled.metadata["execution_backend"] = execution_backend
+    compiled.metadata["gpu_resident"] = bool(
+        actual_capabilities.execution_device == "gpu"
+        and backend_receipt.get("buffer_residency") in {"device", "gpu", "persistent_device"}
+    )
+    if execution_backend != compiled.backend.backend_id and not any(
+        item.get("code") == "runtime_backend_fallback" for item in compiled.diagnostics
+    ):
+        reasons = "; ".join(backend_receipt.get("fallback_reasons") or [])
+        compiled.diagnostics.append({
+            "severity": "warning", "code": "runtime_backend_fallback",
+            "message": f"Executed on {execution_backend} instead of {compiled.backend.backend_id}."
+                       + (f" {reasons}" if reasons else ""),
+        })
     telemetry = {
         "schema": "tech_connector.simulation_execution.v1",
         "compiled_backend": compiled.backend.backend_id,
@@ -398,20 +403,13 @@ def _select_backend(
     diagnostics: list[dict[str, Any]] = []
     requested = str(requested or "auto").lower()
     if requested == "auto":
-        # Auto compilation targets the native IR even when this installation has
-        # no native executor. The compiled receipt remains production-shaped and
-        # the diagnostic makes the execution limitation explicit. An explicitly
-        # requested unavailable backend still falls back to the reference path.
         native = BACKENDS["native_cpu"]
         if set(domains) <= set(native.domains):
-            diagnostics.append({
-                "severity": "warning",
-                "code": "production_backend_unavailable",
-                "message": (
-                    "Compiled native CPU IR; no native executor is installed in "
-                    "this process, so live execution requires the reference backend."
-                ),
-            })
+            if not simulation_backend_status("native_cpu")["available"]:
+                diagnostics.append({
+                    "severity": "warning", "code": "production_backend_unavailable",
+                    "message": "Compiled native CPU IR; no native executor is installed in this process.",
+                })
             return native, diagnostics
     candidates = [requested]
     for backend_id in candidates:
@@ -469,3 +467,10 @@ def _compiled_outputs(domains: list[str], profile: SimulationExecutionProfile) -
         outputs.append({"role": "render_streams", "format": f"tc.render.{profile.render_style}", "required": True})
         outputs.append({"role": "events", "format": "tc.runtime.event_stream", "required": True})
     return outputs
+
+
+try:
+    from tech_connector.game_engine.runtime.tc_simulation_native_backend_service import install_native_cpu_backend
+    install_native_cpu_backend()
+except ImportError:  # pragma: no cover - NumPy-free embedded DCC interpreters retain the reference backend.
+    pass

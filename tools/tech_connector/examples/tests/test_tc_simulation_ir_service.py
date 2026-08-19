@@ -23,7 +23,7 @@ def test_compiles_cloth_to_valid_staged_native_ir() -> None:
     assert {stage.stage_id for stage in compiled.stages} >= {
         "emit", "integrate", "broadphase", "constraints", "collision", "render_prepare",
     }
-    assert any(item["code"] == "production_backend_unavailable" for item in compiled.diagnostics)
+    assert not any(item["code"] == "production_backend_unavailable" for item in compiled.diagnostics)
 
 
 def test_requested_unavailable_gpu_backend_falls_back_explicitly() -> None:

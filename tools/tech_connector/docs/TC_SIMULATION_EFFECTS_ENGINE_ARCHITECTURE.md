@@ -169,6 +169,14 @@ Implemented and covered by headless tests:
 - Deployment and transfer manifests that explicitly declare no editor requirement.
 - Runtime compilation and execution smoke coverage for every built-in effect preset.
 - Replaceable backend executors so native CPU and GPU runtimes use the same authored asset.
+- Typed bounded FX Data Channels with schema validation, retention, overflow policies,
+  event bindings, deterministic tick publishing, and shared listener systems.
+- Versioned reusable FX subgraph contracts with typed sockets, dependency validation,
+  cycle detection, and compiled-IR declarations.
+- Truthful per-tick execution receipts that distinguish compiled, selected, and actual
+  backends while reporting residency, timing, budget status, memory, and channel pressure.
+- Viewer/chat commands to create channels, publish gameplay payloads, inspect execution
+  plans, and inspect live FX profiler history.
 
 Still required before a production game-runtime claim:
 
