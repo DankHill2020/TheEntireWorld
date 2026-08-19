@@ -17,6 +17,21 @@ from tech_connector.game_engine.runtime.tc_simulation_runtime_service import (
     RuntimeFramePacket,
     SimulationRuntimeInstance,
 )
+from tech_connector.game_engine.runtime.tc_simulation_compute_provider_service import (
+    ArrayComputeProvider,
+    ComputeProviderStatus,
+    PersistentComputeBuffer,
+    compute_provider,
+    compute_provider_statuses,
+    discover_compute_providers,
+    register_compute_provider,
+)
+from tech_connector.game_engine.runtime.tc_simulation_native_backend_service import (
+    NativeParticleBuffers,
+    native_backend_support,
+    native_particle_view,
+    synchronize_native_particles,
+)
 from tech_connector.game_engine.runtime.tc_fx_data_channel_service import (
     FxChannelField,
     FxDataChannel,
@@ -101,6 +116,10 @@ __all__ = [
     "GraphTickReceipt",
     "RuntimeFramePacket",
     "SimulationRuntimeInstance",
+    "ArrayComputeProvider",
+    "ComputeProviderStatus",
+    "PersistentComputeBuffer",
+    "NativeParticleBuffers",
     "FxChannelField",
     "FxDataChannel",
     "FxDataChannelBinding",
@@ -134,8 +153,11 @@ __all__ = [
     "choose_character_action",
     "choose_character_lod",
     "choose_dialogue_act",
+    "compute_provider",
+    "compute_provider_statuses",
     "create_default_graph_operation_registry",
     "evaluate_behavior_graph",
+    "discover_compute_providers",
     "execute_character_action",
     "execute_gameplay_experience_command",
     "execute_graph_manifest",
@@ -145,6 +167,9 @@ __all__ = [
     "live_game_sessions",
     "publish_tcscene_save",
     "partition_procedural_result",
+    "native_backend_support",
+    "native_particle_view",
+    "register_compute_provider",
     "register_live_game_session",
     "runtime_goal_options",
     "runtime_target_options",
@@ -153,6 +178,7 @@ __all__ = [
     "simulate_group_tick",
     "solve_crowd_steering",
     "schedule_procedural_runtime",
+    "synchronize_native_particles",
     "unregister_live_game_session",
 ]
 

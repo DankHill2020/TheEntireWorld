@@ -62,9 +62,13 @@ class NativeParticleBuffers:
         self.adhesion[view] = [float(getattr(materials.get(item.material), "adhesion", 0.0)) for item in particles]
 
     def download(self, world: Any) -> None:
-        for index, particle in enumerate(world.particles):
-            particle.position = tuple(float(value) for value in self.positions[index])
-            particle.velocity = tuple(float(value) for value in self.velocities[index])
+        # ndarray.tolist performs the scalar conversion in C and is materially faster
+        # than iterating NumPy row views for the object-model compatibility boundary.
+        positions = self.positions[:self.count].tolist()
+        velocities = self.velocities[:self.count].tolist()
+        for particle, position, velocity in zip(world.particles, positions, velocities):
+            particle.position = tuple(position)
+            particle.velocity = tuple(velocity)
 
     @property
     def memory_bytes(self) -> int:
@@ -89,6 +93,17 @@ def native_backend_support(world: Any) -> tuple[bool, list[str]]:
         reasons.append("deformable-surface coupling kernel is not installed")
     if world.reformable_settings:
         reasons.append("reformable bond kernel is not installed")
+    used_materials = {
+        particle.material: world.materials.get(particle.material)
+        for particle in world.particles
+        if particle.alive
+    }
+    interacting_materials = sorted(
+        name for name, material in used_materials.items()
+        if material is not None and (material.viscosity > 0.0 or material.cohesion > 0.0)
+    )
+    if interacting_materials:
+        reasons.append("material-neighbor kernels are not installed: " + ", ".join(interacting_materials))
     supported_fields = {"gravity", "wind", "uniform", "gravity_source", "point_gravity", "radial", "vortex"}
     unsupported_fields = sorted({str(item.field_type).lower() for item in world.fields} - supported_fields)
     if unsupported_fields:
@@ -100,6 +115,7 @@ def execute_native_cpu(compiled: Any, world: Any, dt: float) -> dict[str, Any]:
     """Run supported worlds with persistent vector buffers; explicitly fall back otherwise."""
     supported, reasons = native_backend_support(world)
     if not supported:
+        synchronize_native_particles(world)
         from tech_connector.game_engine.runtime.tc_simulation_ir_service import execute_compiled_reference
         started = time.perf_counter()
         execute_compiled_reference(compiled, world, dt)
@@ -123,7 +139,13 @@ def execute_native_cpu(compiled: Any, world: Any, dt: float) -> dict[str, Any]:
         buffers = NativeParticleBuffers()
         world._native_particle_buffers = buffers
     uploaded = time.perf_counter()
-    buffers.upload(world)
+    resident_output = bool(compiled.metadata.get("native_resident_output", False) and world.effect_system is None)
+    reused_resident_state = bool(
+        resident_output and getattr(world, "_native_buffers_authoritative", False)
+        and buffers.count == len(world.particles)
+    )
+    if not reused_resident_state:
+        buffers.upload(world)
     timings["buffer_upload"] = (time.perf_counter() - uploaded) * 1000.0
 
     solved = time.perf_counter()
@@ -134,7 +156,11 @@ def execute_native_cpu(compiled: Any, world: Any, dt: float) -> dict[str, Any]:
     timings["integrate_collide"] = (time.perf_counter() - solved) * 1000.0
 
     downloaded = time.perf_counter()
-    buffers.download(world)
+    if resident_output:
+        world._native_buffers_authoritative = True
+    else:
+        buffers.download(world)
+        world._native_buffers_authoritative = False
     timings["buffer_download"] = (time.perf_counter() - downloaded) * 1000.0
     world.time_seconds += float(dt)
     if world.effect_system is not None:
@@ -142,6 +168,9 @@ def execute_native_cpu(compiled: Any, world: Any, dt: float) -> dict[str, Any]:
     timings["finish_events"] = (time.perf_counter() - downloaded) * 1000.0 - timings["buffer_download"]
     return {"execution_backend": "native_cpu", "stage_ms": timings,
             "memory_bytes": buffers.memory_bytes, "dispatches": substeps,
+            "compute_provider": "numpy_cpu",
+            "synchronization_points": 0 if reused_resident_state else (1 if resident_output else 2),
+            "resident_output": resident_output, "reused_resident_state": reused_resident_state,
             "buffer_residency": "persistent_host_soa", "buffer_capacity": buffers.capacity,
             "buffer_count": buffers.count, "buffer_reallocations": buffers.reallocations}
 
@@ -261,6 +290,30 @@ def _normalized_rows(values, fallback):
     return result
 
 
+def native_particle_view(world: Any) -> dict[str, Any] | None:
+    """Return zero-copy native arrays for renderer/compute consumers when allocated."""
+    buffers = getattr(world, "_native_particle_buffers", None)
+    if not isinstance(buffers, NativeParticleBuffers):
+        return None
+    view = slice(0, buffers.count)
+    return {
+        "positions": buffers.positions[view], "velocities": buffers.velocities[view],
+        "radii": buffers.radii[view], "alive": buffers.alive[view],
+        "count": buffers.count, "capacity": buffers.capacity,
+        "residency": "persistent_host_soa", "provider_id": "numpy_cpu",
+    }
+
+
+def synchronize_native_particles(world: Any) -> bool:
+    """Explicitly read authoritative native state back into compatibility particle objects."""
+    buffers = getattr(world, "_native_particle_buffers", None)
+    if not isinstance(buffers, NativeParticleBuffers) or not getattr(world, "_native_buffers_authoritative", False):
+        return False
+    buffers.download(world)
+    world._native_buffers_authoritative = False
+    return True
+
+
 def install_native_cpu_backend() -> None:
     from tech_connector.game_engine.runtime.tc_simulation_ir_service import (
         SimulationBackendCapabilities, register_simulation_backend, register_simulation_executor,
@@ -274,4 +327,7 @@ def install_native_cpu_backend() -> None:
     register_simulation_executor("native_cpu", execute_native_cpu)
 
 
-__all__ = ["NativeParticleBuffers", "execute_native_cpu", "install_native_cpu_backend", "native_backend_support"]
+__all__ = [
+    "NativeParticleBuffers", "execute_native_cpu", "install_native_cpu_backend", "native_backend_support",
+    "native_particle_view", "synchronize_native_particles",
+]

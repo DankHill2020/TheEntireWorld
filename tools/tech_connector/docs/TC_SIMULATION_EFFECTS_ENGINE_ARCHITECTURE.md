@@ -177,10 +177,21 @@ Implemented and covered by headless tests:
   backends while reporting residency, timing, budget status, memory, and channel pressure.
 - Viewer/chat commands to create channels, publish gameplay payloads, inspect execution
   plans, and inspect live FX profiler history.
+- Installed native CPU particle/effect executor with reusable NumPy structure-of-arrays
+  allocations, vectorized supported fields and primitive collisions, explicit stage/upload/
+  download telemetry, and capability-gated reference fallback.
+- Opt-in buffer-authoritative output lets native renderer/compute consumers reuse particle
+  state across ticks with zero compatibility synchronization, plus explicit zero-copy view
+  and object-model readback APIs. The synchronized path remains the default.
+- Compute-provider boundary with persistent host/device buffer contracts and truthful NumPy
+  CPU/CuPy CUDA discovery. CUDA remains unavailable unless a working provider and solver
+  kernels are both present; provider discovery alone never claims GPU execution.
+- Native/reference equivalence, persistent-allocation, fallback, and 20k-particle stress tests.
 
 Still required before a production game-runtime claim:
 
-- Native SIMD/task-graph CPU executor and compute GPU executor.
+- Native constraint, material-neighbor, mesh-collision, sparse-volume, and task-graph kernels.
+- Compute GPU solver executor; the device/provider boundary is present but no GPU solver is installed.
 - GPU-resident particle, constraint, collision, event, and indirect-render buffers.
 - Production cloth self-contact/CCD, tearing, remeshing, multilayer friction, and wrinkle validation.
 - Production sparse-fluid/combustion solver and physically based volume renderer.

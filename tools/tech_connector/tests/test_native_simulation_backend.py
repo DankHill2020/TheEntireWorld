@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import copy
 
+import numpy as np
 import pytest
 
+from tech_connector.game_engine.runtime.tc_simulation_compute_provider_service import (
+    compute_provider,
+    compute_provider_statuses,
+)
 from tech_connector.game_engine.runtime.tc_simulation_ir_service import (
     compile_simulation_world,
     execute_compiled_simulation,
     simulation_backend_status,
 )
+from tech_connector.game_engine.runtime.tc_simulation_native_backend_service import (
+    native_particle_view,
+    synchronize_native_particles,
+)
 from tech_connector.game_engine.runtime.tc_simulation_service import (
     ForceField,
     PlaneCollider,
+    SimulationMaterial,
     SimulationParticle,
     SimulationWorld,
     create_cloth_grid,
@@ -21,12 +31,15 @@ from tech_connector.game_engine.runtime.tc_simulation_service import (
 
 
 def _particle_world(count: int = 4) -> SimulationWorld:
-    return SimulationWorld(
-        particles=[SimulationParticle((index * 0.1, 1.0 + index * 0.01, 0.0), velocity=(0.2, -0.1, 0.0))
+    world = SimulationWorld(
+        particles=[SimulationParticle((index * 0.1, 1.0 + index * 0.01, 0.0), velocity=(0.2, -0.1, 0.0),
+                                      material="native_particle")
                    for index in range(count)],
         fields=[ForceField("gravity", (0.0, -9.81, 0.0))],
         plane_colliders=[PlaneCollider()], self_collision=False, substeps=2, constraint_iterations=1,
     )
+    world.materials["native_particle"] = SimulationMaterial("Native Particle", damping=0.01)
+    return world
 
 
 def test_native_cpu_backend_is_installed_and_reports_real_host_residency() -> None:
@@ -89,3 +102,40 @@ def test_native_cpu_20k_particle_stress_tick_stays_bounded() -> None:
     assert telemetry["execution_backend"] == "native_cpu"
     assert telemetry["elapsed_ms"] < 250.0
     assert telemetry["particle_count"] == 20_000
+
+
+def test_compute_provider_boundary_has_truthful_gpu_probe_and_persistent_cpu_buffer() -> None:
+    statuses = {item["provider_id"]: item for item in compute_provider_statuses()}
+    assert statuses["numpy_cpu"]["available"]
+    assert statuses["numpy_cpu"]["device_type"] == "cpu"
+    assert statuses["cupy_cuda"]["device_type"] == "gpu"
+    if not statuses["cupy_cuda"]["available"]:
+        assert statuses["cupy_cuda"]["reason"]
+
+    provider = compute_provider("numpy_cpu")
+    buffer = provider.allocate((4, 3), "float32")
+    values = np.arange(12, dtype=np.float32).reshape(4, 3)
+    provider.upload(buffer, values)
+    assert buffer.residency == "persistent_host_soa"
+    assert buffer.revision == 1
+    assert provider.download(buffer).tolist() == values.tolist()
+
+
+def test_explicit_resident_output_reuses_buffers_until_requested_readback() -> None:
+    world = _particle_world(100)
+    compiled = compile_simulation_world(world, backend="native_cpu")
+    compiled.metadata["native_resident_output"] = True
+    initial_position = world.particles[0].position
+
+    first = execute_compiled_simulation(compiled, world, 1 / 60)
+    second = execute_compiled_simulation(compiled, world, 1 / 60)
+    view = native_particle_view(world)
+
+    assert first["backend_receipt"]["resident_output"]
+    assert second["backend_receipt"]["reused_resident_state"]
+    assert second["backend_receipt"]["synchronization_points"] == 0
+    assert world.particles[0].position == initial_position
+    assert view is not None and tuple(view["positions"][0]) != initial_position
+    expected = tuple(view["positions"][0])
+    assert synchronize_native_particles(world)
+    assert world.particles[0].position == pytest.approx(expected)
