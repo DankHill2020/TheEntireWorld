@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
@@ -35,7 +36,29 @@ def app_module(relative_module: str) -> str:
     return f"{APP_PACKAGE}.{relative}" if relative else APP_PACKAGE
 
 
-APP_DIR = Path(os.environ.get("AI_STUDIO_APP_DIR", str(APP_ROOT / ".ai_studio"))).expanduser()
+def _default_app_dir() -> Path:
+    """
+        Resolves a user-writable application-state directory.
+
+    :return: application-state directory
+    """
+    legacy = APP_ROOT / ".ai_studio"
+    if legacy.exists():
+        return legacy
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        return base / "TechConnector"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "TechConnector"
+    state_home = os.environ.get("XDG_STATE_HOME", "").strip()
+    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
+    return base / "tech_connector"
+
+
+APP_DIR = Path(
+    os.environ.get("AI_STUDIO_APP_DIR", str(_default_app_dir()))
+).expanduser()
 SCRATCHES_DIR = APP_DIR / "scratches"
 HISTORY_DIR = SCRATCHES_DIR / "chat_history"
 CODE_SNIPPETS_DIR = SCRATCHES_DIR / "code_snippets"

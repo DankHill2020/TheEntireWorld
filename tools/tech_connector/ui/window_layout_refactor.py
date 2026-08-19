@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tech_connector.ui.design_system import set_ui_role
+from tech_connector.ui.icons import configure_button, icon
+
 
 ADVANCED_BUTTON_TEXTS = {
     "Project Dirs",
@@ -95,7 +98,8 @@ def _install_status_visibility_api(window) -> None:
         if btn:
             btn.blockSignals(True)
             btn.setChecked(visible)
-            btn.setText("Hide Status ▲" if visible else "Show Status ▼")
+            btn.setText("Hide details" if visible else "Show details")
+            btn.setIcon(icon("chevron_up" if visible else "chevron_down"))
             btn.blockSignals(False)
 
         action = getattr(window, "status_action", None)
@@ -128,25 +132,27 @@ def _install_system_status_toggle(window) -> None:
 
     header = QFrame()
     header.setObjectName("systemStatusHeader")
-    header.setStyleSheet(
-        "QFrame#systemStatusHeader { background-color: #00040a; border: 1px solid #12324a; border-radius: 5px; }"
-    )
     row = QHBoxLayout(header)
     row.setContentsMargins(8, 4, 8, 4)
     row.setSpacing(8)
 
     title = QLabel("System Status")
-    title.setStyleSheet("font-weight: bold; color: #b9dcff; background: transparent; border: 0;")
+    set_ui_role(title, "sectionTitle")
     row.addWidget(title)
 
     detail = QLabel("routing • model • knowledge • DCC • VCS")
-    detail.setStyleSheet("color: #8fb9c9; background: transparent; border: 0;")
+    set_ui_role(detail, "muted")
     row.addWidget(detail, 1)
 
     btn = QToolButton()
     btn.setCheckable(True)
-    btn.setChecked(bool(getattr(window, "settings", {}).get("show_system_status", True)))
-    btn.setText("Hide Status ▲" if btn.isChecked() else "Show Status ▼")
+    btn.setChecked(bool(getattr(window, "settings", {}).get("show_system_status", False)))
+    configure_button(
+        btn,
+        "chevron_up" if btn.isChecked() else "chevron_down",
+        text="Hide details" if btn.isChecked() else "Show details",
+        role="quiet",
+    )
     btn.toggled.connect(window.set_system_status_visible)
     row.addWidget(btn)
 
@@ -167,34 +173,35 @@ def _move_project_actions_to_left_panel(window) -> None:
 
     actions_frame = QFrame()
     actions_frame.setObjectName("projectPanelActions")
-    actions_frame.setStyleSheet(
-        "QFrame#projectPanelActions { border: 1px solid #12324a; border-radius: 5px; background-color: #000203; }"
-    )
     outer = QVBoxLayout(actions_frame)
     outer.setContentsMargins(8, 6, 8, 6)
     outer.setSpacing(6)
 
     label = QLabel("Project Tools")
-    label.setStyleSheet("font-weight: bold; color: #b9dcff; background: transparent; border: 0;")
+    set_ui_role(label, "sectionTitle")
     outer.addWidget(label)
 
     row1 = QHBoxLayout()
     dirs_btn = QPushButton("Project Dirs")
+    configure_button(dirs_btn, "folder", text="Directories", role="secondary")
     dirs_btn.clicked.connect(window.show_first_run)
     row1.addWidget(dirs_btn)
     index_btn = QPushButton("Quick Index")
+    configure_button(index_btn, "database", text="Quick index", role="secondary")
     index_btn.clicked.connect(window.build_index)
     row1.addWidget(index_btn)
     outer.addLayout(row1)
 
     row2 = QHBoxLayout()
     graph_btn = QPushButton("Graph")
+    configure_button(graph_btn, "graph", text="Graph", role="secondary")
     if hasattr(window, "build_dependency_graph_only"):
         graph_btn.clicked.connect(window.build_dependency_graph_only)
     else:
         graph_btn.setEnabled(False)
     row2.addWidget(graph_btn)
     install_btn = QPushButton("Install")
+    configure_button(install_btn, "package", text="Install", role="secondary")
     install_btn.clicked.connect(window.install_components)
     row2.addWidget(install_btn)
     outer.addLayout(row2)
@@ -245,6 +252,6 @@ def _hide_advanced_top_controls(window) -> None:
 
 
 def _apply_saved_system_status_visibility(window) -> None:
-    visible = bool(getattr(window, "settings", {}).get("show_system_status", True))
+    visible = bool(getattr(window, "settings", {}).get("show_system_status", False))
     if hasattr(window, "set_system_status_visible"):
         window.set_system_status_visible(visible)

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import ast
 import json
@@ -42,7 +42,11 @@ class CapabilityImplementationProviderTests(unittest.TestCase):
         code = json.loads(repaired)["changes"][0]["new_content"]
         tree = ast.parse(code)
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
-        self.assertIsNotNone(ast.get_docstring(function))
+        docstring = ast.get_docstring(function)
+        self.assertIn("Synthesizes source strategy stack.", docstring)
+        self.assertIn(":param source_strategy: source strategy", docstring)
+        self.assertIn(":param parameters: parameters", docstring)
+        self.assertIn(":return: result", docstring)
         self.assertEqual(actions, ["inserted_missing_public_docstring"])
 
     def test_behavior_contract_rejects_metadata_only_domain_strategy(self) -> None:

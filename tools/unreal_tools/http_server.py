@@ -1,5 +1,5 @@
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unreal
 import sys
 import socket
@@ -18,6 +18,10 @@ if tools_dir not in sys.path:
 # Shared queue between HTTP server and tick handler
 request_queue = queue.Queue()
 PORT = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
+MAX_REQUEST_WAIT_SECONDS = float(os.environ.get("UNREAL_HTTP_MAX_WAIT_SECONDS", "120"))
+_server_lock = threading.Lock()
+_server_thread = None
+_http_server = None
 
 
 def _write_bridge_status(status):
@@ -124,6 +128,11 @@ def import_function(func_path):
 def tick(delta_time):
     while not request_queue.empty():
         task = request_queue.get()
+        if task.get("__cancelled__"):
+            task["__result__"] = {"error": "Request was cancelled before Unreal execution began."}
+            task["__handled__"] = True
+            continue
+        task["__started__"] = True
         try:
             func_path = task["function"]
             args = task.get("args", [])
@@ -154,7 +163,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         unreal.log(f"HTTP: {self.address_string()} - {format % args}")
 
     def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
+        content_length = int(self.headers.get('Content-Length') or 0)
         post_data = self.rfile.read(content_length)
         try:
             data = json.loads(post_data.decode('utf-8'))
@@ -168,28 +177,50 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "args": data.get("args", []),
                 "kwargs": data.get("kwargs", {}),
                 "__result__": None,
-                "__handled__": False
+                "__handled__": False,
+                "__started__": False,
+                "__cancelled__": False,
             }
 
             # Queue it
             request_queue.put(task)
 
             # Wait for Unreal tick to process it
-            while not task["__handled__"]:
+            deadline = time.monotonic() + MAX_REQUEST_WAIT_SECONDS
+            while not task["__handled__"] and time.monotonic() < deadline:
                 time.sleep(0.05)
+
+            if not task["__handled__"]:
+                if not task["__started__"]:
+                    task["__cancelled__"] = True
+                    status = "cancelled_before_execution"
+                else:
+                    status = "execution_continues_in_unreal"
+                self._send_json(504, {
+                    "error": f"Unreal request exceeded {MAX_REQUEST_WAIT_SECONDS:.1f} seconds.",
+                    "status": status,
+                })
+                return
 
             # Send back result
             result = task["__result__"]
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(result, indent=2, default=str).encode('utf-8'))
+            self._send_json(200, result)
 
         except Exception as e:
             unreal.log_error(f"Error handling request: {e}")
-            self.send_response(500)
+            self._send_json(500, {"error": str(e)})
+
+    def _send_json(self, status_code, payload):
+        """Send a JSON response without terminating the server on disconnect."""
+        try:
+            encoded = json.dumps(payload, indent=2, default=str).encode('utf-8')
+            self.send_response(int(status_code))
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(encoded)))
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError) as exc:
+            unreal.log_warning(f"HTTP client disconnected before response delivery: {exc}")
 
 
 def is_port_in_use(port):
@@ -198,26 +229,61 @@ def is_port_in_use(port):
 
 
 def run_server():
+    global _http_server
     port = PORT
     if is_port_in_use(port):
         _write_port_files(port)
         unreal.log_error(f"Port {port} already in use — HTTP server won't start.")
         return
     server_address = ('127.0.0.1', port)
-    HTTPServer.allow_reuse_address = True
-    httpd = HTTPServer(server_address, RequestHandler)
+    ThreadingHTTPServer.allow_reuse_address = True
+    httpd = ThreadingHTTPServer(server_address, RequestHandler)
+    _http_server = httpd
+    httpd.daemon_threads = True
     _write_port_files(port)
     unreal.log(f"HTTP Server started on port {port}")
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except Exception as exc:
+        unreal.log_error(f"Tech Connector HTTP server stopped unexpectedly: {exc}")
+    finally:
+        _http_server = None
+        unreal._tech_connector_http_server_started = False
+        try:
+            httpd.server_close()
+        except Exception:
+            pass
 
 
 def start_http_server_in_thread():
-    if getattr(unreal, "_tech_connector_http_server_started", False):
-        unreal.log(f"Tech Connector HTTP server already started on port {PORT}.")
-        return
-    unreal._tech_connector_http_server_started = True
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
+    """Start the listener unless a live server thread already owns it."""
+    global _server_thread
+    with _server_lock:
+        if _server_thread is not None and _server_thread.is_alive() and is_port_in_use(PORT):
+            unreal._tech_connector_http_server_started = True
+            unreal.log(f"Tech Connector HTTP server already started on port {PORT}.")
+            return False
+        unreal._tech_connector_http_server_started = True
+        _server_thread = threading.Thread(
+            target=run_server,
+            name="TechConnectorUnrealHTTP",
+            daemon=True,
+        )
+        _server_thread.start()
+        return True
+
+
+def server_status():
+    """Return listener and worker state for startup diagnostics."""
+    listener_open = is_port_in_use(PORT)
+    return {
+        "ok": listener_open,
+        "port": PORT,
+        "thread_alive": bool(_server_thread and _server_thread.is_alive()),
+        "listener_open": listener_open,
+        "thread_identity_known": bool(_server_thread and _server_thread.is_alive()),
+        "queued_requests": request_queue.qsize(),
+    }
 
 
 if __name__ == "__main__":

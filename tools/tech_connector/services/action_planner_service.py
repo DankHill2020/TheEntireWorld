@@ -360,7 +360,7 @@ if not assets:
 print(json.dumps({'ok': True, 'destination_path': destination_path, 'assets': assets, 'asset_count': len(assets)}))"""
 
     try:
-        from tech_connector.services.dcc.transfer_template_service import plan_transfer_permutation
+        from tech_connector.game_engine.integration.transfer_template_service import plan_transfer_permutation
 
         transfer_permutation = plan_transfer_permutation(prompt)
     except Exception:
@@ -664,7 +664,7 @@ print(json.dumps({
 }))"""
 
     try:
-        from tech_connector.services.dcc.transfer_template_service import plan_transfer_permutation
+        from tech_connector.game_engine.integration.transfer_template_service import plan_transfer_permutation
 
         transfer_permutation = plan_transfer_permutation(prompt)
     except Exception:
@@ -777,7 +777,7 @@ def plan_prompt_to_action_graph(
                     (planning_preferences or {}).get("requirement_manifest") or {}
                 ),
             )
-        from tech_connector.services.dcc.dynamic_pipeline_compiler_service import (
+        from tech_connector.game_engine.integration.dynamic_pipeline_compiler_service import (
             compile_dynamic_pipeline,
             is_dynamic_transfer_request,
         )
@@ -1015,3 +1015,4 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
         "unresolved_inputs": unresolved,
         "source_action_graph_intent": graph.get("intent") or "",
     }
+

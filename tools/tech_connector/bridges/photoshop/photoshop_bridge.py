@@ -9,6 +9,11 @@ import socket
 from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo
+from tech_connector.bridges.session_discovery import (
+    candidate_session_ports,
+    discover_open_ports,
+    parse_session_output,
+)
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
 
@@ -111,18 +116,41 @@ async function dispatchCommand(cmd) {
         if (command === "document.info") {
             const doc = app.activeDocument;
             if (!doc) return { ok: false, error: "No document open" };
+            const nativePath = String(doc.path || "");
+            const normalizedPath = nativePath.replace(/[\\\\/]+$/, "");
+            const filePath = normalizedPath && normalizedPath.endsWith(String(doc.name || ""))
+                ? normalizedPath
+                : (normalizedPath && doc.name ? `${normalizedPath}/${doc.name}` : "");
+            const bitDepth = String(doc.bitsPerChannel || "");
+            const colorProfile = String(doc.colorProfileName || "");
             return {
                 ok: true,
                 result: JSON.stringify({
                     name: doc.name,
                     path: doc.path,
+                    file_path: filePath,
                     width: doc.width,
                     height: doc.height,
                     resolution: doc.resolution,
                     colorMode: doc.mode,
-                    layerCount: doc.layers.length
+                    bitDepth: bitDepth,
+                    colorProfile: colorProfile,
+                    layerCount: doc.layers.length,
+                    parity_checks: {
+                        "dimensions and bit depth": Number(doc.width) > 0 && Number(doc.height) > 0 && Boolean(bitDepth),
+                        "layer order": Array.isArray(doc.layers) && doc.layers.length > 0,
+                        "color profile": Boolean(colorProfile)
+                    }
                 })
             };
+        }
+        if (command === "batch_play") {
+            if (!params || !params.descriptor) return { ok: false, error: "batch_play requires params.descriptor" };
+            const result = await core.executeAsModal(
+                async () => await action.batchPlay([params.descriptor], params.options || {}),
+                { commandName: params.commandName || "Tech Connector BatchPlay" }
+            );
+            return { ok: true, result: JSON.stringify(result) };
         }
         return { ok: false, error: `Unknown command: ${command}` };
     } catch (e) {
@@ -215,37 +243,19 @@ class PhotoshopBridge:
     ]
 
     def find_port(self, host: str = "127.0.0.1") -> int | None:
-        candidates = []
+        ports = self.find_ports(host=host)
+        return ports[0] if ports else None
 
-        for path in self.PORT_FILES:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    candidates.append(int(f.read().strip()))
-            except Exception:
-                pass
-
-        env_port = os.environ.get("PHOTOSHOP_BRIDGE_PORT")
-        if env_port:
-            try:
-                candidates.append(int(env_port))
-            except Exception:
-                pass
-
-        candidates.append(self.DEFAULT_PORT)
-
-        seen = set()
-        for port in candidates:
-            if port in seen:
-                continue
-            seen.add(port)
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.3)
-                    if s.connect_ex((host, port)) == 0:
-                        return port
-            except Exception:
-                pass
-        return None
+    def find_ports(self, host: str = "127.0.0.1") -> list[int]:
+        candidates = candidate_session_ports(
+            "photoshop",
+            port_files=self.PORT_FILES,
+            environment_variable="PHOTOSHOP_BRIDGE_PORT",
+            default_port=self.DEFAULT_PORT,
+            scan_count_variable="PHOTOSHOP_PORT_SCAN_COUNT",
+            default_scan_count=5,
+        )
+        return discover_open_ports(candidates, host=host)
 
     def execute(self, code: str, timeout: float = 10) -> tuple[bool, str]:
         """Send a command dict or raw batchPlay JSON to the Photoshop UXP bridge."""
@@ -256,6 +266,9 @@ class PhotoshopBridge:
                 "No Photoshop bridge found. Install the UXP plugin via Photoshop > Plugins > "
                 "Load Unsigned Plugin, then open the Tech Connector Bridge panel.",
             )
+        return self.execute_on_port(code, port=port, timeout=timeout)
+
+    def execute_on_port(self, code: str, *, port: int, timeout: float = 10) -> tuple[bool, str]:
         try:
             body = code.encode("utf-8")
             request = (
@@ -290,15 +303,34 @@ class PhotoshopBridge:
                 parsed = json.loads(raw)
                 result = parsed.get("result") or parsed.get("error") or raw
                 ok = bool(parsed.get("ok", True)) and not bridge_output_has_error(result)
-                return ok, str(result).strip() or "Photoshop returned no output."
+                result_text = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                return ok, result_text.strip() or "Photoshop returned no output."
             except Exception:
                 return (False, raw) if bridge_output_has_error(raw) else (True, raw)
         except Exception as e:
             return False, str(e)
 
     def _command(self, command: str, params: dict | None = None) -> tuple[bool, str]:
-        payload = json.dumps({"command": command, **(params or {})})
+        payload = json.dumps({"command": command, "params": dict(params or {})})
         return self.execute(payload)
+
+    def execute_command(self, command: str, params: dict | None = None) -> tuple[bool, str]:
+        return self._command(command, params)
+
+    def session_info(self, port: int | None = None, timeout: float = 3.0) -> dict:
+        port = int(port or self.find_port() or 0)
+        if not port:
+            return {"ok": False, "error": "No Photoshop bridge found."}
+        payload = json.dumps({"command": "document.info", "params": {}})
+        ok, raw = self.execute_on_port(payload, port=port, timeout=timeout)
+        data = parse_session_output(raw)
+        data.update({"ok": bool(ok), "port": port})
+        if not ok:
+            data.setdefault("error", str(raw))
+        return data
+
+    def sessions(self, host: str = "127.0.0.1") -> list[dict]:
+        return [self.session_info(port=port) for port in self.find_ports(host=host)]
 
     def get_current_file_code(self) -> str:
         return json.dumps({"command": "document.path"})
@@ -311,6 +343,59 @@ class PhotoshopBridge:
 
     def get_selection_code(self) -> str:
         return json.dumps({"command": "selection.info"})
+
+    def get_scene_snapshot(
+        self,
+        *,
+        timeout: float = 10.0,
+        port: int | None = None,
+        **_kwargs,
+    ) -> tuple[bool, object]:
+        target_port = int(port or self.find_port() or 0)
+        if not target_port:
+            return False, "No Photoshop bridge found."
+
+        def command(name: str) -> tuple[bool, object]:
+            ok, raw = self.execute_on_port(
+                json.dumps({"command": name, "params": {}}),
+                port=target_port,
+                timeout=timeout,
+            )
+            if not ok:
+                return False, raw
+            try:
+                return True, json.loads(str(raw))
+            except Exception:
+                return True, raw
+
+        ok, info = command("document.info")
+        if not ok or not isinstance(info, dict):
+            return False, info
+        layers_ok, layers = command("layer.list")
+        layer_names = list(layers) if layers_ok and isinstance(layers, list) else []
+        scene = str(info.get("file_path") or info.get("path") or "")
+        return True, {
+            "schema": "tech_connector.photoshop.document_snapshot.v1",
+            "provider_id": "photoshop",
+            "scene": scene,
+            "objects": [
+                {
+                    "native_id": f"layer:{index}:{name}",
+                    "name": str(name),
+                    "type": "image_layer",
+                    "visible": True,
+                }
+                for index, name in enumerate(layer_names)
+            ],
+            "selection": [],
+            "cameras": [],
+            "image_document_state": {**info, "layers": layer_names},
+            "isolation": {
+                "include_geometry": False,
+                "include_materials": False,
+                "lookdev_only": True,
+            },
+        }
 
     def parse_input(self, text: str):
         try:

@@ -7,7 +7,7 @@ import shutil
 import urllib.parse
 import urllib.request
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -112,7 +112,7 @@ def _parse_github_repo_reference_impl(repo_ref: str) -> GitHubRepoRef:
 
 
 def _utc_now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _repository_license(repo_dir: Path) -> tuple[str, str]:

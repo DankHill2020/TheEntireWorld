@@ -25,7 +25,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(config_path) if config_path else Path(__file__).with_name("config.yaml")
     with path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
-    for key in ("project_root", "sqlite_db", "graph_pickle"):
+    for key in ("project_root", "sqlite_db", "graph_file", "graph_pickle"):
         value = config.get(key)
         if value and not Path(value).is_absolute():
             config[key] = str((path.parent / value).resolve())
@@ -48,7 +48,11 @@ def run_indexer(
         raise ValueError("project_root is required in config.yaml or as an argument")
 
     extensions = get_included_extensions(cfg)
-    graph_path = Path(cfg.get("graph_pickle", Path(__file__).with_name("graph.pkl")))
+    graph_path = Path(
+        cfg.get("graph_file")
+        or cfg.get("graph_pickle")
+        or Path(__file__).with_name("graph.json")
+    )
     embed_model = cfg.get("embed_model", "nomic-embed-text")
     should_embed = bool(cfg.get("enable_embeddings", False)) if store_embeddings is None else bool(store_embeddings)
 

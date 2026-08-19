@@ -23,6 +23,12 @@ from tech_connector.models.constants import set_active_project_root
 from tech_connector.models.project import all_roots, project_roots, recent_projects, set_active_project
 from tech_connector.services.source_policy import apply_source_policy, live_sources_enabled
 from tech_connector.services.application_command_service import ApplicationCommandService
+from tech_connector.services.project_directory_service import (
+    apply_project_directory_environment,
+    initialize_tc_project_directories,
+    resolve_project_directories,
+    update_project_directory_settings,
+)
 
 
 class LazyCommandRouter:
@@ -71,6 +77,7 @@ class ApplicationService:
         self._index_worker_cls = index_worker_cls
 
         self.settings = settings if settings is not None else self._load_settings_fn()
+        self.project_directories = apply_project_directory_environment(self.settings)
         set_active_project_root(self.settings.get("active_project") or None)
 
         if bridge is not None:
@@ -106,6 +113,7 @@ class ApplicationService:
 
     def reload_settings(self) -> None:
         self.settings = self._load_settings_fn()
+        self.project_directories = apply_project_directory_environment(self.settings)
 
     def all_roots(self) -> List[str]:
         return all_roots(self.settings)
@@ -116,7 +124,35 @@ class ApplicationService:
     def save_settings(self, settings: Optional[Dict[str, Any]] = None) -> None:
         if settings is not None:
             self.settings = settings
+        self.project_directories = apply_project_directory_environment(self.settings)
         self._save_settings_fn(self.settings)
+
+    def set_project_directories(
+        self,
+        *,
+        tools_project: str,
+        custom_game_project: bool = False,
+        game_project: str = "",
+        custom_art_source: bool = False,
+        art_source: str = "",
+    ):
+        self.project_directories = update_project_directory_settings(
+            self.settings,
+            tools_project=tools_project,
+            custom_game_project=custom_game_project,
+            game_project=game_project,
+            custom_art_source=custom_art_source,
+            art_source=art_source,
+        )
+        set_active_project(self.settings, str(self.project_directories.tools_project))
+        initialize_tc_project_directories(self.project_directories)
+        set_active_project_root(self.project_directories.tools_project)
+        self.save_settings()
+        return self.project_directories
+
+    def resolved_project_directories(self):
+        self.project_directories = resolve_project_directories(self.settings)
+        return self.project_directories
 
     def live_sources_enabled(self) -> bool:
         return live_sources_enabled(self.settings)
@@ -140,7 +176,7 @@ class ApplicationService:
 
         if self.remote_mobile_server is not None and self.remote_mobile_server.is_running:
             return self.remote_mobile_server.base_url
-        host = host or self.settings.get("remote_mobile_host", "0.0.0.0")
+        host = host or self.settings.get("remote_mobile_host", "127.0.0.1")
         port = int(port if port is not None else self.settings.get("remote_mobile_port", 8765))
         self.remote_mobile_server = RemoteMobileServer(
             self.command_service,
@@ -168,6 +204,8 @@ class ApplicationService:
 
     def set_active_project(self, path: str) -> str:
         res = set_active_project(self.settings, path)
+        self.settings["tools_project_dir"] = res
+        self.project_directories = apply_project_directory_environment(self.settings)
         set_active_project_root(res)
         self.save_settings()
         return res

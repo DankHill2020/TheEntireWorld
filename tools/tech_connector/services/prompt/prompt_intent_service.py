@@ -134,6 +134,45 @@ _CACHE: dict[tuple[str, ...], RequestUnderstanding] = {}
 _CACHE_LOCK = threading.Lock()
 
 
+def _requires_semantic_composition(
+    prompt: str,
+    understanding: RequestUnderstanding | dict[str, Any] | None = None,
+) -> bool:
+    """Return whether a request needs relationship-aware plan verification.
+
+    :param prompt: Original user request.
+    :param understanding: Optional canonical request understanding.
+    :return: True when multiple goals or unresolved relationships require composition.
+    """
+
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    try:
+        from tech_connector.services.prompt.prompt_task_splitter_service import (
+            compose_request,
+        )
+
+        composed = compose_request(text)
+        if len(composed.goals) > 1 or bool(composed.unresolved_relationships):
+            return True
+        if any(clause.depends_on for clause in composed.clauses):
+            return True
+        return False
+    except Exception:
+        # Composition is an accuracy enhancement. A parser integration issue
+        # must not turn a straightforward request into a hard planning failure.
+        pass
+
+    if isinstance(understanding, RequestUnderstanding):
+        tasks = understanding.tasks
+    elif isinstance(understanding, dict):
+        tasks = list(understanding.get("tasks") or understanding.get("goals") or [])
+    else:
+        tasks = []
+    return len(tasks) > 1
+
+
 def _has(text: str, pattern: str) -> bool:
     return bool(re.search(pattern, text or ""))
 
@@ -245,7 +284,7 @@ def _registered_host_operation_for_prompt(host: str, text: str) -> tuple[str, An
     if host == "unreal":
         return "", None
     try:
-        from tech_connector.services.dcc.dcc_operation_service import (
+        from tech_connector.game_engine.integration.dcc_operation_service import (
             dcc_prompt_to_operation,
             registered_dcc_operation,
         )
@@ -619,7 +658,11 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         scoped_context_reference
         and re.search(r"\b(slider|qslider|widget|class|helper)\b", lower)
         and re.search(r"\b(what would|how would|could .* use|show|example|look like|should i add|already have|is there already|do we already|pretend)\b", lower)
-        and (explicit_read_only or not re.search(r"\b(?:add|create|implement|write|patch|put|make)\b", lower))
+        and (
+            explicit_read_only
+            or re.search(r"\b(?:should i add|already have|is there already|do we already)\b", lower)
+            or not re.search(r"\b(?:add|create|implement|write|patch|put|make)\b", lower)
+        )
     )
 
     if unimported_files_query:
@@ -903,10 +946,13 @@ def _deterministic_understanding(text: str, host: str = "") -> RequestUnderstand
         live_host_execution_requested=execution_requested,
         workflow_requested=workflow_requested,
         read_only_requested=(
-            explicit_read_only
-            or primary_route in {"project_search", "dcc_query", "chat"}
-            or primary_intent in {"read_only_ui_wrapper_planning", "read_only_code_planning"}
-            or code_learning_request
+            not mutation_requested
+            and (
+                explicit_read_only
+                or primary_route in {"project_search", "dcc_query", "chat"}
+                or primary_intent in {"read_only_ui_wrapper_planning", "read_only_code_planning"}
+                or code_learning_request
+            )
         ),
         primary_goal=_normalize_goal(text, primary_action, requested_artifact, files[0] if files else "", behavior),
         goal_type=goal_type,
@@ -1117,10 +1163,7 @@ def _apply_clause_plan_to_understanding(
         not task.read_only
         for task in tasks
     )
-    understanding.read_only_requested = (
-        not understanding.mutation_requested
-        or bool(clause_plan.get("has_approval_gate"))
-    )
+    understanding.read_only_requested = not understanding.mutation_requested
     understanding.workflow_requested = (
         understanding.workflow_requested
         or len(tasks) >= 4
@@ -2453,3 +2496,4 @@ def build_action_graph_clarification(
         "symbols": symbols,
         "text": "\n".join(lines),
     }
+

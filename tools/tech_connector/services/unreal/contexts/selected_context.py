@@ -167,7 +167,7 @@ class UnrealSelectedContextService:
         """
         warnings: list[str] = []
         try:
-            from tech_connector.services.dcc.context_call_registry import execute_context_call
+            from tech_connector.game_engine.integration.context_call_registry import execute_context_call
         except Exception:
             try:
                 from context_call_registry import execute_context_call
@@ -268,3 +268,4 @@ class UnrealSelectedContextService:
         )
         result["selection_context"]["risk_level"] = capability_pack.get("risk")
         return result
+

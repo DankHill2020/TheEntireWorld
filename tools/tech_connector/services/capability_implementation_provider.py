@@ -1,4 +1,4 @@
-﻿"""Grounded model-backed implementation for capability-acquisition jobs."""
+"""Grounded model-backed implementation for capability-acquisition jobs."""
 
 from __future__ import annotations
 
@@ -924,7 +924,48 @@ class ModelBackedCapabilityImplementationProvider:
                 continue
             first_line = int(node.body[0].lineno) - 1
             indent = re.match(r"\s*", lines[first_line]).group(0)
-            insertions.append((first_line, f'{indent}"""Implement the registered {node.name} capability."""'))
+            parameters = [
+                argument.arg
+                for argument in [
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                ]
+                if argument.arg not in {"self", "cls"}
+            ]
+            if node.args.vararg is not None:
+                parameters.append(node.args.vararg.arg)
+            if node.args.kwarg is not None:
+                parameters.append(node.args.kwarg.arg)
+            words = node.name.strip("_").replace("_", " ").split()
+            verb = {
+                "apply": "Applies",
+                "build": "Builds",
+                "create": "Creates",
+                "find": "Finds",
+                "get": "Gets",
+                "inspect": "Inspects",
+                "list": "Lists",
+                "normalize": "Normalizes",
+                "repair": "Repairs",
+                "resolve": "Resolves",
+                "set": "Sets",
+                "synthesize": "Synthesizes",
+                "update": "Updates",
+                "validate": "Validates",
+            }.get(words[0].casefold() if words else "")
+            summary = (
+                " ".join([verb, *words[1:]])
+                if verb
+                else "Handles " + " ".join(words or ["capability"])
+            )
+            docstring_lines = [f'{indent}"""{summary}.', ""]
+            docstring_lines.extend(
+                f"{indent}:param {parameter}: {parameter.replace('_', ' ')}"
+                for parameter in parameters
+            )
+            docstring_lines.extend([f"{indent}:return: result", f'{indent}"""'])
+            insertions.append((first_line, "\n".join(docstring_lines)))
         for index, text in sorted(insertions, reverse=True):
             lines.insert(index, text)
         return "\n".join(lines)
@@ -1115,7 +1156,7 @@ class ModelBackedCapabilityImplementationProvider:
                             {},
                         )
                         if live_evidence:
-                            from tech_connector.services.dcc.operation_evidence_service import (
+                            from tech_connector.game_engine.integration.operation_evidence_service import (
                                 record_operation_validation,
                             )
 
@@ -1455,6 +1496,10 @@ class ModelBackedCapabilityImplementationProvider:
             candidates.append(
                 self.project_root / "plugins" / "AIStudioBridge" / "Source" / "AIStudioBridge" / "Private" / "AIStudioBridgeLibrary.cpp"
             )
+            plugin_private_root = (
+                self.project_root / "plugins" / "AIStudioBridge" / "Source" / "AIStudioBridge" / "Private"
+            )
+            candidates.extend(sorted(plugin_private_root.glob("AIStudioBridgeLibrary*.inl")))
             candidates.append(
                 self.project_root / "plugins" / "AIStudioBridge" / "Source" / "AIStudioBridge" / "Public" / "AIStudioBridgeLibrary.h"
             )
@@ -1907,3 +1952,4 @@ class ModelBackedCapabilityImplementationProvider:
             response_format=stage.response_format or None,
             temperature=0.0,
         ) or "")
+

@@ -161,7 +161,7 @@ class TestGoalGapPlanningService(unittest.TestCase):
         self.assertIn("canonical_action_graph", plan)
         self.assertEqual(
             plan["mixed_operation_graph"]["base_graph"],
-            "tech_connector.services.action_graph_service.ActionGraph",
+            "reasoning_runtime.action.action_graph_service.ActionGraph",
         )
         self.assertEqual(plan["canonical_action_graph"]["intent"], "mixed_operation")
         self.assertTrue(plan["canonical_action_graph"]["validation"]["valid"])
@@ -191,7 +191,10 @@ class TestGoalGapPlanningService(unittest.TestCase):
         materializer = plan["pipeline_materialization_plan"]
         self.assertEqual(materializer["framework"], "mixed_operation_materializer_v1")
         self.assertTrue(materializer["convertible"])
-        self.assertEqual(materializer["base_graph"], "tech_connector.services.action_graph_service.ActionGraph")
+        self.assertEqual(
+            materializer["base_graph"],
+            "reasoning_runtime.action.action_graph_service.ActionGraph",
+        )
         self.assertEqual(materializer["generated_function_root"], "tool_output/generated_functions")
         self.assertEqual(materializer["third_party_wrapper_root"], "third_party/wrappers")
         self.assertEqual(materializer["default_promotion_scope"], "pipeline_local")

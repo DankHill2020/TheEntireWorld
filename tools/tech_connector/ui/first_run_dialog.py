@@ -19,25 +19,32 @@ from PySide6.QtWidgets import (
 
 from tech_connector.models.constants import ASSUMED_DIRS, LOGO_PATH
 from tech_connector.services.settings_service import save_settings
+from tech_connector.ui.design_system import set_ui_role
+from tech_connector.ui.icons import configure_button
 
 
 class FirstRunDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("The Entire World AI Setup")
-        self.resize(900, 620)
+        self.setWindowTitle("Tech Connector Setup")
+        self.resize(780, 560)
 
         layout = QVBoxLayout(self)
 
         brand = QHBoxLayout()
         if LOGO_PATH.exists():
             logo = QLabel()
-            logo.setPixmap(QPixmap(str(LOGO_PATH)).scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            logo.setPixmap(QPixmap(str(LOGO_PATH)).scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             brand.addWidget(logo)
-        title = QLabel("The Entire World\nTechnical Art AI")
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #00b866;")
-        brand.addWidget(title)
+        title_column = QVBoxLayout()
+        title = QLabel("Set up Tech Connector")
+        set_ui_role(title, "title")
+        title_column.addWidget(title)
+        subtitle = QLabel("Choose which projects and tools should be searchable")
+        set_ui_role(subtitle, "muted")
+        title_column.addWidget(subtitle)
+        brand.addLayout(title_column)
         brand.addStretch(1)
         layout.addLayout(brand)
 
@@ -46,7 +53,12 @@ class FirstRunDialog(QDialog):
             "only when you want them included in the AST index."
         )
         info.setWordWrap(True)
+        set_ui_role(info, "muted")
         layout.addWidget(info)
+
+        directories_title = QLabel("Indexed directories")
+        set_ui_role(directories_title, "sectionTitle")
+        layout.addWidget(directories_title)
 
         self.dir_list = QListWidget()
         for d in ASSUMED_DIRS:
@@ -61,10 +73,12 @@ class FirstRunDialog(QDialog):
 
         row = QHBoxLayout()
         add_btn = QPushButton("Add Tool/Project Directory")
+        configure_button(add_btn, "folder", text="Add directory", role="secondary")
         add_btn.clicked.connect(self.add_dir)
         row.addWidget(add_btn)
 
         remove_btn = QPushButton("Remove Selected Extra")
+        configure_button(remove_btn, "close", text="Remove selected", role="danger")
         remove_btn.clicked.connect(self.remove_selected_extra)
         row.addWidget(remove_btn)
         layout.addLayout(row)
@@ -74,6 +88,18 @@ class FirstRunDialog(QDialog):
         layout.addWidget(self.auto_index)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        configure_button(
+            buttons.button(QDialogButtonBox.Ok),
+            "check",
+            text="Save setup",
+            role="primary",
+        )
+        configure_button(
+            buttons.button(QDialogButtonBox.Cancel),
+            "close",
+            text="Cancel",
+            role="quiet",
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

@@ -13,40 +13,36 @@ set "PYTHON_EXE="
 set "PYTHONW_EXE="
 set "PYTHON_ARGS="
 
-py -3.11 --version >nul 2>nul
+py -3.14 --version >nul 2>nul
 if not errorlevel 1 (
     set "PYTHON_EXE=py"
     set "PYTHONW_EXE=pyw"
-    set "PYTHON_ARGS=-3.11"
+    set "PYTHON_ARGS=-3.14"
 )
 
-if not defined PYTHON_EXE if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
-    set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-    set "PYTHONW_EXE=%LOCALAPPDATA%\Programs\Python\Python311\pythonw.exe"
+if not defined PYTHON_EXE if exist "%LOCALAPPDATA%\Programs\Python\Python314\python.exe" (
+    set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python314\python.exe"
+    set "PYTHONW_EXE=%LOCALAPPDATA%\Programs\Python\Python314\pythonw.exe"
 )
 
 if not defined PYTHON_EXE (
-    echo Python 3.11 was not found.
-    echo Please install Python 3.11, then run this again.
+    echo Python 3.14 was not found.
+    echo Please run "py install 3.14", then launch this again.
     pause
     exit /b 1
 )
 
 if /I not "%PYTHONW_EXE%"=="pyw" if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
 echo Using Python: %PYTHON_EXE% %PYTHON_ARGS%
-set SETUP_MARKER=%LOCALAPPDATA%\TA_Tech_Connector_MCPHost\deps_installed.marker
+set SETUP_MARKER=%LOCALAPPDATA%\TA_Tech_Connector_MCPHost\deps_py314_installed.marker
 if not exist "%LOCALAPPDATA%\TA_Tech_Connector_MCPHost" mkdir "%LOCALAPPDATA%\TA_Tech_Connector_MCPHost"
 
 if exist "%SETUP_MARKER%" (
     echo Dependencies already checked.
 ) else (
     echo Checking dependencies...
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip show PySide6 >nul 2>nul
-    if errorlevel 1 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install PySide6
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip show fastmcp >nul 2>nul
-    if errorlevel 1 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install fastmcp
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip show pywinpty >nul 2>nul
-    if errorlevel 1 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install pywinpty
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0packaging\requirements-runtime.txt"
+    if errorlevel 1 exit /b 1
     echo ok > "%SETUP_MARKER%"
 )
 

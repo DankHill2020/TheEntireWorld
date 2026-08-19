@@ -37,18 +37,18 @@ class JiraTaskCreatorDialog(QDialog):
 
     def setup_ui(self, initial_summary: str, initial_desc: str):
         self.setStyleSheet("""
-            QDialog { background-color: #121212; color: #e0e0e0; }
-            QLabel { color: #b3b3b3; font-weight: bold; font-size: 12px; }
+            QDialog { background-color: #0d141e; color: #e0e0e0; }
+            QLabel { color: #9cdbba; font-weight: bold; font-size: 12px; }
             QLineEdit, QTextEdit, QComboBox {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #333333; border-radius: 4px; padding: 8px;
+                background-color: #080d14; color: #ffffff;
+                border: 1px solid #12324a; border-radius: 4px; padding: 8px;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #0052CC; }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #16f26a; }
             QPushButton {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #444444; border-radius: 4px; padding: 8px 16px; font-weight: bold;
+                background-color: #0c1c28; color: #16f26a;
+                border: 1px solid #0c7a47; border-radius: 4px; padding: 8px 16px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #0052CC; border-color: #0052CC; }
+            QPushButton:hover { background-color: #16f26a; color: #000000; }
         """)
 
         layout = QVBoxLayout(self)
@@ -56,7 +56,7 @@ class JiraTaskCreatorDialog(QDialog):
         form.setSpacing(12)
 
         header = QLabel("<h2>📋 Jira Issue Details & Project Linking</h2>")
-        header.setStyleSheet("color: #0052CC;")
+        header.setStyleSheet("color: #16f26a;")
         form.addRow(header)
 
         self.project_edit = QLineEdit(self.project_key)
@@ -88,9 +88,9 @@ class JiraTaskCreatorDialog(QDialog):
         self.parent_combo = QComboBox()
         self.parent_combo.setEditable(True)
         self.parent_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.parent_combo.addItem("✨ None (Top-Level Task)", "")
+        self.parent_combo.addItem("✦ None (Top-Level Task)", "")
 
-        icons = {"Task": "📋", "Bug": "🐛", "Story": "📖", "Epic": "⚡"}
+        icons = {"Task": "📋", "Bug": "🐞", "Story": "📖", "Epic": "⚡"}
         for issue in self.existing_issues:
             icon = icons.get(issue.get("type", "Task"), "📋")
             self.parent_combo.addItem(f"{icon} [{issue['key']}] {issue['summary']}", issue['key'])
@@ -103,7 +103,7 @@ class JiraTaskCreatorDialog(QDialog):
         # Bottom actions
         btn_layout = QHBoxLayout()
         
-        btn_defaults = QPushButton("💾 Save as Default")
+        btn_defaults = QPushButton("⤓ Save as Default")
         btn_defaults.clicked.connect(self.save_as_default)
         btn_layout.addWidget(btn_defaults)
 
@@ -111,8 +111,8 @@ class JiraTaskCreatorDialog(QDialog):
         btn_restore.clicked.connect(self.restore_defaults)
         btn_layout.addWidget(btn_restore)
 
-        btn_create = QPushButton("🚀 Create Issue in Jira")
-        btn_create.setStyleSheet("background: #0052CC; color: #fff;")
+        btn_create = QPushButton("⚡ Create Issue in Jira")
+        btn_create.setStyleSheet("background: linear-gradient(135deg, #1e9bff, #16f26a); color: #000000; font-weight: bold;")
         btn_create.clicked.connect(self.accept)
         btn_layout.addWidget(btn_create)
 
@@ -156,17 +156,17 @@ class JiraTaskViewerDialog(QDialog):
 
     def setup_ui(self):
         self.setStyleSheet("""
-            QDialog { background-color: #121212; color: #e0e0e0; }
-            QLabel { color: #b3b3b3; font-weight: bold; font-size: 12px; }
+            QDialog { background-color: #0d141e; color: #e0e0e0; }
+            QLabel { color: #9cdbba; font-weight: bold; font-size: 12px; }
             QLineEdit, QTextEdit, QComboBox {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #333333; border-radius: 4px; padding: 8px;
+                background-color: #080d14; color: #ffffff;
+                border: 1px solid #12324a; border-radius: 4px; padding: 8px;
             }
             QPushButton {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #444444; border-radius: 4px; padding: 8px 16px; font-weight: bold;
+                background-color: #0c1c28; color: #16f26a;
+                border: 1px solid #0c7a47; border-radius: 4px; padding: 8px 16px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #0052CC; }
+            QPushButton:hover { background-color: #16f26a; color: #000000; }
         """)
 
         layout = QVBoxLayout(self)
@@ -174,15 +174,14 @@ class JiraTaskViewerDialog(QDialog):
         form.setSpacing(12)
 
         header = QLabel("<h2>🔍 Project Issue Navigator & Editor</h2>")
-        header.setStyleSheet("color: #0052CC;")
+        header.setStyleSheet("color: #16f26a;")
         form.addRow(header)
 
-        # Smart Search List to select ANY issue in project
         self.issue_combo = QComboBox()
         self.issue_combo.setEditable(True)
         self.issue_combo.setInsertPolicy(QComboBox.NoInsert)
         
-        icons = {"Task": "📋", "Bug": "🐛", "Story": "📖", "Epic": "⚡"}
+        icons = {"Task": "📋", "Bug": "🐞", "Story": "📖", "Epic": "⚡"}
         for issue in self.existing_issues:
             icon = icons.get(issue.get("type", "Task"), "📋")
             self.issue_combo.addItem(f"{icon} [{issue['key']}] {issue['summary']} ({issue.get('status', 'Open')})", issue['key'])
@@ -192,7 +191,7 @@ class JiraTaskViewerDialog(QDialog):
         form.addRow("Smart Project Task Finder:", self.issue_combo)
 
         self.key_label = QLabel("KAN-101")
-        self.key_label.setStyleSheet("color: #0052CC; font-size: 14px; font-weight: bold;")
+        self.key_label.setStyleSheet("color: #16f26a; font-size: 14px; font-weight: bold;")
         form.addRow("Active Issue Key:", self.key_label)
 
         self.summary_edit = QLineEdit()
@@ -207,12 +206,10 @@ class JiraTaskViewerDialog(QDialog):
 
         layout.addLayout(form)
 
-        # Load first issue
         self._on_issue_selected(0)
 
-        # Save Button
-        btn_save = QPushButton("💾 Update Active Issue in Jira")
-        btn_save.setStyleSheet("background: #0052CC; color: #fff;")
+        btn_save = QPushButton("⤓ Update Active Issue in Jira")
+        btn_save.setStyleSheet("background: linear-gradient(135deg, #1e9bff, #16f26a); color: #000000; font-weight: bold;")
         btn_save.clicked.connect(self.save_issue)
         layout.addWidget(btn_save)
 

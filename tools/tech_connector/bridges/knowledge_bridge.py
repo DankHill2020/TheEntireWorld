@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import sys
 
 from PySide6.QtCore import QThread, Signal
 
@@ -43,7 +44,7 @@ class IndexWorker(QThread):
             env = os.environ.copy()
             env["AI_KNOWLEDGE_ROOTS"] = ";".join(self.roots)
 
-            cmd = ["py", "-3.11", str(indexer)]
+            cmd = [sys.executable, str(indexer)]
             self.output.emit("Starting AST index build...\n")
             self.output.emit("Roots:\n" + "\n".join(f"  - {r}" for r in self.roots) + "\n\n")
 

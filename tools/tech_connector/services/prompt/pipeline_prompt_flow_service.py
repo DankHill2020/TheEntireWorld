@@ -116,7 +116,7 @@ def resolve_pipeline_prompt_flow(
     action_graph: dict[str, Any] = {}
     workflow_plan: dict[str, Any] | None = None
     if route_decision.route in {"pipeline_graph", "action_graph"}:
-        from tech_connector.services.dcc.pipeline_requirement_coverage_service import (
+        from tech_connector.game_engine.integration.pipeline_requirement_coverage_service import (
             build_pipeline_requirement_manifest,
         )
 
@@ -158,7 +158,7 @@ def resolve_pipeline_prompt_flow(
                     action_graph.get("requirement_ledger") or {}
                 ).get("requirement_count", 0),
             )
-            from tech_connector.services.dcc.pipeline_requirement_coverage_service import (
+            from tech_connector.game_engine.integration.pipeline_requirement_coverage_service import (
                 verify_pipeline_requirement_ledger,
             )
 
@@ -267,3 +267,4 @@ def resolve_pipeline_prompt_flow(
         "timings": {key: round(value, 3) for key, value in timings.items()},
         "ok": ok,
     }
+

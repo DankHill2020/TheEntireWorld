@@ -4,11 +4,11 @@
 
 Main launcher. Double-click this.
 
-The launcher requires the Windows `py` launcher and Python 3.11. It performs a
+The source launcher requires the Windows `py` launcher and Python 3.14. It performs a
 first-run dependency check, then starts the UI with:
 
 ```text
-pyw -3.11 -m tech_connector.app.main_window
+pyw -3.14 -m tech_connector.app.main_window
 ```
 
 Installs missing Python dependencies:

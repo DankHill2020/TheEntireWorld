@@ -183,3 +183,86 @@ def prototype_from_template(template, target_path, parameters=None):
         "validation_report": "No mutation was performed. This endpoint produced a project-aware plan from live assets.",
         "rollback_token": "",
     }, indent=2, default=str)
+
+
+def create_gameplay_ability(ability_name, save_path=""):
+    """
+    Creates a Gameplay Ability Blueprint asset.
+
+    :param ability_name: asset name for the new Gameplay Ability Blueprint.
+    :param save_path: optional content folder or full package path.
+    :return: JSON creation and readback result.
+    """
+    import unreal
+
+    clean_name = re.sub(r"[^A-Za-z0-9_]", "_", str(ability_name or "").strip())
+    if not clean_name:
+        raise ValueError("A non-empty Gameplay Ability name is required.")
+    if not clean_name.startswith("GA_"):
+        clean_name = "GA_" + clean_name
+    requested_path = str(save_path or "/Game/Gameplay/Abilities").split(".", 1)[0].rstrip("/")
+    if requested_path.rsplit("/", 1)[-1] == clean_name:
+        package_path = requested_path.rpartition("/")[0]
+    else:
+        package_path = requested_path
+    asset_path = f"{package_path}/{clean_name}"
+
+    existing = unreal.EditorAssetLibrary.load_asset(asset_path)
+    if existing is not None:
+        return json.dumps(
+            {
+                "ok": True,
+                "status": "already_exists",
+                "asset_path": asset_path,
+                "created": False,
+                "class": existing.get_class().get_name(),
+            },
+            indent=2,
+        )
+    ability_class = getattr(unreal, "GameplayAbility", None)
+    factory_class = getattr(unreal, "BlueprintFactory", None)
+    blueprint_class = getattr(unreal, "Blueprint", None)
+    if ability_class is None or factory_class is None or blueprint_class is None:
+        return json.dumps(
+            {
+                "ok": False,
+                "status": "gameplay_ability_api_unavailable",
+                "missing": [
+                    name
+                    for name, value in (
+                        ("GameplayAbility", ability_class),
+                        ("BlueprintFactory", factory_class),
+                        ("Blueprint", blueprint_class),
+                    )
+                    if value is None
+                ],
+            },
+            indent=2,
+        )
+    factory = factory_class()
+    factory.set_editor_property("parent_class", ability_class)
+    asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        clean_name,
+        package_path,
+        blueprint_class,
+        factory,
+    )
+    if asset is None:
+        return json.dumps(
+            {"ok": False, "status": "create_asset_failed", "asset_path": asset_path},
+            indent=2,
+        )
+    saved = bool(unreal.EditorAssetLibrary.save_loaded_asset(asset, False))
+    loaded = unreal.EditorAssetLibrary.load_asset(asset_path)
+    return json.dumps(
+        {
+            "ok": bool(saved and loaded is not None),
+            "status": "saved" if saved and loaded is not None else "save_or_readback_failed",
+            "asset_path": asset_path,
+            "created": True,
+            "saved": saved,
+            "readback": loaded is not None,
+            "parent_class": str(ability_class),
+        },
+        indent=2,
+    )

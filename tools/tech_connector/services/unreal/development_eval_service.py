@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from tech_connector.models.constants import APP_DIR
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 
 
 UNREAL_DEVELOPMENT_EVAL_LOG = APP_DIR / "unreal_development_eval.jsonl"
@@ -33,9 +34,7 @@ def record_unreal_development_eval(
         "remediation": str(remediation or ""),
     }
     path = Path(log_path or UNREAL_DEVELOPMENT_EVAL_LOG)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, default=str) + "\n")
+    append_jsonl_record(path, row)
     return row
 
 

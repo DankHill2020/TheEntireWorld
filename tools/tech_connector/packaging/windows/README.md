@@ -1,8 +1,12 @@
 # Windows Packaging Quickstart
 
-This folder contains the local build loop for website-ready Tech Connector packages.
+This folder contains the local build loop for website-ready Tech Connector
+packages. Release freezes require 64-bit CPython 3.14. The default `auto`
+setting checks normal per-user and system install paths before trying
+`py -3.14`. PyInstaller bundles that interpreter, so installed users do not
+need Python on their machine.
 
-The convenience wrapper lives beside the main script:
+Run the convenience wrapper from the repository root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\Build_TechConnector_Windows_Package.ps1 -Tier reasoning-runtime -Mode freeze
@@ -15,75 +19,53 @@ powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\Build_
 
 ## Build Modes
 
-### 1. Stage Only
-
-Use this to verify package contents quickly.
+Stage package contents without freezing:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode stage
 ```
 
-Output:
-
-```text
-dist\windows\staged\reasoning-runtime
-```
-
-### 2. Frozen App + Portable Zip
-
-Use this before building an installer.
+Create the installed app and portable ZIP:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode freeze
 ```
 
-Outputs:
-
-```text
-dist\windows\frozen\reasoning-runtime\TechConnector\TechConnector.exe
-dist\windows\portable\TechConnectorReasoningRuntime-<version>-win64-portable.zip
-```
-
-### 3. Installer EXE
-
-Install Inno Setup 6 first, then run:
+Create the Inno Setup installer EXE:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode installer
 ```
 
-Output:
+Use `-Tier full-tools` for the complete package. Installer mode requires Inno
+Setup 6; without it, the script retains the frozen app and portable ZIP.
+
+## Outputs
 
 ```text
-dist\windows\installer\TechConnectorReasoningRuntime-<version>-win64-setup.exe
+dist\windows\staged\<tier>
+dist\windows\frozen\<tier>\TechConnector\TechConnector.exe
+dist\windows\portable\<package>-<version>-win64-portable.zip
+dist\windows\installer\<package>-<version>-win64-setup.exe
 ```
 
-Build the full package with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier full-tools -Mode installer
-```
+The freeze builds and tests the C++ graph runtime, packages its DLL, and writes
+`PYTHON_RUNTIME.txt` beside the application with the exact bundled interpreter.
 
 ## Smoke Tests
 
-Test a staged package import:
-
 ```powershell
 python tech_connector\packaging\smoke_test_package.py dist\windows\staged\reasoning-runtime
-```
-
-Test a frozen executable launch:
-
-```powershell
 python tech_connector\packaging\smoke_test_package.py dist\windows\frozen\reasoning-runtime\TechConnector\TechConnector.exe
 ```
 
 ## Iteration Notes
 
-- Use `-Mode stage` when changing package contents.
-- Use `-Mode freeze` when testing PyInstaller issues.
-- Use `-Mode installer` when testing real install/uninstall behavior.
-- Add `-SkipDependencyInstall` after the build venv already has PyInstaller and runtime dependencies.
-- Use `-Python "py -3.11"` if you want to force the Windows Python launcher instead of the default `python`.
-- The installer writes the app to Program Files by default, while user settings remain in local app data.
-- DCC bridge setup should stay opt-in inside the app rather than being forced by the installer.
+- Install the current Python release first with the official Python installer.
+- `-Python auto` is the default. An explicit path must still point to 64-bit
+  CPython 3.14.
+- Use `-Mode stage` for package-content changes and `-Mode freeze` for
+  PyInstaller changes.
+- Add `-SkipDependencyInstall` only after the build environment is populated.
+- User settings remain in local app data; they are not written to Program Files.
+- DCC bridge setup remains an opt-in action inside the app.

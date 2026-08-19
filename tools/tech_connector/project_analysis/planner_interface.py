@@ -12,7 +12,11 @@ from .symbol_db import query_symbols
 
 def _graph_path() -> Path:
     cfg = load_config()
-    return Path(cfg.get("graph_pickle", Path(__file__).with_name("graph.pkl")))
+    return Path(
+        cfg.get("graph_file")
+        or cfg.get("graph_pickle")
+        or Path(__file__).with_name("graph.json")
+    )
 
 
 def query_graph(prompt: str, limit: int = 20) -> dict[str, Any]:

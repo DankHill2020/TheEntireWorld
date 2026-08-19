@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 
 def object_path(asset_path):
@@ -93,14 +94,29 @@ def inspect_asset(asset_path):
     asset = editor.load_asset(asset_path)
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
     data = registry.get_asset_by_object_path(asset_path)
+    package = str(data.package_name) if data else str(asset_path).split(".", 1)[0]
+    absolute_path = ""
+    if package.startswith("/Game/"):
+        content_dir = str(unreal.Paths.project_content_dir())
+        try:
+            content_dir = str(unreal.Paths.convert_relative_path_to_full(content_dir))
+        except Exception:
+            pass
+        absolute_path = os.path.abspath(os.path.join(content_dir, package[len("/Game/"):] + ".uasset"))
+    file_exists = bool(absolute_path and os.path.isfile(absolute_path))
     result = {
         "asset_path": asset_path,
         "exists": True,
+        "absolute_path": absolute_path,
         "name": asset.get_name() if asset else "",
         "class": asset.get_class().get_name() if asset else "",
-        "package": str(data.package_name) if data else "",
+        "package": package,
         "tags": dict(data.tags_and_values) if data else {},
         "dependencies": json.loads(get_dependencies(asset_path)),
+        "parity_checks": {
+            "asset registry readback": bool(asset and data),
+            "references and save state": file_exists,
+        },
     }
     return json.dumps(result, indent=2, default=str)
 
@@ -195,6 +211,12 @@ def resolve_asset(file_name, expected_class="", directory="/Game"):
 
 
 def delete_assets(asset_paths, dry_run=False):
+    """
+        Deletes exact Unreal assets idempotently.
+    :param asset_paths: asset path or paths to delete
+    :param dry_run: whether to inspect without mutation
+    :return: JSON deletion receipt
+    """
     import unreal
 
     paths = asset_paths if isinstance(asset_paths, list) else [asset_paths]
@@ -207,9 +229,22 @@ def delete_assets(asset_paths, dry_run=False):
         if exists_before and not dry_run:
             deleted = bool(unreal.EditorAssetLibrary.delete_asset(path))
         exists_after = bool(unreal.EditorAssetLibrary.does_asset_exist(path))
-        row_ok = exists_before and (dry_run or deleted) and (dry_run or not exists_after)
+        row_ok = bool(not exists_after) if not dry_run else True
+        status = (
+            "would_delete" if dry_run and exists_before
+            else "already_absent" if not exists_before
+            else "deleted" if deleted and not exists_after
+            else "delete_failed"
+        )
         ok = ok and row_ok
-        rows.append({"asset_path": path, "exists_before": exists_before, "deleted": deleted, "exists_after": exists_after, "ok": row_ok})
+        rows.append({
+            "asset_path": path,
+            "status": status,
+            "exists_before": exists_before,
+            "deleted": deleted,
+            "exists_after": exists_after,
+            "ok": row_ok,
+        })
     return json.dumps({"ok": ok, "dry_run": bool(dry_run), "results": rows}, indent=2, default=str)
 
 

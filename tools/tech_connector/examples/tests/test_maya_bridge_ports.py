@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
+import socket
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -17,6 +19,71 @@ class FakeMayaBridge(MayaBridge):
 
 
 class MayaBridgePortTests(unittest.TestCase):
+    def test_execute_on_port_honors_preexisting_cancellation_without_connecting(self):
+        canceled = threading.Event()
+        canceled.set()
+        bridge = object.__new__(MayaBridge)
+
+        with patch("tech_connector.bridges.maya.maya_bridge.socket.socket") as socket_factory:
+            ok, message = bridge.execute_on_port("print('unused')", port=7001, cancel_event=canceled)
+
+        self.assertFalse(ok)
+        self.assertEqual(message, "Maya command canceled.")
+        socket_factory.assert_not_called()
+
+    def test_execute_on_port_interrupts_a_waiting_receive(self):
+        canceled = threading.Event()
+
+        class WaitingSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def settimeout(self, _timeout):
+                return None
+
+            def connect(self, _address):
+                return None
+
+            def sendall(self, _payload):
+                return None
+
+            def recv(self, _count):
+                canceled.set()
+                raise socket.timeout()
+
+        bridge = object.__new__(MayaBridge)
+        with patch("tech_connector.bridges.maya.maya_bridge.socket.socket", return_value=WaitingSocket()):
+            ok, message = bridge.execute_on_port(
+                "print('slow')", port=7001, timeout=30.0, cancel_event=canceled
+            )
+
+        self.assertFalse(ok)
+        self.assertEqual(message, "Maya command canceled.")
+
+    def test_timeline_sampler_install_does_not_report_a_scene_edit(self):
+        captured = {}
+        bridge = object.__new__(MayaBridge)
+
+        def capture(code, **_kwargs):
+            captured["code"] = code
+            return True, "OK"
+
+        bridge.execute_on_port = capture
+        ok, _message = bridge.prepare_fast_timeline_sampler(
+            port=7001,
+            target_native_ids=["|mesh"],
+        )
+
+        self.assertTrue(ok)
+        revision_line = next(
+            line for line in captured["code"].splitlines()
+            if line.startswith("_tech_connector_scene_revision =")
+        )
+        self.assertNotIn("+ 1", revision_line)
+
     def test_find_ports_scans_from_7001_and_returns_active_ports(self):
         with tempfile.TemporaryDirectory() as tmp:
             port_file = Path(tmp) / "maya_port.txt"

@@ -6,6 +6,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+from functools import lru_cache
 from pathlib import Path
 import re
 import time
@@ -13,6 +14,64 @@ from typing import Any, Callable
 
 
 ProgressCallback = Callable[[str], None]
+
+
+@lru_cache(maxsize=1)
+def _plugin_function_status_index() -> dict[str, dict[str, Any]]:
+    """
+    Builds the lightweight reflected plugin-function status index.
+
+    :return: Python call paths mapped to implementation status
+    """
+    from tech_connector.services.unreal.unreal_capability_audit_service import (
+        CPP_PATH,
+        MANIFEST_PATH,
+        _parse_cpp_bodies,
+    )
+
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    bodies = _parse_cpp_bodies(CPP_PATH)
+    index: dict[str, dict[str, Any]] = {}
+    for row in manifest.get("capabilities") or []:
+        python_call = str(row.get("python_call") or "")
+        function_path = python_call.partition("(")[0].strip()
+        cpp_function = str(row.get("function") or "")
+        body = dict(bodies.get(cpp_function) or {})
+        if function_path:
+            index[function_path] = {
+                "callable_found": bool(body) and not body.get("cpp_body_required"),
+                "cpp_status": (
+                    "implemented"
+                    if body and not body.get("cpp_body_required")
+                    else "cpp_body_required" if body else "missing_cpp_body"
+                ),
+                "source_path": str(CPP_PATH),
+            }
+    return index
+
+
+@lru_cache(maxsize=256)
+def _python_source_definitions(
+    path_text: str,
+    modified_ns: int,
+    size: int,
+) -> frozenset[str]:
+    """
+    Reads top-level Python definitions once per source revision.
+
+    :param path_text: Python source path
+    :param modified_ns: source modification timestamp in nanoseconds
+    :param size: source size in bytes
+    :return: top-level callable and class names
+    """
+    del modified_ns, size
+    origin = Path(path_text)
+    tree = ast.parse(origin.read_text(encoding="utf-8"), filename=str(origin))
+    return frozenset(
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    )
 
 
 def is_approved_unreal_feature_execution_request(
@@ -478,11 +537,7 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
         }
     if function_path.startswith("unreal.AIStudioBridgeLibrary."):
         try:
-            from tech_connector.services.unreal.unreal_capability_audit_service import (
-                audit_unreal_capability_catalogs,
-            )
-
-            audit = audit_unreal_capability_catalogs()
+            plugin_row = _plugin_function_status_index().get(function_path)
         except Exception as exc:
             return {
                 "operation": operation_key,
@@ -491,15 +546,6 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
                 "function": function_path,
                 "reason": "AIStudioBridge plugin status could not be inspected: " + str(exc),
             }
-        plugin_row = next(
-            (
-                row
-                for row in audit.get("plugin_capabilities") or []
-                if str(row.get("python_call") or "").startswith(function_path + "(")
-                or str(row.get("python_call") or "") == function_path
-            ),
-            None,
-        )
         if not plugin_row:
             return {
                 "operation": operation_key,
@@ -512,9 +558,9 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
         return {
             "operation": operation_key,
             "registered": True,
-            "callable_found": cpp_status == "implemented",
+            "callable_found": bool(plugin_row.get("callable_found")),
             "function": function_path,
-            "source_path": str(audit.get("sources", {}).get("plugin_cpp") or ""),
+            "source_path": str(plugin_row.get("source_path") or ""),
             "reason": (
                 "AIStudioBridge reflected C++ body is implemented."
                 if cpp_status == "implemented"
@@ -544,12 +590,12 @@ def _local_operation_status(operation_key: str) -> dict[str, Any]:
             "reason": f"Module `{module_name}` is not available as local Python source.",
         }
     try:
-        tree = ast.parse(origin.read_text(encoding="utf-8"), filename=str(origin))
-        definitions = {
-            node.name
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        }
+        source_stat = origin.stat()
+        definitions = _python_source_definitions(
+            str(origin),
+            int(source_stat.st_mtime_ns),
+            int(source_stat.st_size),
+        )
     except Exception as exc:
         return {
             "operation": operation_key,
@@ -2184,6 +2230,11 @@ def _generic_unreal_feature_plan(
             }
             for row in acquisition_missing
         ],
+        "build_readiness": {
+            "ready": not acquisition_missing and bool(detailed_readiness.get("ready_for_approval")),
+            "blocked_by": [row["operation"] for row in acquisition_missing],
+            "errors": list(detailed_readiness.get("errors") or []),
+        },
         "capability_acquisition": acquisition_steps,
         "unknowns": unknowns,
         "validation": [
@@ -2313,12 +2364,25 @@ def render_unreal_feature_plan(plan: dict[str, Any]) -> str:
                 else "Unreal implementation plan is not ready for approval"
             ),
             "",
+            "Project Context:",
             f"Target: `{plan.get('target_asset')}`",
             f"Live bridge evidence: `{plan.get('bridge_seconds', 0):.2f}s`",
             "Domains: " + ", ".join(f"`{item}`" for item in plan.get("detected_domains") or []),
             f"Skeletal mesh: `{evidence.get('skeletal_mesh') or 'not resolved'}`",
             f"Animation Blueprint: `{evidence.get('animation_blueprint') or 'not resolved'}`",
+            "",
+            "What I'll Build:",
+            f"- Feature: `{detailed.get('feature') or 'unresolved feature'}`",
             "State owner: " + str(dict(detailed.get("proposed_architecture") or {}).get("state_owner") or "not resolved"),
+            "- Animation roles: " + ", ".join(
+                f"`{role}`" for role in dict(detailed.get("animation_integration") or {}).get("required_roles") or []
+            ),
+            "- Animation candidates remain `candidate_only` until compatibility, contextual preview, graph consumption, and PIE evidence pass.",
+            "",
+            "Generated State Flow:",
+            " -> ".join(
+                f"`{state}`" for state in dict(detailed.get("proposed_architecture") or {}).get("state_flow") or []
+            ),
             "",
             "Behavior contract:",
         ]

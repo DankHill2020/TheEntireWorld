@@ -82,8 +82,9 @@ def build_resource_orchestration_plan(
         "requires_generation",
         bool(
             re.search(
-                r"\b(generate|write|draft|create an example|show me how|"
-                r"how would i|how do i|implementation example)\b",
+                r"\b(generate|write|draft|plan|implement|implementation|design|"
+                r"create an example|show me how|how would i|how do i|"
+                r"implementation example)\b",
                 prompt_text.lower(),
             )
         ),

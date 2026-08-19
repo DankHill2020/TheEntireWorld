@@ -418,7 +418,9 @@ def format_connected_application_status(settings: dict[str, Any], command_router
 
 def get_slack_oauth_authorize_url(client_id: str = "", redirect_uri: str = "") -> str:
     from urllib.parse import urlencode
-    cid = client_id or "549201938.tech_connector"
+    cid = str(client_id or "").strip()
+    if not cid:
+        return "https://api.slack.com/apps"
     ruri = redirect_uri or "http://127.0.0.1:8765/api/auth/slack/callback"
     params = {
         "client_id": cid,
@@ -431,7 +433,9 @@ def get_slack_oauth_authorize_url(client_id: str = "", redirect_uri: str = "") -
 
 def get_discord_oauth_authorize_url(client_id: str = "", redirect_uri: str = "") -> str:
     from urllib.parse import urlencode
-    cid = client_id or "1192039482710492"
+    cid = str(client_id or "").strip()
+    if not cid:
+        return "https://discord.com/developers/applications"
     ruri = redirect_uri or "http://127.0.0.1:8765/api/auth/discord/callback"
     params = {
         "client_id": cid,
@@ -445,32 +449,24 @@ def get_discord_oauth_authorize_url(client_id: str = "", redirect_uri: str = "")
 
 
 def handle_oauth_callback(provider: str, code: str, settings: dict[str, Any]) -> tuple[bool, str]:
-    import json, urllib.request, urllib.parse
-    provider = provider.lower().strip()
-    
-    if provider == "slack":
-        # Process Slack OAuth code exchange
-        token_url = "https://slack.com/api/oauth.v2.access"
-        payload = urllib.parse.urlencode({
-            "client_id": "549201938.tech_connector",
-            "client_secret": "auto_generated_secret",
-            "code": code,
-        }).encode("utf-8")
-        
-        # Save auto-provisioned webhook or access token
-        webhook_url = f"http://127.0.0.1:8765/api/slack/slash"
-        settings["slack_webhook_url"] = webhook_url
-        settings["slack_bot_token"] = f"xoxb-auto-{code[:12]}"
-        settings["notify_slack_enabled"] = True
-        return True, "Slack auto-provisioned! /techconnector is active."
-        
-    elif provider == "discord":
-        settings["discord_webhook_url"] = f"http://127.0.0.1:8765/api/discord/interactions"
-        settings["discord_bot_token"] = f"Bot-auto-{code[:12]}"
-        settings["notify_discord_enabled"] = True
-        return True, "Discord auto-provisioned! Slash commands and bot responses are active."
-        
-    return False, "Unknown provider"
+    """
+        Rejects incomplete OAuth callbacks without fabricating credentials.
+
+    :param provider: connected-account provider identifier
+    :param code: provider authorization code
+    :param settings: mutable application settings
+    :return: callback success and user-facing explanation
+    """
+    provider_id = str(provider or "").strip().lower()
+    if provider_id not in {"slack", "discord", "atlassian", "clickup"}:
+        return False, "Unknown OAuth provider."
+    if not str(code or "").strip():
+        return False, f"{provider_id.title()} did not return an authorization code."
+    return (
+        False,
+        f"{provider_id.title()} authorization requires a configured official "
+        "client and server-side token exchange. No credential was stored.",
+    )
 
 
 
@@ -481,7 +477,9 @@ def get_atlassian_oauth_authorize_url(client_id: str = "", redirect_uri: str = "
 
 def get_clickup_oauth_authorize_url(client_id: str = "", redirect_uri: str = "") -> str:
     from urllib.parse import urlencode
-    cid = client_id or "clickup_tech_connector"
+    cid = str(client_id or "").strip()
+    if not cid:
+        return "https://app.clickup.com/settings/apps"
     ruri = redirect_uri or "http://127.0.0.1:8765/api/auth/clickup/callback"
     params = {
         "client_id": cid,

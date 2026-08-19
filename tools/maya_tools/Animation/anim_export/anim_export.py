@@ -9,6 +9,7 @@ sys.path.append(tools_dir)
 from maya_tools.Animation.anim_export import anim_export_utils
 from maya_tools.Utilities import joints
 from utilities import p4_utils
+from utilities.safe_serialization import parse_literal_collection
 
 
 def export_animation(maya_file, export_path, namespace, start_frame, end_frame, nodes=None, reference_paths=None, changelist=None):
@@ -25,7 +26,7 @@ def export_animation(maya_file, export_path, namespace, start_frame, end_frame, 
     """
     full_ns = namespace + ':'
     if reference_paths:
-        reference_paths = eval(reference_paths[0])
+        reference_paths = parse_literal_collection(reference_paths[0], list, [])
     else:
         reference_paths = []
     if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):

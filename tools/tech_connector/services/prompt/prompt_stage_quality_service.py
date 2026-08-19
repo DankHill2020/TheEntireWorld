@@ -155,7 +155,14 @@ def audit_prompt_stage_quality(
     engine_metadata: dict[str, Any] = {}
     if include_engine_dispatch:
         engine = RequestEngine(progress=lambda _event: None, activity=lambda _event: None)
-        result = engine.process(RequestContext(text=prompt, project_roots=tuple(roots), extras={"settings": {"ai_work_memory_enabled": False}}))
+        result = engine.process(RequestContext(
+            text=prompt,
+            project_roots=tuple(roots),
+            extras={
+                "settings": {"ai_work_memory_enabled": False},
+                "dispatch_preview_only": True,
+            },
+        ))
         engine_action = str(result.action or "")
         engine_metadata = dict(result.metadata or {})
         discovery = dict(engine_metadata.get("discovery") or {})

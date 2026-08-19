@@ -23,7 +23,7 @@ Research mode:
 - Treat live web techniques as pattern research, not code to copy.
 - Use GitHub examples only when enabled, and identify repo/license risk before ingesting anything.
 - Compare architecture options before recommending a build path when comparison is enabled.
-- Produce an implementation plan before mutating project files unless auto implement is explicitly enabled.
+- Honor the request-level code contract for Ask, Plan, Edit, or Review authority; do not add a second approval policy here.
 """
 
 DCC_ENGINE_GROUNDING_POLICY = """

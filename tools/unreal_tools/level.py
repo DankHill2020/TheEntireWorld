@@ -352,3 +352,112 @@ def delete_actor(actor_query, dry_run=False):
         "deleted": deleted,
         "dry_run": bool(dry_run),
     }, indent=2, default=str)
+
+
+def organize_actors(actor_specs, save=True):
+    """
+        Organizes existing actors with labels, Outliner folders, tags, and visibility.
+
+    :param actor_specs: actor queries and requested organization properties
+    :param save: whether to save the current level
+    :return: JSON mutation and exact actor readback receipt
+    """
+    import unreal
+
+    specs = list(actor_specs or [])
+    if not specs:
+        raise ValueError("At least one actor organization specification is required")
+    actors_by_path = {
+        actor.get_path_name(): actor
+        for actor in _all_level_actors(unreal)
+        if actor is not None
+    }
+    resolved = []
+    targeted_paths = set()
+    for index, raw_spec in enumerate(specs):
+        if not isinstance(raw_spec, dict):
+            raise ValueError("Actor organization specifications must be objects")
+        query = str(raw_spec.get("query") or raw_spec.get("actor") or "").strip()
+        if not query:
+            raise ValueError(f"Actor organization specification {index} requires query")
+        matches = json.loads(resolve_actor(query, allow_asset_lookup=False)).get("matches") or []
+        if not matches:
+            raise ValueError("Actor query did not resolve: " + query)
+        exact_matches = [
+            match for match in matches
+            if query.casefold() in {
+                str(match.get("name") or "").casefold(),
+                str(match.get("label") or "").casefold(),
+                str(match.get("path") or "").casefold(),
+            }
+        ]
+        chosen_matches = exact_matches or matches
+        if len(chosen_matches) != 1:
+            labels = ", ".join(str(match.get("label") or match.get("name")) for match in chosen_matches[:5])
+            raise ValueError(f"Actor query is ambiguous: {query} ({labels})")
+        actor_path = str(chosen_matches[0].get("path") or "")
+        actor = actors_by_path.get(actor_path)
+        if actor is None:
+            raise ValueError("Resolved actor object is unavailable: " + actor_path)
+        if actor_path in targeted_paths:
+            raise ValueError("Actor is targeted more than once: " + actor_path)
+        targeted_paths.add(actor_path)
+        folder = str(raw_spec.get("folder") or raw_spec.get("folder_path") or "").strip()
+        label = str(raw_spec.get("label") or "").strip()
+        add_tags = [str(value).strip() for value in list(raw_spec.get("add_tags") or []) if str(value).strip()]
+        remove_tags = {str(value).strip().casefold() for value in list(raw_spec.get("remove_tags") or []) if str(value).strip()}
+        resolved.append({
+            "query": query,
+            "actor": actor,
+            "actor_path": actor_path,
+            "folder": folder,
+            "set_folder": "folder" in raw_spec or "folder_path" in raw_spec,
+            "label": label,
+            "set_label": "label" in raw_spec,
+            "add_tags": add_tags,
+            "remove_tags": remove_tags,
+            "hidden": bool(raw_spec.get("hidden")) if "hidden" in raw_spec else None,
+        })
+
+    receipts = []
+    with unreal.ScopedEditorTransaction("Tech Connector: Organize Level Actors"):
+        for item in resolved:
+            actor = item["actor"]
+            actor.modify()
+            if item["set_label"]:
+                if not item["label"]:
+                    raise ValueError("Actor labels cannot be blank")
+                actor.set_actor_label(item["label"], True)
+            if item["set_folder"]:
+                actor.set_folder_path(unreal.Name(item["folder"]))
+            current_tags = [str(value) for value in list(actor.get_editor_property("tags") or [])]
+            next_tags = [
+                value for value in current_tags
+                if value.casefold() not in item["remove_tags"]
+            ]
+            existing_folded = {value.casefold() for value in next_tags}
+            for value in item["add_tags"]:
+                if value.casefold() not in existing_folded:
+                    next_tags.append(value)
+                    existing_folded.add(value.casefold())
+            actor.set_editor_property("tags", [unreal.Name(value) for value in next_tags])
+            if item["hidden"] is not None:
+                actor.set_is_temporarily_hidden_in_editor(item["hidden"])
+            receipts.append({
+                "query": item["query"],
+                "actor_path": item["actor_path"],
+                "label": str(actor.get_actor_label()),
+                "folder_path": str(actor.get_folder_path()),
+                "tags": [str(value) for value in list(actor.get_editor_property("tags") or [])],
+                "hidden": bool(actor.is_hidden_ed()),
+            })
+
+    saved = bool(unreal.EditorLoadingAndSavingUtils.save_current_level()) if save else False
+    verified = len(receipts) == len(resolved) and (saved or not save)
+    return json.dumps({
+        "ok": verified,
+        "status": "actors_organized_and_level_saved" if saved else "actors_organized",
+        "actor_count": len(receipts),
+        "actors": receipts,
+        "saved": saved,
+    }, indent=2, default=str)

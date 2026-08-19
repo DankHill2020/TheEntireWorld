@@ -28,6 +28,7 @@ def generate_mutations(prompt: str, *, count: int = 8, model: str = "") -> list[
         response_format="json",
         options={"temperature": 0.6, "num_predict": 500},
         timeout=30,
+        queue_category="background",
     )
     data = _extract_json_array(raw)
     return [str(item).strip() for item in data if str(item).strip()][:count]

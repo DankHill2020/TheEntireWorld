@@ -119,6 +119,61 @@ def _return_outputs(node, return_annotation: str) -> list[dict]:
 
 _SYMBOL_CACHE_MAX_ENTRIES = 4096
 _SYMBOL_CACHE = OrderedDict()
+_SYMBOL_EXTRACTION_ACTIVE: set[str] = set()
+
+
+def resolve_local_star_import_paths(file_path: Path, tree: ast.AST) -> list[Path]:
+    """
+        Resolves local modules re-exported by module-level star imports.
+    :param file_path: Python facade file containing the imports.
+    :param tree: parsed syntax tree for the facade.
+    :return: ordered local implementation paths.
+    """
+    path = Path(file_path).resolve()
+    resolved: list[Path] = []
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.ImportFrom) or not any(alias.name == "*" for alias in node.names):
+            continue
+        module_parts = [part for part in str(node.module or "").split(".") if part]
+        bases: list[Path]
+        if node.level:
+            base = path.parent
+            for _unused in range(max(0, int(node.level) - 1)):
+                base = base.parent
+            bases = [base]
+        else:
+            bases = [path.parent, *path.parents]
+        for base in bases:
+            module_base = base.joinpath(*module_parts) if module_parts else base
+            candidates = [module_base.with_suffix(".py"), module_base / "__init__.py"]
+            target = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+            if target is not None and target != path and target not in resolved:
+                resolved.append(target)
+                break
+    return resolved
+
+
+def _explicit_all_contract(file_path: Path) -> tuple[bool, set[str] | None]:
+    """
+        Reads a module's explicit star-export contract when statically declared.
+    :param file_path: Python implementation module to inspect.
+    :return: declaration flag and static names, or None names for a dynamic contract.
+    """
+    try:
+        tree = ast.parse(Path(file_path).read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError, UnicodeError):
+        return False, None
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(target, ast.Name) and target.id == "__all__" for target in targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, TypeError):
+                return True, None
+            if isinstance(value, (list, tuple)) and all(isinstance(name, str) for name in value):
+                return True, set(value)
+            return True, None
+    return False, None
 
 
 def extract_symbols_from_file(file_path: Path) -> list[dict]:
@@ -132,20 +187,35 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
         return []
         
     if file_path_str in _SYMBOL_CACHE:
-        cached_mtime, cached_symbols = _SYMBOL_CACHE[file_path_str]
-        if cached_mtime == mtime:
+        cached_entry = _SYMBOL_CACHE[file_path_str]
+        if len(cached_entry) == 2:
+            cached_mtime, cached_symbols = cached_entry
+            dependency_mtimes = {}
+        else:
+            cached_mtime, dependency_mtimes, cached_symbols = cached_entry
+        dependencies_current = all(
+            Path(dependency).is_file() and Path(dependency).stat().st_mtime == dependency_mtime
+            for dependency, dependency_mtime in dependency_mtimes.items()
+        )
+        if cached_mtime == mtime and dependencies_current:
             _SYMBOL_CACHE.move_to_end(file_path_str)
             return cached_symbols
+
+    if file_path_str in _SYMBOL_EXTRACTION_ACTIVE:
+        return []
+    _SYMBOL_EXTRACTION_ACTIVE.add(file_path_str)
 
     symbols = []
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except Exception:
+        _SYMBOL_EXTRACTION_ACTIVE.discard(file_path_str)
         return symbols
 
     try:
         tree = ast.parse(content, filename=str(file_path))
     except SyntaxError:
+        _SYMBOL_EXTRACTION_ACTIVE.discard(file_path_str)
         return symbols
 
     lines = content.splitlines(keepends=True)
@@ -260,13 +330,49 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
             except Exception:
                 pass
 
-    visitor = SymbolVisitor()
-    visitor.visit(tree)
-    _SYMBOL_CACHE[file_path_str] = (mtime, symbols)
-    _SYMBOL_CACHE.move_to_end(file_path_str)
-    while len(_SYMBOL_CACHE) > _SYMBOL_CACHE_MAX_ENTRIES:
-        _SYMBOL_CACHE.popitem(last=False)
-    return symbols
+    try:
+        visitor = SymbolVisitor()
+        visitor.visit(tree)
+
+        dependency_mtimes: dict[str, float] = {}
+        existing_names = {
+            str(symbol.get("name") or "")
+            for symbol in symbols
+            if str(symbol.get("callable_scope") or "") in {"module_function", "class"}
+        }
+        for implementation_path in resolve_local_star_import_paths(file_path, tree):
+            try:
+                dependency_mtimes[str(implementation_path)] = implementation_path.stat().st_mtime
+            except OSError:
+                continue
+            declares_explicit_all, explicit_names = _explicit_all_contract(implementation_path)
+            for implementation_symbol in extract_symbols_from_file(implementation_path):
+                scope = str(implementation_symbol.get("callable_scope") or "")
+                name = str(implementation_symbol.get("name") or "")
+                if (
+                    scope not in {"module_function", "class"}
+                    or not name
+                    or name in existing_names
+                    or (explicit_names is not None and name not in explicit_names)
+                    or (name.startswith("_") and not declares_explicit_all)
+                ):
+                    continue
+                exported = dict(implementation_symbol)
+                exported["implementation_file_path"] = str(
+                    implementation_symbol.get("implementation_file_path") or implementation_path
+                )
+                exported["file_path"] = file_path_str
+                exported["reexported"] = True
+                symbols.append(exported)
+                existing_names.add(name)
+
+        _SYMBOL_CACHE[file_path_str] = (mtime, dependency_mtimes, symbols)
+        _SYMBOL_CACHE.move_to_end(file_path_str)
+        while len(_SYMBOL_CACHE) > _SYMBOL_CACHE_MAX_ENTRIES:
+            _SYMBOL_CACHE.popitem(last=False)
+        return symbols
+    finally:
+        _SYMBOL_EXTRACTION_ACTIVE.discard(file_path_str)
 
 
 def list_internal_functions(

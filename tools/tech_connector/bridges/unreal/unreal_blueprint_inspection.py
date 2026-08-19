@@ -472,8 +472,17 @@ def _focus_search_terms(prompt: str, terms: list[str]) -> list[str]:
 
 
 def _asset_search_tokens(name: str, path: str) -> list[str]:
-    tokens = re.findall(r"[A-Za-z0-9]+", name + " " + path)
-    return list(set(t.lower() for t in tokens if t))
+    tokens: list[str] = []
+    for raw in re.findall(r"[A-Za-z0-9]+", name + " " + path):
+        tokens.append(raw.lower())
+        tokens.extend(
+            part.lower()
+            for part in re.findall(
+                r"[A-Z]+(?=[A-Z][a-z]|\d|\b)|[A-Z]?[a-z]+|\d+",
+                raw,
+            )
+        )
+    return list(dict.fromkeys(token for token in tokens if token))
 
 
 def _one_edit_apart(w1: str, w2: str) -> bool:

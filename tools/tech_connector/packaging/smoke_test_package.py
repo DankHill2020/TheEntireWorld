@@ -6,21 +6,30 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 def smoke_import(package_root: Path) -> None:
-    env = dict(os.environ)
-    env["AI_STUDIO_TOOLS_ROOT"] = str(package_root)
-    code = (
-        "import os, sys; "
-        "sys.path.insert(0, os.environ['AI_STUDIO_TOOLS_ROOT']); "
-        "import tech_connector; "
-        "from tech_connector.models.constants import APP_ROOT, TOOLS_ROOT, APP_VERSION; "
-        "from tech_connector.app.application import run_application; "
-        "print('import_ok', APP_VERSION, APP_ROOT, TOOLS_ROOT)"
-    )
-    subprocess.run([sys.executable, "-c", code], cwd=str(package_root), env=env, check=True)
+    with tempfile.TemporaryDirectory(prefix="tech_connector_package_smoke_") as state_dir:
+        env = dict(os.environ)
+        env["AI_STUDIO_TOOLS_ROOT"] = str(package_root)
+        env["AI_STUDIO_APP_DIR"] = state_dir
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        code = (
+            "import os, sys; "
+            "sys.path.insert(0, os.environ['AI_STUDIO_TOOLS_ROOT']); "
+            "import tech_connector; "
+            "from tech_connector.models.constants import APP_ROOT, TOOLS_ROOT, APP_VERSION; "
+            "from tech_connector.app.application import run_application; "
+            "print('import_ok', APP_VERSION, APP_ROOT, TOOLS_ROOT)"
+        )
+        subprocess.run(
+            [sys.executable, "-B", "-c", code],
+            cwd=str(package_root),
+            env=env,
+            check=True,
+        )
 
 
 def smoke_frozen_exe(exe_path: Path, timeout: float) -> None:

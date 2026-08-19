@@ -160,6 +160,15 @@ def _expert_lenses(decision: dict[str, Any]) -> list[dict[str, str]]:
                 "reports": "Asset, graph, Blueprint, C++/Python bridge, and editor safety context.",
             }
         )
+        prompt = _as_text(decision.get("prompt_preview") or decision.get("user_text")).lower()
+        if re.search(r"\b(blueprint|anim\s*bp|abp|graph|stamina|inventory|gameplay)\b", prompt):
+            lenses.append(
+                {
+                    "id": "unreal_blueprint_graph_expert",
+                    "label": "Unreal Blueprint Graph Expert",
+                    "reports": "Blueprint ownership, graph topology, node/pin wiring, compilation, and readback validation.",
+                }
+            )
     if route in {"pipeline_graph", "action_graph"} or "pipeline" in intent:
         lenses.append(
             {

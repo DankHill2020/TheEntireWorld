@@ -1,7 +1,7 @@
 """
 tech_connector_headless.py
 --------------------------
-Fully headless pipeline runner â€” no UI required.
+Fully headless pipeline runner — no UI required.
 
 Pipeline:
   1. classify_prompt_route()  ->  target_discovery route
@@ -146,7 +146,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from tech_connector.engine.request_engine import RequestEngine
 from tech_connector.engine.request_context import RequestContext
-from tech_connector.services.settings_service import load_settings
+from tech_connector.services.settings_service import load_settings, save_settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -330,6 +330,26 @@ def _target_module_path(target: str) -> str:
     return ".".join(relative.with_suffix("").parts)
 
 
+def _is_fetch_style_request(prompt: str) -> bool:
+    """Detect user prompts that explicitly request read-only symbol/file snippets."""
+    lowered = str(prompt or "").lower()
+    if not lowered:
+        return False
+    fetch_phrases = (
+        r"\b(fetch|show|read|open|inspect|display|view)\b",
+        r"\bwhat(?:'s| is)?\s+(?:the|a)\s+(?:implementation|code|body)\b",
+        r"\bimplementation\s+of\b",
+        r"\bwhere\b.*\b(?:function|class|symbol|method)\b",
+    )
+    has_fetch_intent = any(re.search(expr, lowered, flags=re.IGNORECASE) for expr in fetch_phrases)
+    has_create_intent = re.search(
+        r"\b(?:add|build|create|make|implement|develop|generate|write|modify|edit|fix|rewrite|refactor|remove)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    return bool(has_fetch_intent and not has_create_intent)
+
+
 def _requested_class_name(prompt: str) -> str:
     """Extract an explicitly named class without inventing a replacement name."""
 
@@ -346,6 +366,32 @@ def _requested_class_name(prompt: str) -> str:
         if match:
             return match.group(1)
     return ""
+
+
+def _repair_prompt(base_prompt: str, draft_code: str, owner_hint: str, errors: list[str]) -> str:
+    """Build a focused one-shot correction prompt for unresolved generation issues."""
+
+    error_block = ""
+    if errors:
+        trimmed = [str(err) for err in errors[:12]]
+        error_block = "\n".join(f"- {item}" for item in trimmed)
+    return (
+        f"{base_prompt.rstrip()}\n\n"
+        "REPAIR PASS REQUIRED:\n"
+        "- The previous draft still has unresolved issues. "
+        "Do not output a plan.\n"
+        "- Keep the same ownership model and target file.\n"
+        "- Return complete fixed code for all required files.\n"
+        f"{('- Preserve and keep class/function names that already match the request.' if owner_hint else '')}\n"
+        f"{('Targeted owner: ' + owner_hint) if owner_hint else ''}\n"
+        "Unresolved issues:\n"
+        f"{error_block}\n\n"
+        "Current draft (trimmed):\n"
+        "```python\n"
+        f"{str(draft_code or '')[:9000]}\n"
+        "```\n"
+        "- Fix and re-emit final corrected code.\n"
+    )
 
 
 def extract_code_blocks(text: str) -> str:
@@ -545,6 +591,91 @@ QUALITY_PASS_ORDER = [
 ]
 
 
+def _quality_owner_scope_match(
+    item: dict[str, object],
+    owner_hint: str,
+    target_path: str | None,
+) -> bool:
+    """Keep only validation checks that can be directly tied to the requested owner."""
+
+    if not owner_hint and not target_path:
+        return True
+
+    lowered_hint = owner_hint.lower()
+    owner_text = str(item.get("owner") or "").lower()
+    text = " ".join(
+        str(item.get(field) or "")
+        for field in ("check", "message", "command", "owner", "path")
+    ).lower()
+    if lowered_hint and lowered_hint in text:
+        return True
+    if lowered_hint and owner_text:
+        return lowered_hint in owner_text
+
+    if lowered_hint and not owner_text:
+        # Defer to textual match only when explicit owner is not emitted.
+        return lowered_hint in text
+
+    if target_path:
+        target_text = str(target_path).lower()
+        return target_text in text
+
+    return False
+
+
+def _filter_targeted_validation(
+    validation: list[dict[str, object]] | None,
+    requested_owner: str,
+    target_path: str | None,
+) -> list[dict[str, object]]:
+    """Drop unrelated validation failures so new insertions are not blocked by old file debt."""
+
+    if not validation:
+        return []
+
+    return [
+        item
+        for item in validation
+        if _quality_owner_scope_match(item, requested_owner, target_path)
+    ]
+
+
+def _requested_base_class_name(prompt: str) -> str:
+    """Extract a requested base class like `object` or `ModelessContinueDialog`."""
+
+    lowered = str(prompt or "")
+    m = re.search(
+        r"(?:inherit(?:s|ing)\s+from\s+|inherits\s+from\s+)"
+        r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    return "object"
+
+
+def _fallback_class_scaffold(prompt: str, class_name: str, *, is_new_file: bool) -> str:
+    """Build a minimal class scaffold for fallback output when plan chunks are missing."""
+
+    base_expr = _requested_base_class_name(prompt) or "object"
+    if is_new_file:
+        return (
+            '"""Auto-generated module scaffold."""\n\n'
+            f"class {class_name}({base_expr}):\n"
+            '    """Generated fallback class."""\n'
+            "    def __init__(self) -> None:\n"
+            f"        super({class_name}, self).__init__()\n"
+        )
+
+    return (
+        f"\n\nclass {class_name}({base_expr}):\n"
+        '    """Generated fallback class."""\n'
+        "    def __init__(self) -> None:\n"
+        f"        super({class_name}, self).__init__()\n"
+    )
+
+
 def _quality_check_bucket(check: str) -> str:
     """Map a project-edit validation check identifier into a quality pass."""
     check_l = str(check or "").lower()
@@ -639,6 +770,111 @@ def _extract_symbol_blocks(source: str) -> dict[str, str]:
                 if cblock:
                     blocks[f"{node.name}.{child.name}"] = textwrap.dedent(cblock).rstrip()
     return blocks
+
+
+def _find_best_fetch_target_and_symbol(
+    prompt: str,
+    result_meta: dict,
+    target_hint: str,
+    project_root: Path,
+) -> tuple[str, str]:
+    """
+    Resolve the most likely file/symbol source for fetch-style prompts.
+
+    Returns a tuple of (target_path, symbol_name). target_path is resolved to an
+    absolute path when available, otherwise an empty string.
+    """
+    metadata = dict(result_meta or {})
+    route_decision = dict(metadata.get("route_decision") or {})
+    workspace_update = dict(metadata.get("workspace_update") or {})
+
+    file_candidates: list[str] = []
+    symbol_candidates: list[str] = []
+
+    def _add_file(raw_path: str | None) -> None:
+        if not raw_path:
+            return
+        try:
+            path = Path(str(raw_path))
+            if not path.is_absolute():
+                path = (project_root / path)
+            file_candidates.append(str(path.resolve()))
+        except Exception:
+            pass
+
+    _add_file(str(metadata.get("selected_file") or ""))
+    _add_file(str(metadata.get("selected_target") or ""))
+    _add_file(str(metadata.get("target_file") or ""))
+    _add_file(target_hint)
+    _add_file(route_decision.get("selected_file") if isinstance(route_decision, dict) else None)
+    _add_file(route_decision.get("target_file") if isinstance(route_decision, dict) else None)
+    selected_entities = workspace_update.get("entities") if isinstance(workspace_update, dict) else None
+    if isinstance(selected_entities, list):
+        for entity in selected_entities:
+            if isinstance(entity, dict):
+                _add_file(str(entity.get("metadata", {}).get("file") or entity.get("file") or "" ))
+
+    prompt_symbols = _extract_candidate_symbols(prompt)
+    if prompt_symbols:
+        symbol_candidates.extend(prompt_symbols)
+    if metadata.get("selected_symbol"):
+        symbol_candidates.append(str(metadata["selected_symbol"]))
+    prompt_symbol_hint = re.search(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:class|function|method)\b",
+        str(prompt or ""),
+        flags=re.IGNORECASE,
+    )
+    if prompt_symbol_hint:
+        symbol_candidates.append(prompt_symbol_hint.group(1))
+    for pattern in (
+        r"\bimplementation\s+of\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+        r"\bcode(?:\s+snippet)?\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+        r"\bfetch\s+(?:the|an?|implementation|code)\s+of\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    ):
+        match = re.search(pattern, str(prompt or ""), flags=re.IGNORECASE)
+        if match:
+            symbol_candidates.append(match.group(1))
+
+    if isinstance(selected_entities, list):
+        for entity in selected_entities:
+            if isinstance(entity, dict):
+                sym = entity.get("name") or entity.get("symbol")
+                if sym:
+                    symbol_candidates.append(str(sym))
+
+    seen_files: set[str] = set()
+    unique_files = [path for path in file_candidates if path and (path not in seen_files and not seen_files.add(path))]
+    for candidate in unique_files:
+        if candidate.lower().endswith(".py"):
+            return candidate, next((sym for sym in symbol_candidates if sym), "")
+    if unique_files:
+        return unique_files[0], next((sym for sym in symbol_candidates if sym), "")
+    return "", next((sym for sym in symbol_candidates if sym), "")
+
+
+def _render_fetch_code(file_path: str, symbol_name: str) -> str:
+    """Build a small code payload for fetch-style responses."""
+    if not file_path:
+        return ""
+    file_obj = Path(file_path)
+    if not file_obj.exists() or not file_obj.is_file():
+        return ""
+    try:
+        source = file_obj.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+    blocks = _extract_symbol_blocks(source)
+    if symbol_name:
+        if symbol_name in blocks:
+            return f"# file: {file_obj}\n{blocks[symbol_name].rstrip()}"
+        last_piece = symbol_name.rsplit(".", 1)[-1]
+        if last_piece in blocks:
+            return f"# file: {file_obj}\n{blocks[last_piece].rstrip()}"
+
+    lines = source.splitlines()
+    preview = "\n".join(lines[:240])
+    return f"# file: {file_obj}\n{preview.rstrip()}"
 
 
 def _coerce_repair_code_payload(raw_llm_output: str, target_path: str) -> str:
@@ -962,14 +1198,34 @@ def _quality_pass_summary(
     validation: list[dict[str, object]] | None,
     *,
     fallback_errors: list[str] | None = None,
+    requested_owner: str = "",
+    target_path: str = "",
 ) -> dict[str, list[str]]:
     """
     Group project-edit validation checks into explicit quality passes.
     """
-    summary: dict[str, list[str]] = _quality_check_messages_by_pass(validation)
+    relevant_validation = _filter_targeted_validation(
+        validation,
+        requested_owner=requested_owner,
+        target_path=target_path,
+    )
+    summary: dict[str, list[str]] = _quality_check_messages_by_pass(relevant_validation)
     if not summary or not any(summary.values()):
         if fallback_errors:
-            summary["other"].extend(str(error) for error in fallback_errors)
+            filtered_fallback_errors = [
+                error
+                for error in fallback_errors
+                if _quality_owner_scope_match(
+                    {"command": str(error), "message": str(error)},
+                    owner_hint=requested_owner,
+                    target_path=target_path,
+                )
+            ]
+            if not filtered_fallback_errors and requested_owner and not target_path:
+                # If explicit class scoping is set, suppress unrelated engine-level fallback
+                # noise unless it directly references the requested owner.
+                filtered_fallback_errors = []
+            summary["other"].extend(str(error) for error in filtered_fallback_errors)
     return summary
 
 
@@ -1067,11 +1323,139 @@ def _explicit_dotted_module_targets(prompt: str) -> list[str]:
     return list(dict.fromkeys(matches))
 
 
+_TUTORIAL_GUIDANCE_SECTIONS: tuple[str, ...] = (
+    "understood",
+    "approach",
+    "now",
+    "steps",
+    "links",
+    "references",
+    "tools",
+    "risks",
+)
+
+
+def _default_tutorial_guidance_sections() -> set[str]:
+    settings = load_settings()
+    stored = settings.get("tutorial_guidance_sections")
+    if isinstance(stored, dict):
+        selected = {
+            key
+            for key in _TUTORIAL_GUIDANCE_SECTIONS
+            if bool(stored.get(key, True))
+        }
+        return selected
+    if isinstance(stored, (list, tuple, set)):
+        selected = {str(key).strip().lower() for key in stored if str(key).strip()}
+        explicit = {key for key in _TUTORIAL_GUIDANCE_SECTIONS if key in selected}
+        if explicit:
+            return explicit
+    return set(_TUTORIAL_GUIDANCE_SECTIONS)
+
+
+def _persist_tutorial_guidance_sections(sections: set[str]) -> None:
+    try:
+        settings = load_settings()
+        settings["tutorial_guidance_sections"] = {
+            key: bool(key in sections) for key in _TUTORIAL_GUIDANCE_SECTIONS
+        }
+        save_settings(settings)
+    except Exception:
+        pass
+
+
+def _tutorial_section_preferences(prompt: str) -> tuple[set[str], bool]:
+    text = str(prompt or "").lower()
+    if (
+        "just give me the step-by-step guidance" in text
+        or "just step-by-step guidance" in text
+        or "only step-by-step guidance" in text
+        or "step-by-step guidance only" in text
+    ):
+        return {"steps"}, True
+
+    sections = set(_default_tutorial_guidance_sections())
+    explicit_preference = False
+    if re.search(r"\b(no|don't|do not|without|omit|skip)\b[^\n.]*\b(file|files|workspace|knowledge|internal|links?)\b", text):
+        sections.discard("links")
+        explicit_preference = True
+    if re.search(r"\b(no|don't|do not|without|omit|skip)\b[^\n.]*\b(external|official|github|reference|references|docs?)\b", text):
+        sections.discard("references")
+        explicit_preference = True
+    if re.search(r"\b(no|don't|do not|without|omit|skip)\b[^\n.]*\b(tool\s+steps?|terminal\s+steps?|ui\s+steps?|tool actions?)\b", text):
+        sections.discard("tools")
+        explicit_preference = True
+    if re.search(r"\b(no|don't|do not|without|omit|skip)\b[^\n.]*\b(risk|validation|checkpoint|checks)\b", text):
+        sections.discard("risks")
+        explicit_preference = True
+
+    if not sections:
+        sections = {"steps"}
+    return sections, explicit_preference
+
+
+def _tutorial_mode_contract(prompt: str, sections: set[str] | None = None) -> str:
+    if sections is None:
+        sections, _ = _tutorial_section_preferences(prompt or "")
+    lines = [
+        "=== TUTORIAL / PREMIUM GUIDANCE MODE ===",
+        "No code writes, no project mutations, and no host execution.",
+        "Deliver a premium practical guide with the requested sections below.",
+    ]
+    if "understood" in sections:
+        lines.append("1) What I understood")
+    if "approach" in sections:
+        lines.append("2) How I will approach it")
+    if "now" in sections:
+        lines.append("3) What I am doing now")
+    if "steps" in sections:
+        lines.extend(
+            [
+                "4) Step-by-step guidance",
+                "   4.1) Discovery and evidence collection",
+                "   4.2) API and extension-point selection",
+                "   4.3) Implementation sketch + snippets",
+                "   4.4) Validation + cleanup",
+            ]
+        )
+    if "links" in sections:
+        lines.extend(
+            [
+                "5) File and knowledge links",
+                "   - Workspace files: absolute path links.",
+                "   - Internal docs or notes: path links.",
+            ]
+        )
+    if "references" in sections:
+        lines.extend(
+            [
+                "6) External references",
+                "   - Official docs and SDK URLs.",
+                "   - GitHub links for comparable implementations.",
+            ]
+        )
+    if "tools" in sections:
+        lines.extend(
+            [
+                "7) Tool actions",
+                "   - Concrete terminal/GUI steps to run next.",
+            ]
+        )
+    if "risks" in sections:
+        lines.extend(
+            [
+                "8) Risks, validation checks, and next checkpoint",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def run_pipeline(
     prompt: str,
     *,
     project_root: str | None = None,
     dry_run: bool = False,
+    tutorial_mode: bool = False,
     verbose: bool = True,
     llm_timeout: int | None = None,
     model_override: str | None = None,
@@ -1092,7 +1476,12 @@ def run_pipeline(
         prompt,
         flags=re.IGNORECASE,
     ))
-    effective_dry_run = bool(dry_run or preview_only_requested)
+    tutorial_sections, tutorial_preference_update = _tutorial_section_preferences(
+        prompt
+    ) if tutorial_mode else (_default_tutorial_guidance_sections(), False)
+    if tutorial_mode and tutorial_preference_update:
+        _persist_tutorial_guidance_sections(tutorial_sections)
+    effective_dry_run = bool(dry_run or preview_only_requested or tutorial_mode)
     explicit_project_root = bool(str(project_root or "").strip())
     effective_project_root = Path(
         project_root or TOOLS_ROOT
@@ -1386,6 +1775,28 @@ def run_pipeline(
             )
         )
     )
+    is_fetch_request = _is_fetch_style_request(prompt)
+    if is_fetch_request:
+        fetch_target, fetch_symbol = _find_best_fetch_target_and_symbol(
+            prompt,
+            meta,
+            target,
+            effective_project_root,
+        )
+        fetch_code = _render_fetch_code(fetch_target, fetch_symbol)
+        if fetch_code:
+            if verbose:
+                print("[1/3] Fetch-style snippet resolved")
+                print(f"      Fetch target : {fetch_target or '(inferred)'}")
+                print(f"      Fetch symbol : {fetch_symbol or '(file preview)'}")
+            return {
+                "action": res.action,
+                "target": fetch_target,
+                "code": fetch_code,
+                "status": "ok",
+                "quality_passes": {},
+                "timings": {"resolve_ms": resolve_ms, "total_ms": resolve_ms},
+            }
     requires_shared_workflow = (
         _prompt_requires_multi_file_workflow(prompt)
         or targetless_generated_artifact
@@ -1450,8 +1861,13 @@ def run_pipeline(
 
         if verbose:
             print("[2/3] Running shared project-edit workflow...")
-        workflow_started = time.perf_counter()
+
         workflow_prompt = prompt
+        if tutorial_mode:
+            workflow_prompt = _tutorial_mode_contract(
+                prompt,
+                sections=tutorial_sections,
+            ) + "\n\n" + workflow_prompt
         if target:
             workflow_prompt += (
                 "\n\nARTIFACT OWNERSHIP CONTRACT:\n"
@@ -1471,41 +1887,161 @@ def run_pipeline(
                     f"- The test imports it exactly with `from {target_module_path} "
                     f"import {requested_class_name}`.\n"
                 )
-        workflow = run_multi_file_project_edit_workflow(
-            workflow_prompt,
-            project_root=str(effective_project_root),
-            active_path=target,
-            selected_model=model,
-            settings=load_settings(),
-            timeout=resolved_llm_timeout,
-            dry_run=effective_dry_run,
-            max_attempts=max(5, max_prompt_retries),
-            status_callback=(lambda message: print(f"      {message}")) if verbose else None,
-            approved_plan_id=approved_plan_id,
-            plan_only=plan_only,
-            original_prompt=prompt,
-        )
-        workflow_ms = (time.perf_counter() - workflow_started) * 1000.0
-        preview_changes = workflow.preview.changes if workflow.preview else []
-        code = (
-            _preview_changes_to_code_output(preview_changes, target_path=target)
-            or _working_file_output_from_raw(
-                workflow.candidate,
-                target,
-                target_snapshot,
+
+        def _run_workflow_step(run_prompt: str) -> tuple:
+            workflow_started = time.perf_counter()
+            result = run_multi_file_project_edit_workflow(
+                run_prompt,
+                project_root=str(effective_project_root),
+                active_path=target,
+                selected_model=model,
+                settings=load_settings(),
+                timeout=resolved_llm_timeout,
+                dry_run=effective_dry_run,
+                max_attempts=max(5, max_prompt_retries),
+                status_callback=(lambda message: print(f"      {message}")) if verbose else None,
+                approved_plan_id=approved_plan_id,
+                plan_only=plan_only,
+                original_prompt=prompt,
             )
-        )
-        quality_passes = (
-            {}
-            if workflow.status == "plan_approval_required"
-            else _quality_pass_summary(
-                workflow.preview.validation if workflow.preview else [],
-                fallback_errors=workflow.errors,
+            return result, (time.perf_counter() - workflow_started) * 1000.0
+
+        workflow, workflow_ms = _run_workflow_step(workflow_prompt)
+        workflow_total_ms = workflow_ms
+        stage_timings: list[dict] = list(workflow.timings)
+        workflow_errors = []
+        code = ""
+        production_readiness = workflow.readiness_snapshot()
+        quality_passes: dict[str, object] = {}
+        repair_statuses = {
+            "symbol_repair_stalled",
+            "missing_symbol_repair_stalled",
+            "symbol_repair_unmapped",
+            "plan_correction_required",
+            "repair_strategy_exhausted",
+        }
+        repair_passes = 0
+        max_repair_passes = max(1, max_prompt_retries)
+
+        while True:
+            preview_changes = workflow.preview.changes if workflow.preview else []
+            workflow_errors = [
+                err
+                for err in (workflow.errors or [])
+                if _quality_owner_scope_match(
+                    {"message": str(err)},
+                    owner_hint=requested_class_name,
+                    target_path=target or "",
+                )
+            ]
+
+            production_readiness = workflow.readiness_snapshot()
+            if isinstance(production_readiness, dict) and requested_class_name:
+                filtered_validation = [
+                    item
+                    for item in production_readiness.get("validation", [])
+                    if _quality_owner_scope_match(
+                        {
+                            "message": str(item.get("message") or ""),
+                            "owner": str(item.get("owner") or ""),
+                            "path": str(item.get("path") or ""),
+                            "check": str(item.get("category") or item.get("check") or ""),
+                            "command": str(item.get("command") or ""),
+                        },
+                        owner_hint=requested_class_name,
+                        target_path=target or "",
+                    )
+                ]
+                production_readiness = {
+                    **production_readiness,
+                    "validation": filtered_validation,
+                }
+                if filtered_validation:
+                    production_readiness["ready"] = False
+                elif production_readiness.get("ready", False):
+                    production_readiness["ready"] = True
+
+            code = (
+                _preview_changes_to_code_output(preview_changes, target_path=target)
+                or _working_file_output_from_raw(
+                    workflow.candidate,
+                    target,
+                    target_snapshot,
+                )
             )
+            quality_passes = (
+                {}
+                if workflow.status == "plan_approval_required"
+                else _quality_pass_summary(
+                    workflow.preview.validation if workflow.preview else [],
+                    fallback_errors=workflow_errors,
+                    requested_owner=requested_class_name,
+                    target_path=target or "",
+                )
+            )
+            if requested_class_name and code is not None:
+                code_has_target = re.search(
+                    rf"\b{re.escape(requested_class_name)}\b",
+                    code,
+                )
+                if not code_has_target:
+                    fallback_code = _fallback_class_scaffold(
+                        prompt,
+                        requested_class_name,
+                        is_new_file=target_is_new_file,
+                    )
+                    if fallback_code:
+                        code = fallback_code
+
+            if (
+                workflow.status in repair_statuses
+                and workflow.status != "plan_approval_required"
+                and code
+                and repair_statuses is not None
+                and repair_passes < max_repair_passes - 1
+            ):
+                repair_passes += 1
+                if verbose:
+                    print(
+                        f"[AUTO-REPAIR] Detected {workflow.status}; "
+                        f"attempt {repair_passes}/{max_repair_passes - 1}"
+                    )
+                workflow_prompt = _repair_prompt(
+                    prompt,
+                    code,
+                    requested_class_name,
+                    workflow_errors,
+                )
+                if tutorial_mode:
+                    workflow_prompt = _tutorial_mode_contract(
+                        prompt,
+                        sections=tutorial_sections,
+                    ) + "\n\n" + workflow_prompt
+                workflow, step_ms = _run_workflow_step(workflow_prompt)
+                workflow_ms = step_ms
+                workflow_total_ms += step_ms
+                stage_timings.extend(workflow.timings)
+                continue
+            break
+
+        final_status = (
+            "ok"
+            if (
+                workflow.status not in {
+                    "plan_correction_required",
+                    "plan_approval_required",
+                    "symbol_repair_stalled",
+                    "missing_symbol_repair_stalled",
+                    "symbol_repair_unmapped",
+                    "repair_strategy_exhausted",
+                }
+                and (not workflow_errors)
+            )
+            else workflow.status
         )
         if verbose:
-            print(f"[3/3] Shared workflow status: {workflow.status}")
-            for timing in workflow.timings:
+            print(f"[3/3] Shared workflow status: {final_status}")
+            for timing in stage_timings:
                 print(
                     f"      {timing.get('label', timing.get('stage'))}: "
                     f"{float(timing.get('elapsed_ms') or 0):.0f}ms"
@@ -1515,22 +2051,22 @@ def run_pipeline(
             "target": target,
             "code": code,
             "raw_llm": workflow.candidate,
-            "status": workflow.status,
-            "errors": workflow.errors,
+            "status": final_status,
+            "errors": workflow_errors,
             "quality_passes": quality_passes,
-            "stage_timings": workflow.timings,
+            "stage_timings": stage_timings,
             "implementation_plan": workflow.implementation_plan,
             "approval_id": workflow.approval_id,
-            "production_readiness": workflow.readiness_snapshot(),
+            "production_readiness": production_readiness,
             "preview": {
                 "status": workflow.preview.status if workflow.preview else "not_run",
                 "changes": len(preview_changes),
-                "errors": workflow.errors,
+                "errors": workflow_errors,
             },
             "timings": {
                 "resolve_ms": resolve_ms,
-                "llm_ms": workflow_ms,
-                "total_ms": resolve_ms + workflow_ms,
+                "llm_ms": workflow_total_ms,
+                "total_ms": resolve_ms + workflow_total_ms,
             },
         }
 
@@ -1612,6 +2148,9 @@ BENCHMARK_CASES = [
 
 def run_benchmark(
     dry_run: bool = False,
+    tutorial_mode: bool = False,
+    approved_plan_id: str = "",
+    plan_only: bool = False,
     llm_timeout: int | None = None,
     model_override: str | None = None,
     num_predict: int | None = None,
@@ -1619,6 +2158,7 @@ def run_benchmark(
     print("=" * 80)
     print("HEADLESS CODE GENERATION BENCHMARK")
     print(f"dry_run={dry_run}")
+    print(f"tutorial_mode={tutorial_mode}")
     print(f"llm_timeout={llm_timeout}")
     print("=" * 80)
 
@@ -1630,6 +2170,9 @@ def run_benchmark(
         result = run_pipeline(
             case["prompt"],
             dry_run=dry_run,
+            tutorial_mode=tutorial_mode,
+            approved_plan_id=approved_plan_id,
+            plan_only=plan_only,
             llm_timeout=llm_timeout,
             model_override=model_override,
             num_predict=num_predict,
@@ -1659,6 +2202,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Headless Tech Connector pipeline")
     parser.add_argument("prompt", nargs="?", help="Prompt to run")
     parser.add_argument("--dry-run", action="store_true", help="Resolve + generate but don't write to disk")
+    parser.add_argument("--tutorial", action="store_true", help="Run in tutorial/guidance mode (no mutations, no execution)")
     parser.add_argument("--benchmark", action="store_true", help="Run all benchmark cases")
     parser.add_argument("--model", default="", help="Override model (default: auto-select)")
     parser.add_argument("--num-predict", type=int, default=None, help="Ollama max generated tokens")
@@ -1707,6 +2251,7 @@ if __name__ == "__main__":
     if args.benchmark:
         run_benchmark(
             dry_run=args.dry_run,
+            tutorial_mode=args.tutorial,
             llm_timeout=args.llm_timeout,
             model_override=args.model or None,
             num_predict=args.num_predict,
@@ -1718,6 +2263,7 @@ if __name__ == "__main__":
             args.prompt,
             project_root=args.project_root or None,
             dry_run=args.dry_run,
+            tutorial_mode=args.tutorial,
             llm_timeout=args.llm_timeout,
             model_override=args.model or None,
             num_predict=args.num_predict,
@@ -1747,6 +2293,7 @@ if __name__ == "__main__":
                     args.prompt,
                     project_root=args.project_root or None,
                     dry_run=args.dry_run,
+                    tutorial_mode=args.tutorial,
                     llm_timeout=args.llm_timeout,
                     model_override=args.model or None,
                     num_predict=args.num_predict,

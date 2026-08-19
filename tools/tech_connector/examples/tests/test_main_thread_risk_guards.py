@@ -7,7 +7,7 @@ from tech_connector.app.main_window_history_assets import MainWindowHistoryAsset
 from tech_connector.services.project_edit_agent_service import _focused_project_edit_source_context
 
 
-APP_ROOT = Path(__file__).resolve().parent.parent
+APP_ROOT = Path(__file__).resolve().parents[2]
 
 
 class TestMainThreadRiskGuards(unittest.TestCase):

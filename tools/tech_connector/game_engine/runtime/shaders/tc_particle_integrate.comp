@@ -1,0 +1,45 @@
+#version 440
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer Positions
+{
+    vec4 positions[];
+};
+
+layout(std430, binding = 1) buffer Velocities
+{
+    vec4 velocities[];
+};
+
+layout(std140, binding = 2) uniform SimulationParameters
+{
+    vec4 gravityAndDt;
+    uint particleCount;
+    uint substepCount;
+};
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= particleCount)
+        return;
+
+    if (positions[index].w < 0.5) {
+        velocities[index].xyz = vec3(0.0);
+        return;
+    }
+
+    uint steps = max(1u, substepCount);
+    float stepDt = gravityAndDt.w / float(steps);
+    vec3 velocity = velocities[index].xyz;
+    vec3 position = positions[index].xyz;
+    float damping = max(0.0, velocities[index].w);
+    for (uint step = 0u; step < steps; ++step) {
+        velocity += gravityAndDt.xyz * stepDt;
+        position += velocity * stepDt;
+        velocity *= max(0.0, 1.0 - damping * stepDt);
+    }
+    velocities[index] = vec4(velocity, velocities[index].w);
+    positions[index] = vec4(position, positions[index].w);
+}

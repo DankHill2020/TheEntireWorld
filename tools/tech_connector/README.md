@@ -39,6 +39,8 @@ Architecture notes:
 - `docs/HEADLESS_API.md` covers licensed API/function access without starting the UI.
 - `docs/REASONING_RUNTIME_API.md` explains reasoning requests, contextual threads, progress events, runtime tools, modular features, and extensions with runnable examples.
 - `docs/MODEL_PROVIDERS.md` covers OpenAI/Google/Anthropic/local model routing.
+- `docs/CODE_AGENT_WORKFLOW.md` covers explicit Ask/Plan/Edit/Review modes, scope,
+  reasoning depth, permissions, reviewable diffs, repair, and regression evaluation.
 - `docs/UNREAL_SMART_OPERATIONS.md` covers project-aware Unreal scans, navigation, capability validation, and safe prototype operations.
 - `docs/ROUTING_ENTRYPOINT_AUDIT.md` and `docs/ENTERPRISE_INTERACTION_BYPASS_AUDIT.md` cover deterministic routing and remaining migration targets.
 
@@ -49,7 +51,7 @@ Architecture notes:
 - `Ask About File` can now prepare conservative safe patches for obvious bugs.
 - Added `Apply Fix` in the Editor tab.
 - Applying a fix creates a `.tew_backup` first.
-- The main launcher starts the UI with `pyw -3.11 -m app.main_window`.
+- The source launcher starts the UI with `pyw -3.14 -m tech_connector.app.main_window`.
 
 ## Current safe patch example
 

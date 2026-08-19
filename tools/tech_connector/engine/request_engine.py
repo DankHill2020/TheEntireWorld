@@ -75,16 +75,19 @@ class RequestEngine:
         activity: ActivityCallback | None = None,
         providers: Iterable[RequestProvider] | None = None,
         runtime_kernel=None,
+        prompt_provider_route=None,
+        settings: dict | None = None,
     ):
         self.progress = progress or (lambda _event: None)
         self.activity = activity or (lambda _event: None)
         self.providers = list(providers or default_providers())
+        self._prompt_provider_route = prompt_provider_route
         if runtime_kernel is None:
             from reasoning_runtime import ReasoningKernel
             from tech_connector.adapters.domain_package import TechConnectorDomainPackage
 
             runtime_kernel = ReasoningKernel()
-            runtime_kernel.install(TechConnectorDomainPackage())
+            runtime_kernel.install(TechConnectorDomainPackage(settings=settings))
         self.runtime_kernel = runtime_kernel
         self.runtime_preparation = RuntimeRequestPreparation(self.runtime_kernel)
 
@@ -540,7 +543,15 @@ class RequestEngine:
             context.text,
             host=str((context.extras or {}).get("host_hint") or ""),
         )
-        if request_frame.wants_mutation or request_frame.wants_execution:
+        read_only_class_fact = bool(
+            re.search(r"\bclass(?:es)?\b", context.text or "", re.IGNORECASE)
+            and re.search(
+                r"\b(?:do|does)\s+(?:we|i)\s+have\b|\bwhat\s+class\b|\bwhich\s+class\b",
+                context.text or "",
+                re.IGNORECASE,
+            )
+        )
+        if (request_frame.wants_mutation or request_frame.wants_execution) and not read_only_class_fact:
             return None
 
         if re.search(
@@ -586,13 +597,18 @@ class RequestEngine:
         except Exception:
             return None
 
+        contextual_path = (
+            context.current_file_path
+            or (context.open_file_paths[0] if context.open_file_paths else "")
+        )
         direct_answer = answer_simple_project_index_question(
             context.text,
-            active_path=context.current_file_path,
+            active_path=contextual_path,
             semantic_contract={},
+            project_roots=context.project_roots,
         ) or answer_project_dependency_question(
             context.text,
-            active_path=context.current_file_path,
+            active_path=contextual_path,
         )
         if not direct_answer:
             return None
@@ -1528,6 +1544,19 @@ class RequestEngine:
     def process(self, context: RequestContext) -> EngineResult:
         self.emit("intent", "Understanding your request...")
         self.activity(ActivityEvent("intent", "Request received", context.text, status="info"))
+        # Exact symbol and high-confidence project lookups do not benefit from
+        # constructing the full code-understanding packet first. Keeping these
+        # deterministic fast paths ahead of runtime preparation avoids a large
+        # symbol/context scan on the user's most common read-only questions.
+        fast_symbol = self._fast_explicit_symbol_inspection(context)
+        if fast_symbol is not None:
+            return fast_symbol
+        fast_simple_lookup = self._fast_simple_project_index_lookup(context)
+        if fast_simple_lookup is not None:
+            return fast_simple_lookup
+        fast_lookup = self._fast_semantic_project_lookup(context)
+        if fast_lookup is not None:
+            return fast_lookup
         context, _runtime_result = self.runtime_preparation.prepare(context)
         fast_atl = self._fast_atlassian_url_setup(context)
         if fast_atl is not None:
@@ -1552,15 +1581,6 @@ class RequestEngine:
         fast_windows = self._fast_desktop_window_request(context)
         if fast_windows is not None:
             return fast_windows
-        fast_symbol = self._fast_explicit_symbol_inspection(context)
-        if fast_symbol is not None:
-            return fast_symbol
-        fast_simple_lookup = self._fast_simple_project_index_lookup(context)
-        if fast_simple_lookup is not None:
-            return fast_simple_lookup
-        fast_lookup = self._fast_semantic_project_lookup(context)
-        if fast_lookup is not None:
-            return fast_lookup
         try:
             from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 

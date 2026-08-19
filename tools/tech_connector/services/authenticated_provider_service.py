@@ -169,23 +169,28 @@ def account_provider_is_connected(provider_id: str) -> bool:
 
 def begin_provider_login(provider_id: str, *, cwd: str | None = None) -> str:
     """Launch 100% keyless official CLI OAuth Web SSO login in dedicated terminal console."""
-    import subprocess, os
+    import os
+    import subprocess
 
     pid = provider_id.lower().strip()
     creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
     
-    # Official 100% Keyless CLI OAuth Commands
-    keyless_cmds = {
-        "anthropic": "cmd.exe /k npx -y @anthropic-ai/claude-code auth login",
-        "google": "cmd.exe /k gcloud auth application-default login",
-        "openai": "cmd.exe /k npx -y @openai/codex login",
-        "x": "cmd.exe /k npx -y grok-cli login",
+    keyless_args = {
+        "anthropic": ["npx", "-y", "@anthropic-ai/claude-code", "auth", "login"],
+        "google": ["gcloud", "auth", "application-default", "login"],
+        "openai": ["npx", "-y", "@openai/codex", "login"],
+        "x": ["npx", "-y", "grok-cli", "login"],
     }
-    
-    cmd_str = keyless_cmds.get(pid, "cmd.exe /k npx -y @openai/codex login")
-    
+    args = keyless_args.get(pid, keyless_args["openai"])
+    command = ["cmd.exe", "/k", *args] if os.name == "nt" else args
+
     try:
-        subprocess.Popen(cmd_str, cwd=cwd or os.getcwd(), creationflags=creationflags, shell=True)
+        subprocess.Popen(
+            command,
+            cwd=cwd or os.getcwd(),
+            creationflags=creationflags,
+            shell=False,
+        )
         return f"Launched 100% Keyless OAuth Sign-In for {pid.upper()} in console terminal."
     except Exception as exc:
         return str(exc)

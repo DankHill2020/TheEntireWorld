@@ -38,7 +38,7 @@ def build_unreal_capability_inventory(project_root: str | None = None) -> dict[s
 
     manifest = _load_plugin_manifest()
     header_functions = _parse_header_functions(PLUGIN_HEADER_PATH)
-    cpp_functions = _parse_cpp_functions(PLUGIN_CPP_PATH)
+    cpp_functions = _parse_cpp_functions()
     unreal_tools_rows = _discover_unreal_tools_functions()
     base_unreal_api_count = _count_base_unreal_python_api(project_root)
     base_unreal_api_rows = _load_base_unreal_python_api(project_root)
@@ -193,6 +193,9 @@ def build_unreal_capability_inventory(project_root: str | None = None) -> dict[s
             "plugin_manifest": str(PLUGIN_MANIFEST_PATH),
             "plugin_header": str(PLUGIN_HEADER_PATH),
             "plugin_cpp": str(PLUGIN_CPP_PATH),
+            "plugin_implementation_files": [
+                str(path) for path in _plugin_implementation_paths()
+            ],
             "operations": "tech_connector.services.unreal.unreal_operation_service.UNREAL_OPERATIONS",
             "capabilities": "tech_connector.services.unreal.capability_registry.UNREAL_CAPABILITIES",
             "wrapper_requirements": "tech_connector.services.unreal.cpp_domain_wrapper_requirements_service.DOMAIN_WRAPPER_REQUIREMENTS",
@@ -351,10 +354,23 @@ def _parse_header_functions(path: Path) -> set[str]:
     ))
 
 
-def _parse_cpp_functions(path: Path) -> set[str]:
+def _plugin_implementation_paths() -> tuple[Path, ...]:
+    from tech_connector.services.unreal.plugin_source_service import plugin_implementation_paths
+
+    return plugin_implementation_paths()
+
+
+def _parse_cpp_functions(path: Path | None = None) -> set[str]:
+    from tech_connector.services.unreal.plugin_source_service import read_plugin_implementation
+
+    text = (
+        path.read_text(encoding="utf-8", errors="replace")
+        if path is not None
+        else read_plugin_implementation()
+    )
     return set(re.findall(
         r"FString\s+UAIStudioBridgeLibrary::(\w+)\s*\(",
-        path.read_text(encoding="utf-8", errors="replace"),
+        text,
     ))
 
 
@@ -368,7 +384,11 @@ def _discover_unreal_tools_functions() -> dict[str, dict[str, Any]]:
     if not root.is_dir():
         return rows
     for path in sorted(root.glob("*.py")):
-        if path.name.startswith("_") or path.name == "__init__.py":
+        if (
+            path.name.startswith("_")
+            or path.name == "__init__.py"
+            or path.stem.endswith(("_head", "_tail"))
+        ):
             continue
         module = f"unreal_tools.{path.stem}"
         source = path.read_text(encoding="utf-8", errors="replace")

@@ -587,11 +587,7 @@ def build_for_prompt(
         from tech_connector.project_analysis.rules_loader import load_rules
         rules = load_rules(project_root)
     except Exception:
-        try:
-            from tech_connector.bridges.unreal.rules_loader import load_rules  # alternate location
-            rules = load_rules(project_root)
-        except Exception:
-            pass
+        pass
 
     # Load capabilities relevant to this query
     caps: List[Dict[str, Any]] = []

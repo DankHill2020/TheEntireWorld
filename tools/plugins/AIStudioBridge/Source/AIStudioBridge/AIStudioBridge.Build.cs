@@ -12,18 +12,24 @@ public class AIStudioBridge : ModuleRules
             "CoreUObject",
             "Engine",
             "InputCore",
-            "Niagara"
+            "Niagara",
+            "UMG"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "UnrealEd",
+            "UMGEditor",
             "BlueprintGraph",
             "AnimGraph",
             "AnimGraphRuntime",
             "AssetTools",
+            "AudioEditor",
             "Json",
             "JsonUtilities",
+            "AIGraph",
+            "AIModule",
+            "BehaviorTreeEditor",
             "NiagaraEditor",
             "PhysicsUtilities",
             "PoseSearch",

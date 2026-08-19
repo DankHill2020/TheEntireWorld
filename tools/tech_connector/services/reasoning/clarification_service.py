@@ -21,6 +21,9 @@ CONFIRMATION = "confirmation"
 
 APPROVAL_WORDS = {"yes", "y", "yeah", "yep", "yea", "yee", "ok", "okay", "approve", "approved", "confirm", "proceed", "go", "go ahead", "continue", "do it"}
 CANCEL_WORDS = {"no", "n", "cancel", "deny", "denied", "reject", "stop", "never mind", "nevermind", "do not", "don't", "dont"}
+PLAN_MISMATCH_SLOT = "plan_resolution_mode"
+PLAN_MISMATCH_LOCAL = "local_plan"
+PLAN_MISMATCH_ONLINE = "search_online"
 
 
 @dataclass
@@ -817,6 +820,55 @@ def bind_clarification_response(pending_state: dict[str, Any], answer: str) -> d
         return {"accepted": True, "action": "cancel", "clear_pending": True}
     if not pending_state or not pending_state.get("resumable", True):
         return {"accepted": False, "reason": "stale_or_not_resumable", "reroute": True}
+    slots = list(pending_state.get("unresolved_slots") or [])
+    special_slot = next(
+        (slot for slot in slots if str(slot.get("name") or "") == PLAN_MISMATCH_SLOT),
+        None,
+    )
+    if special_slot is not None:
+        schema = (pending_state.get("accepted_value_schemas") or {}).get(PLAN_MISMATCH_SLOT, {})
+        choices = list(schema.get("choices") or [])
+        selected = _match_choice_value(text, choices)
+        if selected is None:
+            selected = _match_choice_value(lower.replace(" ", "_"), choices)
+        if selected is None:
+            selected = _match_choice_value(lower.replace("-", "_"), choices)
+        if selected is None:
+            selected = _match_choice_value(lower.replace(" ", ""), choices)
+        if selected is None:
+            selected = _match_choice(text, choices)
+        selected_text = str(selected or "").strip().lower()
+        if selected_text in {PLAN_MISMATCH_ONLINE, "search", "online", "searchonline", "search online"}:
+            route_decision = dict(pending_state.get("route_decision") or {})
+            execution_request = dict(pending_state.get("execution_request") or {})
+            route_decision["route"] = "chat"
+            route_decision["execution_route"] = "llm.chat"
+            execution_request["plan_resolution_mode"] = PLAN_MISMATCH_ONLINE
+            return {
+                "accepted": True,
+                "action": "resume",
+                "values": {PLAN_MISMATCH_SLOT: PLAN_MISMATCH_ONLINE},
+                "route_decision": route_decision,
+                "execution_request": execution_request,
+                "clear_pending": True,
+            }
+        if selected_text in {PLAN_MISMATCH_LOCAL, "local", "localplan", "continue", "continue local", "local plan", "continue local plan"}:
+            route_decision = _set_plan_verification_for_local_resume(dict(pending_state.get("route_decision") or {}))
+            execution_request = dict(pending_state.get("execution_request") or {})
+            execution_request["plan_resolution_mode"] = PLAN_MISMATCH_LOCAL
+            return {
+                "accepted": True,
+                "action": "resume",
+                "values": {PLAN_MISMATCH_SLOT: PLAN_MISMATCH_LOCAL},
+                "route_decision": route_decision,
+                "execution_request": execution_request,
+                "clear_pending": True,
+            }
+        return {
+            "accepted": False,
+            "reason": "unknown_plan_resolution_choice",
+            "message": "Please choose one option above, or type `Local plan` or `Search online`.",
+        }
     if pending_state.get("kind") == CONFIRMATION:
         if lower in APPROVAL_WORDS or lower in {"run", "execute"}:
             route_decision = dict(pending_state.get("route_decision") or {})
@@ -835,7 +887,6 @@ def bind_clarification_response(pending_state: dict[str, Any], answer: str) -> d
         if lower in CANCEL_WORDS:
             return {"accepted": True, "action": "cancel", "clear_pending": True}
         return {"accepted": False, "reason": "confirmation_expected", "message": "Reply Approve/Yes to continue, or Deny/Cancel to stop."}
-    slots = list(pending_state.get("unresolved_slots") or [])
     if lower in APPROVAL_WORDS and slots:
         approved_values = _approval_values_from_inferred_slots(slots)
         if approved_values:
@@ -855,6 +906,115 @@ def bind_clarification_response(pending_state: dict[str, Any], answer: str) -> d
         return {"accepted": False, "reason": "multiple_slots_require_structured_ui", "message": "Please answer the requested fields."}
     slot = slots[0]
     return _bind_slot_values(pending_state, [slot], {str(slot.get("name") or ""): text})
+
+
+def _set_plan_verification_for_local_resume(route_decision: dict[str, Any]) -> dict[str, Any]:
+    normalized = {"matches_request": True, "status": "overridden_by_user"}
+    return _overwrite_plan_verification_flag(route_decision, normalized)
+
+
+def _overwrite_plan_verification_flag(payload: Any, replacement: dict[str, Any]) -> Any:
+    if isinstance(payload, dict):
+        updated = {key: _overwrite_plan_verification_flag(value, replacement) for key, value in payload.items()}
+        if "request_plan_verification" in updated:
+            updated["request_plan_verification"] = dict(replacement)
+        return updated
+    if isinstance(payload, list):
+        return [_overwrite_plan_verification_flag(item, replacement) for item in payload]
+    if isinstance(payload, tuple):
+        return tuple(_overwrite_plan_verification_flag(item, replacement) for item in payload)
+    return payload
+
+
+def build_plan_mismatch_clarification(
+    *,
+    decision: dict[str, Any],
+    route: str,
+    plan_verification: dict[str, Any],
+) -> ClarificationRenderResult:
+    missing = plan_verification.get("missing") or plan_verification.get("missing_requirements") or []
+    distorted = plan_verification.get("distorted") or plan_verification.get("wrong") or plan_verification.get("distortions") or []
+    unsupported = plan_verification.get("unsupported_claims") or plan_verification.get("unsupported_features") or []
+    issues: list[str] = []
+    for entry in list(missing)[:6]:
+        row = dict(entry or {})
+        fragment = str(row.get("request_fragment") or row.get("text") or "").strip()
+        reason = str(row.get("reason") or "").strip()
+        issues.append(
+            "- Missing: " + (fragment if fragment else "requested behavior")
+            + (f" ({reason})" if reason else "")
+        )
+    for entry in list(distorted)[:6]:
+        row = dict(entry or {})
+        fragment = str(row.get("plan_claim") or row.get("claim") or "").strip()
+        reason = str(row.get("reason") or "").strip()
+        issues.append(
+            "- Distortion: " + (fragment if fragment else "requested behavior")
+            + (f" ({reason})" if reason else "")
+        )
+    for entry in list(unsupported)[:6]:
+        if isinstance(entry, dict):
+            fragment = str(
+                entry.get("plan_claim")
+                or entry.get("claim")
+                or entry.get("request_fragment")
+                or ""
+            ).strip()
+        else:
+            fragment = str(entry)
+        issues.append(f"- Unsupported: {fragment or 'requested behavior'}")
+    if not issues:
+        issues.append("The plan verifier reported a mismatch, but did not include explicit gap details.")
+
+    slot = ClarificationSlot(
+        name=PLAN_MISMATCH_SLOT,
+        label="How should we proceed?",
+        expected_type="selection",
+        choices=[
+            {"value": PLAN_MISMATCH_LOCAL, "label": "Continue with local plan", "description": "Use local project evidence and existing workflow."},
+            {"value": PLAN_MISMATCH_ONLINE, "label": "Search Online", "description": "Ask the assistant to search online references for implementation guidance."},
+        ],
+        required_reason="The current route is blocked by a plan contract mismatch.",
+        control_type="choice",
+        default_value=PLAN_MISMATCH_LOCAL,
+        state="unresolved",
+        free_text_allowed=False,
+        can_use_default=True,
+        context_source="plan_verification",
+    )
+    request = ClarificationRequest(
+        kind=SLOT_CLARIFICATION,
+        intent=str(decision.get("intent_category") or decision.get("route") or ""),
+        target=str(route),
+        execution_environment=str(
+            decision.get("execution_environment")
+            or decision.get("host")
+            or decision.get("execution_environment_hint")
+            or ""
+        ),
+        slots=[slot],
+        route_decision=decision,
+        execution_request={"original_prompt": str(decision.get("original_prompt") or decision.get("target_identifier") or "")},
+        reason=f"Plan verification mismatch before execution for route `{route}`.",
+        model_tier_policy="deterministic",
+        rendering_mechanism="deterministic",
+    )
+    request.ui_controls = ui_controls_for_request(request)
+    lines = [
+        "I can't continue with the local route yet because the plan contract does not match the request.",
+        "Detected mismatch details:",
+        *issues,
+        "",
+        "Choose one of the options below.",
+    ]
+    text = "\n".join(lines)
+    return ClarificationRenderResult(
+        text=text,
+        request=request,
+        model_tier_policy=request.model_tier_policy,
+        rendering_mechanism=request.rendering_mechanism,
+        pending_state=pending_state_for_request(request),
+    )
 
 
 def _approval_values_from_inferred_slots(slots: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1204,3 +1364,4 @@ def build_problem_formulation_clarification(
         rendering_mechanism=request.rendering_mechanism,
         pending_state=pending_state_for_request(request),
     )
+

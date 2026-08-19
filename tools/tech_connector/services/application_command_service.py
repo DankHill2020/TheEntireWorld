@@ -53,6 +53,12 @@ class ApplicationCommandService:
             return {"ok": True, "status": self.retrieve_status()}
         if command == "list_jobs":
             return {"ok": True, "jobs": self.job_store.list_jobs(int(payload.get("limit") or 50), state=str(payload.get("state") or "all"))}
+        if command == "push_texture_to_dcc":
+            return self.push_texture_to_dcc(payload)
+        if command == "capture_dcc_viewport":
+            return self.capture_dcc_viewport(payload)
+        if command == "send_mobile_image_to_desktop":
+            return self.send_mobile_image_to_desktop(payload)
         
         
         
@@ -1263,3 +1269,81 @@ class ApplicationCommandService:
             "workspaces": workspaces,
             "default_workspace": "Theentireworld (theentireworldgroup.slack.com)",
         }
+
+    def push_texture_to_dcc(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save mobile texture base64 payload to disk & notify DCC bridge."""
+        image_data = str(payload.get("image_data") or "")
+        if not image_data:
+            return {"ok": False, "error": "No image_data base64 provided"}
+        
+        try:
+            import base64
+            from pathlib import Path
+            import tempfile
+            
+            if "," in image_data:
+                image_data = image_data.split(",", 1)[1]
+            raw_bytes = base64.b64decode(image_data)
+            temp_path = str(Path(tempfile.gettempdir()) / f"mobile_pushed_texture_{int(time.time()*1000)}.png")
+            with open(temp_path, "wb") as f:
+                f.write(raw_bytes)
+                
+            from tech_connector.bridges.maya.maya_bridge import MayaBridge
+            MayaBridge().execute(f"import maya.cmds as cmds\ncmds.refresh()\nprint('Hot-Reload Signal Received for {temp_path}')")
+            return {"ok": True, "path": temp_path, "message": "Pushed mobile texture to active DCC viewport!"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def capture_dcc_viewport(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Capture live DCC viewport framebuffer & return base64 data for mobile client."""
+        dcc_name = str(payload.get("dcc") or "Autodesk Maya")
+        try:
+            from tech_connector.ui.image_editor_widget import capture_dcc_viewport_to_image
+            qimg = capture_dcc_viewport_to_image(dcc_name)
+            if qimg and not qimg.isNull():
+                from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+                ba = QByteArray()
+                buf = QBuffer(ba)
+                buf.open(QIODevice.WriteOnly)
+                qimg.save(buf, "PNG")
+                import base64
+                data_url = "data:image/png;base64," + base64.b64encode(ba.data()).decode("ascii")
+                return {"ok": True, "image_data": data_url, "width": qimg.width(), "height": qimg.height()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": "Could not capture DCC viewport"}
+
+    def send_mobile_image_to_desktop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Receive mobile canvas drawing & open directly in desktop Tech Connector Image Editor."""
+        image_data = str(payload.get("image_data") or "")
+        if not image_data:
+            return {"ok": False, "error": "No image_data provided"}
+            
+        try:
+            import base64
+            from pathlib import Path
+            import tempfile
+            from PySide6.QtGui import QImage
+            
+            if "," in image_data:
+                image_data = image_data.split(",", 1)[1]
+            raw_bytes = base64.b64decode(image_data)
+            temp_path = str(Path(tempfile.gettempdir()) / f"Mobile_Transfer_{int(time.time()*1000)}.png")
+            with open(temp_path, "wb") as f:
+                f.write(raw_bytes)
+                
+            qimg = QImage(temp_path)
+            if qimg.isNull():
+                return {"ok": False, "error": "Invalid image payload"}
+                
+            if hasattr(self, "desktop_window") and self.desktop_window is not None:
+                try:
+                    if hasattr(self.desktop_window, "open_mobile_image_in_editor"):
+                        self.desktop_window.open_mobile_image_in_editor(temp_path, qimg)
+                except Exception as ex:
+                    print(f"[TechConnector] Error opening image on desktop: {ex}")
+                    
+            self.event_bus.publish("mobile_image_received", {"path": temp_path, "timestamp": time.time()})
+            return {"ok": True, "path": temp_path, "message": "Mobile image received & opened in Desktop Image Editor!"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}

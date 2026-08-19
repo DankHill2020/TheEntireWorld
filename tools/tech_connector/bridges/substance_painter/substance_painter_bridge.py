@@ -1,5 +1,7 @@
 """Direct Substance Painter socket bridge."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -8,6 +10,11 @@ import shutil
 from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
+from tech_connector.bridges.session_discovery import (
+    candidate_session_ports,
+    discover_open_ports,
+    parse_session_output,
+)
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
 
@@ -304,46 +311,29 @@ class SubstancePainterBridge(DCCBridgeDelegateMixin):
         str(APP_ROOT),
     ]
 
+    def _candidate_ports(self) -> list[int]:
+        return candidate_session_ports(
+            "substance_painter",
+            port_files=self.PORT_FILES,
+            environment_variable="SUBSTANCE_PAINTER_COMMAND_PORT",
+            default_port=self.DEFAULT_PORT,
+            scan_count_variable="SUBSTANCE_PAINTER_COMMAND_PORT_SCAN_COUNT",
+        )
+
+    def find_ports(self, host="127.0.0.1") -> list[int]:
+        return discover_open_ports(self._candidate_ports(), host=host)
+
     def find_port(self, host="127.0.0.1"):
-        candidates = []
-
-        for pfile in self.PORT_FILES:
-            if os.path.exists(pfile):
-                try:
-                    with open(pfile, "r") as f:
-                        candidates.append(int(f.read().strip()))
-                except Exception:
-                    pass
-
-        env_port = os.environ.get("SUBSTANCE_PAINTER_COMMAND_PORT")
-        if env_port:
-            try:
-                candidates.append(int(env_port))
-            except Exception:
-                pass
-
-        candidates.append(self.DEFAULT_PORT)
-
-        seen = set()
-        for port in candidates:
-            if port in seen:
-                continue
-            seen.add(port)
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.25)
-                    if s.connect_ex((host, port)) == 0:
-                        return port
-            except Exception:
-                pass
-
-        return None
+        ports = self.find_ports(host=host)
+        return ports[0] if ports else None
 
     def execute(self, code: str, timeout: float = 10) -> tuple[bool, str]:
         port = self.find_port()
         if not port:
             return False, "No Substance Painter bridge found. Re-run setup, then restart Substance Painter."
+        return self.execute_on_port(code, port=port, timeout=timeout)
 
+    def execute_on_port(self, code: str, *, port: int, timeout: float = 10) -> tuple[bool, str]:
         try:
             encoded = base64.b64encode(code.encode("utf-8")).decode("utf-8")
             payload = json.dumps({"code_b64": encoded}).encode("utf-8") + b"\n"
@@ -376,6 +366,32 @@ class SubstancePainterBridge(DCCBridgeDelegateMixin):
         except Exception as e:
             return False, str(e)
 
+    def session_info(self, port: int | None = None, timeout: float = 3.0) -> dict:
+        port = int(port or self.find_port() or 0)
+        if not port:
+            return {"ok": False, "error": "No Substance Painter bridge found."}
+        code = """
+import json
+import os
+import substance_painter.application
+import substance_painter.project
+print(json.dumps({
+    "pid": os.getpid(),
+    "version": str(substance_painter.application.version()),
+    "scene": str(substance_painter.project.file_path() or "") if substance_painter.project.is_open() else "",
+    "project_open": bool(substance_painter.project.is_open()),
+}))
+"""
+        ok, raw = self.execute_on_port(code, port=port, timeout=timeout)
+        data = parse_session_output(raw)
+        data.update({"ok": bool(ok), "port": port})
+        if not ok:
+            data.setdefault("error", str(raw))
+        return data
+
+    def sessions(self, host="127.0.0.1") -> list[dict]:
+        return [self.session_info(port=port) for port in self.find_ports(host=host)]
+
     def call_function(self, function_path: str, args=None, kwargs=None) -> tuple[bool, str]:
         return call_python_function_via_execute(self, function_path, args, kwargs, self.SYS_PATHS)
 
@@ -387,6 +403,31 @@ class SubstancePainterBridge(DCCBridgeDelegateMixin):
 
     def get_scene_objects_code(self) -> str:
         return "import substance_painter.textureset\nprint([ts.name() for ts in substance_painter.textureset.all_texture_sets()])"
+
+    def get_scene_snapshot_code(self, *, include_materials: bool = True, limit: int = 500, **_kwargs) -> str:
+        from tech_connector.game_engine.integration.scene_snapshot_provider import substance_painter_scene_snapshot_code
+
+        return substance_painter_scene_snapshot_code(include_materials=include_materials, limit=limit)
+
+    def get_scene_snapshot(
+        self,
+        *,
+        include_materials: bool = True,
+        limit: int = 500,
+        timeout: float = 10.0,
+        port: int | None = None,
+        **_kwargs,
+    ) -> tuple[bool, object]:
+        from tech_connector.game_engine.integration.scene_snapshot_provider import parse_scene_snapshot_output
+
+        code = self.get_scene_snapshot_code(include_materials=include_materials, limit=limit)
+        if port is None:
+            ok, raw = self.execute(code, timeout=timeout)
+        else:
+            ok, raw = self.execute_on_port(code, port=int(port), timeout=timeout)
+        if not ok:
+            return False, raw
+        return parse_scene_snapshot_output(str(raw).splitlines()[-1], "substance_painter")
 
     def parse_input(self, text: str):
         if text.startswith("{"):

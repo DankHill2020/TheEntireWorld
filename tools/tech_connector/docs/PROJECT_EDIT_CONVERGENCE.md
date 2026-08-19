@@ -8,6 +8,9 @@ Tech Connector.
 
 - `ConvergencePolicy` decides whether a candidate repair is monotonic.
 - `RepairCoordinator` orders registered domain providers.
+- Provider support, repair, and candidate-validation exceptions are isolated,
+  recorded, and do not prevent a later bounded provider from succeeding.
+- Unchanged proposals do not run candidate validation.
 - `RepairContext` carries the candidate and exact validation snapshot.
 - `ProductionReadiness`, `ValidationFinding`, and `RepairRecord` remain the
   shared UI/headless result protocol.
@@ -68,3 +71,25 @@ def repair_project(context):
 The caller validates the proposed candidate and submits both snapshots to the
 runtime policy. A proposal is never production-ready merely because a provider
 returned it.
+
+## Application transaction
+
+Validated edits use the following safety boundary:
+
+1. Every target is re-read and compared with its preview source. Stale targets
+   return `stale_source` without writing or creating an undo session.
+2. Each destination is written through a sibling temporary file and published
+   with atomic replacement.
+3. A write failure stops the remaining transaction and rolls back every file
+   already published.
+4. Post-write validation failure rolls back modified files and removes files
+   created by the transaction.
+5. A successfully rolled-back session remains available as audit history but
+   is removed from the active Undo pointer.
+6. Normal Undo refuses to overwrite files changed after the AI edit. An
+   explicit `force=True` is required to replace newer user content.
+
+Terminal failure statuses distinguish complete rollback from an incomplete
+rollback requiring manual attention: `write_failed_rolled_back`,
+`write_failed_rollback_incomplete`, `validation_failed_rolled_back`, and
+`validation_failed_rollback_incomplete`.

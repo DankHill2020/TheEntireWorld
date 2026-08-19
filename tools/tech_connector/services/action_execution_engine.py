@@ -161,20 +161,44 @@ class ActionHandlerRegistry:
         return validate_planner_executor_contract(self._handlers.keys()).to_dict()
 
 
-def _result_path(value: Any, path: str) -> Any:
+def _result_path_state(value: Any, path: str) -> tuple[bool, Any]:
+    """Resolve a result path while preserving missing-versus-falsey state.
+
+    :param value: Root result value.
+    :param path: Dot-separated dictionary keys and list indexes.
+    :return: Presence flag and resolved value.
+    """
+
     current = value
     if not path:
-        return current
+        return True, current
     for part in str(path).split("."):
         if part == "":
             continue
         if isinstance(current, dict):
-            current = current.get(part)
+            if part not in current:
+                return False, None
+            current = current[part]
         elif isinstance(current, list) and part.isdigit():
-            current = current[int(part)]
+            index = int(part)
+            if index >= len(current):
+                return False, None
+            current = current[index]
         else:
-            return None
-    return current
+            return False, None
+    return True, current
+
+
+def _result_path(value: Any, path: str) -> Any:
+    """Resolve a result path and return None when it is missing.
+
+    :param value: Root result value.
+    :param path: Dot-separated dictionary keys and list indexes.
+    :return: Resolved value or None.
+    """
+
+    found, current = _result_path_state(value, path)
+    return current if found else None
 
 
 def resolve_output_references(value: Any, results: dict[str, Any]) -> Any:
@@ -286,6 +310,52 @@ def _truthy_result(value: Any) -> bool:
     return bool(value)
 
 
+def _infer_action_success(raw: dict[str, Any]) -> bool:
+    """Infer execution success when a handler omits the canonical ok flag.
+
+    :param raw: Raw handler result.
+    :return: True only when no explicit failure evidence is present.
+    """
+
+    if "ok" in raw:
+        return bool(raw.get("ok"))
+    if "success" in raw:
+        return bool(raw.get("success"))
+    status = str(raw.get("status") or "").strip().casefold()
+    if status in {
+        "blocked",
+        "cancelled",
+        "error",
+        "failed",
+        "failure",
+        "partial_failure",
+        "rejected",
+        "timed_out",
+        "timeout",
+    }:
+        return False
+    exit_code = raw.get("exit_code")
+    if exit_code is not None:
+        try:
+            if int(exit_code) != 0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    if any(
+        raw.get(key) not in (None, "", [], {})
+        for key in (
+            "error",
+            "errors",
+            "exception",
+            "exception_message",
+            "exception_type",
+            "traceback",
+        )
+    ):
+        return False
+    return True
+
+
 def _contains_failure_text(text: str) -> bool:
     return bool(re.search(r"\b(error|exception|traceback|failed|failure|permission denied|not found|missing|invalid)\b", text or "", re.IGNORECASE))
 
@@ -334,7 +404,16 @@ def _host_from_action(action: dict[str, Any]) -> str:
 
 
 def _default_repair_plan(action: dict[str, Any], result: SupervisedActionResult, context: ExecutionContext) -> dict[str, Any]:
-    text = " ".join([result.stderr, result.exception_message, result.diagnosis, result.unresolved_blocker]).lower()
+    text = " ".join(
+        [
+            result.stderr,
+            result.exception_type,
+            result.exception_message,
+            result.traceback,
+            result.diagnosis,
+            result.unresolved_blocker,
+        ]
+    ).lower()
     host = _host_from_action(action) or str(result.tool or "").lower()
     action_type = str(action.get("type") or "")
     steps: list[str] = []
@@ -348,6 +427,21 @@ def _default_repair_plan(action: dict[str, Any], result: SupervisedActionResult,
             "Preserve the current action and evidence.",
             "Ask the user to approve the specific destructive or mutating step.",
             "Retry only after confirmation with the same action id and validation criteria.",
+        ]
+    elif result.failure_category == FAILURE_PERMISSION:
+        repair_kind = "resolve_permission_boundary"
+        steps = [
+            "Identify the exact denied file, host operation, credential scope, or protected resource.",
+            "Preserve the failed action without widening permissions automatically.",
+            "Request only the minimum required access or report the exact administrator/user action needed.",
+            "Retry only after the permission boundary is explicitly resolved.",
+        ]
+    elif result.failure_category == FAILURE_NON_RETRYABLE:
+        repair_kind = "report_non_retryable_gap"
+        steps = [
+            "Preserve the exact capability-gap or unsupported-operation evidence.",
+            "Report the missing callable, slot, adapter, or contract without retrying the same action.",
+            "Require a new grounded implementation or capability plan before execution resumes.",
         ]
     elif result.failure_category == FAILURE_ENVIRONMENT or "no " in text and "bridge" in text:
         repair_kind = "restore_host_connection"
@@ -746,8 +840,10 @@ class ActionExecutionEngine:
             if raw_result is None:
                 raw_result = {"ok": True}
             elif not isinstance(raw_result, dict):
-                raw_result = {"ok": bool(raw_result), "output": raw_result}
-            raw_result.setdefault("ok", True)
+                raw_result = {"ok": True, "output": raw_result}
+            else:
+                raw_result = dict(raw_result)
+                raw_result["ok"] = _infer_action_success(raw_result)
         except Exception as exc:
             raw_result = {
                 "ok": False,
@@ -851,15 +947,17 @@ class ActionExecutionEngine:
                 path = str(expected.get("path") or "")
                 expected_value = expected.get("equals")
                 contains = expected.get("contains")
-                exists = bool(expected.get("exists") or expected.get("truthy"))
-                observed = _result_path(raw, path) if path else raw
+                found, observed = _result_path_state(raw, path) if path else (True, raw)
                 passed = True
                 if "equals" in expected:
-                    passed = observed == expected_value
+                    passed = found and observed == expected_value
                 elif contains is not None:
-                    passed = str(contains) in _text_from(observed)
-                elif exists:
-                    passed = bool(observed)
+                    passed = found and str(contains) in _text_from(observed)
+                elif "exists" in expected:
+                    passed = found is bool(expected.get("exists"))
+                elif "truthy" in expected:
+                    expected_truth = bool(expected.get("truthy"))
+                    passed = found and bool(observed) is expected_truth
                 else:
                     passed = _truthy_result(expected)
                 results.append(
@@ -894,20 +992,69 @@ class ActionExecutionEngine:
             if any(item.get("type") == "outcome" for item in validation_failures):
                 return FAILURE_OUTCOME
             return FAILURE_VALIDATION
-        if result.success and not _contains_failure_text(result.stderr) and not nested_error_text:
+        explicit_error = bool(
+            result.exception_type
+            or result.exception_message
+            or result.traceback
+            or raw.get("error")
+            or raw.get("errors")
+        )
+        if (
+            result.success
+            and not explicit_error
+            and not _contains_failure_text(result.stderr)
+            and not nested_error_text
+        ):
             return ""
-        text = " ".join([result.stderr, nested_error_text, result.exception_message, _text_from(raw.get("error")), _text_from(raw.get("status"))]).lower()
+        text = " ".join(
+            [
+                result.stderr,
+                nested_error_text,
+                result.exception_type,
+                result.exception_message,
+                result.traceback,
+                _text_from(raw.get("error")),
+                _text_from(raw.get("status")),
+            ]
+        ).lower()
         if any(term in text for term in ("no object matches name", "missing maya object", "missing maya object(s)", "object does not exist", "could not find object")):
             return FAILURE_EXECUTION
-        if any(term in text for term in ("permission", "access denied", "denied")):
+        if re.search(r"\b(permission(?:error)?|access denied|operation denied)\b", text):
             return FAILURE_PERMISSION
-        if any(term in text for term in ("not connected", "bridge not", "no dcc", "no unreal", "no maya", "host", "environment")):
+        if any(
+            term in text
+            for term in (
+                "not connected",
+                "connection refused",
+                "connection reset",
+                "bridge not",
+                "bridge unavailable",
+                "no dcc",
+                "no unreal",
+                "no maya",
+                "no host session",
+                "host unavailable",
+                "host is unavailable",
+                "execution environment unavailable",
+                "environment is unavailable",
+            )
+        ):
             return FAILURE_ENVIRONMENT
-        if any(term in text for term in ("dependency", "importerror", "modulenotfound", "module not found")):
+        if any(
+            term in text
+            for term in (
+                "dependency",
+                "importerror",
+                "modulenotfound",
+                "module not found",
+                "no module named",
+                "package is not installed",
+            )
+        ):
             return FAILURE_DEPENDENCY
         if raw.get("retryable") is False or raw.get("status") in {"capability_gap", "missing_slots"}:
             return FAILURE_NON_RETRYABLE
-        if not result.success:
+        if not result.success or explicit_error:
             return FAILURE_EXECUTION
         if _contains_failure_text(result.stderr):
             return FAILURE_EXECUTION
@@ -923,24 +1070,103 @@ class ActionExecutionEngine:
         return result.failure_category in {FAILURE_EXECUTION, FAILURE_VALIDATION, FAILURE_OUTCOME, FAILURE_ENVIRONMENT, FAILURE_DEPENDENCY}
 
     def _diagnose_failure(self, raw: dict[str, Any], result: SupervisedActionResult) -> str:
+        detail = self._failure_detail(raw, result)
         if result.failure_category == FAILURE_CONFIRMATION:
             return "User confirmation is required before this action can continue."
         if result.failure_category == FAILURE_OUTCOME:
-            failed = [item.get("name") for item in result.validation_results if not bool(item.get("passed", True))]
-            return "The action ran, but the requested outcome was not observed: " + ", ".join(str(item) for item in failed if item)
+            failed = [
+                item for item in result.validation_results
+                if not bool(item.get("passed", True))
+            ]
+            names = ", ".join(
+                str(item.get("name")) for item in failed if item.get("name")
+            )
+            observation = next(
+                (
+                    f" Expected {item.get('expected')!r}; observed {item.get('observed')!r}."
+                    for item in failed
+                    if item.get("type") == "outcome"
+                ),
+                "",
+            )
+            return (
+                "The action ran, but the requested outcome was not observed"
+                + (f": {names}." if names else ".")
+                + observation
+            )
         if result.failure_category == FAILURE_VALIDATION:
-            return "The action executed but failed technical validation."
+            failed = [
+                item for item in result.validation_results
+                if not bool(item.get("passed", item.get("ok", item.get("valid", True))))
+            ]
+            names = ", ".join(
+                str(item.get("name") or "validation") for item in failed
+            )
+            errors = "; ".join(
+                _text_from(error)
+                for item in failed
+                for error in _as_list(item.get("errors"))
+                if _text_from(error)
+            )
+            suffix = f" Failed checks: {names}." if names else ""
+            if errors:
+                suffix += f" {errors[:500]}"
+            return "The action executed but failed technical validation." + suffix
         if result.failure_category == FAILURE_ENVIRONMENT:
-            return "The target application or execution environment is unavailable or returned an environment error."
+            return self._diagnosis_with_detail(
+                "The target application or execution environment is unavailable or returned an environment error.",
+                detail,
+            )
         if result.failure_category == FAILURE_DEPENDENCY:
-            return "A required dependency or import appears to be missing."
+            return self._diagnosis_with_detail(
+                "A required dependency or import appears to be missing.",
+                detail,
+            )
         if result.failure_category == FAILURE_PERMISSION:
-            return "The action was blocked by a permission or access error."
+            return self._diagnosis_with_detail(
+                "The action was blocked by a permission or access error.",
+                detail,
+            )
         if result.exception_message:
             return result.exception_message
         if result.stderr:
             return result.stderr
         return str(raw.get("error") or raw.get("status") or "")
+
+    @staticmethod
+    def _failure_detail(raw: dict[str, Any], result: SupervisedActionResult) -> str:
+        """Return concise concrete evidence for a failure diagnosis.
+
+        :param raw: Raw action result.
+        :param result: Supervised action result.
+        :return: Bounded failure detail.
+        """
+
+        candidates = [
+            result.exception_message,
+            result.stderr,
+            _collect_error_text(raw),
+            _text_from(raw.get("error")),
+        ]
+        for candidate in candidates:
+            lines = [line.strip() for line in str(candidate or "").splitlines() if line.strip()]
+            if lines:
+                return lines[-1][:500]
+        return result.exception_type[:500]
+
+    @staticmethod
+    def _diagnosis_with_detail(summary: str, detail: str) -> str:
+        """Append non-duplicate evidence to a diagnosis summary.
+
+        :param summary: Human-readable category summary.
+        :param detail: Concrete failure evidence.
+        :return: Complete diagnosis.
+        """
+
+        clean = str(detail or "").strip()
+        if not clean or clean.casefold() in summary.casefold():
+            return summary
+        return f"{summary} Detail: {clean}"
 
     def _max_retries(self, action: dict[str, Any], handler: ActionHandler, context: ExecutionContext) -> int:
         policy = dict(context.policy.get("retry_limits") or {})
@@ -1275,8 +1501,8 @@ def default_action_handler_registry() -> ActionHandlerRegistry:
     registry.register(ActionHandler("index_ingested_repository", "tech_connector.services.tool_discovery_service.list_ingested_tools", mutability="persistent_local_mutation", execute_fn=lambda a, c: _handle_index_repository(a, c)))
     registry.register(ActionHandler("resolve_dcc_capability", "tech_connector.services.project_intelligence_service/unreal capability services", execute_fn=lambda a, c: _handle_resolve_dcc_capability(a, c)))
     registry.register(ActionHandler("validate_dcc_call", "tech_connector.services.project_intelligence_service/unreal capability services", execute_fn=lambda a, c: _handle_validate_dcc_call(a, c)))
-    registry.register(ActionHandler("query_dcc", "tech_connector.services.dcc.dcc_execution_service", execute_fn=lambda a, c: _handle_execute_dcc(a, c, force_query=True)))
-    registry.register(ActionHandler("execute_dcc", "tech_connector.services.dcc.dcc_execution_service", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_dcc(a, c)))
+    registry.register(ActionHandler("query_dcc", "tech_connector.game_engine.integration.dcc_execution_service", execute_fn=lambda a, c: _handle_execute_dcc(a, c, force_query=True)))
+    registry.register(ActionHandler("execute_dcc", "tech_connector.game_engine.integration.dcc_execution_service", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_dcc(a, c)))
     registry.register(ActionHandler("execute_dcc_capability", "tech_connector.services.project_intelligence_service/unreal capability services", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_dcc_capability(a, c)))
     registry.register(ActionHandler("execute_unreal_python", "tech_connector.bridges.unreal.unreal_bridge.execute_python", mutability="dcc_mutation", execute_fn=lambda a, c: _handle_execute_unreal_python(a, c)))
     registry.register(ActionHandler("execute_workflow", "generated workflow callable", mutability="dcc_mutation", execute_fn=lambda a, c: {"ok": False, "error": "execute_workflow requires a registered workflow runner adapter"}))
@@ -1669,7 +1895,7 @@ def _handle_execute_dcc(
             project_roots: tuple[str, ...] = ()
             extras: dict[str, Any] = field(default_factory=dict)
 
-    from tech_connector.services.dcc.dcc_execution_service import build_dcc_execution_request, default_dcc_execution_adapters
+    from tech_connector.game_engine.integration.dcc_execution_service import build_dcc_execution_request, default_dcc_execution_adapters
 
     args = _action_args(action)
     operation_contract = dict(args.get("operation_contract") or {})
@@ -1716,7 +1942,7 @@ def _handle_execute_dcc(
         and generic_function.casefold() not in original_prompt.casefold()
     )
     if "callable" in request.missing_slots or unresolved_generic_function:
-        from tech_connector.services.dcc.dcc_operation_service import build_dcc_capability_gap_plan
+        from tech_connector.game_engine.integration.dcc_operation_service import build_dcc_capability_gap_plan
 
         unresolved_name = generic_function or request.callable_name or request.target_identifier or operation
         gap = build_dcc_capability_gap_plan(
@@ -1822,3 +2048,4 @@ def _handle_download_or_ingest_asset(action: dict[str, Any], context: ExecutionC
         target_host=target_host,
         destination=destination,
     )
+

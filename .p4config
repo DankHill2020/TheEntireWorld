@@ -1,0 +1,4 @@
+P4PORT=localhost:1666
+P4USER=asnyder
+P4CLIENT=ASNYDER_HOME
+P4IGNORE=.p4ignore

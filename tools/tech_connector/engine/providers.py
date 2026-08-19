@@ -10,6 +10,7 @@ from typing import Callable, Protocol
 from reasoning_runtime.engine.progress_events import ActivityEvent, EngineResult, ProgressEvent
 from reasoning_runtime.engine.request_context import RequestContext
 from reasoning_runtime.prompt import extract_plan_verification
+from tech_connector.services import project_search_service as _project_search_service
 
 ProgressCallback = Callable[[ProgressEvent], None]
 ActivityCallback = Callable[[ActivityEvent], None]
@@ -33,6 +34,33 @@ def _activity(activity: ActivityCallback | None, kind: str, title: str, detail: 
 
 def _route_decision(context: RequestContext) -> dict:
     return (context.extras or {}).get("prompt_route_decision") or {}
+
+
+def _planned_generated_python_target(route_decision: dict) -> str:
+    """
+    Gets the primary generated Python target from a grounded capability plan.
+
+    :param route_decision: prompt route decision with an optional capability plan.
+    :return: safe relative Python path, or an empty string.
+    """
+    plan = dict(route_decision.get("capability_gap_plan") or {})
+    for operation in plan.get("mixed_operation_sequence") or []:
+        if not isinstance(operation, dict):
+            continue
+        arguments = dict((operation.get("planned_call") or {}).get("arguments") or {})
+        for key in ("target_files", "expected_files", "patch_files"):
+            for candidate in arguments.get(key) or []:
+                value = str(candidate.get("path") if isinstance(candidate, dict) else candidate).strip()
+                normalized = value.replace("\\", "/")
+                if (
+                    normalized.endswith(".py")
+                    and "*" not in normalized
+                    and " or " not in normalized.lower()
+                    and not Path(normalized).is_absolute()
+                    and ".." not in Path(normalized).parts
+                ):
+                    return normalized
+    return ""
 
 
 def _route_scope(context: RequestContext) -> str | None:
@@ -2042,7 +2070,13 @@ class TargetDiscoveryEditProvider:
                     "production_readiness": readiness,
                 },
             )
+        extras = dict(context.extras or {})
+        route_decision = _route_decision(context)
         active_path = str(context.current_file_path or "").strip()
+        if not active_path:
+            planned_target = _planned_generated_python_target(route_decision)
+            if planned_target:
+                active_path = str((roots[0] / Path(planned_target)).resolve())
         active_candidate = Path(active_path).expanduser().resolve() if active_path else None
         project_root = next(
             (
@@ -2053,8 +2087,37 @@ class TargetDiscoveryEditProvider:
             ),
             roots[0],
         )
-        extras = dict(context.extras or {})
-        route_decision = _route_decision(context)
+        if extras.get("dispatch_preview_only"):
+            from tech_connector.services.project_service import (
+                build_project_edit_target_prompt,
+            )
+
+            discovery_context = (
+                "A grounded capability plan selected this generated-code target: "
+                f"{active_path or '(unresolved)'}. Preserve its declared operation "
+                "catalog, JSON argument editing, queued execution, progress, error, "
+                "and disposable-validation contracts."
+            )
+            model_prompt = build_project_edit_target_prompt(
+                context.text,
+                discovery_context,
+                active_path=active_path or None,
+                generated_artifact=True,
+                live_tree_mutation_allowed=False,
+                target_exists=bool(active_candidate and active_candidate.exists()),
+            )
+            return EngineResult(
+                action="send_raw",
+                label="Grounded Project Edit",
+                text=model_prompt,
+                metadata={
+                    "engine_path": self.name,
+                    "result_type": "project_edit_dispatch_preview",
+                    "selected_target": active_path,
+                    "discovery": {"selected_path": active_path} if active_path else {},
+                    "route_decision": route_decision,
+                },
+            )
         clarification_binding = dict(extras.get("clarification_binding") or {})
         bound_route = dict(clarification_binding.get("route_decision") or {})
         approved_plan_id = str(
@@ -2096,6 +2159,8 @@ class TargetDiscoveryEditProvider:
         readiness = workflow.readiness_snapshot()
         base_metadata = {
             "engine_path": self.name,
+            "selected_target": active_path,
+            "discovery": {"selected_path": active_path} if active_path else {},
             "workflow_status": workflow.status,
             "approval_id": workflow.approval_id,
             "implementation_plan": workflow.implementation_plan,
@@ -2192,26 +2257,13 @@ class ProjectSearchProvider:
         if route_decision:
             return route_decision.get("provider") == self.name
         try:
-            from tech_connector.services.project_search_service import is_project_scope_request
-            return is_project_scope_request(context.text)
+            return _project_search_service.is_project_scope_request(context.text)
         except Exception:
             return False
 
     def handle(self, context: RequestContext, emit: ProgressCallback, activity: ActivityCallback | None = None) -> EngineResult:
-        from tech_connector.services.project_search_service import (
-            answer_project_dependency_question,
-            answer_explicit_symbol_inspection_question,
-            answer_simple_project_index_question,
-            build_deterministic_project_search_answer,
-            gather_project_search_context,
-            should_deepen_project_search,
-        )
         _emit(emit, "project_search", "Searching project index")
-        try:
-            from tech_connector.services.prompt.prompt_task_splitter_service import normalize_prompt_text
-            query_text = normalize_prompt_text(context.text)
-        except Exception:
-            query_text = context.text
+        query_text = " ".join(str(context.text or "").split())
         _activity(activity, "tool", "Project index", f"Query: {query_text}", status="info")
 
         referenced_file = _selected_file_from_context(context) if _is_conversational_file_reference(query_text) else ""
@@ -2223,7 +2275,7 @@ class ProjectSearchProvider:
             or (context.extras or {}).get("semantic_execution_contract")
             or {}
         )
-        explicit_symbol_answer = answer_explicit_symbol_inspection_question(
+        explicit_symbol_answer = _project_search_service.answer_explicit_symbol_inspection_question(
             query_text,
             project_roots=list(context.project_roots or []),
             active_path=effective_active_path,
@@ -2256,11 +2308,12 @@ class ProjectSearchProvider:
                     "conversation_entities": {},
                 },
             )
-        direct_answer = answer_simple_project_index_question(
+        direct_answer = _project_search_service.answer_simple_project_index_question(
             query_text,
             active_path=effective_active_path,
             semantic_contract=semantic_contract,
-        ) or answer_project_dependency_question(
+            project_roots=list(context.project_roots or []),
+        ) or _project_search_service.answer_project_dependency_question(
             query_text, active_path=effective_active_path
         )
         if direct_answer:
@@ -2284,7 +2337,7 @@ class ProjectSearchProvider:
                 metadata={
                     "engine_path": self.name,
                     "result_type": "project_index_direct",
-                    "deep_search_candidate": should_deepen_project_search(query_text, direct_answer),
+                    "deep_search_candidate": _project_search_service.should_deepen_project_search(query_text, direct_answer),
                     "deep_search_query": query_text,
                     "original_query": context.text,
                     "deep_search_scope": _route_scope(context),
@@ -2301,7 +2354,7 @@ class ProjectSearchProvider:
                 },
             )
 
-        project_context = gather_project_search_context(
+        project_context = _project_search_service.gather_project_search_context(
             query_text,
             active_path=effective_active_path,
             limit=120,
@@ -2309,7 +2362,7 @@ class ProjectSearchProvider:
         )
         _emit(emit, "project_search", "Project evidence gathered", 1, 1)
         _activity(activity, "result", "Project evidence gathered", "Returning indexed evidence directly without LLM routing", status="ok")
-        answer = build_deterministic_project_search_answer(
+        answer = _project_search_service.build_deterministic_project_search_answer(
             query_text,
             effective_active_path,
             project_context,
@@ -2326,7 +2379,7 @@ class ProjectSearchProvider:
             metadata={
                 "engine_path": self.name,
                 "result_type": "project_search_direct",
-                "deep_search_candidate": should_deepen_project_search(query_text, answer),
+                "deep_search_candidate": _project_search_service.should_deepen_project_search(query_text, answer),
                 "deep_search_query": query_text,
                 "original_query": context.text,
                 "deep_search_scope": _route_scope(context),

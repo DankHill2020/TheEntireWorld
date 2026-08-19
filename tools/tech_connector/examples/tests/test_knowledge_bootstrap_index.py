@@ -67,8 +67,8 @@ class TestKnowledgeBootstrapIndex(unittest.TestCase):
             python_exe="python",
         )
         cwd, env = worker._subprocess_context()
-        package_root = Path(__file__).resolve().parents[1]
-        self.assertEqual(package_root.parent, cwd)
+        checkout_root = Path(__file__).resolve().parents[3]
+        self.assertEqual(checkout_root, cwd)
         self.assertEqual("C:/example/project", env["TECH_CONNECTOR_PROJECT_ROOT"])
         self.assertEqual(str(cwd), env["PYTHONPATH"].split(os.pathsep)[0])
 

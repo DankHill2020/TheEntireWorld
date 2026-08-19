@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from tech_connector.models.constants import temp_output_path
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 
 
 @dataclass(frozen=True)
@@ -146,5 +147,4 @@ def record_route_metric(metric: dict[str, Any], *, project_root: str | None = No
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **(metric or {}),
     }
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+    append_jsonl_record(path, payload, sort_keys=True)

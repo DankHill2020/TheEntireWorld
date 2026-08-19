@@ -180,7 +180,7 @@ def _evidence_packet_cache_key(
     except Exception:
         capability_scope = []
     payload = {
-        "evidence_contract": 2,
+        "evidence_contract": 5,
         "capability_scope": capability_scope,
         "text_fallback": (
             ""
@@ -1520,6 +1520,89 @@ def _unreal_records(
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
+    direct_editor_api = {
+        "unreal.EditorActorSubsystem": "EditorActorSubsystem",
+        "unreal.StaticMeshActor": "StaticMeshActor",
+        "unreal.StaticMeshComponent": "StaticMeshComponent",
+        "unreal.Name": "Name(value: str = '')",
+        "unreal.get_editor_subsystem": "get_editor_subsystem(subsystem_class) -> unreal.Object",
+        "unreal.EditorAssetLibrary.load_asset": "load_asset(asset_path: str) -> unreal.Object",
+        "unreal.EditorActorSubsystem.get_all_level_actors": "get_all_level_actors(self) -> list[unreal.Actor]",
+        "unreal.EditorActorSubsystem.get_selected_level_actors": "get_selected_level_actors(self) -> list[unreal.Actor]",
+        "unreal.EditorActorSubsystem.spawn_actor_from_class": "spawn_actor_from_class(self, actor_class, location: unreal.Vector, rotation: unreal.Rotator) -> unreal.Actor",
+        "unreal.EditorActorSubsystem.destroy_actor": "destroy_actor(self, actor: unreal.Actor) -> bool",
+        "unreal.Actor.set_actor_label": "set_actor_label(self, new_actor_label: str, mark_dirty: bool = True) -> None",
+        "unreal.Actor.get_actor_label": "get_actor_label(self) -> str",
+        "unreal.Actor.get_actor_location": "get_actor_location(self) -> unreal.Vector",
+        "unreal.Actor.tags": "tags: list[unreal.Name]",
+        "unreal.StaticMeshActor.static_mesh_component": "static_mesh_component: unreal.StaticMeshComponent",
+        "unreal.StaticMeshComponent.set_static_mesh": "set_static_mesh(self, new_mesh: unreal.StaticMesh) -> bool",
+        "unreal.Object.get_path_name": "get_path_name(self) -> str",
+        "unreal.Vector": "Vector(x: float = 0.0, y: float = 0.0, z: float = 0.0)",
+        "unreal.Rotator": "Rotator(roll: float = 0.0, pitch: float = 0.0, yaw: float = 0.0)",
+    }
+    semantic_api_triggers = {
+        "unreal.EditorActorSubsystem.get_all_level_actors": (
+            "existing level actor",
+            "all level actor",
+        ),
+        "unreal.EditorActorSubsystem.spawn_actor_from_class": (
+            "spawn an unreal.staticmeshactor",
+            "spawn actor",
+        ),
+        "unreal.EditorActorSubsystem.destroy_actor": (
+            "destroy every existing",
+            "destroy the newly spawned actor",
+        ),
+        "unreal.Actor.set_actor_label": ("label it", "set actor label"),
+        "unreal.Actor.get_actor_label": ("actor_label", "actor label"),
+        "unreal.Actor.get_actor_location": ("location as a three-float list",),
+        "unreal.Actor.tags": ("tags as strings", "add unreal.name"),
+        "unreal.StaticMeshActor.static_mesh_component": (
+            "get its static_mesh_component",
+            "component is unavailable",
+        ),
+        "unreal.StaticMeshComponent.set_static_mesh": (
+            "set the cube mesh",
+            "set static mesh",
+        ),
+        "unreal.Object.get_path_name": ("actor_path", "actor path"),
+    }
+    lowered_text = text.casefold()
+    direct_records = [
+        {
+            "qualified_name": qualified_name,
+            "owner_module": "unreal",
+            "import_statement": "import unreal",
+            "signature": signature,
+            "source_excerpt": "Unreal Editor Python API surface used by the live editor bridge.",
+            "path": "",
+            "provider": "unreal_capability_graph:live_editor_api",
+            "provenance": "live_unreal_python_reflection_contract",
+            "confidence": "exact",
+            "authoritative_signature": True,
+            "execution_requires_live_host": True,
+            "supports": [
+                qualified_name,
+                *semantic_api_triggers.get(qualified_name, ()),
+            ],
+            "access_kind": (
+                "property"
+                if qualified_name in {
+                    "unreal.Actor.tags",
+                    "unreal.StaticMeshActor.static_mesh_component",
+                }
+                else "callable"
+            ),
+        }
+        for qualified_name, signature in direct_editor_api.items()
+        if qualified_name.casefold() in lowered_text
+        or qualified_name.rsplit(".", 1)[-1].casefold() in lowered_text
+        or any(
+            trigger in lowered_text
+            for trigger in semantic_api_triggers.get(qualified_name, ())
+        )
+    ]
     try:
         from tech_connector.services.unreal.capability_graph_service import (
             resolve_unreal_graph_item,
@@ -1679,7 +1762,7 @@ def _unreal_records(
             results.append(capability_result)
     except Exception:
         return []
-    records: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = list(direct_records)
     requested_tokens = {
         token.casefold()
         for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", text)
@@ -1995,6 +2078,14 @@ def build_symbol_evidence_packet(
         )
     ]
     multi_dcc = len(hosts) > 1
+    direct_unreal_python_request = bool(
+        "unreal" in hosts
+        and re.search(
+            r"\bimport\s+unreal\b|\bunreal\.[A-Za-z_]",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
     cache_key = _evidence_packet_cache_key(
         text,
         root=root,
@@ -2187,7 +2278,13 @@ def build_symbol_evidence_packet(
         "unreal_index",
     }
     fast_prepared_providers = [
-        item for item in providers if item[0] in fast_provider_names
+        item
+        for item in providers
+        if item[0] in fast_provider_names
+        and not (
+            direct_unreal_python_request
+            and item[0] == "host_adapter_capabilities"
+        )
     ]
     deferred_prepared_providers = [
         item
@@ -2213,16 +2310,20 @@ def build_symbol_evidence_packet(
         )
     )
     skip_broad_discovery = bool(
-        host_adapter_covered
-        and internal_host_request
-        and not multi_dcc
+        not multi_dcc
+        and (
+            direct_unreal_python_request
+            or (host_adapter_covered and internal_host_request)
+        )
     )
     lookup_decisions.append({
         "decision": "broad_capability_discovery",
         "executed": not skip_broad_discovery,
         "reason": (
             "exact authoritative host-adapter members cover the internal host request"
-            if skip_broad_discovery
+            if skip_broad_discovery and not direct_unreal_python_request
+            else "direct Unreal Python requests use only the host API index"
+            if direct_unreal_python_request
             else "exact prepared evidence did not fully cover the request"
         ),
     })
@@ -2256,7 +2357,8 @@ def build_symbol_evidence_packet(
         )
     ]
     requires_runtime_reflection = bool(
-        unresolved_prepared_queries
+        not direct_unreal_python_request
+        and unresolved_prepared_queries
         and (
             any(
                 (
@@ -2413,19 +2515,28 @@ def build_symbol_evidence_packet(
             text,
             limit=max(24, limit * 2),
         )
-        capability_intents = list(
-            capability_resolution.get("intents") or []
-        )
-        from tech_connector.services.capability_gap_resolution_service import (
-            resolve_unnamed_capability_gaps,
-        )
-        gap_resolution = resolve_unnamed_capability_gaps(
-            capability_intents,
-            deduped,
-            project_root=root,
-            allow_online=allow_official_research,
-            local_provider_errors=provider_errors,
-        )
+        capability_intents = list(capability_resolution.get("intents") or [])
+        if direct_unreal_python_request:
+            gap_resolution = {
+                "evidence": [],
+                "unresolved_intents": [],
+                "acquisition_requests": [],
+                "provider_errors": [],
+                "local_resolution_complete": True,
+                "online_search_performed": False,
+                "status": "explicit_host_api_evidence",
+            }
+        else:
+            from tech_connector.services.capability_gap_resolution_service import (
+                resolve_unnamed_capability_gaps,
+            )
+            gap_resolution = resolve_unnamed_capability_gaps(
+                capability_intents,
+                deduped,
+                project_root=root,
+                allow_online=allow_official_research,
+                local_provider_errors=provider_errors,
+            )
     except Exception as exc:
         provider_errors.append({
             "provider": "capability_gap_resolution",

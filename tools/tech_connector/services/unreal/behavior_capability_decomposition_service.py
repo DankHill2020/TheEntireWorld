@@ -939,7 +939,7 @@ def validate_model_behavior_synthesis(prompt: str, synthesis: dict[str, Any]) ->
                 )
             )
             and not re.search(
-                r"^(?:add|apply|clear|disable|enable|launch|move|play|read|remove|restore|schedule|set|start|stop|sweep|trace|update|write)_",
+                r"^(?:add|apply|clear|disable|enable|launch|move|play|read|remove|resolve|restore|schedule|set|start|stop|sweep|trace|update|write)_",
                 value.split(".")[-1],
             )
         ]
@@ -1086,9 +1086,14 @@ def validate_model_behavior_synthesis(prompt: str, synthesis: dict[str, Any]) ->
             )
         contextual_query_requested = bool(
             re.search(r"\b(?:obstacle|ledge|wall|surface|ceiling)\b", source_text, re.I)
-            and re.search(r"\b(?:observed|measured|detected|valid|present|exists?)\b", " ".join(
-                str(value) for value in (behavior.get("observations") or []) + (behavior.get("guards") or [])
-            ), re.I)
+            and (
+                re.search(r"\b(?:observe|measure|detect|find|trace|sweep|query)\w*\b", source_text, re.I)
+                or re.search(
+                    r"\b(?:observed|measured|detected)\b",
+                    " ".join(str(value) for value in behavior.get("observations") or []),
+                    re.I,
+                )
+            )
         )
         if contextual_query_requested and not any(
             value.split(".", 1)[0] in {"collision", "perception", "query", "sensing", "trace"}
@@ -1157,8 +1162,8 @@ def validate_model_behavior_synthesis(prompt: str, synthesis: dict[str, Any]) ->
         ]
         if not animation_only_requested and outcomes and (len(tautological_outcomes) == len(outcomes) or not any(
             re.search(
-                r"\b(?:applies?|becomes?|changes?|disables?|enables?|enters?|exits?|launches?|"
-                r"moves?|reaches?|restores?|sets?|transitions?|travels?|updates?|zips|zipped|zipping|dodges?|"
+                r"\b(?:accelerates?|applies?|becomes?|changes?|disables?|enables?|enters?|exits?|falls?|launches?|"
+                r"moves?|points?|reaches?|restores?|rotates?|sets?|transitions?|travels?|updates?|zips|zipped|zipping|dodges?|"
                 r"rolls?|vaults?|slides?|climbs?|jumps?)\b",
                 value,
                 re.I,
@@ -1538,6 +1543,22 @@ Do not invent asset existence, API support, runtime results, or source authority
     behavior_obligations, obligation_lookup = _atomic_behavior_obligations(
         clause_lookup, fixed_clauses
     )
+
+    def resolve_clause_reference(value: Any) -> str:
+        """
+        Resolve a model clause ID or punctuation variant to canonical source text.
+        :param value: clause ID or source text returned by the model
+        :return: canonical obligation text when available
+        """
+        raw = str(value or "")
+        direct = obligation_lookup.get(raw, clause_lookup.get(raw))
+        if direct:
+            return str(direct)
+        normalized = _normalized_words(raw)
+        for candidate in [*obligation_lookup.values(), *clause_lookup.values()]:
+            if normalized and normalized == _normalized_words(candidate):
+                return str(candidate)
+        return raw
     packet = {
         "behavior_clauses": behavior_obligations,
         "binding_context_and_constraints": [
@@ -2293,10 +2314,8 @@ When critic errors say numeric constants were absent from the source, value must
                 raise ValueError("Model response is not a JSON object.")
             for row in synthesis.get("clause_coverage") or []:
                 if isinstance(row, dict):
-                    row["source_clause"] = obligation_lookup.get(
-                        str(row.get("source_clause") or ""), clause_lookup.get(
-                            str(row.get("source_clause") or ""), row.get("source_clause")
-                        )
+                    row["source_clause"] = resolve_clause_reference(
+                        row.get("source_clause")
                     )
             synthesis.setdefault("clause_coverage", []).extend(
                 {
@@ -2314,7 +2333,7 @@ When critic errors say numeric constants were absent from the source, value must
             for behavior in synthesis.get("behaviors") or []:
                 if isinstance(behavior, dict):
                     behavior["source_clauses"] = [
-                        obligation_lookup.get(str(value), clause_lookup.get(str(value), value))
+                        resolve_clause_reference(value)
                         for value in behavior.get("source_clauses") or []
                     ]
                     behavior_id = str(behavior.get("id") or "")

@@ -87,6 +87,8 @@ class UnrealOperation:
     mutates_project: bool = False
     execution_host: str = "unreal"
     description: str = ""
+    execution_mode: str = "host_native"
+    delegation: dict[str, Any] = field(default_factory=dict)
 
 
 UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
@@ -134,7 +136,7 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
     "project.snapshot": UnrealOperation(
         key="project.snapshot",
         label="Unreal Project Snapshot",
-        function="ai_studio.synthetic.project_snapshot",
+        function="unreal_tools.project.project_snapshot",
         optional={"directory": "/Game/"},
         description="Gather loaded-level state plus core project asset inventory for model context.",
     ),
@@ -227,7 +229,7 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         required=("blueprint_path", "component_class", "component_name"),
         optional={"asset_path": "", "attach_bone": "", "socket_name": "", "save": True},
         mutates_project=True,
-        description="Add a component to a Blueprint and optionally assign an asset/socket when exposed through editor reflection.",
+        description="Add a Blueprint-authored component with SubobjectData compile/save readback.",
     ),
     "input.create_action": UnrealOperation(
         key="input.create_action",
@@ -436,13 +438,14 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
     "project.debug": UnrealOperation(
         key="project.debug",
         label="Unreal Project Debug",
-        function="ai_studio.synthetic.project_debug",
+        function="unreal_tools.project.project_debug",
         optional={
             "directory": "/Game/",
             "paths": [],
             "compile_blueprints": True,
             "save": False,
         },
+        mutates_project=True,
         description="Scan project/level state, validate references, compile Blueprints when supported, and report what is broken plus suggested fixes.",
     ),
     "rollback.latest": UnrealOperation(
@@ -451,6 +454,43 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         function="unreal_tools.rollback.latest",
         mutates_project=True,
         description="Rollback the latest tracked safe operation when the Unreal side supports rollback data.",
+    ),
+    "rollback.record_asset_snapshot": UnrealOperation(
+        key="rollback.record_asset_snapshot",
+        label="Record Unreal Asset Snapshot",
+        function="unreal_tools.rollback.record_asset_snapshot",
+        required=("asset_path",),
+        optional={"reason": "", "operation": "", "metadata": {}},
+        mutates_project=True,
+        description="Duplicate an asset into the rollback journal before a bounded mutation.",
+    ),
+    "rollback.restore_asset_snapshot": UnrealOperation(
+        key="rollback.restore_asset_snapshot",
+        label="Restore Unreal Asset Snapshot",
+        function="unreal_tools.rollback.restore_asset_snapshot",
+        optional={"token": ""},
+        mutates_project=True,
+        description="Restore the asset recorded by a rollback journal token, or the latest snapshot.",
+    ),
+    "network.inspect_authority_flow": UnrealOperation(
+        key="network.inspect_authority_flow",
+        label="Inspect Unreal Authority Flow",
+        function="unreal_tools.networking.inspect_authority_flow",
+        required=("blueprint_path",),
+        optional={
+            "required_variables": [],
+            "required_server_rpcs": [],
+            "required_onrep_functions": [],
+        },
+        description="Read back replicated properties, RPC functions, authority nodes, and compile state.",
+    ),
+    "skeletal.inspect_bones": UnrealOperation(
+        key="skeletal.inspect_bones",
+        label="Inspect Unreal Skeletal Mesh Bones",
+        function="unreal_tools.skeletal.inspect_bones",
+        required=("skeletal_mesh_path",),
+        optional={"include_hierarchy": True},
+        description="Read bone names and hierarchy from a SkeletalMesh before attachment or retargeting.",
     ),
     "runtime.pie_begin": UnrealOperation(
         key="runtime.pie_begin",
@@ -502,6 +542,18 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         optional={"target_assets": [], "expected": {}, "start_pie": False},
         description="Fail-closed PIE validation of target assets and structured runtime expectations.",
     ),
+    "runtime.multiplayer_pie_validate": UnrealOperation(
+        key="runtime.multiplayer_pie_validate",
+        label="Unreal Multiplayer PIE Validation",
+        function="unreal_tools.runtime.multiplayer_pie_validate",
+        optional={
+            "target_assets": [],
+            "expected": {},
+            "client_count": 2,
+            "start_pie": True,
+        },
+        description="Configure and inspect a multi-client PIE session with structured readback proof.",
+    ),
     "semantic_index.record_runtime_observation": UnrealOperation(
         key="semantic_index.record_runtime_observation",
         label="Record Unreal Runtime Observation",
@@ -514,7 +566,7 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
     "feature.execute_generic_plan": UnrealOperation(
         key="feature.execute_generic_plan",
         label="Unreal Execute Generic Feature Plan",
-        function="tech_connector.unreal.orchestration.execute_generic_plan",
+        function="tech_connector.services.unreal.orchestration.execute_generic_plan",
         required=("plan",),
         optional={"dry_run": True},
         execution_host="desktop",
@@ -579,6 +631,18 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         mutates_project=True,
         description="Set the active actor selection in the current level.",
     ),
+    "level.organize_actors": UnrealOperation(
+        key="level.organize_actors",
+        label="Organize Unreal Level Actors",
+        function="unreal_tools.level.organize_actors",
+        required=("actor_specs",),
+        optional={"save": True},
+        mutates_project=True,
+        description=(
+            "Transactionally organize exact loaded actors by Outliner folder, label, "
+            "tags, and editor visibility with ambiguity rejection and readback."
+        ),
+    ),
 
     # ── Blueprint Additions ──
     "blueprint.add_function": UnrealOperation(
@@ -596,7 +660,13 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         function="unreal_tools.blueprint.set_property",
         required=("blueprint_path", "property_name", "value"),
         mutates_project=True,
-        description="Set a default property value on a Blueprint asset.",
+        description="Set a Blueprint default property through an explicit Unreal Editor handoff until typed CDO readback is installed.",
+        execution_mode="user_delegated",
+        delegation={
+            "surface": "Blueprint Editor > Class Defaults",
+            "action": "Set the named default property to the requested value and compile/save the Blueprint.",
+            "verification": "Reopen Class Defaults and confirm the persisted value after compilation.",
+        },
     ),
     "blueprint.add_node": UnrealOperation(
         key="blueprint.add_node",
@@ -612,7 +682,13 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         function="unreal_tools.blueprint.open_graph",
         required=("blueprint_path", "graph_name"),
         mutates_project=True,
-        description="Open a Blueprint graph in the editor UI.",
+        description="Open a Blueprint graph through an explicit Unreal Editor UI handoff.",
+        execution_mode="user_delegated",
+        delegation={
+            "surface": "Blueprint Editor > My Blueprint",
+            "action": "Open the requested graph in the selected Blueprint asset.",
+            "verification": "Confirm the active graph tab name matches the requested graph.",
+        },
     ),
     "blueprint.open_function": UnrealOperation(
         key="blueprint.open_function",
@@ -620,7 +696,335 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         function="unreal_tools.blueprint.open_function",
         required=("blueprint_path", "function_name"),
         mutates_project=True,
-        description="Open a Blueprint function graph in the editor UI.",
+        description="Open a Blueprint function graph through an explicit Unreal Editor UI handoff.",
+        execution_mode="user_delegated",
+        delegation={
+            "surface": "Blueprint Editor > My Blueprint > Functions",
+            "action": "Open the requested function graph in the selected Blueprint asset.",
+            "verification": "Confirm the active graph tab name matches the requested function.",
+        },
+    ),
+    "blueprint.configure_replication": UnrealOperation(
+        key="blueprint.configure_replication",
+        label="Configure Blueprint Replication",
+        function="unreal_tools.networking.configure_blueprint_replication",
+        required=("blueprint_path",),
+        optional={
+            "replicated_variables": [],
+            "rep_notify_variables": [],
+            "server_rpc_functions": [],
+            "reliable": True,
+            "save": True,
+        },
+        mutates_project=True,
+        description="Configure replicated variables, RepNotify fields, and server RPCs.",
+    ),
+    "asset.create_by_class_path": UnrealOperation(
+        key="asset.create_by_class_path",
+        label="Create Reflected Asset by Class Path",
+        function="unreal_tools.assets.create_by_class_path",
+        required=("asset_path", "class_path"),
+        optional={"initial_properties": {}},
+        mutates_project=True,
+        description="Create a supported asset from an exact reflected class path.",
+    ),
+    "asset.inspect_reflected": UnrealOperation(
+        key="asset.inspect_reflected",
+        label="Inspect Reflected Asset",
+        function="unreal_tools.assets.inspect_reflected",
+        required=("asset_path",),
+        optional={"property_names": []},
+        description="Read reflected properties from an Unreal asset.",
+    ),
+    "asset.set_reflected_property": UnrealOperation(
+        key="asset.set_reflected_property",
+        label="Set Reflected Asset Property",
+        function="unreal_tools.assets.set_reflected_property",
+        required=("asset_path", "property_name", "value"),
+        mutates_project=True,
+        description="Set and read back one reflected Unreal asset property.",
+    ),
+    "asset.array_add_object_reference": UnrealOperation(
+        key="asset.array_add_object_reference",
+        label="Add Reflected Object Array Reference",
+        function="unreal_tools.assets.array_add_object_reference",
+        required=("asset_path", "property_name", "object_path"),
+        mutates_project=True,
+        description="Add an object reference to a reflected array with readback.",
+    ),
+    "asset.array_remove_object_reference": UnrealOperation(
+        key="asset.array_remove_object_reference",
+        label="Remove Reflected Object Array Reference",
+        function="unreal_tools.assets.array_remove_object_reference",
+        required=("asset_path", "property_name", "object_path"),
+        mutates_project=True,
+        description="Remove an object reference from a reflected array with readback.",
+    ),
+    "material.inspect": UnrealOperation(
+        key="material.inspect",
+        label="Inspect Unreal Material",
+        function="unreal_tools.materials.inspect_material",
+        required=("asset_path",),
+        description="Inspect material expressions and material-property graph connections.",
+    ),
+    "material.create": UnrealOperation(
+        key="material.create",
+        label="Create Unreal Material",
+        function="unreal_tools.materials.create_material",
+        required=("asset_path",),
+        optional={"overwrite": False, "dry_run": False},
+        mutates_project=True,
+        description="Create a blank Material with save and asset-registry readback.",
+    ),
+    "material.create_parameterized_pbr": UnrealOperation(
+        key="material.create_parameterized_pbr",
+        label="Create Parameterized PBR Material",
+        function="unreal_tools.materials.create_parameterized_pbr_material",
+        required=("asset_path",),
+        optional={
+            "base_color": [0.18, 0.35, 0.8, 1.0],
+            "roughness": 0.5,
+            "metallic": 0.0,
+            "overwrite": False,
+            "dry_run": False,
+            "cleanup_on_failure": True,
+        },
+        mutates_project=True,
+        description="Create, wire, compile, save, and verify a parameterized PBR material graph.",
+    ),
+    "material.create_from_spec": UnrealOperation(
+        key="material.create_from_spec",
+        label="Create Unreal Material Graph from Specification",
+        function="unreal_tools.materials.create_material_from_spec",
+        required=("asset_path", "nodes"),
+        optional={
+            "connections": [],
+            "outputs": [],
+            "material_domain": "MD_SURFACE",
+            "material_properties": {},
+            "overwrite": False,
+            "dry_run": False,
+            "cleanup_on_failure": True,
+        },
+        mutates_project=True,
+        description=(
+            "Create a generic Surface, Post Process, UI, or other Material graph from "
+            "validated expression nodes, connections, outputs, reflected properties, and domain."
+        ),
+    ),
+    "sound_cue.create_from_wave": UnrealOperation(
+        key="sound_cue.create_from_wave",
+        label="Create Playable Unreal Sound Cue",
+        function="unreal_tools.sound_cue.create_from_wave",
+        required=("asset_path", "sound_wave_path"),
+        optional={
+            "looping": False,
+            "volume_multiplier": 1.0,
+            "pitch_multiplier": 1.0,
+            "overwrite": False,
+            "dry_run": False,
+            "cleanup_on_failure": True,
+        },
+        mutates_project=True,
+        description=(
+            "Create a playable Sound Cue from a Sound Wave, configure looping, volume, "
+            "and pitch, save it, and verify the Wave Player root."
+        ),
+    ),
+    "sound_cue.inspect": UnrealOperation(
+        key="sound_cue.inspect",
+        label="Inspect Unreal Sound Cue",
+        function="unreal_tools.sound_cue.inspect_sound_cue",
+        required=("asset_path",),
+        description="Inspect a Sound Cue's playable root node and Sound Wave reference.",
+    ),
+    "data_table.create_from_rows": UnrealOperation(
+        key="data_table.create_from_rows",
+        label="Create Unreal Data Table From Rows",
+        function="unreal_tools.data_tables.create_from_rows",
+        required=("asset_path", "row_struct_path", "rows"),
+        optional={"overwrite": False, "dry_run": False, "cleanup_on_failure": True},
+        mutates_project=True,
+        description=(
+            "Create a Data Table for a native or asset-backed row struct, fill validated "
+            "JSON rows, save, and verify exact row-name and column readback."
+        ),
+    ),
+    "data_table.inspect": UnrealOperation(
+        key="data_table.inspect",
+        label="Inspect Unreal Data Table",
+        function="unreal_tools.data_tables.inspect_data_table",
+        required=("asset_path",),
+        optional={"include_rows": False, "max_rows": 200},
+        description="Inspect a Data Table row struct, columns, row names, and JSON export.",
+    ),
+    "domain_asset.create": UnrealOperation(
+        key="domain_asset.create",
+        label="Create Unreal Domain Asset",
+        function="unreal_tools.domain_assets.create_domain_asset",
+        required=("asset_type", "asset_path"),
+        optional={"overwrite": False, "dry_run": False, "cleanup_on_failure": True},
+        mutates_project=True,
+        description=(
+            "Create a Widget Blueprint, PCG Graph, Behavior Tree, Blackboard, Level Sequence, "
+            "or a factory-compatible MetaSound asset with class/save/registry readback."
+        ),
+    ),
+    "domain_asset.inspect": UnrealOperation(
+        key="domain_asset.inspect",
+        label="Inspect Unreal Domain Asset",
+        function="unreal_tools.domain_assets.inspect_domain_asset",
+        required=("asset_path",),
+        optional={"expected_type": ""},
+        description="Inspect a domain asset and verify its reflected class and asset-registry identity.",
+    ),
+    "pcg.inspect_graph": UnrealOperation(
+        key="pcg.inspect_graph",
+        label="Inspect PCG Graph",
+        function="unreal_tools.pcg.inspect_graph",
+        required=("graph_path",),
+        description="Inspect PCG nodes, settings classes, positions, pins, and directed edges.",
+    ),
+    "pcg.create_grid_transform_graph": UnrealOperation(
+        key="pcg.create_grid_transform_graph",
+        label="Author PCG Grid Transform Graph",
+        function="unreal_tools.pcg.create_grid_transform_graph",
+        required=("graph_path",),
+        optional={
+            "grid_extents": [1000.0, 1000.0, 100.0],
+            "cell_size": [200.0, 200.0, 200.0],
+            "offset": [0.0, 0.0, 100.0],
+            "save": True,
+        },
+        mutates_project=True,
+        description="Author, connect, save, and read back a Grid to Transform PCG graph.",
+    ),
+    "pcg.apply_graph_spec": UnrealOperation(
+        key="pcg.apply_graph_spec",
+        label="Apply Typed PCG Graph Specification",
+        function="unreal_tools.pcg.apply_graph_spec",
+        required=("graph_path", "nodes", "edges"),
+        optional={"clear_existing": True, "save": True},
+        mutates_project=True,
+        description="Apply validated PCG settings classes, properties, positions, and typed pin connections.",
+    ),
+    "metasound.create_sine_tone_source": UnrealOperation(
+        key="metasound.create_sine_tone_source",
+        label="Author MetaSound Sine Tone Source",
+        function="unreal_tools.metasound.create_sine_tone_source",
+        required=("asset_path",),
+        optional={
+            "frequency": 440.0,
+            "author": "Tech Connector",
+            "overwrite": False,
+            "dry_run": False,
+            "cleanup_on_failure": True,
+        },
+        mutates_project=True,
+        description="Author, connect, serialize, save, and read back a mono MetaSound sine source.",
+    ),
+    "metasound.create_source_from_spec": UnrealOperation(
+        key="metasound.create_source_from_spec",
+        label="Create MetaSound Source From Typed Graph Specification",
+        function="unreal_tools.metasound.create_source_from_spec",
+        required=("asset_path", "nodes", "connections"),
+        optional={
+            "author": "Tech Connector",
+            "overwrite": False,
+            "dry_run": False,
+            "cleanup_on_failure": True,
+        },
+        mutates_project=True,
+        description="Build a mono MetaSound Source from registered classes, typed defaults, and named-vertex connections.",
+    ),
+    "blackboard.inspect_schema": UnrealOperation(
+        key="blackboard.inspect_schema",
+        label="Inspect Blackboard Schema",
+        function="unreal_tools.blackboard.inspect_schema",
+        required=("asset_path",),
+        description="Inspect Blackboard key names, types, categories, and synchronization settings.",
+    ),
+    "blackboard.set_schema": UnrealOperation(
+        key="blackboard.set_schema",
+        label="Author Blackboard Schema",
+        function="unreal_tools.blackboard.set_schema",
+        required=("asset_path", "keys"),
+        optional={"replace_existing": True, "save": True},
+        mutates_project=True,
+        description="Author, save, and read back a typed Blackboard schema.",
+    ),
+    "widget.author_canvas_text": UnrealOperation(
+        key="widget.author_canvas_text",
+        label="Author Widget Blueprint Canvas and Text",
+        function="unreal_tools.widget.author_canvas_text",
+        required=("widget_blueprint_path",),
+        optional={
+            "root_name": "RootCanvas",
+            "text_name": "TitleText",
+            "text": "Tech Connector",
+            "save": True,
+        },
+        mutates_project=True,
+        description="Transactionally author, compile, save, and read back a Widget Blueprint design tree.",
+    ),
+    "widget.author_from_spec": UnrealOperation(
+        key="widget.author_from_spec",
+        label="Author Widget Blueprint From Specification",
+        function="unreal_tools.widget.author_from_spec",
+        required=("widget_blueprint_path", "widgets"),
+        optional={"save": True},
+        mutates_project=True,
+        description=(
+            "Transactionally author, compile, save, and read back a validated "
+            "Widget Blueprint hierarchy."
+        ),
+    ),
+    "behavior_tree.author_baseline": UnrealOperation(
+        key="behavior_tree.author_baseline",
+        label="Author Behavior Tree Baseline",
+        function="unreal_tools.behavior_tree.author_baseline",
+        required=("behavior_tree_path",),
+        optional={"blackboard_path": "", "wait_seconds": 1.0, "save": True},
+        mutates_project=True,
+        description="Author Root to Selector to Wait topology, rebuild runtime data, save, and read back.",
+    ),
+    "behavior_tree.author_wait_graph": UnrealOperation(
+        key="behavior_tree.author_wait_graph",
+        label="Author Behavior Tree Wait Graph",
+        function="unreal_tools.behavior_tree.author_wait_graph",
+        required=("behavior_tree_path", "composite_type", "wait_seconds"),
+        optional={"blackboard_path": "", "save": True},
+        mutates_project=True,
+        description="Author a Selector or Sequence with multiple ordered Wait task children and runtime readback.",
+    ),
+    "behavior_tree.author_task_graph": UnrealOperation(
+        key="behavior_tree.author_task_graph",
+        label="Author Mixed Behavior Tree Task Graph",
+        function="unreal_tools.behavior_tree.author_task_graph",
+        required=("behavior_tree_path", "blackboard_path", "tasks"),
+        optional={"composite_type": "sequence", "save": True},
+        mutates_project=True,
+        description=(
+            "Author a Selector or Sequence containing ordered Move To and Wait tasks, "
+            "resolve Blackboard keys, rebuild runtime data, save, and return dual readback."
+        ),
+    ),
+    "physics.add_profile": UnrealOperation(
+        key="physics.add_profile",
+        label="Add Physics Asset Profile",
+        function="unreal_tools.physics.add_profile",
+        required=("asset_path", "profile_name", "profile_type"),
+        optional={"assign_all": False},
+        mutates_project=True,
+        description="Add and optionally assign a physical animation or constraint profile.",
+    ),
+    "physics.remove_profile": UnrealOperation(
+        key="physics.remove_profile",
+        label="Remove Physics Asset Profile",
+        function="unreal_tools.physics.remove_profile",
+        required=("asset_path", "profile_name", "profile_type"),
+        mutates_project=True,
+        description="Remove a physical animation or constraint profile with readback.",
     ),
 
     # ── Animation Additions ──
@@ -640,6 +1044,69 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         mutates_project=True,
         description="Delete a transition between two states in an Animation Blueprint locomotion state machine.",
     ),
+    "unreal.create_blendspace": UnrealOperation(
+        key="unreal.create_blendspace",
+        label="Create or Update Unreal BlendSpace",
+        function="unreal_tools.animation.create_blendspace",
+        required=("asset_path", "skeleton_path"),
+        optional={
+            "samples": [],
+            "animation_paths": [],
+            "axis_x": {},
+            "axis_y": {},
+            "save": True,
+        },
+        mutates_project=True,
+        description=(
+            "Create or update a BlendSpace and verify its samples through the "
+            "reflected AIStudio bridge."
+        ),
+    ),
+    "animation.inspect_imported_pipeline": UnrealOperation(
+        key="animation.inspect_imported_pipeline",
+        label="Inspect Imported Unreal Animation Pipeline",
+        function="unreal_tools.animation.inspect_imported_animation_pipeline",
+        required=("imported_paths",),
+        optional={
+            "target_skeleton_path": "",
+            "target_skeletal_mesh_path": "",
+        },
+        description=(
+            "Inspect imported animation timing, root motion, Skeleton ownership, "
+            "and target compatibility."
+        ),
+    ),
+    "animation.retarget_imported_if_needed": UnrealOperation(
+        key="animation.retarget_imported_if_needed",
+        label="Retarget Imported Unreal Animations When Needed",
+        function="unreal_tools.animation.retarget_imported_animations_if_needed",
+        required=("compatibility_report",),
+        optional={
+            "source_skeletal_mesh_path": "",
+            "target_skeletal_mesh_path": "",
+            "output_path": "/Game/Animations/Retargeted",
+            "retargeter_path": "",
+        },
+        mutates_project=True,
+        description=(
+            "Preserve compatible AnimSequences and retarget only incompatible "
+            "imports with structured readback."
+        ),
+    ),
+    "animation.report_pipeline_assets": UnrealOperation(
+        key="animation.report_pipeline_assets",
+        label="Report Final Unreal Animation Pipeline Assets",
+        function="unreal_tools.animation.report_animation_pipeline_assets",
+        required=("imported_paths", "animation_paths"),
+        optional={
+            "target_skeleton_path": "",
+            "target_anim_blueprint_path": "",
+        },
+        description=(
+            "Report final imported and retargeted asset existence, save state, "
+            "and Skeleton ownership."
+        ),
+    ),
 
     # ── Sequencer Additions ──
     "sequencer.delete_track": UnrealOperation(
@@ -656,6 +1123,27 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         function="unreal_tools.sequencer.get_tracks",
         required=("sequence_path",),
         description="Get all tracks inside a Level Sequence.",
+    ),
+    "sequencer.create_float_track": UnrealOperation(
+        key="sequencer.create_float_track",
+        label="Create Keyed Sequencer Float Track",
+        function="unreal_tools.sequencer.create_float_track",
+        required=("sequence_path", "track_name", "keys"),
+        optional={"display_rate": 30, "replace_existing": True, "save": True},
+        mutates_project=True,
+        description="Create, key, save, and read back a master float track in a Level Sequence.",
+    ),
+    "sequencer.author_camera_cuts": UnrealOperation(
+        key="sequencer.author_camera_cuts",
+        label="Author Sequencer Camera Cuts",
+        function="unreal_tools.sequencer.author_camera_cuts",
+        required=("sequence_path", "cameras"),
+        optional={"display_rate": 30, "replace_existing": False, "save": True},
+        mutates_project=True,
+        description=(
+            "Author spawnable CineCameraActors, keyed transform tracks, non-overlapping "
+            "camera cuts, playback range, save, and structural readback in a Level Sequence."
+        ),
     ),
 
     # ── Niagara Additions ──
@@ -700,9 +1188,9 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         label="Unreal Create Blueprint Variable",
         function="unreal_tools.blueprint.create_variable",
         required=("blueprint_path", "variable_name", "variable_type"),
-        optional={"is_array": False, "default_value": None},
+        optional={"is_array": False, "default_value": None, "save": True},
         mutates_project=True,
-        description="Create a new typed variable in a Blueprint or Animation Blueprint.",
+        description="Create a typed Blueprint variable with generated-class default-value readback.",
     ),
     "blueprint.connect_node_pins": UnrealOperation(
         key="blueprint.connect_node_pins",
@@ -798,7 +1286,13 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         required=("blueprint_path", "node_name"),
         optional={"enabled": True},
         mutates_project=True,
-        description="Set or toggle a debugging breakpoint on a Blueprint node.",
+        description="Set or toggle a Blueprint breakpoint through an explicit Unreal Editor UI handoff.",
+        execution_mode="user_delegated",
+        delegation={
+            "surface": "Blueprint Editor > requested graph",
+            "action": "Locate the requested node and set or clear its breakpoint to match the requested state.",
+            "verification": "Confirm the node breakpoint marker and Debug panel state match the request.",
+        },
     ),
     "animation.add_anim_notify": UnrealOperation(
         key="animation.add_anim_notify",
@@ -998,6 +1492,78 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
     ),
 }
 
+UNREAL_OPERATIONS.update(
+    {
+        "niagara.attach_editable_character_fx": UnrealOperation(
+            key="niagara.attach_editable_character_fx",
+            label="Attach Editable Niagara Character FX",
+            function="unreal_tools.niagara.attach_editable_character_fx",
+            required=("blueprint_path",),
+            optional={
+                "source_system_path": "/Game/Variant_Platforming/VFX/NS_Jump_Trail",
+                "system_path": "/Game/AIStudio/Prototypes/Niagara/NS_AIStudio_CharacterAura",
+                "component_name": "AIStudio_AuraFX",
+                "socket_name": "spine_03",
+                "parameters": {},
+                "extra_components": [],
+                "native_binding_chunk_size": 2,
+                "disable_native_graph_binding": False,
+                "save": True,
+            },
+            mutates_project=True,
+            description="Attach a reusable Niagara system to a character and expose editable Blueprint parameter bindings.",
+        ),
+        "animation.set_slot_animation": UnrealOperation(
+            key="animation.set_slot_animation", label="Unreal Set Slot Animation",
+            function="unreal_tools.animation.set_slot_animation",
+            required=("anim_bp_path", "slot_name", "animation_path"), mutates_project=True,
+            description="Assign an animation asset to an Animation Blueprint slot.",
+        ),
+        "motion_matching.add_state_animations": UnrealOperation(
+            key="motion_matching.add_state_animations", label="Unreal Add Motion Matching State Animations",
+            function="unreal_tools.motion_matching.add_state_animations",
+            required=("database_path", "animation_paths", "state_tag"), mutates_project=True,
+            description="Add state-tagged animations to a Pose Search Database.",
+        ),
+        "physics.create_physics_asset": UnrealOperation(
+            key="physics.create_physics_asset", label="Unreal Create Physics Asset",
+            function="unreal_tools.physics.create_physics_asset", required=("skeletal_mesh_path",),
+            optional={"save_path": ""}, mutates_project=True,
+            description="Create a PhysicsAsset for a SkeletalMesh.",
+        ),
+        "physics.add_body": UnrealOperation(
+            key="physics.add_body", label="Unreal Add Physics Body",
+            function="unreal_tools.physics.add_body", required=("physics_asset_path", "bone_name"),
+            optional={"shape_type": "capsule"}, mutates_project=True,
+            description="Add a physical body shape for a skeleton bone.",
+        ),
+        "physics.add_constraint": UnrealOperation(
+            key="physics.add_constraint", label="Unreal Add Physics Constraint",
+            function="unreal_tools.physics.add_constraint",
+            required=("physics_asset_path", "bone_name_a", "bone_name_b"), mutates_project=True,
+            description="Add a constraint between two PhysicsAsset bodies.",
+        ),
+        "physics.set_collision_profile": UnrealOperation(
+            key="physics.set_collision_profile", label="Unreal Set Collision Profile",
+            function="unreal_tools.physics.set_collision_profile", required=("actor_query", "profile_name"),
+            optional={"component_name": ""}, mutates_project=True,
+            description="Assign a collision profile to an actor component.",
+        ),
+        "navigation.add_nav_mesh_bounds": UnrealOperation(
+            key="navigation.add_nav_mesh_bounds", label="Unreal Add Nav Mesh Bounds Volume",
+            function="unreal_tools.navigation.add_nav_mesh_bounds",
+            optional={"location": [0.0, 0.0, 0.0], "extent": [1000.0, 1000.0, 500.0]},
+            mutates_project=True, description="Place a NavMeshBoundsVolume in the current level.",
+        ),
+        "gameplay.create_gameplay_ability": UnrealOperation(
+            key="gameplay.create_gameplay_ability", label="Unreal Create Gameplay Ability",
+            function="unreal_tools.gameplay.create_gameplay_ability", required=("ability_name",),
+            optional={"save_path": ""}, mutates_project=True,
+            description="Create a Gameplay Ability asset for an approved feature plan.",
+        ),
+    }
+)
+
 UNREAL_OPERATIONS_REQUIRING_IMPLEMENTATION_STRATEGY: set[str] = set()
 
 
@@ -1061,6 +1627,10 @@ def build_unreal_editable_character_fx_params(text: str) -> dict[str, Any]:
         params["parameters"].setdefault("FX_Radius", 72.0)
     if "pulse" in q:
         params["parameters"].setdefault("FX_PulseSpeed", 2.5)
+    if "velocity" in q:
+        params["parameters"].setdefault("FX_Velocity", [0.0, 0.0, 100.0])
+    if "noise" in q:
+        params["parameters"].setdefault("FX_NoiseStrength", 1.0)
     if "offset" in q:
         params["parameters"].setdefault("FX_AttachOffset", [0.0, 0.0, 0.0])
     if "auto activate" in q or "auto_activate" in q:
@@ -1319,12 +1889,85 @@ def is_unreal_debug_request(text: str) -> bool:
 
 
 def extract_unreal_asset_paths(text: str) -> list[str]:
+    """
+        Extracts Unreal content paths from game and plugin mount points.
+    :param text: natural-language request
+    :return: unique Unreal content paths in prompt order
+    """
     paths = []
-    for match in re.finditer(r"(/Game/[A-Za-z0-9_/.-]*)", text or ""):
+    for match in re.finditer(r"(/(?:Game|[A-Za-z][A-Za-z0-9_]*)/[A-Za-z0-9_/.-]*)", text or ""):
         path = match.group(1).rstrip(".,;:)")
         if path and path not in paths:
             paths.append(path)
     return paths
+
+
+def _select_unreal_asset_path(paths, prefixes=()):
+    """
+        Selects a content path by conventional asset-name prefix.
+    :param paths: candidate Unreal content paths
+    :param prefixes: accepted basename prefixes
+    :return: selected content path or an empty string
+    """
+    normalized = tuple(str(prefix).casefold() for prefix in prefixes)
+    for path in paths:
+        name = str(path).rsplit("/", 1)[-1].casefold()
+        if any(name.startswith(prefix) for prefix in normalized):
+            return str(path)
+    return str(paths[0]) if paths else ""
+
+
+def _extract_blackboard_key_specs(text: str) -> list[dict[str, Any]]:
+    """
+        Extracts explicit Blackboard key-name and type pairs.
+    :param text: natural-language Unreal request
+    :return: ordered unique key specifications
+    """
+    aliases = {
+        "boolean": "bool",
+        "integer": "int",
+    }
+    types = "bool|boolean|class|enum|float|int|integer|name|object|rotator|string|vector"
+    pairs = []
+    patterns = (
+        rf"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:(?::|=|\bis\b)\s*|\s+)({types})\b",
+        rf"\b({types})\s+(?:key\s+)?(?:named\s+)?([A-Za-z_][A-Za-z0-9_]*)\b",
+    )
+    for pattern_index, pattern in enumerate(patterns):
+        for match in re.finditer(pattern, text or "", re.IGNORECASE):
+            if pattern_index == 0:
+                name, key_type = match.group(1), match.group(2)
+            else:
+                key_type, name = match.group(1), match.group(2)
+            key_type = aliases.get(key_type.casefold(), key_type.casefold())
+            if name.casefold() in {"key", "keys", "blackboard", "schema", "type", "typed"}:
+                continue
+            pairs.append({"name": name, "type": key_type})
+    result = []
+    seen = set()
+    for row in pairs:
+        marker = row["name"].casefold()
+        if marker not in seen:
+            seen.add(marker)
+            result.append(row)
+    return result
+
+
+def _extract_sequencer_key_specs(text: str) -> list[dict[str, Any]]:
+    """
+        Extracts explicit Sequencer frame and value pairs.
+    :param text: natural-language Unreal request
+    :return: sorted key specifications
+    """
+    rows = []
+    for match in re.finditer(
+        r"\b(?:frame\s*)?(\d+)\s*(?::|=|(?:(?:has|with|to)\s+)?value\s+)(-?\d+(?:\.\d+)?)\b",
+        text or "",
+        re.IGNORECASE,
+    ):
+        rows.append({"frame": int(match.group(1)), "value": float(match.group(2))})
+    unique = {row["frame"]: row for row in rows}
+    return [unique[frame] for frame in sorted(unique)]
 
 
 def build_unreal_debug_params(text: str, directory: str = "/Game/") -> dict[str, Any]:
@@ -1371,7 +2014,12 @@ def normalize_unreal_package_path(path: str, default_name: str = "Asset") -> str
     if p.endswith("/") and len(p) > 1:
         p = p.rstrip("/")
     lower = p.lower()
-    if not any(lower.startswith(root) for root in ("/game", "/engine", "/script", "/plugin")):
+    mounted_content_path = bool(
+        re.match(r"^/[A-Za-z][A-Za-z0-9_]*/[^/]+", p)
+    )
+    if not mounted_content_path and not any(
+        lower.startswith(root) for root in ("/game", "/engine", "/script", "/plugin")
+    ):
         if any(lower.startswith(root) for root in ("game/", "engine/", "script/", "plugin/")):
             p = "/" + p
         elif p.lower() in {"game", "engine", "script", "plugin"}:
@@ -1610,6 +2258,88 @@ def find_best_unreal_operation(prompt: str) -> tuple[str, float]:
 
 def unreal_prompt_to_operation(text: str) -> str:
     q = (text or "").lower()
+    create_request = bool(re.search(r"\b(?:create|make|build|generate|new|set up|setup)\b", q))
+    inspect_request = bool(re.search(r"\b(?:inspect|scan|analy[sz]e|describe|show)\b", q))
+    author_request = create_request or bool(
+        re.search(r"\b(?:add|author|populate|configure|connect|wire|key)\b", q)
+    )
+    if re.search(r"\bsound\s+cue\b", q):
+        if create_request:
+            return "sound_cue.create_from_wave"
+        if inspect_request:
+            return "sound_cue.inspect"
+    if re.search(r"\bdata\s+table\b", q):
+        if create_request:
+            return "data_table.create_from_rows"
+        if inspect_request:
+            return "data_table.inspect"
+    if re.search(r"\b(?:outliner|level actors?|actors?)\b", q) and re.search(
+        r"\b(?:organize|folder|folders|categorize|rename|tag|hide)\b", q
+    ):
+        return "level.organize_actors"
+    if re.search(r"\b(?:material|shader)\b", q):
+        if create_request and re.search(
+            r"\b(?:graph spec|node spec|json spec|specification|post[ -]?process)\b", q
+        ):
+            return "material.create_from_spec"
+        if create_request and re.search(r"\b(?:pbr|parameter|roughness|metallic|base color)\b", q):
+            return "material.create_parameterized_pbr"
+        if create_request:
+            return "material.create"
+        if inspect_request:
+            return "material.inspect"
+    if re.search(r"\b(?:pcg graph|procedural content generation graph)\b", q):
+        if author_request and re.search(r"\b(?:graph spec|specification|node spec|json spec)\b", q):
+            return "pcg.apply_graph_spec"
+        if author_request and re.search(r"\b(?:grid|points?|transform|offset|cell)\b", q):
+            return "pcg.create_grid_transform_graph"
+        if inspect_request:
+            return "pcg.inspect_graph"
+    if re.search(r"\bmeta\s?sound(?: source)?\b", q):
+        if author_request and re.search(r"\b(?:graph spec|specification|node spec|json spec)\b", q):
+            return "metasound.create_source_from_spec"
+        if author_request and re.search(r"\b(?:sine|tone|oscillat(?:or|e)|frequency|hz)\b", q):
+            return "metasound.create_sine_tone_source"
+    # Behavior Tree prompts commonly contain "blackboard key". Resolve the
+    # enclosing asset domain first so that phrase cannot steal a task-graph
+    # request and incorrectly route it to Blackboard schema authoring.
+    if re.search(r"\bbehavio(?:u)?r tree\b", q):
+        if author_request and re.search(
+            r"\b(?:moves? to|moveto|task spec|mixed tasks?|patrol|chase|navigate)\b", q
+        ):
+            return "behavior_tree.author_task_graph"
+        if author_request and re.search(r"\b(?:sequence|wait tasks?|waits)\b", q):
+            return "behavior_tree.author_wait_graph"
+        if author_request and re.search(r"\b(?:root|selector|wait|baseline|blackboard|topology|graph)\b", q):
+            return "behavior_tree.author_baseline"
+    if re.search(r"\bblackboard(?: data| asset)?\b", q):
+        if author_request and re.search(r"\b(?:schema|keys?|bool|float|vector|rotator|string|object)\b", q):
+            return "blackboard.set_schema"
+        if inspect_request and re.search(r"\b(?:schema|keys?|types?)\b", q):
+            return "blackboard.inspect_schema"
+    if re.search(r"\b(?:widget blueprint|umg|user widget)\b", q):
+        if author_request and re.search(r"\b(?:hierarchy spec|widget spec|json spec|specification)\b", q):
+            return "widget.author_from_spec"
+        if author_request and re.search(r"\b(?:canvas|text|label|title|design tree|hierarchy)\b", q):
+            return "widget.author_canvas_text"
+    if re.search(r"\b(?:level sequence|sequencer asset|cinematic sequence|sequencer)\b", q):
+        if author_request and re.search(r"\b(?:camera cuts?|cinematic cameras?|shot cameras?)\b", q):
+            return "sequencer.author_camera_cuts"
+        if author_request and re.search(r"\b(?:float track|float channel|keys?|keyframes?)\b", q):
+            return "sequencer.create_float_track"
+    domain_asset_terms = (
+        ("widget_blueprint", r"\b(?:widget blueprint|umg|user widget)\b"),
+        ("pcg_graph", r"\b(?:pcg graph|procedural content generation graph)\b"),
+        ("behavior_tree", r"\bbehavio(?:u)?r tree\b"),
+        ("blackboard", r"\bblackboard(?: data| asset)?\b"),
+        ("level_sequence", r"\b(?:level sequence|sequencer asset|cinematic sequence)\b"),
+        ("metasound_source", r"\bmeta\s?sound(?: source)?\b"),
+    )
+    if any(re.search(pattern, q) for _, pattern in domain_asset_terms):
+        if create_request:
+            return "domain_asset.create"
+        if inspect_request:
+            return "domain_asset.inspect"
     if "snapshot" in q or (
         re.search(r"\b(project|active level|selected actors|selected assets)\b", q)
         and re.search(r"\b(snapshot|scan|report|inspect)\b", q)
@@ -1620,6 +2350,16 @@ def unreal_prompt_to_operation(text: str) -> str:
         return navigation_key
     if is_unreal_debug_request(text):
         return "project.debug"
+    character_fx_request = bool(
+        re.search(r"\b(?:niagara|niagra|vfx|particle)\b", q)
+        and re.search(r"\b(?:character|mesh|blueprint|bp_[a-z0-9_]+)\b", q)
+        and re.search(
+            r"\b(?:attach|component|editable|tunable|user parameter|aura|outline|silhouette|bone|socket)\w*\b",
+            q,
+        )
+    )
+    if character_fx_request:
+        return "niagara.attach_editable_character_fx"
     if is_unreal_niagara_create_request(text):
         return "niagara.create_emitter"
     if "blueprint" in q and ("create" in q or "make" in q or "new" in q) and "template" in q:
@@ -1767,7 +2507,20 @@ def generate_unreal_execution_steps(operation: str, params: dict[str, Any], raw_
         steps.append("Identify subsystem intent, existing behavior, integration points, and preservation checks.")
         steps.append("Reserve graph layout space, preserve local graph style, and group new logic with intent-based comments.")
 
-    if operation == "niagara.create_emitter":
+    if operation == "niagara.attach_editable_character_fx":
+        steps.extend(
+            [
+                "Duplicate or reuse Niagara System assets without modifying the source template.",
+                "Attach the Niagara component to the validated character component, bone, or socket.",
+                "Create editable Blueprint variables for every requested Niagara user parameter.",
+                "Bind supported Blueprint variables into Niagara user parameters and verify readback.",
+            ]
+        )
+        if str((params.get("parameters") or {}).get("FX_SourceMode") or "") == "camera_facing_character_outline":
+            steps.append("Synthesize and validate the camera-facing silhouette/outline source strategy before emission.")
+        if re.search(r"\b(?:play mode|play in editor|pie)\b", raw_text, re.I):
+            steps.append("Run Play In Editor and capture source, attachment, parameter, and visible-state readback evidence.")
+    elif operation == "niagara.create_emitter":
         steps.append(f"Create a new Niagara emitter asset named '{asset_name or 'NE_AIStudioEmitter'}' at '{asset_path or '/Game/AIStudio/Prototypes/Niagara/NE_AIStudioEmitter'}'.")
         q = raw_text.lower()
         if any(w in q for w in ("attach", "connect", "link", "parent")):
@@ -1861,6 +2614,25 @@ def build_unreal_execution_plan(
         action = "create"
 
     resolved_op_key = unreal_prompt_to_operation(raw_text)
+    bounded_domain_authoring = {
+        "behavior_tree.author_baseline",
+        "behavior_tree.author_wait_graph",
+        "blackboard.set_schema",
+        "metasound.create_sine_tone_source",
+        "metasound.create_source_from_spec",
+        "pcg.create_grid_transform_graph",
+        "pcg.apply_graph_spec",
+        "sequencer.create_float_track",
+        "sequencer.author_camera_cuts",
+        "material.create_from_spec",
+        "sound_cue.create_from_wave",
+        "data_table.create_from_rows",
+        "level.organize_actors",
+        "widget.author_canvas_text",
+        "widget.author_from_spec",
+    }
+    if resolved_op_key in bounded_domain_authoring:
+        semantic_graph_required = False
     
     if resolved_op_key and resolved_op_key in UNREAL_OPERATIONS:
         op = UNREAL_OPERATIONS[resolved_op_key]
@@ -1869,6 +2641,13 @@ def build_unreal_execution_plan(
         
         if operation == "project.debug":
             params = build_unreal_debug_params(raw_text)
+        elif operation == "niagara.attach_editable_character_fx":
+            params = build_unreal_editable_character_fx_params(raw_text)
+            target_assets.extend(
+                str(params.get(key) or "")
+                for key in ("blueprint_path", "system_path")
+                if params.get(key)
+            )
         elif operation == "niagara.create_emitter":
             params = build_unreal_niagara_create_params(raw_text)
             if params.get("asset_path"):
@@ -1881,6 +2660,469 @@ def build_unreal_execution_plan(
             params["parameters"]["require_plan_only_for_graph_changes"] = bool(
                 high_risk_graph_rewrite
             )
+        elif operation == "pcg.create_grid_transform_graph":
+            graph_path = _select_unreal_asset_path(target_assets, ("pcg_",))
+            params = {"graph_path": graph_path} if graph_path else {}
+        elif operation == "pcg.inspect_graph":
+            graph_path = _select_unreal_asset_path(target_assets, ("pcg_",))
+            params = {"graph_path": graph_path} if graph_path else {}
+        elif operation == "pcg.apply_graph_spec":
+            graph_path = _select_unreal_asset_path(target_assets, ("pcg_",))
+            params = {"graph_path": graph_path} if graph_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("graph_spec", specification)
+                    if isinstance(specification, dict):
+                        if isinstance(specification.get("nodes"), list):
+                            params["nodes"] = specification["nodes"]
+                        if isinstance(specification.get("edges"), list):
+                            params["edges"] = specification["edges"]
+        elif operation == "metasound.create_sine_tone_source":
+            asset_path = _select_unreal_asset_path(target_assets, ("ms_", "metasound_"))
+            params = {"asset_path": asset_path} if asset_path else {}
+            frequency_match = re.search(
+                r"\b(\d+(?:\.\d+)?)\s*(?:hz|hertz)\b",
+                raw_text,
+                re.IGNORECASE,
+            )
+            if frequency_match:
+                params["frequency"] = float(frequency_match.group(1))
+        elif operation == "metasound.create_source_from_spec":
+            asset_path = _select_unreal_asset_path(target_assets, ("ms_", "metasound_"))
+            params = {"asset_path": asset_path} if asset_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("graph_spec", specification)
+                    if isinstance(specification, dict):
+                        if isinstance(specification.get("nodes"), list):
+                            params["nodes"] = specification["nodes"]
+                        if isinstance(specification.get("connections"), list):
+                            params["connections"] = specification["connections"]
+        elif operation in {"blackboard.set_schema", "blackboard.inspect_schema"}:
+            asset_path = _select_unreal_asset_path(target_assets, ("bb_",))
+            params = {"asset_path": asset_path} if asset_path else {}
+            if operation == "blackboard.set_schema":
+                keys = _extract_blackboard_key_specs(raw_text)
+                if keys:
+                    params["keys"] = keys
+        elif operation == "widget.author_canvas_text":
+            widget_path = _select_unreal_asset_path(target_assets, ("wbp_",))
+            params = {"widget_blueprint_path": widget_path} if widget_path else {}
+            text_match = re.search(
+                r"\b(?:text|label|title)\s+(?:to\s+)?[\"']([^\"']+)[\"']",
+                raw_text,
+                re.IGNORECASE,
+            )
+            if text_match:
+                params["text"] = text_match.group(1)
+        elif operation == "widget.author_from_spec":
+            widget_path = _select_unreal_asset_path(target_assets, ("wbp_",))
+            params = {"widget_blueprint_path": widget_path} if widget_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("widget_spec", specification)
+                    if isinstance(specification, dict) and isinstance(
+                        specification.get("widgets"), list
+                    ):
+                        params["widgets"] = specification["widgets"]
+        elif operation == "behavior_tree.author_baseline":
+            tree_path = _select_unreal_asset_path(target_assets, ("bt_",))
+            blackboard_path = _select_unreal_asset_path(target_assets, ("bb_",))
+            params = {"behavior_tree_path": tree_path} if tree_path else {}
+            if blackboard_path and blackboard_path != tree_path:
+                params["blackboard_path"] = blackboard_path
+            wait_match = re.search(
+                r"\bwait(?:\s+(?:for|time))?\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?\b",
+                raw_text,
+                re.IGNORECASE,
+            )
+            if wait_match:
+                params["wait_seconds"] = float(wait_match.group(1))
+        elif operation == "behavior_tree.author_wait_graph":
+            tree_path = _select_unreal_asset_path(target_assets, ("bt_",))
+            blackboard_path = _select_unreal_asset_path(target_assets, ("bb_",))
+            params = {"behavior_tree_path": tree_path} if tree_path else {}
+            params["composite_type"] = "sequence" if "sequence" in lower else "selector"
+            if blackboard_path and blackboard_path != tree_path:
+                params["blackboard_path"] = blackboard_path
+            waits_match = re.search(
+                r"\b(?:wait\s+tasks?|waits)\s+([0-9.,\s]+(?:and\s+)?[0-9.]+)",
+                raw_text,
+                re.IGNORECASE,
+            )
+            if waits_match:
+                params["wait_seconds"] = [
+                    float(value)
+                    for value in re.findall(r"\d+(?:\.\d+)?", waits_match.group(1))
+                ]
+            else:
+                wait_values = re.findall(
+                    r"\bwait(?:\s+(?:for|time))?\s+(\d+(?:\.\d+)?)",
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                if wait_values:
+                    params["wait_seconds"] = [float(value) for value in wait_values]
+        elif operation == "behavior_tree.author_task_graph":
+            tree_path = _select_unreal_asset_path(target_assets, ("bt_",))
+            blackboard_path = _select_unreal_asset_path(target_assets, ("bb_",))
+            params = {"behavior_tree_path": tree_path} if tree_path else {}
+            if blackboard_path and blackboard_path != tree_path:
+                params["blackboard_path"] = blackboard_path
+            elif tree_path:
+                tree_folder, _, tree_name = tree_path.rpartition("/")
+                blackboard_name = re.sub(
+                    r"^BT_",
+                    "BB_",
+                    tree_name,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if blackboard_name == tree_name:
+                    blackboard_name = f"BB_{tree_name}"
+                params["blackboard_path"] = (
+                    f"{tree_folder}/{blackboard_name}"
+                    if tree_folder
+                    else f"/Game/{blackboard_name}"
+                )
+            params["composite_type"] = "selector" if "selector" in lower else "sequence"
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("behavior_tree_spec", specification)
+                    if isinstance(specification, dict):
+                        if isinstance(specification.get("tasks"), list):
+                            params["tasks"] = specification["tasks"]
+                        if specification.get("composite_type"):
+                            params["composite_type"] = str(specification["composite_type"])
+            if "tasks" not in params:
+                task_matches = []
+                for match in re.finditer(
+                    r"\bmove\s*to\s+(?:(?:the\s+)?blackboard\s+key\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+                    r"|\bwait(?:\s+(?:for|time))?\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?",
+                    raw_text,
+                    re.IGNORECASE,
+                ):
+                    if match.group(1):
+                        task_matches.append({"type": "move_to", "blackboard_key": match.group(1)})
+                    else:
+                        task_matches.append({"type": "wait", "seconds": float(match.group(2))})
+                if task_matches:
+                    params["tasks"] = task_matches
+            if "tasks" not in params:
+                task_matches = []
+                for match in re.finditer(
+                    r"\bmoves?\s*to\s+(?:(?:the\s+)?blackboard\s+key\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+                    r"|\bwaits?(?:\s+(?:for|time))?\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?",
+                    raw_text,
+                    re.IGNORECASE,
+                ):
+                    if match.group(1):
+                        task_matches.append({"type": "move_to", "blackboard_key": match.group(1)})
+                    else:
+                        task_matches.append({"type": "wait", "seconds": float(match.group(2))})
+                if task_matches:
+                    params["tasks"] = task_matches
+        elif operation == "sequencer.create_float_track":
+            sequence_path = _select_unreal_asset_path(target_assets, ("ls_",))
+            params = {"sequence_path": sequence_path} if sequence_path else {}
+            track_match = re.search(
+                r"\b(?:float\s+track|track)\s+(?:named\s+)?(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z_][A-Za-z0-9_-]*))",
+                raw_text,
+                re.IGNORECASE,
+            )
+            if track_match:
+                params["track_name"] = next(
+                    group.strip() for group in track_match.groups() if group
+                )
+            keys = _extract_sequencer_key_specs(raw_text)
+            if keys:
+                params["keys"] = keys
+        elif operation == "sequencer.author_camera_cuts":
+            sequence_path = _select_unreal_asset_path(target_assets, ("ls_",))
+            params = {"sequence_path": sequence_path} if sequence_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("camera_cut_spec", specification)
+                    if isinstance(specification, dict):
+                        if isinstance(specification.get("cameras"), list):
+                            params["cameras"] = specification["cameras"]
+                        if "display_rate" in specification:
+                            params["display_rate"] = specification["display_rate"]
+                        if "replace_existing" in specification:
+                            params["replace_existing"] = bool(specification["replace_existing"])
+            if "cameras" not in params:
+                between_match = re.search(
+                    r"\bbetween\s+([A-Za-z_][A-Za-z0-9_]*)\s+and\s+([A-Za-z_][A-Za-z0-9_]*)",
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                camera_names = list(between_match.groups()) if between_match else []
+                frame_match = re.search(
+                    r"\b(?:at|starting at|on)\s+frames?\s+([0-9,\s]+(?:and\s+[0-9]+)?)",
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                frames = [int(value) for value in re.findall(r"\d+", frame_match.group(1))] if frame_match else []
+                if camera_names and len(frames) >= len(camera_names):
+                    positive_deltas = [b - a for a, b in zip(frames, frames[1:]) if b > a]
+                    fallback_duration = positive_deltas[-1] if positive_deltas else 30
+                    params["cameras"] = [
+                        {
+                            "name": name,
+                            "start_frame": frames[index],
+                            "end_frame": frames[index + 1] if index + 1 < len(frames) else frames[index] + fallback_duration,
+                        }
+                        for index, name in enumerate(camera_names)
+                    ]
+            if "cameras" not in params:
+                count_match = re.search(
+                    r"\b(\d+|one|two|three|four|five|six|seven|eight)\s+"
+                    r"(?:cinematic\s+|shot\s+)?cameras?\b",
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                if count_match:
+                    count_words = {
+                        "one": 1,
+                        "two": 2,
+                        "three": 3,
+                        "four": 4,
+                        "five": 5,
+                        "six": 6,
+                        "seven": 7,
+                        "eight": 8,
+                    }
+                    raw_count = count_match.group(1).casefold()
+                    camera_count = int(raw_count) if raw_count.isdigit() else count_words[raw_count]
+                    camera_count = max(1, min(camera_count, 8))
+                    shot_length = 30
+                    params["cameras"] = [
+                        {
+                            "name": f"Camera_{index + 1:02d}",
+                            "start_frame": index * shot_length,
+                            "end_frame": (index + 1) * shot_length,
+                            "location": [float(index * 300), -600.0, 180.0],
+                            "rotation": [0.0, -10.0, 0.0],
+                        }
+                        for index in range(camera_count)
+                    ]
+        elif operation == "level.organize_actors":
+            params = {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("outliner_spec", specification)
+                    if isinstance(specification, dict):
+                        if isinstance(specification.get("actors"), list):
+                            params["actor_specs"] = specification["actors"]
+                        if "save" in specification:
+                            params["save"] = bool(specification["save"])
+            if "actor_specs" not in params:
+                actor_match = re.search(
+                    r"\b(?:organize|actors?)\s+(?:actors?\s+)?(.+?)\s+into\s+(?:the\s+)?folder\s+([A-Za-z0-9_./-]+)",
+                    raw_text,
+                    re.IGNORECASE,
+                )
+                if actor_match:
+                    actor_text, folder = actor_match.groups()
+                    actor_names = [
+                        value.strip(" \t\"'")
+                        for value in re.split(r"\s*,\s*|\s+and\s+", actor_text)
+                        if value.strip(" \t\"'")
+                    ]
+                    tag_match = re.search(
+                        r"\btag\s+(?:them\s+)?(?:as\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+                        raw_text,
+                        re.IGNORECASE,
+                    )
+                    hidden_match = re.search(
+                        r"\bhide\s+([A-Za-z_][A-Za-z0-9_]*)",
+                        raw_text,
+                        re.IGNORECASE,
+                    )
+                    hidden_name = hidden_match.group(1).casefold() if hidden_match else ""
+                    params["actor_specs"] = [
+                        {
+                            "query": name,
+                            "folder": folder,
+                            **({"add_tags": [tag_match.group(1)]} if tag_match else {}),
+                            **({"hidden": True} if name.casefold() == hidden_name else {}),
+                        }
+                        for name in actor_names
+                    ]
+        elif operation == "domain_asset.create":
+            domain_patterns = (
+                ("widget_blueprint", r"\b(?:widget blueprint|umg|user widget)\b"),
+                ("pcg_graph", r"\b(?:pcg graph|procedural content generation graph)\b"),
+                ("behavior_tree", r"\bbehavio(?:u)?r tree\b"),
+                ("blackboard", r"\bblackboard(?: data| asset)?\b"),
+                ("level_sequence", r"\b(?:level sequence|sequencer asset|cinematic sequence)\b"),
+                ("metasound_source", r"\bmeta\s?sound(?: source)?\b"),
+            )
+            asset_type = next(
+                (key for key, pattern in domain_patterns if re.search(pattern, lower)),
+                "",
+            )
+            params = {"asset_type": asset_type}
+            if target_assets:
+                params["asset_path"] = target_assets[0]
+            if params.get("asset_path"):
+                target_assets.append(params["asset_path"])
+        elif operation == "domain_asset.inspect":
+            params = {"expected_type": ""}
+            if target_assets:
+                params["asset_path"] = target_assets[0]
+        elif operation == "material.create_from_spec":
+            params = {"asset_path": target_assets[0]} if target_assets else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("material_spec", specification)
+                    if isinstance(specification, dict):
+                        for key in (
+                            "nodes", "connections", "outputs", "material_domain",
+                            "material_properties", "overwrite",
+                        ):
+                            if key in specification:
+                                params[key] = specification[key]
+            if "nodes" not in params and "post" in lower and "scene" in lower and "texture" in lower:
+                color_values = {
+                    "red": [1.0, 0.0, 0.0, 1.0], "green": [0.0, 1.0, 0.0, 1.0],
+                    "blue": [0.0, 0.0, 1.0, 1.0], "cyan": [0.0, 1.0, 1.0, 1.0],
+                    "magenta": [1.0, 0.0, 1.0, 1.0], "yellow": [1.0, 1.0, 0.0, 1.0],
+                    "white": [1.0, 1.0, 1.0, 1.0], "black": [0.0, 0.0, 0.0, 1.0],
+                }
+                tint = color_values.get(extract_requested_color(raw_text), [0.0, 1.0, 0.0, 1.0])
+                params.update({
+                    "material_domain": "MD_POST_PROCESS",
+                    "nodes": [
+                        {"id": "scene", "class": "MaterialExpressionSceneTexture", "properties": {"scene_texture_id": "PPI_POST_PROCESS_INPUT0"}},
+                        {"id": "tint", "class": "MaterialExpressionVectorParameter", "properties": {"parameter_name": "Tint", "default_value": tint}},
+                        {"id": "multiply", "class": "MaterialExpressionMultiply"},
+                    ],
+                    "connections": [
+                        {"source": "scene", "target": "multiply", "target_input": "A"},
+                        {"source": "tint", "target": "multiply", "target_input": "B"},
+                    ],
+                    "outputs": [{"source": "multiply", "material_property": "MP_EMISSIVE_COLOR"}],
+                })
+        elif operation == "sound_cue.create_from_wave":
+            cue_path = _select_unreal_asset_path(target_assets, ("sc_", "soundcue_"))
+            params = {"asset_path": cue_path} if cue_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("sound_cue_spec", specification)
+                    if isinstance(specification, dict):
+                        for key in (
+                            "asset_path", "sound_wave_path", "looping",
+                            "volume_multiplier", "pitch_multiplier", "overwrite",
+                        ):
+                            if key in specification:
+                                params[key] = specification[key]
+            if "sound_wave_path" not in params:
+                wave_path = next((path for path in target_assets if path != cue_path), "")
+                if wave_path:
+                    params["sound_wave_path"] = wave_path
+            if "modulator" in lower and "processors" not in params:
+                params["processors"] = [{"class": "SoundNodeModulator"}]
+            params["looping"] = bool(re.search(r"\bloop(?:ing|ed)?\b", lower))
+            for key, pattern in (
+                ("volume_multiplier", r"\bvolume(?:\s+multiplier)?\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)"),
+                ("pitch_multiplier", r"\bpitch(?:\s+multiplier)?\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)"),
+            ):
+                scalar_match = re.search(pattern, raw_text, re.IGNORECASE)
+                if scalar_match:
+                    params[key] = float(scalar_match.group(1))
+        elif operation == "sound_cue.inspect":
+            cue_path = _select_unreal_asset_path(target_assets, ("sc_", "soundcue_"))
+            params = {"asset_path": cue_path} if cue_path else {}
+        elif operation == "data_table.create_from_rows":
+            table_path = _select_unreal_asset_path(target_assets, ("dt_",))
+            params = {"asset_path": table_path} if table_path else {}
+            json_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if json_match:
+                try:
+                    specification = json.loads(json_match.group(1))
+                except (TypeError, ValueError):
+                    specification = {}
+                if isinstance(specification, dict):
+                    specification = specification.get("data_table_spec", specification)
+                    if isinstance(specification, dict):
+                        for key in ("asset_path", "row_struct_path", "rows", "overwrite"):
+                            if key in specification:
+                                params[key] = specification[key]
+                        if (
+                            "rows" not in params
+                            and re.search(r"\brows?\s*\{", raw_text, re.IGNORECASE)
+                            and not any(
+                                key in specification
+                                for key in (
+                                    "asset_path",
+                                    "row_struct_path",
+                                    "overwrite",
+                                )
+                            )
+                        ):
+                            params["rows"] = specification
+            if "row_struct_path" not in params:
+                struct_path = next((path for path in target_assets if path != table_path), "")
+                if struct_path:
+                    params["row_struct_path"] = struct_path
+            if "rows" not in params:
+                rows_match = re.search(r"\brows?\s+(.+?)(?:\s+with\s+|[.;]|$)", raw_text, re.IGNORECASE)
+                if rows_match:
+                    row_names = [
+                        value.strip(" \t\"'")
+                        for value in re.split(r"\s*,\s*|\s+and\s+", rows_match.group(1))
+                        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value.strip(" \t\"'"))
+                    ]
+                    if row_names:
+                        params["rows"] = [{"Name": name} for name in row_names]
+        elif operation == "data_table.inspect":
+            table_path = _select_unreal_asset_path(target_assets, ("dt_",))
+            params = {"asset_path": table_path} if table_path else {}
+        elif operation in {"material.create", "material.create_parameterized_pbr", "material.inspect"}:
+            params = {}
+            if target_assets:
+                params["asset_path"] = target_assets[0]
         elif operation == "project.scan_assets" and intent and intent.asset_class:
             params = {
                 "mode": "standard",
@@ -1931,7 +3173,16 @@ def build_unreal_execution_plan(
         params = {}
         mutating = action == "create" or high_risk_graph_rewrite
 
-    for p_key in ("asset_path", "target_path", "blueprint_path"):
+    for p_key in (
+        "asset_path",
+        "target_path",
+        "blueprint_path",
+        "graph_path",
+        "sequence_path",
+        "widget_blueprint_path",
+        "behavior_tree_path",
+        "blackboard_path",
+    ):
         if p_key in params and isinstance(params[p_key], str):
             default_name = "NE_AIStudioEmitter" if "niagara" in operation else ("BP_NewBlueprint" if "blueprint" in operation else "Asset")
             params[p_key] = normalize_unreal_package_path(params[p_key], default_name=default_name)
@@ -1955,6 +3206,35 @@ def build_unreal_execution_plan(
                 params["parameters"].setdefault("graph_layout_contract", semantic_graph.get("layout_contract") or [])
                 params["parameters"].setdefault("graph_edit_progress_stages", semantic_graph.get("progress_stages") or [])
                 params["parameters"].setdefault("graph_edit_threading_contract", semantic_graph.get("threading_contract") or {})
+    capability_gaps: list[dict[str, Any]] = []
+    selected_operation = UNREAL_OPERATIONS.get(operation)
+    non_empty_required = {"keys", "nodes", "wait_seconds", "widgets"}
+    missing_required = [
+        name
+        for name in (selected_operation.required if selected_operation else ())
+        if name not in params
+        or params[name] in (None, "")
+        or (name in non_empty_required and not params[name])
+    ]
+    if missing_required:
+        capability_gaps.append(
+            {
+                "required_capability": "request.required_parameters",
+                "reason": "The prompt did not provide all parameters required for safe execution.",
+                "missing_parameters": missing_required,
+            }
+        )
+    if operation == "niagara.attach_editable_character_fx" and str(
+        (params.get("parameters") or {}).get("FX_SourceMode") or ""
+    ) == "camera_facing_character_outline":
+        capability_gaps.append(
+            {
+                "required_capability": "niagara.synthesize_source_strategy_stack",
+                "request_fragment": raw_text,
+                "source_strategy": "camera_facing_character_outline",
+                "reason": "The generic attachment callable does not synthesize a camera-visible silhouette emission stack.",
+            }
+        )
     return {
         "ok": True,
         "action": action,
@@ -1980,76 +3260,11 @@ def build_unreal_execution_plan(
         else None,
         "params": params,
         "raw_request": raw_text,
+        "complete": not capability_gaps,
+        "capability_gaps": capability_gaps,
     
     # ── Traversal, Gameplay, Navigation & Physics Additions ──
-    "animation.set_slot_animation": UnrealOperation(
-        key="animation.set_slot_animation",
-        label="Unreal Set Slot Animation",
-        function="unreal_tools.animation.set_slot_animation",
-        required=("anim_bp_path", "slot_name", "animation_path"),
-        mutates_project=True,
-        description="Assign an animation sequence or blend space to a specific slot (like UpperBody) inside an Animation Blueprint.",
-    ),
-    "motion_matching.add_state_animations": UnrealOperation(
-        key="motion_matching.add_state_animations",
-        label="Unreal Add Motion Matching State Animations",
-        function="unreal_tools.motion_matching.add_state_animations",
-        required=("database_path", "animation_paths", "state_tag"),
-        mutates_project=True,
-        description="Add a set of animations corresponding to a gameplay state (climbing, flying, traversal) into a Pose Search Database.",
-    ),
-    "physics.create_physics_asset": UnrealOperation(
-        key="physics.create_physics_asset",
-        label="Unreal Create Physics Asset",
-        function="unreal_tools.physics.create_physics_asset",
-        required=("skeletal_mesh_path",),
-        optional={"save_path": ""},
-        mutates_project=True,
-        description="Create a physics asset (bodies, joints) for the given Skeletal Mesh.",
-    ),
-    "physics.add_body": UnrealOperation(
-        key="physics.add_body",
-        label="Unreal Add Physics Body",
-        function="unreal_tools.physics.add_body",
-        required=("physics_asset_path", "bone_name", "shape_type"),
-        mutates_project=True,
-        description="Add a physical body shape (capsule, sphere, box) for a specific bone in the physics asset.",
-    ),
-    "physics.add_constraint": UnrealOperation(
-        key="physics.add_constraint",
-        label="Unreal Add Physics Constraint",
-        function="unreal_tools.physics.add_constraint",
-        required=("physics_asset_path", "bone_name_a", "bone_name_b"),
-        mutates_project=True,
-        description="Add a physical constraint connecting physics body A to physics body B.",
-    ),
-    "physics.set_collision_profile": UnrealOperation(
-        key="physics.set_collision_profile",
-        label="Unreal Set Collision Profile preset",
-        function="unreal_tools.physics.set_collision_profile",
-        required=("actor_query", "profile_name"),
-        optional={"component_name": ""},
-        mutates_project=True,
-        description="Assign a collision preset profile (like Ragdoll, Pawn, blockAll) to a physical component or actor.",
-    ),
-    "navigation.add_nav_mesh_bounds": UnrealOperation(
-        key="navigation.add_nav_mesh_bounds",
-        label="Unreal Add Nav Mesh Bounds Volume",
-        function="unreal_tools.navigation.add_nav_mesh_bounds",
-        optional={"location": [0.0, 0.0, 0.0], "extent": [1000.0, 1000.0, 500.0]},
-        mutates_project=True,
-        description="Place a Nav Mesh Bounds Volume in the current level to enable pathfinding.",
-    ),
-    "gameplay.create_gameplay_ability": UnrealOperation(
-        key="gameplay.create_gameplay_ability",
-        label="Unreal Create Gameplay Ability",
-        function="unreal_tools.gameplay.create_gameplay_ability",
-        required=("ability_name",),
-        optional={"save_path": ""},
-        mutates_project=True,
-        description="Create a new Gameplay Ability class or Component for traversal actions (climbing, flying, dash).",
-    ),
-}
+    }
 
 
 def explain_unreal_execution_plan(plan: dict[str, Any]) -> str:

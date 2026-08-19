@@ -11,8 +11,13 @@ echo.
 
 set PYTHON_CMD=
 
+py -3.14 --version >nul 2>nul
+if not errorlevel 1 set PYTHON_CMD=py -3.14
+
+if "%PYTHON_CMD%"=="" (
 py -3.11 --version >nul 2>nul
 if not errorlevel 1 set PYTHON_CMD=py -3.11
+)
 
 if "%PYTHON_CMD%"=="" (
     py -3.10 --version >nul 2>nul

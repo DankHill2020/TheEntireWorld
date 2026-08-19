@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import hashlib
@@ -1459,7 +1459,7 @@ This should solve the request without any other changes or tests.
             source = Path(tmp) / "sample.py"
             source.write_text(
                 "class Example:\n"
-                "    def value(self):\n"
+                "    def value(self) -> int:\n"
                 "        return 1\n",
                 encoding="utf-8",
             )
@@ -1471,7 +1471,7 @@ This should solve the request without any other changes or tests.
                             "path": str(source),
                             "target_symbol": "value",
                             "original_content": "",
-                            "new_content": "def value(self):\n    return 2",
+                            "new_content": "def value(self) -> int:\n    return 2",
                         }
                     ],
                     "report": {"changed": ["Example.value"], "reused": [], "verification": ["compile"], "remaining_gaps": []},
@@ -1482,13 +1482,14 @@ This should solve the request without any other changes or tests.
             preview = preview_project_edit_agent_response(response, project_root=tmp)
 
             self.assertTrue(preview.ok)
-            self.assertIn("    def value(self):\n        return 2", preview.changes[0]["after"])
+            self.assertIn("    def value(self) -> int:", preview.changes[0]["after"])
+            self.assertIn("        return 2", preview.changes[0]["after"])
 
     def test_project_edit_preview_composes_symbol_operations_on_one_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "sample.py"
             source.write_text(
-                "def value():\n"
+                "def value() -> int:\n"
                 "    return 1\n",
                 encoding="utf-8",
             )
@@ -1500,14 +1501,14 @@ This should solve the request without any other changes or tests.
                             "path": str(source),
                             "target_symbol": "value",
                             "original_content": "",
-                            "new_content": "def helper():\n    \"\"\"Return the replacement value.\"\"\"\n    return 2",
+                            "new_content": "def helper() -> int:\n    \"\"\"Return the replacement value.\n\n    :return: Replacement integer value.\n    \"\"\"\n    return 2",
                         },
                         {
                             "action": "replace_symbol",
                             "path": str(source),
                             "target_symbol": "value",
                             "original_content": "",
-                            "new_content": "def value():\n    return helper()",
+                            "new_content": "def value() -> int:\n    return helper()",
                         },
                     ],
                     "report": {"changed": ["helper", "value"], "reused": [], "verification": ["compile"], "remaining_gaps": []},
@@ -1519,8 +1520,10 @@ This should solve the request without any other changes or tests.
 
             self.assertTrue(preview.ok, preview.errors)
             self.assertEqual(1, len(preview.changes))
-            self.assertIn("def helper():\n    \"\"\"Return the replacement value.\"\"\"\n    return 2", preview.changes[0]["after"])
-            self.assertIn("def value():\n    return helper()", preview.changes[0]["after"])
+            self.assertIn("def helper() -> int:", preview.changes[0]["after"])
+            self.assertIn(":return: Replacement integer value.", preview.changes[0]["after"])
+            self.assertIn("def value() -> int:", preview.changes[0]["after"])
+            self.assertIn("    return helper()", preview.changes[0]["after"])
 
     def test_project_edit_leaf_workers_compile_evidence_and_compose_valid_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1530,8 +1533,11 @@ This should solve the request without any other changes or tests.
             tests_dir.mkdir()
             test_path = tests_dir / "test_service.py"
             target_before = (
-                "def render_errors(results):\n"
-                "    \"\"\"Render validation errors.\"\"\"\n"
+                "def render_errors(results: list[dict[str, object]]) -> list[str]:\n"
+                "    \"\"\"Render validation errors.\n\n"
+                "    :param results: Validation result dictionaries.\n"
+                "    :return: Failure message strings.\n"
+                "    \"\"\"\n"
                 "    return [str(item.get('message', '')) for item in results if not item.get('ok')]\n"
             )
             test_before = (
@@ -1619,8 +1625,11 @@ This should solve the request without any other changes or tests.
             helper_source, helper_errors = parse_project_edit_leaf_source(
                 json.dumps({
                     "source": (
-                        "def summarize_validation_failures(results: list[dict]) -> list[str]:\n"
-                        "    \"\"\"Return messages from failed validation results.\"\"\"\n"
+                        "def summarize_validation_failures(results: list[dict[str, object]]) -> list[str]:\n"
+                        "    \"\"\"Return messages from failed validation results.\n\n"
+                        "    :param results: Validation result dictionaries.\n"
+                        "    :return: Failure message strings.\n"
+                        "    \"\"\"\n"
                         "    return [str(item.get('message', 'Validation failed.')) for item in results "
                         "if not item.get('ok')]"
                     )
@@ -1632,8 +1641,11 @@ This should solve the request without any other changes or tests.
             integration_source, integration_errors = parse_project_edit_leaf_source(
                 json.dumps({
                     "source": (
-                        "def render_errors(results):\n"
-                        "    \"\"\"Render validation errors.\"\"\"\n"
+                        "def render_errors(results: list[dict[str, object]]) -> list[str]:\n"
+                        "    \"\"\"Render validation errors.\n\n"
+                        "    :param results: Validation result dictionaries.\n"
+                        "    :return: Failure message strings.\n"
+                        "    \"\"\"\n"
                         "    return summarize_validation_failures(results)"
                     )
                 }),
@@ -1671,8 +1683,16 @@ This should solve the request without any other changes or tests.
 
             self.assertTrue(preview.ok, preview.errors)
             self.assertEqual(2, len(preview.changes))
-            target_after = next(item["after"] for item in preview.changes if item["path"] == str(target.resolve()))
-            test_after = next(item["after"] for item in preview.changes if item["path"] == str(test_path.resolve()))
+            target_after = next(
+                item["after"]
+                for item in preview.changes
+                if Path(item["path"]).resolve() == target.resolve()
+            )
+            test_after = next(
+                item["after"]
+                for item in preview.changes
+                if Path(item["path"]).resolve() == test_path.resolve()
+            )
             self.assertIn("def summarize_validation_failures", target_after)
             self.assertIn("from service import summarize_validation_failures", test_after)
             self.assertEqual(target_before, target.read_text(encoding="utf-8"))
@@ -1801,7 +1821,7 @@ This should solve the request without any other changes or tests.
             preview = preview_project_edit_agent_response(response, project_root=tmp)
 
             self.assertTrue(preview.ok, preview.errors)
-            self.assertEqual(str(source.resolve()), preview.changes[0]["path"])
+            self.assertEqual(source.resolve(), Path(preview.changes[0]["path"]).resolve())
 
     def test_project_edit_preview_supports_exact_text_edits_for_cpp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2017,13 +2037,13 @@ This should solve the request without any other changes or tests.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "tool.py"
-            source.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+            source.write_text("def run() -> str:\n    return 'old'\n", encoding="utf-8")
             response = f"""<modify_file path="{source}">
 <<<< ORIGINAL
-def run():
+def run() -> str:
     return 'old'
 ====
-def run():
+def run() -> str:
     return 'new'
 >>>>
 </modify_file>"""
@@ -2034,19 +2054,19 @@ def run():
             self.assertEqual("preview_ready", result.status)
             self.assertEqual(1, len(result.changes))
             self.assertIn("return 'new'", result.changes[0]["after"])
-            self.assertEqual("def run():\n    return 'old'\n", source.read_text(encoding="utf-8"))
+            self.assertEqual("def run() -> str:\n    return 'old'\n", source.read_text(encoding="utf-8"))
 
     def test_apply_writes_change_validates_python_and_creates_undo_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "tool.py"
-            source.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+            source.write_text("def run() -> str:\n    return 'old'\n", encoding="utf-8")
             response = f"""<modify_file path="{source}">
 <<<< ORIGINAL
-def run():
+def run() -> str:
     return 'old'
 ====
-def run():
+def run() -> str:
     return 'new'
 >>>>
 </modify_file>"""
@@ -2092,11 +2112,14 @@ def run(
     def test_create_file_is_supported_and_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            response = """<create_file path="new_tool.py">
-def created():
-    \"\"\"Return whether the generated tool was created successfully.\"\"\"
+            response = '''<create_file path="new_tool.py">
+def created() -> bool:
+    \"\"\"Return whether the generated tool was created successfully.
+
+    :return: True when the tool was created.
+    \"\"\"
     return True
-</create_file>"""
+</create_file>'''
 
             result = apply_project_edit_agent_response(response, project_root=str(root))
             report = render_project_edit_agent_report(result)
@@ -2135,11 +2158,15 @@ def normalize_records(records):
 
     def test_whole_tool_preview_requires_and_accepts_focused_behavior_test(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            response_without_test = """<create_file path="record_tool.py">
+            response_without_test = '''<create_file path="record_tool.py">
 def normalize_records(records: list[str]) -> list[str]:
-    \"\"\"Normalize records by trimming whitespace and removing empty values.\"\"\"
+    \"\"\"Normalize records by trimming whitespace and removing empty values.
+
+    :param records: Record values to normalize.
+    :return: Normalized non-empty record values.
+    \"\"\"
     return [value.strip() for value in records if value.strip()]
-</create_file>"""
+</create_file>'''
             prompt = "Create a reusable record normalization tool with working behavior."
 
             rejected = preview_project_edit_agent_response(
@@ -2185,9 +2212,13 @@ if __name__ == "__main__":
 
     def test_preview_rejects_placeholder_test_that_discovers_zero_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            response = """<create_file path="record_tool.py">
+            response = '''<create_file path="record_tool.py">
 def normalize_records(records: list[str]) -> list[str]:
-    \"\"\"Normalize records by trimming whitespace and removing empty values.\"\"\"
+    \"\"\"Normalize records by trimming whitespace and removing empty values.
+
+    :param records: Record values to normalize.
+    :return: Normalized non-empty record values.
+    \"\"\"
     return [value.strip() for value in records if value.strip()]
 </create_file>
 <create_file path="test_record_tool.py">
@@ -2196,7 +2227,7 @@ import unittest
 
 class RecordToolTests(unittest.TestCase):
     pass
-</create_file>"""
+</create_file>'''
 
             result = preview_project_edit_agent_response(
                 response,
@@ -2209,20 +2240,26 @@ class RecordToolTests(unittest.TestCase):
 
     def test_preview_rejects_cross_file_import_failure_in_disposable_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            response = """<create_file path="cycle_a.py">
+            response = '''<create_file path="cycle_a.py">
 from cycle_b import read_b
 
 
-def read_a():
-    \"\"\"Read the A value.\"\"\"
+def read_a() -> object:
+    """Read the A value.
+
+    :return: Value read from the B module.
+    """
     return read_b()
 </create_file>
 <create_file path="cycle_b.py">
 from cycle_a import read_a
 
 
-def read_b():
-    \"\"\"Read the B value.\"\"\"
+def read_b() -> object:
+    """Read the B value.
+
+    :return: Value read from the A module.
+    """
     return read_a()
 </create_file>
 <create_file path="test_cycle.py">
@@ -2234,7 +2271,7 @@ from cycle_a import read_a
 class CycleTests(unittest.TestCase):
     def test_cycle_imports(self):
         self.assertTrue(callable(read_a))
-</create_file>"""
+</create_file>'''
 
             result = preview_project_edit_agent_response(
                 response,
@@ -2990,9 +3027,14 @@ def unrelated_helper():
 
     def test_apply_withholds_completion_when_generated_behavior_test_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            response = """<create_file path="calculator_tool.py">
+            response = '''<create_file path="calculator_tool.py">
 def add_values(left: int, right: int) -> int:
-    \"\"\"Return the sum of two integer values.\"\"\"
+    """Return the sum of two integer values.
+
+    :param left: Left integer value.
+    :param right: Right integer value.
+    :return: Sum of both values.
+    """
     return left - right
 </create_file>
 <create_file path="test_calculator_tool.py">
@@ -3008,7 +3050,7 @@ class CalculatorToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-</create_file>"""
+</create_file>'''
 
             result = apply_project_edit_agent_response(
                 response,

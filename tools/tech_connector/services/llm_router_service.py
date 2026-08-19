@@ -1,4 +1,4 @@
-﻿"""LLM routing with a stable provider/model selection for each prompt run."""
+"""LLM routing with a stable provider/model selection for each prompt run."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from typing import Any, Optional
 
 from reasoning_runtime.models import (
@@ -48,16 +49,19 @@ def lock_llm_provider_for_prompt(function):
 
     @wraps(function)
     def wrapped(*args, **kwargs):
-        from tech_connector.services.settings_service import load_settings
+        owner = args[0] if args else None
+        route = getattr(owner, "_prompt_provider_route", None)
+        if route is None:
+            from tech_connector.services.settings_service import load_settings
 
-        settings = load_settings()
-        selected = str(
-            settings.get("model")
-            or settings.get("cloud_provider_model")
-            or settings.get("general_model")
-            or "qwen3:4b-instruct"
-        )
-        route = resolve_llm_provider_route(selected, settings)
+            settings = load_settings()
+            selected = str(
+                settings.get("model")
+                or settings.get("cloud_provider_model")
+                or settings.get("general_model")
+                or "qwen3:4b-instruct"
+            )
+            route = resolve_llm_provider_route(selected, settings)
         with locked_model_provider_route(route) as calls:
             result = function(*args, **kwargs)
             metadata = getattr(result, "metadata", None)
@@ -179,6 +183,22 @@ def resolve_llm_provider_route(
         else:
             return LLMProviderRoute("ollama", local_model)
 
+    if (
+        target_provider == "openai"
+        and bool(settings.get("auto_select_openai_model_by_depth", True))
+        and (
+            not target_name
+            or str(target_name).lower().startswith(("gpt-5.6", "gpt-5.3-codex"))
+        )
+    ):
+        from tech_connector.services.code_prompt_profile_service import (
+            preferred_openai_model,
+        )
+
+        target_name = preferred_openai_model(
+            str(settings.get("code_prompt_depth") or "balanced")
+        )
+
     target_account_provider = (
         "google" if target_provider == "gemini" else target_provider
     )
@@ -246,8 +266,36 @@ def generate_llm_response(
     allow_cloud_fallback: bool = False,
     no_progress_seconds: int | None = None,
     max_wall_seconds: int | None = None,
+    queue_category: str = "interactive",
+    queue_priority: int | None = None,
+    queue_request_id: str = "",
+    queue_supersede_key: str = "",
+    queue_cancel_event: Any = None,
+    queue_deadline_seconds: float | None = None,
+    _queue_bypass: bool = False,
+    _queue_metadata: dict[str, Any] | None = None,
 ) -> str:
-    """Generate a response without changing an active cloud route mid-run."""
+    """Generate through a bounded provider queue and a stable provider route.
+
+    :param model: Requested model name.
+    :param prompt: User or workflow prompt.
+    :param system: Optional system prompt.
+    :param response_format: Optional structured-output contract.
+    :param options: Provider-specific generation options.
+    :param timeout: Provider timeout and default queue-start deadline in seconds.
+    :param provider_route: Optional already-resolved provider route.
+    :param allow_cloud_fallback: Whether cloud failure may enqueue local fallback.
+    :param no_progress_seconds: Local streaming no-progress limit.
+    :param max_wall_seconds: Optional stricter local provider wall limit.
+    :param queue_category: Scheduling category such as interactive or background.
+    :param queue_priority: Optional explicit scheduling priority.
+    :param queue_request_id: Optional request correlation identifier.
+    :param queue_supersede_key: Optional key for replacing stale queued work.
+    :param queue_cancel_event: Optional cancellation event.
+    :param queue_deadline_seconds: Optional queue-start deadline overriding timeout.
+    :return: Generated response text.
+    """
+
     from tech_connector.services.settings_service import load_settings
     settings = load_settings()
     active_route = current_model_provider_route()
@@ -260,6 +308,93 @@ def generate_llm_response(
         if active_route is not None
         else resolve_llm_provider_route(model, settings)
     )
+    if not _queue_bypass:
+        from tech_connector.services.llm_request_queue_service import (
+            global_llm_request_queue,
+            llm_queue_lane_options,
+        )
+
+        request_id = str(queue_request_id or uuid.uuid4())
+        queued_at = time.monotonic()
+        import threading
+
+        submitting_thread_id = threading.get_ident()
+        _INFERENCE_METRICS_BY_THREAD.pop(submitting_thread_id, None)
+        transferred_metrics: dict[str, Any] = {}
+        total_deadline = max(
+            0.001,
+            float(
+                queue_deadline_seconds
+                if queue_deadline_seconds is not None
+                else timeout
+            ),
+        )
+        lane_options = llm_queue_lane_options(settings, route.provider)
+
+        def execute_queued_request() -> str:
+            queue_wait = max(0.0, time.monotonic() - queued_at)
+            remaining = max(1, int(total_deadline - queue_wait))
+            effective_wall = (
+                min(float(max_wall_seconds), float(remaining))
+                if max_wall_seconds is not None
+                else remaining
+            )
+            try:
+                return generate_llm_response(
+                    model,
+                    prompt,
+                    system,
+                    response_format,
+                    options,
+                    min(int(timeout), remaining),
+                    provider_route=route,
+                    allow_cloud_fallback=allow_cloud_fallback,
+                    no_progress_seconds=no_progress_seconds,
+                    max_wall_seconds=effective_wall,
+                    queue_category=queue_category,
+                    queue_priority=queue_priority,
+                    queue_request_id=request_id,
+                    queue_supersede_key=queue_supersede_key,
+                    queue_cancel_event=queue_cancel_event,
+                    queue_deadline_seconds=remaining,
+                    _queue_bypass=True,
+                    _queue_metadata={
+                        "queue_request_id": request_id,
+                        "queue_category": str(queue_category or "interactive"),
+                        "queue_priority": queue_priority,
+                        "queue_wait_seconds": round(queue_wait, 6),
+                    },
+                )
+            finally:
+                worker_metrics = pop_last_inference_metrics()
+                if worker_metrics:
+                    transferred_metrics.update(worker_metrics)
+
+        try:
+            result = global_llm_request_queue().submit(
+                execute_queued_request,
+                provider=route.provider,
+                model=route.model,
+                category=queue_category,
+                priority=queue_priority,
+                **lane_options,
+                deadline_seconds=total_deadline,
+                request_id=request_id,
+                supersede_key=queue_supersede_key,
+                cancel_event=queue_cancel_event,
+            )
+            return result
+        except LLMCloudProviderError as exc:
+            # ContextVar state is copied into queue workers. Replay the provider
+            # poison in the submitting context so swallowed stage failures still
+            # stop the prompt run at its next health check.
+            mark_model_provider_failed(str(exc))
+            raise
+        finally:
+            if transferred_metrics:
+                _INFERENCE_METRICS_BY_THREAD[submitting_thread_id] = dict(
+                    transferred_metrics
+                )
     if route.cloud_active:
         assert_model_provider_healthy()
     call_event = {
@@ -269,6 +404,7 @@ def generate_llm_response(
         "started_at_monotonic": round(time.monotonic(), 6),
         "status": "running",
     }
+    call_event.update(dict(_queue_metadata or {}))
     active_calls = current_model_calls()
     if active_calls is not None:
         active_calls.append(call_event)
@@ -294,6 +430,24 @@ def generate_llm_response(
         finally:
             call_event["elapsed_seconds"] = round(time.monotonic() - started, 3)
 
+    effective_options = dict(options or {})
+    if route.provider == "openai":
+        from tech_connector.services.code_prompt_profile_service import (
+            normalize_code_prompt_profile,
+            openai_execution_options,
+        )
+
+        profile = normalize_code_prompt_profile(settings=settings)
+        defaults = openai_execution_options(profile)
+        defaults["reasoning_context"] = str(
+            settings.get("openai_reasoning_context")
+            or defaults.get("reasoning_context")
+            or "all_turns"
+        )
+        defaults["store"] = bool(settings.get("openai_store_responses", True))
+        defaults.update(effective_options)
+        effective_options = defaults
+
     try:
         if route.transport == "account":
             from tech_connector.services.authenticated_provider_service import (
@@ -310,7 +464,15 @@ def generate_llm_response(
                 timeout,
             )
         elif route.provider == "openai":
-            value = _query_openai(route.model, route.api_key, prompt, system, response_format, options, timeout)
+            value = _query_openai(
+                route.model,
+                route.api_key,
+                prompt,
+                system,
+                response_format,
+                effective_options,
+                timeout,
+            )
         elif route.provider == "anthropic":
             value = _query_anthropic(route.model, route.api_key, prompt, system, response_format, options, timeout)
         elif route.provider == "gemini":
@@ -333,13 +495,21 @@ def generate_llm_response(
                 file=sys.stderr,
                 flush=True,
             )
-            return _query_ollama(
+            return generate_llm_response(
                 local_fallback_model,
                 prompt,
-                system,
-                response_format,
-                options,
-                timeout,
+                system=system,
+                response_format=response_format,
+                options=options,
+                timeout=timeout,
+                provider_route=LLMProviderRoute("ollama", local_fallback_model),
+                allow_cloud_fallback=False,
+                no_progress_seconds=no_progress_seconds,
+                max_wall_seconds=max_wall_seconds,
+                queue_category=queue_category,
+                queue_priority=queue_priority,
+                queue_request_id=f"{queue_request_id or uuid.uuid4()}:fallback",
+                queue_cancel_event=queue_cancel_event,
             )
         message = (
             f"{route.provider}:{route.model} failed; provider lock prevented "
@@ -581,13 +751,10 @@ def _query_ollama(
         }
         active_response = state.get("response")
         if active_response is not None:
-            while True:
-                try:
-                    active_response.close()
-                except Exception:
-                    pass
-                finally:
-                    break
+            try:
+                active_response.close()
+            except Exception:
+                pass
         raise TimeoutError(timeout_error)
 
     try:
@@ -662,34 +829,79 @@ def _query_openai(
     options: Optional[dict[str, Any]] = None,
     timeout: int = 45
 ) -> str:
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    """Generate through OpenAI's Responses API.
 
-    payload_dict = {
+    :param model: OpenAI model identifier.
+    :param api_key: OpenAI API key.
+    :param prompt: User input.
+    :param system: Optional developer instructions.
+    :param response_format: Optional JSON response contract.
+    :param options: Reasoning, verbosity, continuation, and storage options.
+    :param timeout: HTTP timeout in seconds.
+    :return: Assistant output text.
+    """
+
+    effective_options = dict(options or {})
+    payload_dict: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "input": prompt,
     }
+    if system:
+        payload_dict["instructions"] = system
+
+    text_options: dict[str, Any] = {}
+    verbosity = str(effective_options.get("verbosity") or "").strip().lower()
+    if verbosity in {"low", "medium", "high"}:
+        text_options["verbosity"] = verbosity
     if response_format == "json":
-        payload_dict["response_format"] = {"type": "json_object"}
+        text_options["format"] = {"type": "json_object"}
     elif isinstance(response_format, dict):
-        payload_dict["response_format"] = {
+        text_options["format"] = {
             "type": "json_schema",
-            "json_schema": {
-                "name": "tech_connector_response",
-                # Planner schemas intentionally allow forward-compatible fields.
-                # Strict mode would reject that schema before the model runs.
-                "strict": False,
-                "schema": response_format,
-            },
+            "name": "tech_connector_response",
+            "strict": False,
+            "schema": response_format,
         }
-    if options and "temperature" in options:
-        payload_dict["temperature"] = float(options["temperature"])
+    if text_options:
+        payload_dict["text"] = text_options
+
+    reasoning: dict[str, Any] = {}
+    effort = str(effective_options.get("reasoning_effort") or "").strip().lower()
+    if effort in {"none", "low", "medium", "high", "xhigh", "max"}:
+        reasoning["effort"] = effort
+    context = str(effective_options.get("reasoning_context") or "").strip().lower()
+    if context in {"auto", "current_turn", "all_turns"}:
+        reasoning["context"] = context
+    mode = str(effective_options.get("reasoning_mode") or "").strip().lower()
+    if mode == "pro":
+        reasoning["mode"] = "pro"
+    if reasoning:
+        payload_dict["reasoning"] = reasoning
+
+    previous_response_id = str(
+        effective_options.get("previous_response_id") or ""
+    ).strip()
+    if previous_response_id:
+        payload_dict["previous_response_id"] = previous_response_id
+    if "store" in effective_options:
+        payload_dict["store"] = bool(effective_options["store"])
+    safety_identifier = str(
+        effective_options.get("safety_identifier") or ""
+    ).strip()
+    if safety_identifier:
+        payload_dict["safety_identifier"] = safety_identifier
+
+    # Retain compatibility for older non-reasoning models. GPT-5-family
+    # Responses requests are controlled through reasoning rather than sampling.
+    if (
+        "temperature" in effective_options
+        and not str(model or "").lower().startswith(("gpt-5", "o1", "o3", "o4"))
+    ):
+        payload_dict["temperature"] = float(effective_options["temperature"])
 
     payload = json.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/responses",
         data=payload,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -703,7 +915,27 @@ def _query_openai(
     try:
         with opener.open(req, timeout=timeout) as response:
             resp = json.loads(response.read().decode("utf-8"))
-            return str(resp["choices"][0]["message"]["content"])
+            if isinstance(resp.get("output_text"), str) and resp["output_text"]:
+                return str(resp["output_text"])
+            chunks: list[str] = []
+            refusals: list[str] = []
+            for item in list(resp.get("output") or []):
+                if not isinstance(item, dict):
+                    continue
+                for content in list(item.get("content") or []):
+                    if not isinstance(content, dict):
+                        continue
+                    value = content.get("text")
+                    if isinstance(value, str) and value:
+                        chunks.append(value)
+                    refusal = content.get("refusal")
+                    if isinstance(refusal, str) and refusal:
+                        refusals.append(refusal)
+            if chunks:
+                return "".join(chunks)
+            if refusals:
+                raise RuntimeError("OpenAI refused the request: " + " ".join(refusals))
+            raise RuntimeError("OpenAI Responses API returned no output text.")
     except urllib.error.HTTPError as exc:
         detail = ""
         try:
@@ -713,13 +945,13 @@ def _query_openai(
             detail = ""
         if api_key:
             detail = detail.replace(api_key, "[REDACTED]")
-            
+
         # Check for credit/quota errors specifically
         is_quota = exc.code in {402, 429} or "quota" in detail.lower() or "credit" in detail.lower() or "billing" in detail.lower()
         if is_quota:
             warn_msg = "\n[WARNING] Cloud provider credits are unavailable or exhausted. Please check your API credits/billing details."
             raise RuntimeError(f"OpenAI API HTTP {exc.code} - Insufficient API Credits / Quota Exceeded. Detail: {detail}{warn_msg}") from exc
-            
+
         suffix = f": {detail[:500]}" if detail else ""
         raise RuntimeError(f"OpenAI API HTTP {exc.code}{suffix}") from exc
 
@@ -806,7 +1038,7 @@ def _query_anthropic(
         },
         method="POST"
     )
-    
+
     proxy_handler = urllib.request.ProxyHandler({})
     opener = urllib.request.build_opener(proxy_handler)
     try:
@@ -826,13 +1058,13 @@ def _query_anthropic(
             detail = ""
         if api_key:
             detail = detail.replace(api_key, "[REDACTED]")
-            
+
         # Check for credit/quota errors
         is_quota = exc.code in {402, 429} or "quota" in detail.lower() or "credit" in detail.lower() or "balance" in detail.lower()
         if is_quota:
             warn_msg = "\n[WARNING] Cloud provider credits are unavailable or exhausted. Please check your API credits/billing details."
             raise RuntimeError(f"Anthropic API HTTP {exc.code} - Insufficient API Credits / Quota Exceeded. Detail: {detail}{warn_msg}") from exc
-            
+
         suffix = f": {detail[:500]}" if detail else ""
         raise RuntimeError(f"Anthropic API HTTP {exc.code}{suffix}") from exc
 
@@ -855,7 +1087,7 @@ def _query_gemini(
     }
     if system:
         payload_dict["systemInstruction"] = {"parts": [{"text": system}]}
-    
+
     gen_config = {}
     if response_format == "json" or isinstance(response_format, dict):
         gen_config["responseMimeType"] = "application/json"
@@ -872,7 +1104,7 @@ def _query_gemini(
         gen_config["thinkingConfig"] = {
             "thinkingBudget": int((options or {}).get("thinking_budget", 256))
         }
-        
+
     if gen_config:
         payload_dict["generationConfig"] = gen_config
 
@@ -886,7 +1118,7 @@ def _query_gemini(
         },
         method="POST",
     )
-    
+
     proxy_handler = urllib.request.ProxyHandler({})
     opener = urllib.request.build_opener(proxy_handler)
     try:
@@ -909,13 +1141,13 @@ def _query_gemini(
             detail = ""
         if api_key:
             detail = detail.replace(api_key, "[REDACTED]")
-            
+
         # Check for credit/quota/limit errors
         is_quota = exc.code in {402, 429} or "quota" in detail.lower() or "credit" in detail.lower() or "limit" in detail.lower() or "exhausted" in detail.lower()
         if is_quota:
             warn_msg = "\n[WARNING] Cloud provider credits are unavailable or exhausted. Please check your API credits/billing details."
             raise RuntimeError(f"Gemini API HTTP {exc.code} - Insufficient API Credits / Quota Exceeded. Detail: {detail}{warn_msg}") from exc
-            
+
         suffix = f": {detail[:500]}" if detail else ""
         raise RuntimeError(f"Gemini API HTTP {exc.code}{suffix}") from exc
 

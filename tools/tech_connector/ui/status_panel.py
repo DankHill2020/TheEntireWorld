@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 
 from tech_connector.models.constants import project_index_db_path
 from tech_connector.ui.status_bar import format_status_card
+from tech_connector.ui.design_system import set_ui_role
+from tech_connector.ui.icons import configure_button, icon
 
 STATUS_BAND_STYLE = (
     "QLabel { background-color: #000711; border: 1px solid #1e9bff; "
@@ -29,7 +31,7 @@ STATUS_BODY_STYLE = (
 STATUS_CARD_KEYS = [
     ("ollama", "Ollama"),
     ("mcphost", "MCPHost"),
-    ("knowledge", "Knowledge"),
+    ("knowledge", "Roots"),
     ("vcs", "VCS"),
     ("maya", "Maya"),
     ("unreal", "Unreal"),
@@ -79,7 +81,7 @@ def build_system_status_panel(window) -> QWidget:
 
     header = QHBoxLayout()
     title = QLabel("System Status")
-    title.setStyleSheet("font-weight: bold; color: #b9dcff; background: transparent; border: 0;")
+    set_ui_role(title, "sectionTitle")
     header.addWidget(title)
 
     if hasattr(window, "active_model_label"):
@@ -92,7 +94,8 @@ def build_system_status_panel(window) -> QWidget:
         window.active_model_label.setStyleSheet(STATUS_BAND_STYLE)
         header.addWidget(window.active_model_label, 1)
 
-    toggle = QPushButton("Hide Status ▲")
+    toggle = QPushButton("Hide details")
+    configure_button(toggle, "chevron_up", text="Hide details", role="quiet")
     toggle.setMaximumWidth(130)
     toggle.clicked.connect(window.toggle_system_status_panel)
     window.status_toggle_btn = toggle
@@ -119,7 +122,7 @@ def build_system_status_panel(window) -> QWidget:
     body_layout.addLayout(cards_row)
 
     index_row = QHBoxLayout()
-    window.index_status = QLabel("Knowledge: " + ("ready" if project_index_db_path().exists() else "missing"))
+    window.index_status = QLabel("Roots: " + ("ready" if project_index_db_path().exists() else "missing"))
     window.index_status.setObjectName("statusBandLabel")
     window.index_status.setStyleSheet(STATUS_BAND_STYLE)
     window.index_status.setMinimumWidth(175)
@@ -166,4 +169,5 @@ def toggle_system_status_panel(window) -> None:
     visible = not body.isVisible()
     body.setVisible(visible)
     if btn is not None:
-        btn.setText("Hide Status ▲" if visible else "Show Status ▼")
+        btn.setText("Hide details" if visible else "Show details")
+        btn.setIcon(icon("chevron_up" if visible else "chevron_down"))

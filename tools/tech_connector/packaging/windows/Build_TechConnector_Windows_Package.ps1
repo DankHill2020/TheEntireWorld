@@ -6,7 +6,7 @@ param(
     [string]$Mode = "freeze",
 
     [string]$Version = "",
-    [string]$Python = "python",
+    [string]$Python = "auto",
     [switch]$NoClean,
     [switch]$SkipDependencyInstall
 )

@@ -23,12 +23,16 @@ dist/
 .release_iter_test/
 .release_stage_test/
 .release_stage_test_full/
+.release_public_audit/
 
 # Generated indices/caches that exceed normal GitHub blob limits.
 tech_connector/data/capability_registry.json
+tech_connector/data/ai_intel.db*
+tech_connector/tech_connector/
 tech_connector/project_analysis/*.db
 
 # Large local source art and third-party binary payloads should stay local or use LFS.
+external_tools/downloaded_code/
 ../ArtSource/Rigs/*.ma
 ../ArtSource/Rigs/*.mb
 ../ArtSource/Rigs/**/*.fbx

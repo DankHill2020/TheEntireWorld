@@ -16,6 +16,9 @@ from PySide6.QtWidgets import QMenu, QMenuBar, QMessageBox
 
 from tech_connector.models.constants import APP_ROOT, LOGO_PATH
 
+THE_GARDEN_DCC_VIEWER_NAME = "The Garden"
+THE_GARDEN_DCC_VIEWER_WINDOW_TITLE = "The Garden - Adaptive DCC Scene"
+
 
 def _call_if_present(window, method_name: str) -> Callable:
     def _wrapped(*_args, **_kwargs):
@@ -136,7 +139,7 @@ def _open_image_editor_window(window, image_path: str = ""):
         from tech_connector.ui.image_editor_widget import ImageEditorWindow
         return ImageEditorWindow.open_for_image(image_path, window)
     except Exception as exc:
-        QMessageBox.warning(window, "Image Editor unavailable", str(exc))
+        QMessageBox.warning(window, "Ophanim unavailable", str(exc))
         return None
 
 
@@ -144,14 +147,14 @@ def _open_mesh_painter_window(window):
     try:
         from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
     except Exception as exc:
-        QMessageBox.warning(window, "3D Mesh Painter unavailable", str(exc))
+        QMessageBox.warning(window, f"{THE_GARDEN_DCC_VIEWER_NAME} unavailable", str(exc))
         return None
     mesh_window = getattr(window, "_mesh_painter_window", None)
     try:
         if mesh_window is None or not mesh_window.isVisible():
             mesh_window = ThreeDMeshPainterViewport(window)
             mesh_window.setWindowFlags(Qt.Window)
-            mesh_window.setWindowTitle("3D Mesh / FBX Viewer & Painter")
+            mesh_window.setWindowTitle(THE_GARDEN_DCC_VIEWER_WINDOW_TITLE)
             mesh_window.resize(1180, 760)
             window._mesh_painter_window = mesh_window
         mesh_window.show()
@@ -159,7 +162,7 @@ def _open_mesh_painter_window(window):
         mesh_window.activateWindow()
         return mesh_window
     except Exception as exc:
-        QMessageBox.warning(window, "3D Mesh Painter unavailable", str(exc))
+        QMessageBox.warning(window, f"{THE_GARDEN_DCC_VIEWER_NAME} unavailable", str(exc))
         return None
 
 
@@ -226,7 +229,7 @@ def _show_about_dialog(window) -> None:
     box.setText("The Entire World Tech Connector v6.7")
     box.setInformativeText(
         "Created and owned by The Entire World.\n\n"
-        "Maya - Unreal - Blender - MotionBuilder - AST Knowledge Index - Pipeline Assistant\n\n"
+        "Maya - Unreal - Blender - MotionBuilder - Root System Index - Branching Assistant\n\n"
         "Website:\n"
         "https://theentireworld.net\n\n"
         "GitHub:\n"
@@ -346,6 +349,11 @@ def _populate_connected_applications_menu(menu, window) -> None:
     _add_if_present(blender_menu, "Install Startup Bridge", window, "install_blender_bridge_from_menu")
     _add_if_present(blender_menu, "Copy Script Editor Setup", window, "copy_blender_script_editor_setup")
 
+    max_menu = _add_app_menu(dcc_group, "3ds Max", "3dsmax")
+    _add_if_present(max_menu, "Open 3ds Max", window, "launch_3dsmax")
+    max_menu.addSeparator()
+    _add_if_present(max_menu, "Install Startup Bridge", window, "install_3dsmax_bridge_from_menu")
+
     substance_menu = _add_app_menu(dcc_group, "Substance Painter", "substance_painter")
     _add_if_present(substance_menu, "Open Substance Painter", window, "launch_substance_painter")
     substance_menu.addAction("Open Driver / Second Screen", lambda: _open_dcc_driver(window, "substance_painter"))
@@ -443,10 +451,10 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_if_present(project_menu, "Update Project", window, "update_project")
     _add_if_present(project_menu, "Project Directories...", window, "show_first_run")
     project_menu.addSeparator()
-    _add_if_present(project_menu, "Refresh Project Tree", window, "refresh_project_tree_fast")
+    _add_if_present(project_menu, "Refresh Workspace Roots", window, "refresh_project_tree_fast")
     _add_if_present(project_menu, "Open Project Folder", window, "open_active_project_folder")
 
-    ai_menu = _add_top_menu(menu_bar, "AI")
+    ai_menu = _add_top_menu(menu_bar, "Trunk (Reasoning Engine)")
     _add_if_present(ai_menu, "Local Model Configuration...", window, "show_customization_panel_models")
     _add_if_present(ai_menu, "Cloud AI Setup...", window, "show_customization_panel_cloud")
     activity_action = QAction("Show Activity Details", ai_menu)
@@ -468,22 +476,23 @@ def build_main_menu_bar(window) -> QMenuBar:
     _add_checkable_attr_action(safety_menu, "Local-Only Model", window, "_chk_local_only")
     _add_checkable_attr_action(safety_menu, "Allow Project Modifications", window, "_chk_allow_modifications")
     _add_checkable_attr_action(safety_menu, "Require Confirmation Before Changes", window, "_chk_require_confirm")
+    _add_checkable_attr_action(safety_menu, "Tutorial / Guidance Only", window, "_chk_tutorial_mode")
     _add_checkable_attr_action(safety_menu, "Allow GitHub / Tool Search", window, "_chk_github_search")
 
-    knowledge_menu = _add_top_menu(menu_bar, "Knowledge")
-    _add_if_present(knowledge_menu, "Quick Index", window, "build_index")
-    _add_if_present(knowledge_menu, "Rebuild Dependency Graph", window, "build_dependency_graph_only")
+    knowledge_menu = _add_top_menu(menu_bar, "Roots")
+    _add_if_present(knowledge_menu, "Root Scan", window, "build_index")
+    _add_if_present(knowledge_menu, "Rebuild Root System", window, "build_dependency_graph_only")
     knowledge_menu.addSeparator()
-    _add_if_present(knowledge_menu, "Knowledge Summary", window, "show_ai_knowledge_summary")
-    _add_if_present(knowledge_menu, "Lock Current Knowledge", window, "lock_ai_knowledge_snapshot")
+    _add_if_present(knowledge_menu, "Root Summary", window, "show_ai_knowledge_summary")
+    _add_if_present(knowledge_menu, "Seal Root Record", window, "lock_ai_knowledge_snapshot")
 
-    pipelines_menu = _add_top_menu(menu_bar, "Pipelines")
-    pipelines_menu.addAction("Open Pipelines Tab", lambda: _switch_to_tab(window, "Pipelines"))
-    _add_if_present(pipelines_menu, "Create New Pipeline", window, "start_new_workflow_builder")
-    _add_if_present(pipelines_menu, "Refresh Pipelines", window, "refresh_workflows_list")
+    pipelines_menu = _add_top_menu(menu_bar, "Branches")
+    pipelines_menu.addAction("Open Branches (Code Editor) Tab", lambda: _switch_to_tab(window, "Pipelines"))
+    _add_if_present(pipelines_menu, "Graft New Branch", window, "start_new_workflow_builder")
+    _add_if_present(pipelines_menu, "Refresh Branches", window, "refresh_workflows_list")
     _add_if_present(pipelines_menu, "Upload Documentation to Confluence...", window, "show_upload_to_confluence_dialog")
     pipelines_menu.addSeparator()
-    _add_if_present(pipelines_menu, "Pipeline Settings...", window, "show_settings_dialog")
+    _add_if_present(pipelines_menu, "Branch Settings...", window, "show_settings_dialog")
 
     apps_menu = _add_top_menu(menu_bar, "Apps")
     apps_menu.setToolTip(
@@ -498,18 +507,32 @@ def build_main_menu_bar(window) -> QMenuBar:
 
     tools_menu = _add_top_menu(menu_bar, "Tools")
 
-    img_editor_action = QAction("🎨 Image & Texture Editor...", window)
+    tools_menu.addAction("Editor", lambda: _call_if_present(window, "open_editor_workspace_tab"))
+    tools_menu.addAction("Search / Symbols", lambda: _call_if_present(window, "open_search_symbols_workspace_tab"))
+    tools_menu.addAction("Pipelines", lambda: _call_if_present(window, "open_pipelines_workspace_tab"))
+    tools_menu.addSeparator()
+
+    world_action = QAction("The Kingdom (Game Engine Runtime Suite)...", window)
+    world_action.setToolTip("Open the Game Engine runtime flow for a scene (.tcscene).")
+    world_action.triggered.connect(_call_if_present(window, "open_the_kingdom_workspace_tab"))
+    tools_menu.addAction(world_action)
+
+    img_editor_action = QAction("Ophanim (Image & Texture Review Suite)...", window)
     img_editor_action.setShortcut("Ctrl+Shift+I")
-    img_editor_action.setToolTip("Open the standalone Image & Texture Editor window (Photoshop, Substance, GIMP, PBR inspection).")
-    img_editor_action.triggered.connect(lambda: _open_image_editor_window(window))
+    img_editor_action.setToolTip(
+        "Open Ophanim for image editing, texture work, PSD inspection, review markups, and PBR inspection."
+    )
+    img_editor_action.triggered.connect(_call_if_present(window, "open_ophanim_workspace_tab"))
     tools_menu.addAction(img_editor_action)
 
-    mesh_painter_action = QAction("3D Mesh / FBX Viewer & Painter...", window)
-    mesh_painter_action.setToolTip("Open the standalone 3D Mesh Painter viewport for FBX, OBJ, glTF, GLB, and USD assets.")
-    mesh_painter_action.triggered.connect(lambda: _open_mesh_painter_window(window))
+    mesh_painter_action = QAction(f"{THE_GARDEN_DCC_VIEWER_NAME} (DCC Integration Suite)...", window)
+    mesh_painter_action.setToolTip(
+        f"Open {THE_GARDEN_DCC_VIEWER_NAME} for adaptive DCC viewport playback, rigging, animation, and engine transfer."
+    )
+    mesh_painter_action.triggered.connect(_call_if_present(window, "open_garden_workspace_tab"))
     tools_menu.addAction(mesh_painter_action)
 
-    dcc_driver_action = QAction("DCC Driver / Second Screen...", window)
+    dcc_driver_action = QAction("DCC Driver Suite / Second Screen...", window)
     dcc_driver_action.setToolTip("Open a bridge-powered control surface for Maya, Blender, Substance Painter, Unreal, Unity, Houdini, and MotionBuilder.")
     dcc_driver_action.triggered.connect(lambda: _open_dcc_driver(window))
     tools_menu.addAction(dcc_driver_action)

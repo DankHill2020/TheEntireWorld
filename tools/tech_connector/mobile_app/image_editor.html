@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Tech Connector Mobile Image & Texture Editor</title>
+  <style>
+    :root { color-scheme: dark; --bg:#050a0f; --panel:#0a121a; --accent:#16f26a; --line:#0c364e; --text:#d6f5e3; --muted:#76a88b; }
+    * { box-sizing: border-box; touch-action: manipulation; }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    .app-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#020609; border-bottom:1px solid var(--line); }
+    .app-title { font-size:16px; font-weight:bold; color:var(--accent); display:flex; align-items:center; gap:6px; }
+    .toolbar-row { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto; }
+    button { background:#12202e; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 12px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; }
+    button.active { border-color:var(--accent); background:#0c2a1a; color:var(--accent); }
+    button.primary { background:linear-gradient(135deg, #1e9bff, #16f26a); color:#000; border:none; font-weight:bold; }
+    input[type="range"] { accent-color: var(--accent); }
+    .canvas-container { position:relative; width:100vw; height:calc(100vh - 120px); background:#0c1218; touch-action:none; display:flex; align-items:center; justify-content:center; }
+    canvas { display:block; background:#18202a; box-shadow:0 8px 32px rgba(0,0,0,0.6); touch-action:none; }
+  </style>
+</head>
+<body>
+  <div class="app-header">
+    <div class="app-title">❖ Tech Connector Mobile Touch Image Editor</div>
+    <div>
+      <button class="primary" onclick="sendToDesktop()">📲 Send to Desktop</button>
+      <button onclick="pushToDcc()">⚡ Push to DCC</button>
+    </div>
+  </div>
+
+  <div class="toolbar-row">
+    <button id="btnBrush" class="active" onclick="setTool('brush')">🖌 Brush</button>
+    <button id="btnEraser" onclick="setTool('eraser')">⌫ Eraser</button>
+    <button id="btnFill" onclick="setTool('fill')">⏍ Fill</button>
+    <span style="color:var(--muted); font-size:12px">Size:</span>
+    <input type="range" id="brushSize" min="2" max="120" value="20" style="width:90px" oninput="updateBrush()">
+    <span style="color:var(--muted); font-size:12px">Opacity:</span>
+    <input type="range" id="brushOpacity" min="1" max="100" value="100" style="width:90px" oninput="updateBrush()">
+    <input type="color" id="brushColor" value="#16f26a" style="width:36px; height:32px; border:none; border-radius:4px; cursor:pointer" onchange="updateBrush()">
+    
+    <span style="color:var(--muted); font-size:12px">Atmos Depth:</span>
+    <button onclick="setDepth(1)">1: Haze</button>
+    <button onclick="setDepth(2)">2: Mid</button>
+    <button onclick="setDepth(3)">3: Base</button>
+    <button onclick="setDepth(4)">4: Fore</button>
+    <button onclick="setDepth(5)">5: Peak</button>
+    <button onclick="captureViewport()">📸 Viewport Capture</button>
+    <button onclick="clearCanvas()">✕ Clear</button>
+  </div>
+
+  <div class="canvas-container">
+    <canvas id="editorCanvas" width="1280" height="720"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('editorCanvas');
+    const ctx = canvas.getContext('2d');
+    let tool = 'brush';
+    let size = 20;
+    let opacity = 1.0;
+    let color = '#16f26a';
+    let isDrawing = false;
+    let lastX = 0, lastY = 0;
+
+    // Fill background initial
+    ctx.fillStyle = '#18202a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    function updateBrush(){
+      size = Number(document.getElementById('brushSize').value);
+      opacity = Number(document.getElementById('brushOpacity').value) / 100;
+      color = document.getElementById('brushColor').value;
+    }
+
+    function setTool(t){
+      tool = t;
+      ['Brush','Eraser','Fill'].forEach(id => {
+        const el = document.getElementById('btn' + id);
+        if (el) el.classList.toggle('active', id.toLowerCase() === t);
+      });
+    }
+
+    function getPos(e){
+      const rect = canvas.getBoundingClientRect();
+      const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+      const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height)
+      };
+    }
+
+    function startDraw(e){
+      e.preventDefault();
+      isDrawing = true;
+      const p = getPos(e);
+      lastX = p.x; lastY = p.y;
+      if (tool === 'fill') {
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        isDrawing = false;
+      }
+    }
+
+    function moveDraw(e){
+      if (!isDrawing) return;
+      e.preventDefault();
+      const p = getPos(e);
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.lineWidth = size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = (tool === 'eraser') ? '#18202a' : color;
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      ctx.restore();
+      lastX = p.x; lastY = p.y;
+    }
+
+    function stopDraw(e){ isDrawing = false; }
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', moveDraw);
+    canvas.addEventListener('mouseup', stopDraw);
+    canvas.addEventListener('touchstart', startDraw, {passive:false});
+    canvas.addEventListener('touchmove', moveDraw, {passive:false});
+    canvas.addEventListener('touchend', stopDraw);
+
+    function clearCanvas(){
+      ctx.fillStyle = '#18202a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function setDepth(level){
+      document.getElementById('brushOpacity').value = Math.max(20, Math.min(100, 100 - (3 - level) * 20));
+      updateBrush();
+    }
+
+    async function apiCall(command, payload){
+      const token = new URL(location.href).searchParams.get('token') || '';
+      const res = await fetch('/api/command', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-AI-Studio-Token': token},
+        body: JSON.stringify({command, payload})
+      });
+      return await res.json();
+    }
+
+    async function sendToDesktop(){
+      const dataUrl = canvas.toDataURL('image/png');
+      const res = await apiCall('send_mobile_image_to_desktop', {image_data: dataUrl});
+      if (res && res.ok) {
+        alert('📲 Drawing successfully sent & opened in Desktop Tech Connector Image Editor!');
+      } else {
+        alert('Notice: ' + (res.error || 'Desktop connection standby'));
+      }
+    }
+
+    async function pushToDcc(){
+      const dataUrl = canvas.toDataURL('image/png');
+      const res = await apiCall('push_texture_to_dcc', {image_data: dataUrl, target: 'active_dcc'});
+      if (res && res.ok) {
+        alert('⚡ Texture pushed to active DCC viewport!');
+      } else {
+        alert('Notice: ' + (res.error || 'DCC connection standby'));
+      }
+    }
+
+    async function captureViewport(){
+      const res = await apiCall('capture_dcc_viewport', {dcc: 'Autodesk Maya'});
+      if (res && res.image_data) {
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.src = res.image_data;
+      }
+    }
+  </script>
+</body>
+</html>

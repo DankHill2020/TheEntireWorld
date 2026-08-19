@@ -63,6 +63,8 @@ PROVIDERS = {
         display_name="Google Gemini",
         env_vars=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         example_models=(
+            "google:gemini-3.1-pro",
+            "google:gemini-3-flash",
             "google:gemini-2.5-flash",
             "google:gemini-2.5-pro",
         ),
@@ -78,6 +80,7 @@ PROVIDERS = {
         example_models=(
             "anthropic:claude-sonnet-5",
             "anthropic:claude-haiku-4-5",
+            "anthropic:claude-opus-4-1",
         ),
         setup_url="https://console.anthropic.com/settings/keys",
         setup_kind="account_login_or_api_key",
@@ -89,10 +92,27 @@ PROVIDERS = {
 PROVIDER_ORDER = ("ollama", "openai", "x", "google", "anthropic")
 
 
-def models_for_provider(provider_id: str) -> tuple[str, ...]:
-    """Return only models belonging to one UI provider category."""
+def models_for_provider(
+    provider_id: str,
+    cached_catalog: Optional[dict] = None,
+) -> tuple[str, ...]:
+    """Return static and discovered models for one UI provider category.
+
+    :param provider_id: Tech Connector provider identifier.
+    :param cached_catalog: Optional persisted provider-to-model mapping.
+    :return: Stable unique prefixed model identifiers.
+    """
+
     provider = PROVIDERS.get(provider_id)
-    return provider.example_models if provider else ()
+    if not provider:
+        return ()
+    discovered = list((cached_catalog or {}).get(provider_id) or [])
+    prefixed = [
+        value if ":" in value else f"{provider_id}:{value}"
+        for value in (str(item).strip() for item in discovered)
+        if value
+    ]
+    return tuple(dict.fromkeys([*provider.example_models, *prefixed]))
 
 
 def provider_for_model(model: str) -> str:
@@ -119,6 +139,34 @@ def provider_has_credentials(provider_id: str) -> bool:
         if account_provider_is_connected(provider_id):
             return True
     return any(bool(os.environ.get(name)) for name in provider.env_vars)
+
+
+def provider_api_key(provider_id: str, settings: Optional[dict] = None) -> str:
+    """Return an explicitly configured API key for model discovery.
+
+    :param provider_id: Tech Connector provider identifier.
+    :param settings: Optional application settings.
+    :return: API key or an empty string for account-only/local connections.
+    """
+
+    provider = PROVIDERS.get(provider_id)
+    if not provider:
+        return ""
+    for env_var in provider.env_vars:
+        value = str(os.environ.get(env_var) or "").strip()
+        if value:
+            return value
+    values = dict(settings or {})
+    keys = [f"{provider_id}_api_key"]
+    if provider_id == "x":
+        keys.append("xai_api_key")
+    if provider_id == "google":
+        keys.extend(["gemini_api_key", "google_api_key"])
+    for key in keys:
+        value = str(values.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def provider_status_lines() -> list[str]:

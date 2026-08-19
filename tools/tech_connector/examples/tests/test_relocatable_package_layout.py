@@ -17,7 +17,7 @@ from tech_connector.services.unreal.unreal_operation_service import UNREAL_OPERA
 class RelocatablePackageLayoutTests(unittest.TestCase):
     def test_roots_are_derived_from_the_current_checkout(self):
         self.assertEqual("tech_connector", APP_PACKAGE)
-        self.assertEqual(Path(__file__).resolve().parents[1], APP_ROOT)
+        self.assertEqual(Path(__file__).resolve().parents[2], APP_ROOT)
         self.assertEqual("tools", TOOLS_ROOT.name.lower())
         self.assertIn(TOOLS_ROOT, APP_ROOT.parents)
         self.assertEqual(APP_ROOT / "knowledge", KNOWLEDGE_DIR)

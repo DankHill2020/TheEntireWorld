@@ -1861,3 +1861,349 @@ document.addEventListener("click", (event) => {
     openSmartChannelPicker(content, title);
   }
 });
+
+
+/* ==========================================================================
+   STANDALONE OFFLINE MOBILE TOUCH IMAGE EDITOR ENGINE
+   ========================================================================== */
+class StandaloneMobileImageEditor {
+  constructor() {
+    this.canvas = document.getElementById("mobileStandaloneCanvas");
+    if (!this.canvas) return;
+    this.ctx = this.canvas.getContext("2d");
+    this.tool = "brush";
+    this.size = 18;
+    this.opacity = 1.0;
+    this.color = "#16f26a";
+    this.tilt = 0;
+    this.mask = "none";
+    this.isDrawing = false;
+    this.lastX = 0;
+    this.lastY = 0;
+    
+    // Multi-Layer System
+    this.layers = [];
+    this.activeLayerIndex = 0;
+    
+    this.initLayers();
+    this.bindEvents();
+    this.renderLayerList();
+    this.composite();
+  }
+
+  initLayers() {
+    const bgLayer = this.createLayer("Background");
+    const bgCtx = bgLayer.canvas.getContext("2d");
+    bgCtx.fillStyle = "#141c26";
+    bgCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const mainLayer = this.createLayer("Layer 1");
+    this.layers = [bgLayer, mainLayer];
+    this.activeLayerIndex = 1;
+  }
+
+  createLayer(name) {
+    const c = document.createElement("canvas");
+    c.width = this.canvas.width;
+    c.height = this.canvas.height;
+    return { name, canvas: c, visible: true, opacity: 1.0 };
+  }
+
+  activeLayer() {
+    return this.layers[this.activeLayerIndex] || this.layers[0];
+  }
+
+  activeCtx() {
+    return this.activeLayer().canvas.getContext("2d");
+  }
+
+  bindEvents() {
+    const el = this.canvas;
+    const getPos = (e) => {
+      const rect = el.getBoundingClientRect();
+      const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+      const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) * (el.width / rect.width),
+        y: (clientY - rect.top) * (el.height / rect.height)
+      };
+    };
+
+    const start = (e) => {
+      e.preventDefault();
+      this.isDrawing = true;
+      const pos = getPos(e);
+      this.lastX = pos.x;
+      this.lastY = pos.y;
+
+      if (this.tool === "fill") {
+        const ctx = this.activeCtx();
+        ctx.fillStyle = this.color;
+        ctx.fillRect(0, 0, el.width, el.height);
+        this.isDrawing = false;
+        this.composite();
+      } else if (this.tool === "picker") {
+        const c = this.ctx.getImageData(pos.x, pos.y, 1, 1).data;
+        const hex = "#" + ((1 << 24) + (c[0] << 16) + (c[1] << 8) + c[2]).toString(16).slice(1);
+        this.color = hex;
+        document.getElementById("mBrushColor").value = hex;
+        this.isDrawing = false;
+      }
+    };
+
+    const move = (e) => {
+      if (!this.isDrawing) return;
+      e.preventDefault();
+      const pos = getPos(e);
+      const ctx = this.activeCtx();
+
+      ctx.save();
+      ctx.globalAlpha = this.opacity;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      if (this.tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = this.size;
+        ctx.beginPath();
+        ctx.moveTo(this.lastX, this.lastY);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = this.size;
+        ctx.beginPath();
+        ctx.moveTo(this.lastX, this.lastY);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+      this.lastX = pos.x;
+      this.lastY = pos.y;
+      this.composite();
+    };
+
+    const stop = () => {
+      this.isDrawing = false;
+    };
+
+    el.addEventListener("mousedown", start);
+    el.addEventListener("mousemove", move);
+    el.addEventListener("mouseup", stop);
+    el.addEventListener("touchstart", start, { passive: false });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", stop);
+
+    // Inputs listener
+    document.getElementById("mBrushSize")?.addEventListener("input", (e) => this.size = Number(e.target.value));
+    document.getElementById("mBrushOpacity")?.addEventListener("input", (e) => this.opacity = Number(e.target.value) / 100);
+    document.getElementById("mBrushColor")?.addEventListener("change", (e) => this.color = e.target.value);
+    document.getElementById("mBrushTilt")?.addEventListener("input", (e) => this.tilt = Number(e.target.value) / 100);
+    document.getElementById("mBrushMask")?.addEventListener("change", (e) => this.mask = e.target.value);
+  }
+
+  composite() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    for (const l of this.layers) {
+      if (l.visible) {
+        this.ctx.globalAlpha = l.opacity;
+        this.ctx.drawImage(l.canvas, 0, 0);
+      }
+    }
+    this.ctx.globalAlpha = 1.0;
+  }
+
+  addLayer() {
+    const l = this.createLayer(`Layer ${this.layers.length}`);
+    this.layers.push(l);
+    this.activeLayerIndex = this.layers.length - 1;
+    this.renderLayerList();
+    this.composite();
+  }
+
+  deleteLayer() {
+    if (this.layers.length <= 1) return;
+    this.layers.splice(this.activeLayerIndex, 1);
+    this.activeLayerIndex = Math.max(0, this.layers.length - 1);
+    this.renderLayerList();
+    this.composite();
+  }
+
+  clearActiveLayer() {
+    const ctx = this.activeCtx();
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.activeLayerIndex === 0) {
+      ctx.fillStyle = "#141c26";
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+    this.composite();
+  }
+
+  renderLayerList() {
+    const listEl = document.getElementById("mLayerList");
+    if (!listEl) return;
+    document.getElementById("mLayerCount").textContent = `${this.layers.length} Layers`;
+    listEl.innerHTML = this.layers.map((l, i) => `
+      <div class="m-layer-item ${i === this.activeLayerIndex ? "active" : ""}" onclick="window.mEditor.selectLayer(${i})">
+        <button onclick="event.stopPropagation(); window.mEditor.toggleLayerVis(${i})" style="min-height:26px; padding:2px 6px">${l.visible ? "👁" : "🚫"}</button>
+        <span style="flex:1">${l.name}</span>
+        <input type="range" min="0" max="100" value="${Math.round(l.opacity*100)}" style="width:60px" onclick="event.stopPropagation()" oninput="window.mEditor.setLayerOp(${i}, this.value)">
+      </div>
+    `).join("");
+  }
+
+  selectLayer(index) {
+    this.activeLayerIndex = index;
+    this.renderLayerList();
+  }
+
+  toggleLayerVis(index) {
+    if (this.layers[index]) {
+      this.layers[index].visible = !this.layers[index].visible;
+      this.renderLayerList();
+      this.composite();
+    }
+  }
+
+  setLayerOp(index, val) {
+    if (this.layers[index]) {
+      this.layers[index].opacity = Number(val) / 100;
+      this.composite();
+    }
+  }
+
+  saveLocal() {
+    const dataUrl = this.canvas.toDataURL("image/png");
+    localStorage.aiStudioSavedMobileCanvas = dataUrl;
+    alert("💾 Sketch saved locally in Mobile Storage (Works 100% Offline)!");
+  }
+
+  exportPng() {
+    const dataUrl = this.canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `Mobile_Sketch_${Date.now()}.png`;
+    a.click();
+  }
+
+  async sendToPc() {
+    const dataUrl = this.canvas.toDataURL("image/png");
+    try {
+      const res = await api("/api/command", { method: "POST", body: JSON.stringify({ command: "send_mobile_image_to_desktop", payload: { image_data: dataUrl } }) });
+      if (res && res.ok) alert("📲 Drawing sent & opened in Desktop Tech Connector Image Editor!");
+      else alert("Notice: " + (res.error || "PC Disconnected (Saved locally)"));
+    } catch (e) {
+      alert("⚡ Standalone Mode: Sketch saved locally. Will sync when PC connects.");
+      this.saveLocal();
+    }
+  }
+
+  async pushToDcc() {
+    const dataUrl = this.canvas.toDataURL("image/png");
+    try {
+      const res = await api("/api/command", { method: "POST", body: JSON.stringify({ command: "push_texture_to_dcc", payload: { image_data: dataUrl, target: "active_dcc" } }) });
+      if (res && res.ok) alert("⚡ Texture pushed to active DCC viewport!");
+      else alert("Notice: " + (res.error || "DCC Disconnected (Saved locally)"));
+    } catch (e) {
+      alert("⚡ Standalone Mode: Texture edit saved locally.");
+      this.saveLocal();
+    }
+  }
+
+  applyFilter(filterType) {
+    const ctx = this.activeCtx();
+    const w = this.canvas.width, h = this.canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    if (filterType === "cel") {
+      const step = 255 / 3;
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.round(data[i] / step) * step;
+        data[i+1] = Math.round(data[i+1] / step) * step;
+        data[i+2] = Math.round(data[i+2] / step) * step;
+      }
+    } else if (filterType === "sketch") {
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+        if (gray < 80) {
+          data[i] = 30; data[i+1] = 40; data[i+2] = 70;
+        } else {
+          data[i] = 245; data[i+1] = 245; data[i+2] = 240;
+        }
+      }
+    } else if (filterType === "sepia") {
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2];
+        data[i] = Math.min(255, 0.393 * r + 0.769 * g + 0.189 * b);
+        data[i+1] = Math.min(255, 0.349 * r + 0.686 * g + 0.168 * b);
+        data[i+2] = Math.min(255, 0.272 * r + 0.534 * g + 0.131 * b);
+      }
+    } else if (filterType === "pixel") {
+      const blockSize = 8;
+      for (let y = 0; y < h; y += blockSize) {
+        for (let x = 0; x < w; x += blockSize) {
+          const idx = (y * w + x) * 4;
+          const r = Math.round(data[idx] / 32) * 32;
+          const g = Math.round(data[idx+1] / 32) * 32;
+          const b = Math.round(data[idx+2] / 32) * 32;
+          for (let by = 0; by < blockSize && (y + by) < h; by++) {
+            for (let bx = 0; bx < blockSize && (x + bx) < w; bx++) {
+              const bIdx = ((y + by) * w + (x + bx)) * 4;
+              data[bIdx] = r; data[bIdx+1] = g; data[bIdx+2] = b;
+            }
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    this.composite();
+  }
+}
+
+// Global initialization
+document.addEventListener("DOMContentLoaded", () => {
+  window.mEditor = new StandaloneMobileImageEditor();
+});
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-action]");
+  if (!t) return;
+  const act = t.dataset.action;
+  if (act === "m-set-tool") {
+    const tool = t.dataset.tool;
+    if (window.mEditor) {
+      window.mEditor.tool = tool;
+      ["brush","airbrush","pencil","eraser","fill","picker"].forEach(id => {
+        const b = document.getElementById("mTool" + id.charAt(0).toUpperCase() + id.slice(1));
+        if (b) b.classList.toggle("active", id === tool);
+      });
+    }
+  } else if (act === "m-apply-filter") {
+    const filter = t.dataset.filter;
+    if (window.mEditor) window.mEditor.applyFilter(filter);
+  } else if (act === "m-set-atmos") {
+    const lvl = Number(t.dataset.level);
+    const op = Math.max(20, Math.min(100, 100 - (3 - lvl) * 20));
+    document.getElementById("mBrushOpacity").value = op;
+    if (window.mEditor) window.mEditor.opacity = op / 100;
+  } else if (act === "m-add-layer") {
+    if (window.mEditor) window.mEditor.addLayer();
+  } else if (act === "m-delete-layer") {
+    if (window.mEditor) window.mEditor.deleteLayer();
+  } else if (act === "m-clear-canvas") {
+    if (window.mEditor) window.mEditor.clearActiveLayer();
+  } else if (act === "mobile-save-local") {
+    if (window.mEditor) window.mEditor.saveLocal();
+  } else if (act === "mobile-export-png") {
+    if (window.mEditor) window.mEditor.exportPng();
+  } else if (act === "mobile-send-pc") {
+    if (window.mEditor) window.mEditor.sendToPc();
+  } else if (act === "mobile-push-dcc") {
+    if (window.mEditor) window.mEditor.pushToDcc();
+  }
+});
+

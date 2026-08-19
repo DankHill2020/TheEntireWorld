@@ -161,7 +161,10 @@ def verify_unreal_task_sequence(
 ) -> dict[str, Any]:
     """Verify focused clause/task alignment without asking the model to plan."""
 
-    from tech_connector.services.llm_router_service import _query_ollama
+    from tech_connector.services.llm_router_service import (
+        LLMProviderRoute,
+        generate_llm_response,
+    )
 
     started = perf_counter()
     sequences = list(task_sequence.get("clause_sequences") or [])
@@ -245,7 +248,7 @@ def verify_unreal_task_sequence(
             ]
         }
         batch_started = perf_counter()
-        raw = _query_ollama(
+        raw = generate_llm_response(
             model=model,
             prompt=json.dumps(packet, separators=(",", ":"), default=str),
             system=system,
@@ -259,6 +262,8 @@ def verify_unreal_task_sequence(
                 "repeat_penalty": 1.0,
             },
             timeout=max(3, int(timeout)),
+            provider_route=LLMProviderRoute("ollama", model),
+            queue_category="validation",
         )
         elapsed_ms = round((perf_counter() - batch_started) * 1000.0, 3)
         rows = _parse_verdict_rows(str(raw or ""))

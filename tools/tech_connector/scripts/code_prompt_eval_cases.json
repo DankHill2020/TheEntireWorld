@@ -1,0 +1,53 @@
+[
+  {
+    "id": "ask_explain_edit_request",
+    "category": "mode_authority",
+    "prompt": "Explain how to refactor the selected helper and do not edit it.",
+    "max_ms": 600,
+    "code_prompt_profile": {"mode": "ask", "scope": "selection", "depth": "fast", "permission": "read_only"},
+    "expected_routes": ["chat", "project_search"],
+    "expected_mutation_scope": "read_only",
+    "expected_requires_confirmation": false,
+    "expected_requires_execution": false
+  },
+  {
+    "id": "plan_project_refactor",
+    "category": "mode_authority",
+    "prompt": "Refactor the project DCC adapters and consolidate duplicated provider logic.",
+    "code_prompt_profile": {"mode": "plan", "scope": "project", "depth": "deep", "permission": "automatic_safe"},
+    "expected_routes": ["project_search"],
+    "expected_provider": "project_search",
+    "expected_mutation_scope": "read_only",
+    "expected_requires_confirmation": false,
+    "expected_requires_execution": false
+  },
+  {
+    "id": "edit_project_preview",
+    "category": "permission",
+    "prompt": "Find the duplicated DCC provider code and consolidate it.",
+    "code_prompt_profile": {"mode": "edit", "scope": "project", "depth": "balanced", "permission": "preview"},
+    "expected_routes": ["target_discovery"],
+    "expected_provider": "target_discovery",
+    "expected_mutation_scope": "project_code_mutation",
+    "expected_requires_confirmation": true
+  },
+  {
+    "id": "review_project_change",
+    "category": "mode_authority",
+    "prompt": "Review the proposed Python changes for syntax and behavioral regressions.",
+    "code_prompt_profile": {"mode": "review", "scope": "project", "depth": "maximum", "permission": "automatic_safe"},
+    "expected_routes": ["chat", "project_search"],
+    "expected_mutation_scope": "read_only",
+    "expected_requires_confirmation": false,
+    "expected_requires_execution": false
+  },
+  {
+    "id": "dcc_edit_requires_review",
+    "category": "scope",
+    "prompt": "Add the requested rig operation to the Maya session.",
+    "code_prompt_profile": {"mode": "edit", "scope": "dcc", "depth": "deep", "permission": "apply_after_review"},
+    "expected_routes": ["target_discovery", "dcc_execute"],
+    "expected_mutation_scope": "project_code_mutation",
+    "expected_requires_confirmation": true
+  }
+]

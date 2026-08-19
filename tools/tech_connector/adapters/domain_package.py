@@ -71,7 +71,7 @@ class TechConnectorDomainPackage:
         return TechConnectorModelRouter(settings=self.settings)
 
     def get_escalation_policies(self) -> list[TechConnectorLocalModelEscalationPolicy]:
-        return [TechConnectorLocalModelEscalationPolicy()]
+        return [TechConnectorLocalModelEscalationPolicy(settings=self.settings)]
 
     def get_code_understanding_providers(self) -> list[TechConnectorCodeUnderstandingProvider]:
         return [TechConnectorCodeUnderstandingProvider()]

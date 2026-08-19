@@ -1,3 +1,3 @@
-pyinstaller>=6.10
-wheel>=0.43
-setuptools>=70
+pyinstaller>=6.21,<7
+wheel>=0.46,<1
+setuptools>=80,<82

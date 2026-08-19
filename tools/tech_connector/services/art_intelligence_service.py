@@ -1511,7 +1511,8 @@ def _brightest_region(image: Any) -> str:
 
 def _threshold_ratio(image: Any, below: int | None = None, above: int | None = None) -> float:
     gray = image.convert("L")
-    pixels = list(gray.getdata())
+    pixel_reader = getattr(gray, "get_flattened_data", None) or gray.getdata
+    pixels = list(pixel_reader())
     if not pixels:
         return 0.0
     if below is not None:

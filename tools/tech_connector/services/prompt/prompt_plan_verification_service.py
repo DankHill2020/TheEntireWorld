@@ -8,10 +8,10 @@ import json
 import re
 import threading
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 
-PlanVerifierQuery = Callable[[str, str], str | None]
+PlanVerifierQuery = Callable[[str, str], Optional[str]]
 _ALIGNMENT_CACHE: OrderedDict[str, str] = OrderedDict()
 _ALIGNMENT_CACHE_LOCK = threading.Lock()
 _ALIGNMENT_CACHE_LIMIT = 256
@@ -300,6 +300,7 @@ def _default_model_query(system: str, user: str) -> str | None:
             "repeat_penalty": 1.0,
         },
         timeout=10,
+        queue_category="validation",
     )
 
 
@@ -326,11 +327,15 @@ def _default_fallback_model_query(system: str, user: str) -> str | None:
             "repeat_penalty": 1.0,
         },
         timeout=12,
+        queue_category="validation",
     )
 
 
 def _default_alignment_model_query(system: str, user: str) -> str | None:
-    from tech_connector.services.llm_router_service import _query_ollama
+    from tech_connector.services.llm_router_service import (
+        LLMProviderRoute,
+        generate_llm_response,
+    )
     from tech_connector.services.ollama_service import semantic_alignment_model
 
     model = semantic_alignment_model()
@@ -340,7 +345,7 @@ def _default_alignment_model_query(system: str, user: str) -> str | None:
         if cached is not None:
             _ALIGNMENT_CACHE.move_to_end(key)
             return cached
-    response = _query_ollama(
+    response = generate_llm_response(
         model=model,
         prompt=user,
         system=(
@@ -359,6 +364,8 @@ def _default_alignment_model_query(system: str, user: str) -> str | None:
             "think": False,
         },
         timeout=30,
+        provider_route=LLMProviderRoute("ollama", model),
+        queue_category="validation",
     )
     if response:
         with _ALIGNMENT_CACHE_LOCK:

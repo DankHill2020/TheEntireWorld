@@ -131,6 +131,125 @@ def resolve_animation_target(target_hint="", directory="/Game/"):
     return json.dumps(result, indent=2, default=str)
 
 
+def set_slot_animation(anim_bp_path, slot_name, animation_path):
+    """
+    Sets an animation on a montage slot compatible with an Animation Blueprint.
+
+    :param anim_bp_path: Animation Blueprint used to resolve the target skeleton.
+    :param slot_name: montage slot name to assign.
+    :param animation_path: source AnimSequence asset path.
+    :return: JSON operation result with asset and slot readback.
+    """
+    import unreal
+
+    anim_blueprint = _load_anim_blueprint(unreal, anim_bp_path)
+    animation = unreal.EditorAssetLibrary.load_asset(str(animation_path or ""))
+    if animation is None:
+        raise ValueError(f"Animation asset not found: {animation_path}")
+    requested_slot = str(slot_name or "").strip()
+    if not requested_slot:
+        raise ValueError("A non-empty montage slot name is required.")
+
+    blueprint_skeleton = None
+    try:
+        blueprint_skeleton = anim_blueprint.get_editor_property("target_skeleton")
+    except Exception:
+        pass
+    animation_skeleton = _animation_skeleton(animation)
+    if blueprint_skeleton and animation_skeleton and blueprint_skeleton != animation_skeleton:
+        return json.dumps(
+            {
+                "ok": False,
+                "status": "skeleton_mismatch",
+                "anim_blueprint": _asset_path(anim_blueprint),
+                "animation": _asset_path(animation),
+            },
+            indent=2,
+        )
+
+    source_package = str(animation_path or "").split(".", 1)[0]
+    source_folder, _, source_name = source_package.rpartition("/")
+    montage_name = f"{source_name}_{requested_slot}_Montage"
+    montage_path = f"{source_folder}/{montage_name}"
+    montage = unreal.EditorAssetLibrary.load_asset(montage_path)
+    created = False
+    if montage is None:
+        factory_class = getattr(unreal, "AnimMontageFactory", None)
+        montage_class = getattr(unreal, "AnimMontage", None)
+        if factory_class is None or montage_class is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "anim_montage_factory_unavailable",
+                    "missing": [
+                        name
+                        for name, value in (
+                            ("AnimMontageFactory", factory_class),
+                            ("AnimMontage", montage_class),
+                        )
+                        if value is None
+                    ],
+                },
+                indent=2,
+            )
+        factory = factory_class()
+        for property_name, value in (
+            ("source_animation", animation),
+            ("target_skeleton", animation_skeleton or blueprint_skeleton),
+        ):
+            if value is None:
+                continue
+            try:
+                factory.set_editor_property(property_name, value)
+            except Exception:
+                pass
+        montage = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            montage_name,
+            source_folder,
+            montage_class,
+            factory,
+        )
+        created = montage is not None
+    if montage is None:
+        return json.dumps(
+            {"ok": False, "status": "montage_creation_failed", "asset_path": montage_path},
+            indent=2,
+        )
+
+    try:
+        tracks = list(montage.get_editor_property("slot_anim_tracks") or [])
+        for track in tracks:
+            track.set_editor_property("slot_name", requested_slot)
+        if tracks:
+            montage.set_editor_property("slot_anim_tracks", tracks)
+        slot_readback = [str(track.get_editor_property("slot_name")) for track in tracks]
+    except Exception as exc:
+        return json.dumps(
+            {
+                "ok": False,
+                "status": "slot_track_update_failed",
+                "asset_path": montage_path,
+                "error": str(exc),
+            },
+            indent=2,
+        )
+    saved = bool(unreal.EditorAssetLibrary.save_loaded_asset(montage, False))
+    return json.dumps(
+        {
+            "ok": bool(saved and requested_slot in slot_readback),
+            "status": "saved" if saved else "save_failed",
+            "asset_path": _asset_path(montage).split(".", 1)[0],
+            "anim_blueprint": _asset_path(anim_blueprint).split(".", 1)[0],
+            "animation": _asset_path(animation).split(".", 1)[0],
+            "slot_name": requested_slot,
+            "slot_readback": slot_readback,
+            "created": created,
+            "saved": saved,
+        },
+        indent=2,
+    )
+
+
 def inspect_imported_animation_pipeline(
     imported_paths,
     target_skeleton_path="",

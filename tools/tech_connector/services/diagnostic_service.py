@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from tech_connector.models.constants import temp_output_path
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 
 
 BACKEND_LOG_PATH = temp_output_path("backend.jsonl", subdir="backend_logs")
@@ -57,8 +58,7 @@ def log_backend_event(
             payload["error"] = _clip(error)
         if details:
             payload["details"] = details
-        with BACKEND_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        append_jsonl_record(BACKEND_LOG_PATH, payload)
     except Exception:
         pass
 
@@ -128,8 +128,7 @@ def log_ui_event(event: str, *, enabled: bool = True, **details: Any) -> None:
             "event": str(event or "ui_event"),
             "details": details,
         }
-        with DIAGNOSTIC_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True, default=str) + "\n")
+        append_jsonl_record(DIAGNOSTIC_PATH, payload)
     except Exception:
         pass
 

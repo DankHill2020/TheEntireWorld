@@ -98,7 +98,7 @@ class SplashPreloadWorker(QThread):
         return "3D_Mesh_Painter_Ready"
 
     def _preload_dcc_bridges(self) -> str:
-        from tech_connector.services.dcc.dcc_bridge_setup import auto_reconnect_dcc_bridges
+        from tech_connector.game_engine.integration.dcc_bridge_setup import auto_reconnect_dcc_bridges
         auto_reconnect_dcc_bridges()
         return "DCC_Bridges_Warmed"
 
@@ -106,3 +106,4 @@ class SplashPreloadWorker(QThread):
         from tech_connector.services.tutorial_mode_service import TutorialModeService
         svc = TutorialModeService()
         return "Tutorial_Service_Ready"
+

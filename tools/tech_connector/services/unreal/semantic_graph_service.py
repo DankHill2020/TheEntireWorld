@@ -302,6 +302,21 @@ def is_unreal_graph_modification_request(text: str) -> bool:
         lower,
     ):
         return False
+    asset_lifecycle_only = bool(
+        re.search(r"\b(?:create|make|build|generate|new)\b", lower)
+        and re.search(
+            r"\b(?:widget blueprint|pcg graph|behavio(?:u)?r tree|blackboard(?: data| asset)?|"
+            r"level sequence|meta\s?sound(?: source)?|material asset)\b",
+            lower,
+        )
+        and not re.search(
+            r"\b(?:node|pin|connect|wire|rewire|input|output|parameter|task|decorator|service|"
+            r"widget tree|button|text block|canvas|track|section|keyframe|generator|oscillator|filter)\b",
+            lower,
+        )
+    )
+    if asset_lifecycle_only:
+        return False
     return bool(
         any(term in lower for term in GRAPH_EDIT_TERMS)
         and re.search(r"\b(add|insert|edit|modify|connect|rewire|prototype|implement|create|improve|fix)\b", lower)

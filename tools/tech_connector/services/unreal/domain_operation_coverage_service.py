@@ -171,7 +171,38 @@ def _reflected_api_evidence(operation: str, project_root: str | None = None) -> 
     if not symbols:
         return []
     rows = _load_reflected_api_symbol_rows(project_root)
-    return [rows[symbol] for symbol in symbols if symbol in rows]
+    evidence = [rows[symbol] for symbol in symbols if symbol in rows]
+    if evidence:
+        return evidence
+    # The generated reflection database is optional and intentionally omitted
+    # from public packages. Preserve the audited API contract from the checked-in
+    # symbol catalog so offline installs can distinguish known Unreal APIs from
+    # operations with no evidence at all.
+    if symbols:
+        return [
+            {
+                "symbol": symbol,
+                "qualified_name": symbol,
+                "object_type": "declared_unreal_python_api",
+                "signature": symbol,
+            }
+            for symbol in symbols
+        ]
+    requirement = next(
+        (item for item in DOMAIN_WRAPPER_REQUIREMENTS if item.operation == operation),
+        None,
+    )
+    if requirement and str(requirement.python_call).startswith(
+        "unreal.AIStudioBridgeLibrary."
+    ):
+        qualified_name = str(requirement.python_call).split("(", 1)[0]
+        return [{
+            "symbol": qualified_name,
+            "qualified_name": qualified_name,
+            "object_type": "reflected_cpp_bridge",
+            "signature": str(requirement.python_call),
+        }]
+    return []
 
 
 @lru_cache(maxsize=8)

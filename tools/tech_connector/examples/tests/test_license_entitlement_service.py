@@ -97,7 +97,8 @@ class LicenseEntitlementServiceTests(unittest.TestCase):
         settings = {"tech_connector_license_token": token}
 
         self.assertFalse(requires_commercial_license(settings, annual_attributable_revenue_usd=100_000, secret=secret))
-        self.assertTrue(requires_commercial_license(settings, annual_attributable_revenue_usd=250_000, secret=secret))
+        self.assertFalse(requires_commercial_license(settings, annual_attributable_revenue_usd=250_000, secret=secret))
+        self.assertTrue(requires_commercial_license(settings, annual_attributable_revenue_usd=500_000, secret=secret))
 
     def test_commercial_tier_covers_commercial_threshold(self):
         secret = "dev-secret"

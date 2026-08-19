@@ -27,6 +27,7 @@ class MainWindow(
     """Primary IDE window. Delegates business logic to services and bridges."""
 
     dynamic_models_loaded = Signal(list)
+    provider_models_loaded = Signal(str, list)
     thread_log_message = Signal(str)
     live_process_update = Signal(str)
     response_started = Signal(str)

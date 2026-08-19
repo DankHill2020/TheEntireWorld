@@ -1,0 +1,10 @@
+PySide6>=6.10.1,<6.12
+fastmcp>=3,<4
+pywinpty>=3,<4; platform_system == "Windows"
+imageio>=2.37,<3
+imageio-ffmpeg>=0.6,<1
+requests>=2.32,<3
+certifi>=2025.8,<2027
+numpy>=2.3,<3
+Pillow>=12,<13
+PyYAML>=6,<7

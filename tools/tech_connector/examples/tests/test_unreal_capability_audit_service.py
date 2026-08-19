@@ -47,9 +47,10 @@ class TestUnrealCapabilityAuditService(unittest.TestCase):
         audit = audit_unreal_capability_catalogs()
 
         self.assertEqual([], audit["plugin_body_gaps"])
-        self.assertEqual(48, audit["counts"]["plugin_manifest_capabilities"])
-        self.assertEqual(48, audit["counts"]["header_functions"])
-        self.assertEqual(48, audit["counts"]["cpp_functions"])
+        manifest_count = audit["counts"]["plugin_manifest_capabilities"]
+        self.assertGreaterEqual(manifest_count, 48)
+        self.assertEqual(manifest_count, audit["counts"]["header_functions"])
+        self.assertEqual(manifest_count, audit["counts"]["cpp_functions"])
         self.assertEqual(19, audit["counts"]["cpp_domain_wrapper_requirements"])
 
     def test_wrapper_plan_recognizes_existing_functional_reflected_body(self) -> None:
@@ -202,7 +203,7 @@ class TestUnrealCapabilityAuditService(unittest.TestCase):
             behavior["python_api"],
         )
         self.assertEqual(
-            "unreal.GeometryScript_MeshBooleans.apply_mesh_boolean",
+            "unreal.DynamicMesh.apply_mesh_boolean",
             geometry["python_api"][0]["qualified_name"],
         )
 

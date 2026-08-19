@@ -5,6 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "tech_connector").is_dir()
+)
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
 

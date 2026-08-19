@@ -85,6 +85,8 @@ from tech_connector.services.settings_service import best_config
 from tech_connector.ui.first_run_dialog import FirstRunDialog
 from tech_connector.ui.chat_worker_dialogs import CredentialsPromptDialog
 from tech_connector.ui.unreal_editor_dialogs import WebImportDialog
+from tech_connector.ui.design_system import set_ui_role
+from tech_connector.ui.icons import configure_button
 
 from tech_connector.services.knowledge_background_service import KnowledgeBuildWorker, KnowledgeBuildPhase
 
@@ -920,7 +922,10 @@ class MainWindowHistoryAssetsMixin:
                 self.add_model_option("Installed", model, self._seen_models)
         else:
             provider = PROVIDERS[provider_id]
-            for model in models_for_provider(provider_id):
+            for model in models_for_provider(
+                provider_id,
+                self.settings.get("provider_model_catalog") or {},
+            ):
                 self.add_model_option(provider.display_name, model, self._seen_models)
 
         index = self.model_box.findData(selected_model)
@@ -1182,14 +1187,142 @@ class MainWindowHistoryAssetsMixin:
     def show_settings_dialog(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
-        dialog.resize(860, 760)
+        dialog.resize(920, 820)
 
-        layout = QVBoxLayout(dialog)
+        dialog_layout = QVBoxLayout(dialog)
+        settings_header = QHBoxLayout()
+        settings_title = QLabel("Settings")
+        set_ui_role(settings_title, "title")
+        settings_header.addWidget(settings_title, 1)
+        settings_header.addWidget(QLabel("Jump to:"))
+        settings_nav = QComboBox()
+        settings_nav.setMinimumWidth(210)
+        settings_header.addWidget(settings_nav)
+        dialog_layout.addLayout(settings_header)
+        settings_scroll = QScrollArea(dialog)
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QFrame.NoFrame)
+        settings_body = QWidget(settings_scroll)
+        layout = QVBoxLayout(settings_body)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
+        settings_scroll.setWidget(settings_body)
+        dialog_layout.addWidget(settings_scroll)
+
+        directory_title = QLabel("Project Directories")
+        set_ui_role(directory_title, "sectionTitle")
+        layout.addWidget(directory_title)
+
+        directory_help = QLabel(
+            "Tools contains Tech Connector and pipeline code. Game accepts a TC, Unreal, Unity, "
+            "Godot, or other engine project. Art Source contains editable source assets."
+        )
+        directory_help.setWordWrap(True)
+        set_ui_role(directory_help, "muted")
+        layout.addWidget(directory_help)
+
+        directories = self.service.resolved_project_directories()
+        path_style = (
+            "QLineEdit { background: #0c1016; border: 1px solid #273241; "
+            "color: #edf2f7; padding: 5px; border-radius: 6px; }"
+        )
+
+        tools_directory_row = QHBoxLayout()
+        tools_directory_row.addWidget(QLabel("Tools Project:"))
+        tools_project_edit = QLineEdit(str(directories.tools_project))
+        tools_project_edit.setStyleSheet(path_style)
+        tools_project_edit.setToolTip("The source workspace used by the editor, index, pipelines, and Tech Connector tools.")
+        tools_directory_row.addWidget(tools_project_edit, 1)
+        browse_tools_project_btn = QPushButton("Browse")
+        configure_button(browse_tools_project_btn, "folder", text="Browse", role="secondary")
+        tools_directory_row.addWidget(browse_tools_project_btn)
+        layout.addLayout(tools_directory_row)
+
+        game_directory_row = QHBoxLayout()
+        custom_game_directory_checkbox = QCheckBox("Custom Game Project")
+        custom_game_directory_checkbox.setChecked(directories.custom_game_project)
+        custom_game_directory_checkbox.setToolTip("Use an existing Unreal, Unity, Godot, TC, or other engine project.")
+        game_directory_row.addWidget(custom_game_directory_checkbox)
+        game_project_edit = QLineEdit(str(directories.game_project))
+        game_project_edit.setStyleSheet(path_style)
+        game_directory_row.addWidget(game_project_edit, 1)
+        browse_game_project_btn = QPushButton("Browse")
+        configure_button(browse_game_project_btn, "folder", text="Browse", role="secondary")
+        game_directory_row.addWidget(browse_game_project_btn)
+        layout.addLayout(game_directory_row)
+
+        art_directory_row = QHBoxLayout()
+        custom_art_directory_checkbox = QCheckBox("Custom Art Source")
+        custom_art_directory_checkbox.setChecked(directories.custom_art_source)
+        custom_art_directory_checkbox.setToolTip("Use a separate source-art depot instead of the TC game's ArtSource folder.")
+        art_directory_row.addWidget(custom_art_directory_checkbox)
+        art_source_edit = QLineEdit(str(directories.art_source))
+        art_source_edit.setStyleSheet(path_style)
+        art_directory_row.addWidget(art_source_edit, 1)
+        browse_art_source_btn = QPushButton("Browse")
+        configure_button(browse_art_source_btn, "folder", text="Browse", role="secondary")
+        art_directory_row.addWidget(browse_art_source_btn)
+        layout.addLayout(art_directory_row)
+
+        project_kind_label = QLabel("")
+        project_kind_label.setStyleSheet("color: #8fb5d8; font-size: 11px;")
+        layout.addWidget(project_kind_label)
+
+        remembered_game = [str(self.settings.get("game_project_dir") or directories.game_project)]
+        remembered_art = [str(self.settings.get("art_source_dir") or directories.art_source)]
+
+        def sync_project_directory_controls(*_args):
+            tools_path = Path(tools_project_edit.text().strip() or str(TOOLS_ROOT)).expanduser()
+            game_custom = custom_game_directory_checkbox.isChecked()
+            game_path = Path(remembered_game[0]).expanduser() if game_custom and remembered_game[0] else tools_path / "TCGame"
+            art_custom = custom_art_directory_checkbox.isChecked()
+            art_path = Path(remembered_art[0]).expanduser() if art_custom and remembered_art[0] else game_path / "ArtSource"
+            game_project_edit.blockSignals(True)
+            art_source_edit.blockSignals(True)
+            game_project_edit.setText(str(game_path))
+            art_source_edit.setText(str(art_path))
+            game_project_edit.blockSignals(False)
+            art_source_edit.blockSignals(False)
+            game_project_edit.setEnabled(game_custom)
+            browse_game_project_btn.setEnabled(game_custom)
+            art_source_edit.setEnabled(art_custom)
+            browse_art_source_btn.setEnabled(art_custom)
+            from tech_connector.services.project_directory_service import detect_game_project_kind
+
+            kind = detect_game_project_kind(game_path).replace("_", " ").title()
+            mode = "custom" if game_custom else "TC default"
+            project_kind_label.setText(f"Game: {kind} ({mode})  |  Art: {'custom' if art_custom else 'TC default'}")
+
+        def browse_directory(edit, title, remember=None):
+            selected = QFileDialog.getExistingDirectory(
+                dialog,
+                title,
+                edit.text().strip() or str(Path.home()),
+            )
+            if selected:
+                if remember is not None:
+                    remember[0] = selected
+                edit.setText(selected)
+                sync_project_directory_controls()
+
+        tools_project_edit.textChanged.connect(sync_project_directory_controls)
+        custom_game_directory_checkbox.toggled.connect(sync_project_directory_controls)
+        custom_art_directory_checkbox.toggled.connect(sync_project_directory_controls)
+        game_project_edit.textEdited.connect(lambda value: remembered_game.__setitem__(0, value))
+        art_source_edit.textEdited.connect(lambda value: remembered_art.__setitem__(0, value))
+        browse_tools_project_btn.clicked.connect(
+            lambda: browse_directory(tools_project_edit, "Select Tools Project")
+        )
+        browse_game_project_btn.clicked.connect(
+            lambda: browse_directory(game_project_edit, "Select Game Project", remembered_game)
+        )
+        browse_art_source_btn.clicked.connect(
+            lambda: browse_directory(art_source_edit, "Select Art Source", remembered_art)
+        )
+        sync_project_directory_controls()
 
         title = QLabel("Model Providers")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        set_ui_role(title, "sectionTitle")
         layout.addWidget(title)
 
         help_text = QLabel(
@@ -1198,7 +1331,7 @@ class MainWindowHistoryAssetsMixin:
             "switching models."
         )
         help_text.setWordWrap(True)
-        help_text.setStyleSheet("color: #cfcfcf;")
+        set_ui_role(help_text, "muted")
         layout.addWidget(help_text)
 
         source_row = QHBoxLayout()
@@ -1252,7 +1385,10 @@ class MainWindowHistoryAssetsMixin:
             else:
                 choices = [
                     (PROVIDERS[provider_id].display_name, model)
-                    for model in models_for_provider(provider_id)
+                    for model in models_for_provider(
+                        provider_id,
+                        self.settings.get("provider_model_catalog") or {},
+                    )
                 ]
             for label, model in choices:
                 if model and model not in seen:
@@ -1266,7 +1402,74 @@ class MainWindowHistoryAssetsMixin:
             lambda _index: populate_settings_models()
         )
         model_row.addWidget(model_box, 1)
+        refresh_catalog_btn = QPushButton("Refresh models")
+        configure_button(refresh_catalog_btn, "database", text="Refresh models", role="secondary")
+        refresh_catalog_btn.setToolTip(
+            "Fetch the selected provider's current model catalog with the configured API key."
+        )
+        model_row.addWidget(refresh_catalog_btn)
         layout.addLayout(model_row)
+
+        def refresh_provider_catalog():
+            provider_id = str(provider_box.currentData() or "ollama")
+            if provider_id == "ollama":
+                populate_settings_models()
+                return
+            from tech_connector.services.model_provider_service import provider_api_key
+
+            api_key = provider_api_key(provider_id, self.settings)
+            if not api_key:
+                QMessageBox.information(
+                    dialog,
+                    "Provider model catalog",
+                    "A provider API key is required for catalog discovery. Account-login sessions remain usable with the built-in compatibility catalog.",
+                )
+                return
+            refresh_catalog_btn.setEnabled(False)
+            refresh_catalog_btn.setText("Refreshing...")
+
+            def worker():
+                models = []
+                try:
+                    from tech_connector.services.provider_model_catalog_service import (
+                        discover_provider_models,
+                    )
+
+                    models = list(
+                        discover_provider_models(
+                            provider_id,
+                            api_key=api_key,
+                            refresh=True,
+                        )
+                    )
+                except Exception as exc:
+                    self.thread_log_message.emit(
+                        f"\n[Model Catalog] {provider_id} refresh failed: {exc}\n"
+                    )
+                self.provider_models_loaded.emit(provider_id, models)
+
+            import threading
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        refresh_catalog_btn.clicked.connect(refresh_provider_catalog)
+
+        def on_dialog_catalog(provider_id, models):
+            if str(provider_id) != str(provider_box.currentData() or ""):
+                return
+            refresh_catalog_btn.setEnabled(True)
+            refresh_catalog_btn.setText("Refresh models")
+            populate_settings_models()
+
+        self.provider_models_loaded.connect(on_dialog_catalog)
+
+        def disconnect_dialog_catalog(*_args):
+            try:
+                self.provider_models_loaded.disconnect(on_dialog_catalog)
+            except (RuntimeError, TypeError):
+                pass
+
+        dialog.finished.connect(disconnect_dialog_catalog)
 
         selected_requirement = QLabel("")
         selected_requirement.setWordWrap(True)
@@ -1300,9 +1503,7 @@ class MainWindowHistoryAssetsMixin:
         update_dialog_requirement()
 
         runtime_title = QLabel("Source & Runtime")
-        runtime_title.setStyleSheet(
-            "font-weight: bold; color: #64b5f6; margin-top: 10px;"
-        )
+        set_ui_role(runtime_title, "sectionTitle")
         layout.addWidget(runtime_title)
 
         config_row = QHBoxLayout()
@@ -1322,6 +1523,7 @@ class MainWindowHistoryAssetsMixin:
         settings_config_box.setToolTip("Config file passed to MCPHost with --config.")
         config_row.addWidget(settings_config_box, 1)
         browse_config_btn = QPushButton("Browse")
+        configure_button(browse_config_btn, "folder", text="Browse", role="secondary")
         config_row.addWidget(browse_config_btn)
         layout.addLayout(config_row)
 
@@ -1390,9 +1592,7 @@ class MainWindowHistoryAssetsMixin:
         layout.addLayout(source_settings_row)
 
         routing_title = QLabel("Model Routing")
-        routing_title.setStyleSheet(
-            "font-weight: bold; color: #64b5f6; margin-top: 8px;"
-        )
+        set_ui_role(routing_title, "sectionTitle")
         layout.addWidget(routing_title)
 
         routing_row = QHBoxLayout()
@@ -1446,9 +1646,7 @@ class MainWindowHistoryAssetsMixin:
         layout.addLayout(routing_row)
 
         research_title = QLabel("Research Mode")
-        research_title.setStyleSheet(
-            "font-weight: bold; color: #64b5f6; margin-top: 8px;"
-        )
+        set_ui_role(research_title, "sectionTitle")
         layout.addWidget(research_title)
 
         research_row_1 = QHBoxLayout()
@@ -1572,6 +1770,7 @@ class MainWindowHistoryAssetsMixin:
         )
         external_tools_row.addWidget(external_tools_edit, 1)
         browse_tools_btn = QPushButton("Browse")
+        configure_button(browse_tools_btn, "folder", text="Browse", role="secondary")
         external_tools_row.addWidget(browse_tools_btn)
         layout.addLayout(external_tools_row)
 
@@ -1600,9 +1799,7 @@ class MainWindowHistoryAssetsMixin:
         browse_tools_btn.clicked.connect(browse_external_tools_dir)
 
         provider_title = QLabel("Enterprise Connections & API Keys")
-        provider_title.setStyleSheet(
-            "font-weight: bold; color: #64b5f6; margin-top: 10px;"
-        )
+        set_ui_role(provider_title, "sectionTitle")
         layout.addWidget(provider_title)
 
         vcs_row = QHBoxLayout()
@@ -1758,6 +1955,8 @@ class MainWindowHistoryAssetsMixin:
         buttons.addStretch(1)
         save_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
+        configure_button(save_btn, "check", text="Save settings", role="primary")
+        configure_button(cancel_btn, "close", text="Cancel", role="quiet")
         buttons.addWidget(save_btn)
         buttons.addWidget(cancel_btn)
         layout.addLayout(buttons)
@@ -1779,6 +1978,20 @@ class MainWindowHistoryAssetsMixin:
             self.settings["openai_api_key"] = openai_key
             self.settings["anthropic_api_key"] = anthropic_key
             self.settings["xai_api_key"] = xai_key
+
+            tools_project = tools_project_edit.text().strip()
+            if not tools_project:
+                QMessageBox.warning(dialog, "Project Directories", "Tools Project is required.")
+                return
+            previous_tools_project = str(self.settings.get("active_project") or "")
+            resolved_directories = self.service.set_project_directories(
+                tools_project=tools_project,
+                custom_game_project=custom_game_directory_checkbox.isChecked(),
+                game_project=remembered_game[0],
+                custom_art_source=custom_art_directory_checkbox.isChecked(),
+                art_source=remembered_art[0],
+            )
+            self.settings = self.service.settings
 
             if gemini_key:
                 os.environ["GEMINI_API_KEY"] = gemini_key
@@ -1915,11 +2128,36 @@ class MainWindowHistoryAssetsMixin:
             self.update_active_response_model_label(model)
             self.append(
                 f"\n[Settings] Saved provider/source/runtime settings: {mode}, {model}\n"
+                f"[Projects] Tools: {resolved_directories.tools_project}\n"
+                f"[Projects] Game: {resolved_directories.game_project}\n"
+                f"[Projects] Art: {resolved_directories.art_source}\n"
             )
+            if previous_tools_project != str(resolved_directories.tools_project):
+                self.update_project_header()
+                self.refresh_recent_projects()
+                self.load_project_tree_lazy()
+                self.start_async_symbol_indexing()
             dialog.accept()
 
         save_btn.clicked.connect(save_settings_from_dialog)
         cancel_btn.clicked.connect(dialog.reject)
+
+        settings_sections = (
+            ("Project directories", directory_title),
+            ("Model provider", title),
+            ("Source & runtime", runtime_title),
+            ("Model routing", routing_title),
+            ("Research mode", research_title),
+            ("Connections & API keys", provider_title),
+        )
+        for section_label, _section_widget in settings_sections:
+            settings_nav.addItem(section_label)
+
+        def navigate_settings_section(index):
+            if 0 <= index < len(settings_sections):
+                settings_scroll.ensureWidgetVisible(settings_sections[index][1], 0, 12)
+
+        settings_nav.currentIndexChanged.connect(navigate_settings_section)
         dialog.exec()
 
     def _on_dynamic_models_loaded(self, models):
@@ -1935,3 +2173,34 @@ class MainWindowHistoryAssetsMixin:
                 "ollama",
                 selected_model=selected_model,
             )
+
+    def _on_provider_models_loaded(self, provider_id, models):
+        """Persist and display a refreshed cloud-provider model catalog.
+
+        :param provider_id: Tech Connector provider identifier.
+        :param models: Raw provider model identifiers.
+        """
+
+        provider_id = str(provider_id or "").strip()
+        values = [str(item).strip() for item in list(models or []) if str(item).strip()]
+        if not provider_id or not values:
+            return
+        catalog = dict(self.settings.get("provider_model_catalog") or {})
+        catalog[provider_id] = values
+        self.settings["provider_model_catalog"] = catalog
+        try:
+            self.service.settings["provider_model_catalog"] = catalog
+            self.service.save_settings()
+        except Exception:
+            pass
+        if (
+            hasattr(self, "model_provider_box")
+            and self.model_provider_box.currentData() == provider_id
+        ):
+            self.refresh_model_options_for_provider(
+                provider_id,
+                selected_model=self.settings.get("model"),
+            )
+        self.append(
+            f"\n[Model Catalog] Loaded {len(values)} current {provider_id} model(s).\n"
+        )

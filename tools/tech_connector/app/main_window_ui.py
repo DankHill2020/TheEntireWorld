@@ -80,14 +80,30 @@ from tech_connector.services.ollama_service import (
 )
 
 from tech_connector.services.settings_service import best_config
+from tech_connector.services.native_project_build_service import source_location_from_output_line
 
 from tech_connector.ui.chat_worker_dialogs import ChatLogBrowser
 from tech_connector.ui.unreal_editor_dialogs import EditorDiffWidget
 from tech_connector.ui.detachable_tabs import DetachableTabWidget
+from tech_connector.ui.design_system import set_ui_role
+from tech_connector.ui.icons import configure_button, icon
 try:
     from tech_connector.editor.editor_widget import CodeEditor
 except Exception:
     CodeEditor = None
+
+
+class NavigableOutputEdit(QPlainTextEdit):
+    """Output log that opens source locations embedded in diagnostic lines."""
+
+    sourceLocationActivated = Signal(str, int, int)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        cursor = self.cursorForPosition(event.position().toPoint())
+        location = source_location_from_output_line(cursor.block().text())
+        if location is not None:
+            self.sourceLocationActivated.emit(*location)
 
 
 
@@ -105,35 +121,40 @@ class MainWindowUiMixin:
 
     def build_ui(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
 
         self.top_section_widget = QWidget()
+        self.top_section_widget.setObjectName("appHeader")
         top_layout = QVBoxLayout(self.top_section_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setContentsMargins(6, 4, 6, 5)
 
         header = QHBoxLayout()
         if LOGO_PATH.exists():
             logo = QLabel()
             logo.setPixmap(
                 QPixmap(str(LOGO_PATH)).scaled(
-                    72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
             )
-            logo.setStyleSheet("margin-right: 12px; padding: 2px;")
+            logo.setStyleSheet("margin-right: 6px; padding: 0;")
             header.addWidget(logo)
 
         title_col = QVBoxLayout()
+        title_col.setSpacing(1)
         title = QLabel(APP_DISPLAY_NAME)
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #5bd000;")
+        set_ui_role(title, "title")
         title_col.addWidget(title)
         subtitle = QLabel(
-            "Maya • Unreal • Blender • MotionBuilder • AST Knowledge Index • Pipeline Assistant"
+            "Build, connect, and automate across DCCs and game engines"
         )
-        subtitle.setStyleSheet("color: #bdbdbd;")
+        set_ui_role(subtitle, "muted")
         title_col.addWidget(subtitle)
         header.addLayout(title_col)
 
         self.status = QLabel("Stopped")
-        self.status.setStyleSheet("font-weight: bold; color: #5bd000; padding: 3px 8px;")
+        set_ui_role(self.status, "status")
+        self.status.setProperty("statusState", "idle")
         self.status.setMinimumWidth(82)
         self.status.setAlignment(Qt.AlignCenter)
         self.status.setToolTip(f"Current {APP_SHORT_NAME} application state. Detailed routing, model, knowledge, DCC, and VCS status is shown in the bottom status panel.")
@@ -148,6 +169,7 @@ class MainWindowUiMixin:
         controls.setSpacing(8)
 
         source_label = QLabel("Source:")
+        set_ui_role(source_label, "muted")
         source_label.setFixedWidth(56)
         source_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         controls.addWidget(source_label)
@@ -173,6 +195,7 @@ class MainWindowUiMixin:
         selected_model = self.settings.get("model", DEFAULT_MODEL)
 
         provider_label = QLabel("Provider:")
+        set_ui_role(provider_label, "muted")
         provider_label.setFixedWidth(58)
         provider_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         controls.addWidget(provider_label)
@@ -192,6 +215,7 @@ class MainWindowUiMixin:
         controls.addWidget(self.model_provider_box)
 
         model_label = QLabel("Model:")
+        set_ui_role(model_label, "muted")
         model_label.setFixedWidth(52)
         model_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         controls.addWidget(model_label)
@@ -216,6 +240,7 @@ class MainWindowUiMixin:
 
         # Dynamic Ollama Installed Models - Non-blocking
         self.dynamic_models_loaded.connect(self._on_dynamic_models_loaded)
+        self.provider_models_loaded.connect(self._on_provider_models_loaded)
         import threading
 
         def load_models():
@@ -239,16 +264,20 @@ class MainWindowUiMixin:
         self.model_provider_box.currentIndexChanged.connect(
             self.on_model_provider_changed
         )
-        self.model_box.setMinimumWidth(360)
-        self.model_box.setMaximumWidth(560)
+        self.model_box.setMinimumWidth(260)
+        self.model_box.setMaximumWidth(480)
         controls.addWidget(self.model_box, 1)
         controls.addStretch(1)
         controls.addWidget(self.status)
 
-        settings_btn = QPushButton("⚙")
-        settings_btn.setToolTip("Settings — configure models, safety, knowledge, DCC integrations, pipelines, and community tools")
-        settings_btn.setMaximumWidth(34)
-        settings_btn.setMinimumWidth(30)
+        settings_btn = QPushButton()
+        configure_button(
+            settings_btn,
+            "settings",
+            tooltip="Settings — models, safety, knowledge, integrations, and pipelines",
+            role="quiet",
+            icon_only=True,
+        )
         settings_btn.clicked.connect(self.show_settings_dialog)
         controls.addWidget(settings_btn)
         header.addWidget(self.menu_bar_controls_widget, 1)
@@ -467,7 +496,7 @@ class MainWindowUiMixin:
         self.project_restore_btn.setToolTip("Restore the hidden Project panel")
         self.project_restore_btn.setMaximumWidth(64)
         self.project_restore_btn.setMinimumWidth(54)
-        self.project_restore_btn.setStyleSheet("padding: 2px 6px; font-size: 11px;")
+        configure_button(self.project_restore_btn, "panel_left", text="Project", role="quiet")
         self.project_restore_btn.clicked.connect(self.toggle_project_panel)
         self.project_restore_btn.setVisible(False)
 
@@ -476,20 +505,24 @@ class MainWindowUiMixin:
         self.main_splitter.setHandleWidth(10)
 
         left = QWidget()
+        left.setObjectName("projectSidebar")
         left.setMinimumWidth(220)
         left.setMaximumWidth(900)
         left.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         left_layout = QVBoxLayout(left)
 
         project_header = QHBoxLayout()
-        project_header.addWidget(QLabel("Project"), 1)
-        self.project_setup_toggle_btn = QPushButton("Setup -")
-        self.project_setup_toggle_btn.setToolTip("Collapse or expand project setup controls.")
-        self.project_setup_toggle_btn.setMaximumWidth(76)
-        self.project_setup_toggle_btn.setStyleSheet("padding: 2px 6px; font-size: 11px;")
-        self.project_setup_toggle_btn.clicked.connect(self.toggle_project_setup_section)
-        project_header.addWidget(self.project_setup_toggle_btn)
+        project_title = QLabel("Project")
+        set_ui_role(project_title, "sectionTitle")
+        project_header.addWidget(project_title, 1)
         self.toggle_project_btn = QPushButton("Hide")
+        configure_button(
+            self.toggle_project_btn,
+            "panel_left",
+            text="Hide",
+            tooltip="Hide the project sidebar",
+            role="quiet",
+        )
         self.toggle_project_btn.clicked.connect(self.toggle_project_panel)
         project_header.addWidget(self.toggle_project_btn)
         left_layout.addLayout(project_header)
@@ -509,14 +542,14 @@ class MainWindowUiMixin:
             )
             sidebar_logo.setPixmap(
                 logo_crop.scaled(
-                    336,
-                    126,
+                    220,
+                    72,
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation,
                 )
             )
-            sidebar_logo.setMinimumHeight(118)
-            sidebar_logo.setMaximumHeight(132)
+            sidebar_logo.setMinimumHeight(64)
+            sidebar_logo.setMaximumHeight(78)
             sidebar_logo.setStyleSheet(
                 "QLabel1projectSidebarLogo { "
                 "background-color: #000102; "
@@ -535,6 +568,11 @@ class MainWindowUiMixin:
         self.project_root_label.setStyleSheet("color: #bdbdbd;")
         self.project_root_label.setWordWrap(True)
         project_setup_layout.addWidget(self.project_root_label)
+
+        self.project_directories_label = QLabel("Game: TCGame  |  Art: ArtSource")
+        self.project_directories_label.setStyleSheet("color: #7f9bb3; font-size: 10px;")
+        self.project_directories_label.setWordWrap(True)
+        project_setup_layout.addWidget(self.project_directories_label)
 
         project_actions = QHBoxLayout()
         load_project_btn = QPushButton("Load Project")
@@ -651,9 +689,11 @@ class MainWindowUiMixin:
         main_layout = QVBoxLayout(main)
 
         self.workspace_tabs = DetachableTabWidget(self, tab_type="feature")
+        self.workspace_tabs.set_tab_close_handler(self.close_workspace_tab)
+        self.workspace_tabs.setTabsClosable(True)
         self.main_fullscreen_btn = QPushButton("Full Screen")
+        configure_button(self.main_fullscreen_btn, "maximize", text="Focus", role="quiet")
         self.main_fullscreen_btn.setCheckable(True)
-        self.main_fullscreen_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
         self.main_fullscreen_btn.setToolTip("Focus the current tab by hiding surrounding panels. Detached tabs use real fullscreen.")
         self.main_fullscreen_btn.clicked.connect(self.toggle_main_window_fullscreen)
         self.workspace_tabs.setCornerWidget(self.project_restore_btn, Qt.TopLeftCorner)
@@ -672,6 +712,8 @@ class MainWindowUiMixin:
             tab_type="feature",
             root_container=self.workspace_tabs,
         )
+        self.workspace_anchor_tabs.set_tab_close_handler(self.close_workspace_tab)
+        self.workspace_anchor_tabs.setTabsClosable(True)
         self.workspace_anchor_tabs.setToolTip("Anchored feature tabs. Drag compatible feature tabs here or use Window > Anchor Current Tab Right.")
         self.workspace_anchor_tabs.tabActivated.connect(self.on_workspace_tab_activated)
         self.workspace_anchor_tabs.tabActivated.connect(lambda *_args: self.schedule_window_state_save())
@@ -681,7 +723,7 @@ class MainWindowUiMixin:
         self.workspace_anchor_close_btn = QPushButton("Close")
         self.workspace_anchor_close_btn.setToolTip("Move anchored tabs back to the main feature tab container")
         self.workspace_anchor_close_btn.setMaximumWidth(58)
-        self.workspace_anchor_close_btn.setStyleSheet("padding: 2px 6px; font-size: 11px;")
+        configure_button(self.workspace_anchor_close_btn, "close", text="Close", role="quiet")
         self.workspace_anchor_close_btn.clicked.connect(self.close_workspace_anchor)
         self.workspace_anchor_tabs.setCornerWidget(self.workspace_anchor_close_btn, Qt.TopRightCorner)
         self.workspace_anchor_tabs.setVisible(False)
@@ -691,29 +733,29 @@ class MainWindowUiMixin:
 
         chat_top = QHBoxLayout()
         chat_title = QLabel("Conversation Log")
-        chat_title.setStyleSheet("font-weight: bold; color: #b9dcff;")
+        set_ui_role(chat_title, "sectionTitle")
         chat_top.addWidget(chat_title, 1)
 
         self.chat_prev_response_btn = QPushButton("Up")
         self.chat_prev_response_btn.setToolTip("Jump to the previous assistant response")
-        self.chat_prev_response_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        configure_button(self.chat_prev_response_btn, "chevron_up", text="Previous", role="quiet")
         self.chat_prev_response_btn.clicked.connect(lambda: self.navigate_chat_response(-1))
         chat_top.addWidget(self.chat_prev_response_btn)
 
         self.chat_next_response_btn = QPushButton("Down")
         self.chat_next_response_btn.setToolTip("Jump to the next assistant response")
-        self.chat_next_response_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        configure_button(self.chat_next_response_btn, "chevron_down", text="Next", role="quiet")
         self.chat_next_response_btn.clicked.connect(lambda: self.navigate_chat_response(1))
         chat_top.addWidget(self.chat_next_response_btn)
 
         self.copy_response_header_btn = QPushButton("Copy Response")
         self.copy_response_header_btn.setToolTip("Copy the currently selected assistant response")
-        self.copy_response_header_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        configure_button(self.copy_response_header_btn, "copy", text="Copy response", role="quiet")
         self.copy_response_header_btn.clicked.connect(self.copy_current_chat_response)
         chat_top.addWidget(self.copy_response_header_btn)
 
-        self.copy_thread_header_btn = QPushButton("📋 Copy Thread")
-        self.copy_thread_header_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.copy_thread_header_btn = QPushButton("Copy Thread")
+        configure_button(self.copy_thread_header_btn, "copy", text="Copy thread", role="quiet")
         self.copy_thread_header_btn.clicked.connect(self.copy_full_log)
         chat_top.addWidget(self.copy_thread_header_btn)
 
@@ -721,21 +763,51 @@ class MainWindowUiMixin:
         self.full_thread_header_btn.setToolTip(
             "View the complete canonical conversation, including messages outside the recent render window"
         )
-        self.full_thread_header_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        configure_button(self.full_thread_header_btn, "maximize", text="Full thread", role="quiet")
         self.full_thread_header_btn.clicked.connect(self.show_full_thread)
         chat_top.addWidget(self.full_thread_header_btn)
 
-        self.undo_header_btn = QPushButton("↩️ Undo Last Change")
-        self.undo_header_btn.setStyleSheet(
-            "padding: 2px 8px; font-size: 11px; background-color: #3e2723; border: 1px solid #795548; color: #ffab91;"
-        )
+        self.undo_header_btn = QPushButton("Undo Last Change")
+        configure_button(self.undo_header_btn, "undo", text="Undo change", role="danger")
         self.undo_header_btn.clicked.connect(self.undo_last_applied_changes)
         chat_top.addWidget(self.undo_header_btn)
 
-        self.export_pdf_btn = QPushButton("📄 Export PDF")
-        self.export_pdf_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.export_pdf_btn = QPushButton("Export PDF")
+        configure_button(self.export_pdf_btn, "export", text="Export PDF", role="quiet")
         self.export_pdf_btn.clicked.connect(self.export_log_to_pdf)
         chat_top.addWidget(self.export_pdf_btn)
+
+        # Keep the conversation toolbar task-focused. Less common thread
+        # operations remain available from a single, labeled overflow menu.
+        for secondary_action in (
+            self.copy_thread_header_btn,
+            self.full_thread_header_btn,
+            self.undo_header_btn,
+            self.export_pdf_btn,
+        ):
+            secondary_action.setVisible(False)
+        self.chat_more_btn = QToolButton()
+        configure_button(
+            self.chat_more_btn,
+            "more_horizontal",
+            text="More",
+            tooltip="More conversation actions",
+            role="quiet",
+        )
+        self.chat_more_btn.setPopupMode(QToolButton.InstantPopup)
+        chat_more_menu = QMenu(self.chat_more_btn)
+        for label, icon_name, callback in (
+            ("Copy thread", "copy", self.copy_full_log),
+            ("View full thread", "maximize", self.show_full_thread),
+            ("Undo last change", "undo", self.undo_last_applied_changes),
+            ("Export PDF", "export", self.export_log_to_pdf),
+        ):
+            action = chat_more_menu.addAction(icon(icon_name), label)
+            action.triggered.connect(
+                lambda _checked=False, fn=callback: fn()
+            )
+        self.chat_more_btn.setMenu(chat_more_menu)
+        chat_top.addWidget(self.chat_more_btn)
 
         self.simple_response_checkbox = QCheckBox("Simple")
         self.simple_response_checkbox.setChecked(
@@ -792,21 +864,36 @@ class MainWindowUiMixin:
         editor_tools.addLayout(file_top)
         self.editor_find = QLineEdit()
         self.editor_find.setPlaceholderText("Find in file...")
-        self.editor_find.setMinimumWidth(520)
+        self.editor_find.setMinimumWidth(260)
         self.editor_find.returnPressed.connect(self.find_in_current_file)
         editor_tools.addWidget(self.editor_find, 1)
 
         self.find_file_btn = QPushButton("Find")
+        configure_button(self.find_file_btn, "search", text="Find", role="secondary")
         self.find_file_btn.clicked.connect(self.find_in_current_file)
         editor_tools.addWidget(self.find_file_btn)
 
         self.editor_find_prev_btn = QPushButton("↑")
         self.editor_find_prev_btn.setToolTip("Previous match in file")
+        configure_button(
+            self.editor_find_prev_btn,
+            "chevron_up",
+            tooltip="Previous match in file",
+            role="quiet",
+            icon_only=True,
+        )
         self.editor_find_prev_btn.clicked.connect(self.find_previous_in_current_file)
         editor_tools.addWidget(self.editor_find_prev_btn)
 
         self.editor_find_next_btn = QPushButton("↓")
         self.editor_find_next_btn.setToolTip("Next match in file")
+        configure_button(
+            self.editor_find_next_btn,
+            "chevron_down",
+            tooltip="Next match in file",
+            role="quiet",
+            icon_only=True,
+        )
         self.editor_find_next_btn.clicked.connect(self.find_next_in_current_file)
         editor_tools.addWidget(self.editor_find_next_btn)
 
@@ -817,12 +904,14 @@ class MainWindowUiMixin:
         editor_tools.addWidget(self.goto_line_box)
 
         self.goto_line_btn = QPushButton("Go")
+        configure_button(self.goto_line_btn, "arrow_right", text="Go", role="secondary")
         self.goto_line_btn.clicked.connect(self.goto_line_from_box)
         editor_tools.addWidget(self.goto_line_btn)
 
         editor_tools.addStretch(1)
 
-        self.go_to_file_button = QPushButton("📁 Go to File Location")
+        self.go_to_file_button = QPushButton("File location")
+        configure_button(self.go_to_file_button, "folder", text="File location", role="quiet")
         self.go_to_file_button.clicked.connect(
             lambda checked=False: self.open_file_location(
                 getattr(self, "current_file_path", "")
@@ -831,23 +920,51 @@ class MainWindowUiMixin:
         editor_tools.addWidget(self.go_to_file_button)
 
         self.save_file_btn = QPushButton("Save File")
+        configure_button(self.save_file_btn, "save", text="Save", role="primary")
         self.save_file_btn.clicked.connect(self.save_code_file)
         editor_tools.addWidget(self.save_file_btn)
 
         self.editor_analyze_btn = QPushButton("Analyze")
-        self.editor_analyze_btn.setToolTip("Run Python syntax, style, and standards checks for the current file.")
+        configure_button(self.editor_analyze_btn, "search", text="Analyze", role="secondary")
+        self.editor_analyze_btn.setToolTip("Inspect Python source or build the current CMake project for compiler diagnostics")
         self.editor_analyze_btn.clicked.connect(self.analyze_current_editor_file)
         editor_tools.addWidget(self.editor_analyze_btn)
 
         self.editor_reformat_btn = QPushButton("Reformat")
-        self.editor_reformat_btn.setToolTip("Reformat the current Python file. Uses Black when available; otherwise fixes whitespace/indentation basics.")
+        configure_button(self.editor_reformat_btn, "format", text="Format", role="secondary")
+        self.editor_reformat_btn.setToolTip("Reformat Python with Black or C/C++ with clang-format")
         self.editor_reformat_btn.clicked.connect(self.reformat_current_editor_file)
         editor_tools.addWidget(self.editor_reformat_btn)
 
         self.editor_fix_btn = QPushButton("Fix Issues")
+        configure_button(self.editor_fix_btn, "wrench", text="Fix issues", role="secondary")
         self.editor_fix_btn.setToolTip("Apply safe automated code-quality fixes. Uses Ruff when available, then formatting cleanup.")
         self.editor_fix_btn.clicked.connect(self.fix_current_editor_quality_issues)
         editor_tools.addWidget(self.editor_fix_btn)
+
+        self.editor_build_configuration = QComboBox()
+        self.editor_build_configuration.addItems(["Debug", "Release", "RelWithDebInfo"])
+        self.editor_build_configuration.setToolTip("CMake build configuration")
+        editor_tools.addWidget(self.editor_build_configuration)
+
+        self.editor_build_btn = QToolButton()
+        configure_button(self.editor_build_btn, "package", text="Build", role="secondary")
+        self.editor_build_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        self.editor_build_btn.setToolTip("Build the native project containing the current file")
+        self.editor_build_btn.clicked.connect(self.build_current_native_project)
+        self.editor_build_menu = QMenu(self.editor_build_btn)
+        build_action = self.editor_build_menu.addAction("Build")
+        build_action.triggered.connect(lambda checked=False: self.build_current_native_project("build"))
+        test_action = self.editor_build_menu.addAction("Build and Test")
+        test_action.triggered.connect(lambda checked=False: self.build_current_native_project("build_test"))
+        analyze_action = self.editor_build_menu.addAction("Analyze Current File")
+        analyze_action.triggered.connect(lambda checked=False: self.build_current_native_project("analyze"))
+        rebuild_action = self.editor_build_menu.addAction("Rebuild")
+        rebuild_action.triggered.connect(lambda checked=False: self.build_current_native_project("rebuild"))
+        clean_action = self.editor_build_menu.addAction("Clean")
+        clean_action.triggered.connect(lambda checked=False: self.build_current_native_project("clean"))
+        self.editor_build_btn.setMenu(self.editor_build_menu)
+        editor_tools.addWidget(self.editor_build_btn)
 
         self.editor_fullscreen_btn = QPushButton("Full Screen")
         self.editor_fullscreen_btn.setVisible(False)
@@ -909,16 +1026,89 @@ class MainWindowUiMixin:
         self.editor_structure_timer.setSingleShot(True)
         self.editor_structure_timer.timeout.connect(self.refresh_editor_structure)
 
+        editor_status_row = QHBoxLayout()
+        editor_status_row.setContentsMargins(0, 0, 0, 0)
         self.editor_status_label = QLabel("Line 1, Col 1")
-        normal_layout.addWidget(self.editor_status_label)
+        editor_status_row.addWidget(self.editor_status_label, 1)
+        self.editor_problems_toggle = QPushButton("Warnings")
+        self.editor_problems_toggle.setCheckable(True)
+        self.editor_problems_toggle.setChecked(bool(self.settings.get("editor_problems_visible", False)))
+        self.editor_problems_toggle.setToolTip("Show source diagnostics and style warnings")
+        self.editor_problems_toggle.setMaximumWidth(88)
+        self.editor_problems_toggle.toggled.connect(self.set_editor_problems_visible)
+        editor_status_row.addWidget(self.editor_problems_toggle)
+        self.engine_console_toggle = QPushButton("Engine Console")
+        self.engine_console_toggle.setCheckable(True)
+        self.engine_console_toggle.setChecked(bool(self.settings.get("engine_console_visible", False)))
+        self.engine_console_toggle.setToolTip("Show the explicit Python and TC command console")
+        self.engine_console_toggle.toggled.connect(self.set_engine_console_visible)
+        editor_status_row.addWidget(self.engine_console_toggle)
+        normal_layout.addLayout(editor_status_row)
 
         self.editor_problems_list = QListWidget()
         self.editor_problems_list.setMaximumHeight(96)
         self.editor_problems_list.setAlternatingRowColors(True)
-        self.editor_problems_list.setToolTip("Python problems and style warnings. Double-click a row to jump to the line.")
+        self.editor_problems_list.setMouseTracking(True)
+        self.editor_problems_list.viewport().setMouseTracking(True)
+        self.editor_problems_list.setToolTip("Source and build diagnostics. Hover a row to preview its line; double-click to focus it.")
+        self.editor_problems_list.itemEntered.connect(self.preview_editor_problem_item)
         self.editor_problems_list.itemDoubleClicked.connect(self.jump_to_editor_problem_item)
         self.editor_problems_list.setVisible(False)
         normal_layout.addWidget(self.editor_problems_list)
+
+        self.engine_console_panel = QWidget()
+        engine_console_layout = QVBoxLayout(self.engine_console_panel)
+        engine_console_layout.setContentsMargins(0, 2, 0, 0)
+        engine_console_layout.setSpacing(3)
+        engine_console_tools = QHBoxLayout()
+        self.engine_console_mode = QComboBox()
+        self.engine_console_mode.addItems(["Python", "TC Command"])
+        self.engine_console_mode.setToolTip("Python runs in a persistent engine namespace; TC Command executes adaptive command JSON")
+        self.engine_console_mode.currentTextChanged.connect(self.on_engine_console_mode_changed)
+        engine_console_tools.addWidget(self.engine_console_mode)
+        self.engine_console_target = QLabel("Target: active TC scene")
+        engine_console_tools.addWidget(self.engine_console_target, 1)
+        self.engine_play_btn = QPushButton("Play")
+        self.engine_play_btn.setToolTip("Run a .tcscene in the standalone TC runtime")
+        self.engine_play_btn.clicked.connect(self.play_tc_scene)
+        engine_console_tools.addWidget(self.engine_play_btn)
+        self.engine_stop_btn = QPushButton("Stop")
+        self.engine_stop_btn.setToolTip("Stop the active TC Play In Editor runtime")
+        self.engine_stop_btn.setEnabled(False)
+        self.engine_stop_btn.clicked.connect(self.stop_tc_play_in_editor)
+        engine_console_tools.addWidget(self.engine_stop_btn)
+        self.engine_build_player_btn = QPushButton("Build Player")
+        self.engine_build_player_btn.setToolTip("Create a self-contained Windows player from a .tcscene")
+        self.engine_build_player_btn.clicked.connect(self.build_tc_windows_player)
+        engine_console_tools.addWidget(self.engine_build_player_btn)
+        self.engine_console_run_btn = QPushButton("Run")
+        self.engine_console_run_btn.setToolTip("Execute console input (Ctrl+Enter)")
+        self.engine_console_run_btn.clicked.connect(self.execute_engine_console)
+        engine_console_tools.addWidget(self.engine_console_run_btn)
+        self.engine_console_reset_btn = QPushButton("Reset")
+        self.engine_console_reset_btn.setToolTip("Reset the persistent Python namespace and clear output")
+        self.engine_console_reset_btn.clicked.connect(self.reset_engine_console)
+        engine_console_tools.addWidget(self.engine_console_reset_btn)
+        engine_console_layout.addLayout(engine_console_tools)
+        engine_console_splitter = QSplitter(Qt.Vertical)
+        self.engine_console_input = CodeEditor()
+        self.engine_console_input.setPlaceholderText("engine.create_game_experience('orbit_lab', ['realistic_simulation', 'educational'])")
+        self.engine_console_input.setMinimumHeight(72)
+        self.engine_console_output = NavigableOutputEdit()
+        self.engine_console_output.setReadOnly(True)
+        self.engine_console_output.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.engine_console_output.setPlaceholderText("Execution output")
+        self.engine_console_output.setMinimumHeight(54)
+        self.engine_console_output.setToolTip("Build and runtime output. Click a diagnostic line to open its source location.")
+        self.engine_console_output.sourceLocationActivated.connect(self.open_output_source_location)
+        engine_console_splitter.addWidget(self.engine_console_input)
+        engine_console_splitter.addWidget(self.engine_console_output)
+        engine_console_splitter.setSizes([100, 80])
+        engine_console_layout.addWidget(engine_console_splitter)
+        self.engine_console_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self.engine_console_input)
+        self.engine_console_shortcut.activated.connect(self.execute_engine_console)
+        self.engine_console_panel.setVisible(self.engine_console_toggle.isChecked())
+        normal_layout.addWidget(self.engine_console_panel)
 
         # The old editor-specific prompt row has been collapsed into the single
         # global Ask line at the bottom of the window. These widgets remain as
@@ -951,6 +1141,9 @@ class MainWindowUiMixin:
         self.editor_diff_widget.setVisible(False)
         self.editor_diff_widget.accepted_all.connect(self.handle_diff_accepted)
         self.editor_diff_widget.cancelled.connect(self.handle_diff_cancelled)
+        self.editor_diff_widget.repair_requested.connect(
+            self.handle_editor_diff_repair_requested
+        )
         code_layout.addWidget(self.editor_diff_widget, 1)
 
         self.workspace_tabs.addTab(code_tab, "Editor")
@@ -963,6 +1156,7 @@ class MainWindowUiMixin:
         self.project_search.returnPressed.connect(self.find_in_project)
         search_row.addWidget(self.project_search, 1)
         search_btn = QPushButton("Find")
+        configure_button(search_btn, "search", text="Find project", role="primary")
         search_btn.clicked.connect(self.find_in_project)
         search_row.addWidget(search_btn)
 
@@ -1065,18 +1259,20 @@ class MainWindowUiMixin:
         left_wf_layout.addWidget(self.wf_build_host)
 
         self.create_wf_btn = QPushButton("Create New Pipeline")
+        configure_button(self.create_wf_btn, "edit", text="New pipeline", role="secondary")
         self.create_wf_btn.setToolTip("Clear the composer and start a new pipeline definition")
         self.create_wf_btn.clicked.connect(self.start_new_workflow_builder)
         left_wf_layout.addWidget(self.create_wf_btn)
 
         self.wf_build_save_btn = QPushButton("Save Pipeline")
+        configure_button(self.wf_build_save_btn, "save", text="Save pipeline", role="primary")
         self.wf_build_save_btn.setToolTip("Save and compile the current pipeline")
         self.wf_build_save_btn.clicked.connect(self.save_new_workflow)
         left_wf_layout.addWidget(self.wf_build_save_btn)
 
         left_wf_layout.addSpacing(8)
         saved_label = QLabel("Saved Pipelines:")
-        saved_label.setStyleSheet("font-weight: bold; color: #b9dcff;")
+        set_ui_role(saved_label, "sectionTitle")
         left_wf_layout.addWidget(saved_label)
         self.wf_filter_input = QLineEdit()
         self.wf_filter_input.setPlaceholderText("Filter pipelines...")
@@ -1095,6 +1291,7 @@ class MainWindowUiMixin:
         left_wf_layout.addWidget(self.workflows_list, 1)
 
         refresh_list_btn = QPushButton("Refresh List")
+        configure_button(refresh_list_btn, "database", text="Refresh list", role="quiet")
         refresh_list_btn.clicked.connect(self.refresh_workflows_list)
         left_wf_layout.addWidget(refresh_list_btn)
 
@@ -1109,9 +1306,7 @@ class MainWindowUiMixin:
         manager_layout.setContentsMargins(0, 0, 0, 0)
 
         self.wf_header = QLabel("Select a pipeline to view details.")
-        self.wf_header.setStyleSheet(
-            "font-size: 14px; font-weight: bold; color: #b9dcff;"
-        )
+        set_ui_role(self.wf_header, "sectionTitle")
         manager_layout.addWidget(self.wf_header)
 
         self.wf_path_lbl = QLabel("")
@@ -1158,39 +1353,43 @@ class MainWindowUiMixin:
         # Actions Row
         actions_row = QHBoxLayout()
         self.wf_save_btn = QPushButton("Save Parameters")
+        configure_button(self.wf_save_btn, "save", text="Save parameters", role="secondary")
         self.wf_save_btn.clicked.connect(self.save_workflow_parameter_changes)
         self.wf_save_btn.setEnabled(False)
         actions_row.addWidget(self.wf_save_btn)
 
         self.wf_run_btn = QPushButton("Run in DCC")
+        configure_button(self.wf_run_btn, "play", text="Run in DCC", role="primary")
         self.wf_run_btn.clicked.connect(self.run_selected_workflow)
         self.wf_run_btn.setEnabled(False)
         actions_row.addWidget(self.wf_run_btn)
 
         self.wf_test_btn = QPushButton("Run Test")
+        configure_button(self.wf_test_btn, "test", text="Run test", role="secondary")
         self.wf_test_btn.clicked.connect(self.run_selected_workflow_test)
         self.wf_test_btn.setEnabled(False)
         actions_row.addWidget(self.wf_test_btn)
 
         self.wf_test_log_btn = QPushButton("View Test Log")
+        configure_button(self.wf_test_log_btn, "document", text="Test log", role="quiet")
         self.wf_test_log_btn.clicked.connect(self.view_test_log)
         self.wf_test_log_btn.setEnabled(False)
         actions_row.addWidget(self.wf_test_log_btn)
 
         self.wf_delete_btn = QPushButton("Delete")
+        configure_button(self.wf_delete_btn, "trash", text="Delete", role="danger")
         self.wf_delete_btn.clicked.connect(self.delete_selected_workflow)
         self.wf_delete_btn.setEnabled(False)
         actions_row.addWidget(self.wf_delete_btn)
 
         self.wf_edit_btn = QPushButton("Edit Visually")
+        configure_button(self.wf_edit_btn, "edit", text="Edit visually", role="secondary")
         self.wf_edit_btn.clicked.connect(self.load_selected_workflow_to_builder)
         self.wf_edit_btn.setEnabled(False)
-        self.wf_edit_btn.setStyleSheet(
-            "background-color: #000711; border: 1px solid #1e9bff; color: #b9dcff;"
-        )
         actions_row.addWidget(self.wf_edit_btn)
 
         self.wf_export_btn = QPushButton("Export .py")
+        configure_button(self.wf_export_btn, "export", text="Export .py", role="quiet")
         self.wf_export_btn.clicked.connect(self.export_selected_workflow)
         self.wf_export_btn.setEnabled(False)
         self.wf_export_btn.setToolTip(
@@ -1199,12 +1398,49 @@ class MainWindowUiMixin:
         actions_row.addWidget(self.wf_export_btn)
 
         self.wf_append_btn = QPushButton("Append to File")
+        configure_button(self.wf_append_btn, "document", text="Append to file", role="quiet")
         self.wf_append_btn.clicked.connect(self.append_selected_workflow_to_file)
         self.wf_append_btn.setEnabled(False)
         self.wf_append_btn.setToolTip(
             "Append this pipeline function to an existing .py file"
         )
         actions_row.addWidget(self.wf_append_btn)
+
+        for overflow_button in (
+            self.wf_test_log_btn,
+            self.wf_delete_btn,
+            self.wf_export_btn,
+            self.wf_append_btn,
+        ):
+            overflow_button.setVisible(False)
+        self.wf_more_btn = QToolButton()
+        configure_button(
+            self.wf_more_btn,
+            "more_horizontal",
+            text="More",
+            tooltip="More pipeline actions",
+            role="quiet",
+        )
+        self.wf_more_btn.setPopupMode(QToolButton.InstantPopup)
+        workflow_more_menu = QMenu(self.wf_more_btn)
+        workflow_more_actions = []
+        for label, icon_name, source_button, callback in (
+            ("View test log", "document", self.wf_test_log_btn, self.view_test_log),
+            ("Export .py", "export", self.wf_export_btn, self.export_selected_workflow),
+            ("Append to file", "document", self.wf_append_btn, self.append_selected_workflow_to_file),
+            ("Delete pipeline", "trash", self.wf_delete_btn, self.delete_selected_workflow),
+        ):
+            action = workflow_more_menu.addAction(icon(icon_name), label)
+            action.triggered.connect(lambda _checked=False, fn=callback: fn())
+            workflow_more_actions.append((action, source_button))
+
+        def sync_workflow_more_actions():
+            for action, source_button in workflow_more_actions:
+                action.setEnabled(source_button.isEnabled())
+
+        workflow_more_menu.aboutToShow.connect(sync_workflow_more_actions)
+        self.wf_more_btn.setMenu(workflow_more_menu)
+        actions_row.addWidget(self.wf_more_btn)
 
         manager_layout.addLayout(actions_row)
 
@@ -1523,17 +1759,25 @@ class MainWindowUiMixin:
         compact_actions = QHBoxLayout()
         compact_actions.setSpacing(6)
 
-        def _small_action_button(label, tooltip, callback):
-            btn = QPushButton(label)
-            btn.setToolTip(tooltip)
-            btn.setMaximumWidth(34)
-            btn.setMinimumWidth(30)
-            btn.setStyleSheet("padding: 3px 6px; font-size: 12px;")
+        def _small_action_button(icon_name, tooltip, callback, role="quiet"):
+            btn = QPushButton()
+            configure_button(
+                btn,
+                icon_name,
+                tooltip=tooltip,
+                role=role,
+                icon_only=True,
+            )
             btn.clicked.connect(callback)
             compact_actions.addWidget(btn)
             return btn
 
-        _small_action_button("⛔", "Cancel the active model/tool request", self.cancel_active_query)
+        _small_action_button(
+            "cancel",
+            "Cancel the active model/tool request",
+            self.cancel_active_query,
+            role="danger",
+        )
         self.approve_editor_plan_btn = QPushButton("Approve Plan")
         self.approve_editor_plan_btn.setToolTip(
             "Approve the reviewed implementation plan and generate a code preview"
@@ -1542,11 +1786,11 @@ class MainWindowUiMixin:
         self.approve_editor_plan_btn.setVisible(False)
         compact_actions.addWidget(self.approve_editor_plan_btn)
         self.apply_fix_compact_btn = _small_action_button(
-            "✓", "Apply the latest proposed editor fix/diff", self.apply_pending_editor_patch
+            "check", "Apply the latest proposed editor fix/diff", self.apply_pending_editor_patch
         )
-        _small_action_button("↩", "Undo the last applied project/editor change", self.undo_last_applied_changes)
-        _small_action_button("📋", "Copy the last model prompt", self.copy_last_prompt)
-        _small_action_button("📄", "Copy the full conversation log", self.copy_full_log)
+        _small_action_button("undo", "Undo the last applied project/editor change", self.undo_last_applied_changes)
+        _small_action_button("clipboard", "Copy the last model prompt", self.copy_last_prompt)
+        _small_action_button("document", "Copy the full conversation log", self.copy_full_log)
 
         # Pipeline saving is contextual now: the Pipelines tab owns pipeline management,
         # and generated answers can still populate this hidden menu when needed.
@@ -1580,8 +1824,141 @@ class MainWindowUiMixin:
         self.clarification_controls_widget.setVisible(False)
         bottom_layout.addWidget(self.clarification_controls_widget)
 
+        prompt_profile_row = QHBoxLayout()
+        prompt_profile_row.setSpacing(6)
+        prompt_profile_row.addWidget(QLabel("Code agent:"))
+
+        self.code_prompt_mode_box = QComboBox()
+        for label, value in (
+            ("Auto", "auto"),
+            ("Ask", "ask"),
+            ("Plan", "plan"),
+            ("Edit", "edit"),
+            ("Review", "review"),
+        ):
+            self.code_prompt_mode_box.addItem(label, value)
+        self.code_prompt_mode_box.setToolTip(
+            "Choose the requested outcome explicitly. Auto keeps natural-language inference enabled."
+        )
+        prompt_profile_row.addWidget(self.code_prompt_mode_box)
+
+        self.code_prompt_scope_box = QComboBox()
+        for label, value in (
+            ("Auto scope", "auto"),
+            ("Selection", "selection"),
+            ("Current file", "file"),
+            ("Folder", "folder"),
+            ("Project", "project"),
+            ("DCC session", "dcc"),
+        ):
+            self.code_prompt_scope_box.addItem(label, value)
+        self.code_prompt_scope_box.setToolTip(
+            "Set the maximum context boundary used for discovery and generation."
+        )
+        prompt_profile_row.addWidget(self.code_prompt_scope_box)
+
+        self.code_prompt_depth_box = QComboBox()
+        for label, value in (
+            ("Fast", "fast"),
+            ("Balanced", "balanced"),
+            ("Deep", "deep"),
+            ("Maximum quality", "maximum"),
+        ):
+            self.code_prompt_depth_box.addItem(label, value)
+        self.code_prompt_depth_box.setToolTip(
+            "Controls the model family member, reasoning effort, response detail, latency, and cost."
+        )
+        prompt_profile_row.addWidget(self.code_prompt_depth_box)
+
+        self.code_prompt_permission_box = QComboBox()
+        for label, value in (
+            ("Read only", "read_only"),
+            ("Preview changes", "preview"),
+            ("Apply after review", "apply_after_review"),
+            ("Automatic safe edits", "automatic_safe"),
+        ):
+            self.code_prompt_permission_box.addItem(label, value)
+        self.code_prompt_permission_box.setToolTip(
+            "Maximum mutation authority. Destructive and external actions always require separate approval."
+        )
+        prompt_profile_row.addWidget(self.code_prompt_permission_box)
+        prompt_profile_row.addStretch(1)
+        bottom_layout.addLayout(prompt_profile_row)
+
+        for box, key, default in (
+            (self.code_prompt_mode_box, "code_prompt_mode", "auto"),
+            (self.code_prompt_scope_box, "code_prompt_scope", "auto"),
+            (self.code_prompt_depth_box, "code_prompt_depth", "balanced"),
+            (self.code_prompt_permission_box, "code_prompt_permission", "preview"),
+        ):
+            index = box.findData(self.settings.get(key, default))
+            box.setCurrentIndex(index if index >= 0 else box.findData(default))
+
+        def persist_code_prompt_profile(*_args):
+            from tech_connector.services.code_prompt_profile_service import (
+                normalize_code_prompt_profile,
+            )
+
+            profile = normalize_code_prompt_profile(
+                {
+                    "mode": self.code_prompt_mode_box.currentData(),
+                    "scope": self.code_prompt_scope_box.currentData(),
+                    "depth": self.code_prompt_depth_box.currentData(),
+                    "permission": self.code_prompt_permission_box.currentData(),
+                }
+            )
+            self.settings.update(
+                {
+                    "code_prompt_mode": profile.mode,
+                    "code_prompt_scope": profile.scope,
+                    "code_prompt_depth": profile.depth,
+                    "code_prompt_permission": profile.permission,
+                }
+            )
+            if (
+                bool(self.settings.get("auto_select_openai_model_by_depth", True))
+                and hasattr(self, "model_provider_box")
+                and self.model_provider_box.currentData() == "openai"
+            ):
+                from tech_connector.services.code_prompt_profile_service import (
+                    preferred_openai_model,
+                )
+
+                current_model = str(self.model_box.currentData() or "")
+                current_name = current_model.partition(":")[2].lower()
+                if not current_name or current_name.startswith(
+                    ("gpt-5.6", "gpt-5.3-codex")
+                ):
+                    preferred_model = "openai:" + preferred_openai_model(profile.depth)
+                    preferred_index = self.model_box.findData(preferred_model)
+                    if preferred_index >= 0:
+                        self.model_box.setCurrentIndex(preferred_index)
+            permission_index = self.code_prompt_permission_box.findData(profile.permission)
+            if permission_index >= 0 and permission_index != self.code_prompt_permission_box.currentIndex():
+                self.code_prompt_permission_box.blockSignals(True)
+                self.code_prompt_permission_box.setCurrentIndex(permission_index)
+                self.code_prompt_permission_box.blockSignals(False)
+            try:
+                self.service.settings.update(self.settings)
+                self.service.save_settings()
+            except Exception:
+                pass
+            try:
+                self.update_unified_prompt_context_label()
+            except Exception:
+                pass
+
+        for box in (
+            self.code_prompt_mode_box,
+            self.code_prompt_scope_box,
+            self.code_prompt_depth_box,
+            self.code_prompt_permission_box,
+        ):
+            box.currentIndexChanged.connect(persist_code_prompt_profile)
+
         input_row = QHBoxLayout()
         self.input = GrowingPromptEdit()
+        set_ui_role(self.input, "composer")
         self.input.setPlaceholderText(
             "Ask anything. I’ll infer chat vs current file vs selection vs project search vs pipeline."
         )
@@ -1593,10 +1970,11 @@ class MainWindowUiMixin:
         self.input.installEventFilter(self)
         input_row.addWidget(self.input, 1)
         send_btn = QPushButton("Send")
+        configure_button(send_btn, "send", text="Send", tooltip="Send request", role="primary")
         send_btn.clicked.connect(self.send_message)
         input_row.addWidget(send_btn)
 
-        self.prioritize_open_file_context_checkbox = QCheckBox("Files")
+        self.prioritize_open_file_context_checkbox = QCheckBox("Prioritize open files")
         self.prioritize_open_file_context_checkbox.setChecked(
             bool(self.settings.get("prioritize_open_file_context", False))
         )
@@ -1608,30 +1986,27 @@ class MainWindowUiMixin:
         )
         input_row.addWidget(self.prioritize_open_file_context_checkbox)
 
-        attach_file_btn = QPushButton("📎")
+        attach_file_btn = QPushButton("File")
         attach_file_btn.setToolTip("Attach files to the next prompt. Text/code files are included as searchable context.")
-        attach_file_btn.setMaximumWidth(36)
+        configure_button(attach_file_btn, "paperclip", text="File", role="secondary")
         attach_file_btn.clicked.connect(self.attach_files)
         input_row.addWidget(attach_file_btn)
 
-        paste_btn = QPushButton("📋")
+        paste_btn = QPushButton("Paste")
         paste_btn.setToolTip("Paste an image from the clipboard and attach it to the next prompt")
-        paste_btn.setMaximumWidth(36)
+        configure_button(paste_btn, "clipboard", text="Paste", role="secondary")
         paste_btn.clicked.connect(self.paste_image_from_clipboard)
         input_row.addWidget(paste_btn)
 
-        attach_btn = QPushButton("🖼")
+        attach_btn = QPushButton("Image")
         attach_btn.setToolTip("Attach image files to the next prompt")
-        attach_btn.setMaximumWidth(36)
+        configure_button(attach_btn, "image", text="Image", role="secondary")
         attach_btn.clicked.connect(self.attach_images)
         input_row.addWidget(attach_btn)
         bottom_layout.addLayout(input_row)
 
         self.prompt_context_label = QLabel("Context: Chat • Project • Model")
-        self.prompt_context_label.setStyleSheet(
-            "color: #b9dcff; font-size: 11px; padding: 2px 6px; "
-            "background-color: #000711; border: 1px solid #1e9bff; border-radius: 4px;"
-        )
+        set_ui_role(self.prompt_context_label, "context")
         self.prompt_context_label.setToolTip(
             "Shows what context the unified prompt will use. Editor and selection context are inferred automatically."
         )
@@ -1639,10 +2014,7 @@ class MainWindowUiMixin:
         self.prompt_context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.live_process_label = QLabel("Working: Ready")
-        self.live_process_label.setStyleSheet(
-            "color: #b9dcff; font-size: 11px; padding: 2px 6px; "
-            "background-color: #000711; border: 1px solid #1e9bff; border-radius: 4px;"
-        )
+        set_ui_role(self.live_process_label, "context")
         self.live_process_label.setToolTip(
             "Shows the current Tech Connector operation, such as searching the project index, building context, routing, or waiting for the model."
         )
@@ -1652,7 +2024,7 @@ class MainWindowUiMixin:
         self.bottom_system_status_widget = QWidget()
         self.bottom_system_status_widget.setObjectName("bottomSystemStatusWidget")
         self.bottom_system_status_widget.setStyleSheet(
-            "QWidget1bottomSystemStatusWidget { background-color: #00040a; border: 1px solid #12324a; border-radius: 4px; }"
+            "QWidget#bottomSystemStatusWidget { background-color: #0c1016; border: 1px solid #273241; border-radius: 6px; }"
         )
         bottom_status_layout = QVBoxLayout(self.bottom_system_status_widget)
         bottom_status_layout.setContentsMargins(6, 5, 6, 5)
@@ -1671,7 +2043,13 @@ class MainWindowUiMixin:
         bottom_status_header.addWidget(self.bottom_system_status_detail)
         bottom_status_header.addWidget(self.prompt_context_label, 2)
         bottom_status_header.addWidget(self.live_process_label, 2)
-        self.bottom_system_status_toggle_btn = QPushButton("Hide Status ▲")
+        self.bottom_system_status_toggle_btn = QPushButton("Hide details")
+        configure_button(
+            self.bottom_system_status_toggle_btn,
+            "chevron_up",
+            text="Hide details",
+            role="quiet",
+        )
         self.bottom_system_status_toggle_btn.setMaximumWidth(110)
         self.bottom_system_status_toggle_btn.setCheckable(True)
         self.bottom_system_status_toggle_btn.setChecked(True)
@@ -1690,7 +2068,10 @@ class MainWindowUiMixin:
 
         def _toggle_bottom_status(checked):
             self.bottom_status_details_widget.setVisible(bool(checked))
-            self.bottom_system_status_toggle_btn.setText("Hide Status ▲" if checked else "Show Status ▼")
+            self.bottom_system_status_toggle_btn.setText("Hide details" if checked else "Show details")
+            self.bottom_system_status_toggle_btn.setIcon(
+                icon("chevron_up" if checked else "chevron_down")
+            )
             try:
                 self.settings["show_system_status"] = bool(checked)
                 self.service.save_settings(self.settings)
@@ -1699,7 +2080,7 @@ class MainWindowUiMixin:
             self.schedule_window_state_save()
 
         self.bottom_system_status_toggle_btn.toggled.connect(_toggle_bottom_status)
-        initial_status_visible = bool(self.settings.get("show_system_status", True))
+        initial_status_visible = bool(self.settings.get("show_system_status", False))
         self.bottom_system_status_toggle_btn.setChecked(initial_status_visible)
         _toggle_bottom_status(initial_status_visible)
         bottom_layout.addWidget(self.bottom_system_status_widget)
@@ -1740,6 +2121,13 @@ class MainWindowUiMixin:
         self._chk_allow_modifications.setChecked(True)
         self._chk_require_confirm = QCheckBox("Require confirmation before changes")
         self._chk_require_confirm.setChecked(True)
+        self._chk_tutorial_mode = QCheckBox("Tutorial / Guidance only")
+        self._chk_tutorial_mode.setChecked(bool(self.settings.get("tutorial_mode", False)))
+        self._chk_tutorial_mode.setToolTip(
+            "Deliver step-by-step guidance, architecture, checks, and code snippets only. "
+            "No project mutations."
+        )
+        self._chk_tutorial_mode.stateChanged.connect(self._apply_tutorial_mode_constraints)
         self._chk_github_search = QCheckBox("Allow GitHub / Community Tool Search")
 
         _ms_chk_style = "QCheckBox { color:#b9dcff; font-size:11px; } QCheckBox::indicator { width:13px; height:13px; }"
@@ -1748,6 +2136,7 @@ class MainWindowUiMixin:
                 self._chk_allow_better,
                 self._chk_allow_modifications,
                 self._chk_require_confirm,
+                self._chk_tutorial_mode,
                 self._chk_github_search,
         ):
             chk.setStyleSheet(_ms_chk_style)
@@ -1759,6 +2148,7 @@ class MainWindowUiMixin:
         # ── end Model & Safety bar ─────────────────────────────────────────
 
         main_layout.addWidget(self.bottom_controls_widget)
+        self._apply_tutorial_mode_constraints()
 
         self.main_splitter.addWidget(main)
         self.main_splitter.setSizes([360, 1180])
@@ -1795,6 +2185,22 @@ class MainWindowUiMixin:
                 getattr(self, "_chk_require_confirm", None) is None
                 or self._chk_require_confirm.isChecked()
         )
+
+    def _ms_tutorial_mode(self) -> bool:
+        return (
+                getattr(self, "_chk_tutorial_mode", None) is not None
+                and self._chk_tutorial_mode.isChecked()
+        )
+
+    def _apply_tutorial_mode_constraints(self) -> None:
+        if getattr(self, "_chk_allow_modifications", None) is None:
+            return
+        if self._ms_tutorial_mode():
+            self._chk_allow_modifications.setChecked(False)
+            self._chk_allow_modifications.setEnabled(False)
+        else:
+            self._chk_allow_modifications.setEnabled(True)
+        self.schedule_window_state_save()
 
     def _ms_allow_modifications(self) -> bool:
         return (
@@ -1847,6 +2253,179 @@ class MainWindowUiMixin:
         if not hasattr(self, "workspace_tabs"):
             return []
         return [self.workspace_tabs.tabText(i) for i in range(self.workspace_tabs.count())]
+
+    def _find_workspace_tab(self, tab_name: str):
+        tabs = getattr(self, "workspace_tabs", None)
+        if tabs is None:
+            return None
+        target = tab_name.strip().lower()
+        for index in range(tabs.count()):
+            if tabs.tabText(index).strip().lower() == target:
+                return tabs.widget(index)
+        return None
+
+    def _activate_workspace_tab(self, tab_name: str) -> bool:
+        tabs = getattr(self, "workspace_tabs", None)
+        if tabs is None:
+            return False
+        target = tab_name.strip().lower()
+        for index in range(tabs.count()):
+            if tabs.tabText(index).strip().lower() == target:
+                tabs.setCurrentIndex(index)
+                self.update_unified_prompt_context_label()
+                return True
+        return False
+
+    def _ensure_visible_workspace_tab(self, tab_name: str) -> bool:
+        if self._activate_workspace_tab(tab_name):
+            return True
+        self.set_workspace_tab_visible(tab_name, True)
+        return self._activate_workspace_tab(tab_name)
+
+    def _show_workspace_tab(self, tab_name: str, cache_name: str, builder) -> None:
+        tabs = getattr(self, "workspace_tabs", None)
+        if tabs is None:
+            return
+
+        if self._ensure_visible_workspace_tab(tab_name):
+            return
+
+        widget = getattr(self, cache_name, None)
+        if widget is None:
+            widget = builder()
+            setattr(self, cache_name, widget)
+            if widget is None:
+                return
+
+        index = self.workspace_tabs.addTab(widget, tab_name)
+        self.workspace_tabs.setCurrentIndex(index)
+        self.schedule_window_state_save()
+
+    def _build_the_kingdom_workspace_tab(self):
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        header = QLabel("The Kingdom Runtime Workspace")
+        header.setStyleSheet("font-weight: bold; color: #b9dcff; font-size: 14px;")
+        layout.addWidget(header)
+
+        action_row = QHBoxLayout()
+        play_btn = QPushButton("Play")
+        play_btn.setToolTip("Run the current .tcscene flow in the runtime launcher.")
+        play_btn.clicked.connect(self.play_tc_scene)
+
+        stop_btn = QPushButton("Stop")
+        stop_btn.setToolTip("Stop an active runtime session.")
+        stop_btn.clicked.connect(self.stop_tc_play_in_editor)
+
+        build_player_btn = QPushButton("Build Player")
+        build_player_btn.setToolTip("Build a standalone runtime player from this scene.")
+        build_player_btn.clicked.connect(self.build_tc_windows_player)
+
+        engine_btn = QPushButton("Open Engine Console")
+        engine_btn.setToolTip("Jump to the Editor tab for full runtime console controls.")
+        engine_btn.clicked.connect(lambda: self._ensure_visible_workspace_tab("Editor"))
+
+        action_row.addWidget(play_btn)
+        action_row.addWidget(stop_btn)
+        action_row.addWidget(build_player_btn)
+        action_row.addWidget(engine_btn)
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
+
+        command_row = QHBoxLayout()
+        command_label = QLabel("Runtime Command:")
+        command_row.addWidget(command_label)
+        command = QLineEdit()
+        command.setPlaceholderText("engine.create_game_experience('my_world', ['realistic_simulation'])")
+        command_row.addWidget(command, 1)
+        run_btn = QPushButton("Run")
+        run_btn.setToolTip("Execute a runtime command in the shared editor engine console context.")
+
+        def _run_command():
+            text = command.text().strip()
+            if not text:
+                return
+            editor_input = getattr(self, "engine_console_input", None)
+            if editor_input is not None:
+                editor_input.setPlainText(text)
+            self.execute_engine_console()
+
+        run_btn.clicked.connect(_run_command)
+        command_row.addWidget(run_btn)
+        layout.addLayout(command_row)
+
+        hint = QLabel("Output is shown in the shared Engine Console panel on the Editor tab.")
+        hint.setStyleSheet("color: #84b5ff; font-size: 11px;")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return container
+
+    def _build_ophanim_workspace_tab(self):
+        try:
+            from tech_connector.ui.image_editor_widget import ImageEditorWidget
+        except Exception as exc:
+            QMessageBox.warning(self, "Ophanim unavailable", str(exc))
+            return None
+        return ImageEditorWidget(parent=self)
+
+    def _build_garden_workspace_tab(self):
+        try:
+            from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
+        except Exception as exc:
+            QMessageBox.warning(self, "The Garden unavailable", str(exc))
+            return None
+        return ThreeDMeshPainterViewport(parent=self)
+
+    def open_editor_workspace_tab(self):
+        self._ensure_visible_workspace_tab("Editor")
+
+    def open_search_symbols_workspace_tab(self):
+        self._ensure_visible_workspace_tab("Search / Symbols")
+
+    def open_pipelines_workspace_tab(self):
+        self._ensure_visible_workspace_tab("Pipelines")
+
+    def open_the_kingdom_workspace_tab(self):
+        self._show_workspace_tab(
+            "The Kingdom (Game Engine Runtime Suite)",
+            "_the_kingdom_workspace_tab",
+            self._build_the_kingdom_workspace_tab,
+        )
+
+    def open_ophanim_workspace_tab(self):
+        self._show_workspace_tab(
+            "Ophanim (Image & Texture Review Suite)",
+            "_ophanim_workspace_tab",
+            self._build_ophanim_workspace_tab,
+        )
+
+    def open_garden_workspace_tab(self):
+        self._show_workspace_tab(
+            "The Garden (DCC Integration Suite)",
+            "_garden_workspace_tab",
+            self._build_garden_workspace_tab,
+        )
+
+    def close_workspace_tab(self, _container: DetachableTabWidget, index: int) -> None:
+        tabs = getattr(self, "workspace_tabs", None)
+        if tabs is None:
+            return
+        try:
+            title = _container.tabText(index)
+        except Exception:
+            title = ""
+        if title:
+            if hasattr(self, "set_workspace_tab_visible"):
+                self.set_workspace_tab_visible(title, False)
+            else:
+                if 0 <= index < _container.count():
+                    _container.removeTab(index)
+            return
+        if 0 <= index < _container.count():
+            _container.removeTab(index)
 
     def set_workspace_tab_visible(self, title, visible):
         if hasattr(self, "workspace_tabs") and hasattr(self.workspace_tabs, "set_tab_visible"):
@@ -1949,6 +2528,18 @@ class MainWindowUiMixin:
             return
 
         parts = []
+        try:
+            profile = self.code_prompt_profile()
+            parts.extend(
+                [
+                    profile.mode.title(),
+                    profile.scope.replace("_", " ").title(),
+                    profile.depth.title(),
+                    profile.permission.replace("_", " ").title(),
+                ]
+            )
+        except Exception:
+            pass
         tab = self.active_workspace_title()
         parts.append(tab)
 
@@ -2005,5 +2596,41 @@ class MainWindowUiMixin:
             pass
 
         self.prompt_context_label.setText("Context: " + " • ".join(parts))
+
+    def code_prompt_profile(self):
+        """Return the current visible code-agent execution profile.
+
+        :return: Normalized code-prompt profile.
+        """
+
+        from tech_connector.services.code_prompt_profile_service import (
+            normalize_code_prompt_profile,
+        )
+
+        return normalize_code_prompt_profile(
+            {
+                "mode": (
+                    self.code_prompt_mode_box.currentData()
+                    if hasattr(self, "code_prompt_mode_box")
+                    else self.settings.get("code_prompt_mode")
+                ),
+                "scope": (
+                    self.code_prompt_scope_box.currentData()
+                    if hasattr(self, "code_prompt_scope_box")
+                    else self.settings.get("code_prompt_scope")
+                ),
+                "depth": (
+                    self.code_prompt_depth_box.currentData()
+                    if hasattr(self, "code_prompt_depth_box")
+                    else self.settings.get("code_prompt_depth")
+                ),
+                "permission": (
+                    self.code_prompt_permission_box.currentData()
+                    if hasattr(self, "code_prompt_permission_box")
+                    else self.settings.get("code_prompt_permission")
+                ),
+            },
+            settings=self.settings,
+        )
 
 # Ctrl+S save shortcut installed by workflow mixin.

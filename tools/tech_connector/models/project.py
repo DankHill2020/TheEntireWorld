@@ -10,7 +10,18 @@ def all_roots(settings: dict) -> list[str]:
     roots = []
     active_proj = settings.get("active_project", "")
     ext_tools = settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
-    candidates = [active_proj, ext_tools]
+    try:
+        from tech_connector.services.project_directory_service import resolve_project_directories
+
+        directories = resolve_project_directories(settings)
+        workspace_roots = [
+            str(directories.tools_project),
+            str(directories.game_project),
+            str(directories.art_source),
+        ]
+    except Exception:
+        workspace_roots = []
+    candidates = [active_proj, *workspace_roots, ext_tools]
     for r in candidates + ASSUMED_DIRS + settings.get("extra_dirs", []):
         normalized = normalize_project_path(r)
         if normalized and normalized not in roots:

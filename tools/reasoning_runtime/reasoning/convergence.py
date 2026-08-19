@@ -10,7 +10,6 @@ from reasoning_runtime.adapters.repair_provider import (
     RepairProposal,
     RepairProvider,
 )
-
 if TYPE_CHECKING:
     from reasoning_runtime.engine.progress_events import RepairRecord, ValidationFinding
 
@@ -152,11 +151,35 @@ class RepairCoordinator:
         )
         records: list["RepairRecord"] = []
         for provider in providers:
-            if not provider.supports(context):
+            try:
+                supported = provider.supports(context)
+            except Exception as exc:
+                records.append(self._provider_error_record(provider, "supports", exc))
+                last_decision = self._provider_error_decision(context, provider, exc)
                 continue
-            proposal: RepairProposal = provider.repair(context)
+            if not supported:
+                continue
+            try:
+                proposal: RepairProposal = provider.repair(context)
+            except Exception as exc:
+                records.append(self._provider_error_record(provider, "repair", exc))
+                last_decision = self._provider_error_decision(context, provider, exc)
+                continue
             records.extend(proposal.records)
-            after = tuple(validate(proposal.candidate))
+            if not proposal.changed:
+                last_decision = self.policy.evaluate(
+                    context.findings,
+                    context.findings,
+                    candidate_changed=False,
+                    is_protected=is_protected,
+                )
+                continue
+            try:
+                after = tuple(validate(proposal.candidate))
+            except Exception as exc:
+                records.append(self._provider_error_record(provider, "validate", exc))
+                last_decision = self._provider_error_decision(context, provider, exc)
+                continue
             decision = self.policy.evaluate(
                 context.findings,
                 after,
@@ -177,4 +200,54 @@ class RepairCoordinator:
             findings=context.findings,
             repairs=tuple(records),
             decision=last_decision,
+        )
+
+    @staticmethod
+    def _provider_error_record(
+        provider: RepairProvider,
+        phase: str,
+        error: Exception,
+    ) -> "RepairRecord":
+        """Build an observable record for an isolated provider failure.
+
+        :param provider: Failing repair provider.
+        :param phase: Provider lifecycle phase.
+        :param error: Raised exception.
+        :return: Failed repair record.
+        """
+
+        from reasoning_runtime.engine.progress_events import RepairRecord
+
+        return RepairRecord(
+            owner=str(provider.name or provider.__class__.__name__),
+            strategy=f"provider_{phase}",
+            status="failed",
+            changed=False,
+            detail=f"{type(error).__name__}: {error}"[:1000],
+        )
+
+    @staticmethod
+    def _provider_error_decision(
+        context: RepairContext,
+        provider: RepairProvider,
+        error: Exception,
+    ) -> ConvergenceDecision:
+        """Build a nonterminal decision for an isolated provider failure.
+
+        :param context: Current repair context.
+        :param provider: Failing repair provider.
+        :param error: Raised exception.
+        :return: Observable provider-error decision.
+        """
+
+        count = len({_finding_key(item) for item in context.findings})
+        return ConvergenceDecision(
+            accepted=False,
+            status="provider_error",
+            summary=(
+                f"Repair provider {provider.name!r} failed without aborting "
+                f"convergence: {type(error).__name__}: {error}"
+            )[:1200],
+            before_count=count,
+            after_count=count,
         )

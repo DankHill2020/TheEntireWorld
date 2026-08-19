@@ -22,6 +22,10 @@ class PromptRouteEvalCase:
     category: str = "uncategorized"
     max_ms: float = 250.0
     expected_mutation_scope: str = ""
+    code_prompt_profile: dict[str, str] = field(default_factory=dict)
+    expected_provider: str = ""
+    expected_requires_confirmation: bool | None = None
+    expected_requires_execution: bool | None = None
 
 
 @dataclass
@@ -37,6 +41,10 @@ class PromptRouteEvalRow:
     expected_mutation_scope: str = ""
     max_ms: float = 250.0
     timing_ok: bool = True
+    code_prompt_profile: dict[str, str] = field(default_factory=dict)
+    provider: str = ""
+    requires_confirmation: bool = False
+    requires_execution: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -86,6 +94,18 @@ def load_prompt_route_eval_cases(path: str | Path) -> list[PromptRouteEvalCase]:
                 category=str(item.get("category") or "uncategorized"),
                 max_ms=float(item.get("max_ms") or 250.0),
                 expected_mutation_scope=str(item.get("expected_mutation_scope") or ""),
+                code_prompt_profile=dict(item.get("code_prompt_profile") or {}),
+                expected_provider=str(item.get("expected_provider") or ""),
+                expected_requires_confirmation=(
+                    bool(item["expected_requires_confirmation"])
+                    if "expected_requires_confirmation" in item
+                    else None
+                ),
+                expected_requires_execution=(
+                    bool(item["expected_requires_execution"])
+                    if "expected_requires_execution" in item
+                    else None
+                ),
             )
         )
     return cases
@@ -119,9 +139,23 @@ def evaluate_prompt_route_cases(
         if execution_context is not None:
             decision_kwargs["execution_context"] = execution_context.to_dict()
         decision = classifier(case.prompt, **decision_kwargs)
+        if case.code_prompt_profile:
+            from tech_connector.services.code_prompt_profile_service import (
+                apply_code_prompt_profile_to_decision,
+            )
+
+            decision = apply_code_prompt_profile_to_decision(
+                decision,
+                case.code_prompt_profile,
+            )
         elapsed_ms = (perf_counter() - start) * 1000.0
         actual_route = str(getattr(decision, "route", "") or "")
         mutation_scope = str(getattr(decision, "mutation_scope", "") or "")
+        provider = str(getattr(decision, "provider", "") or "")
+        requires_confirmation = bool(
+            getattr(decision, "requires_confirmation", False)
+        )
+        requires_execution = bool(getattr(decision, "requires_execution", False))
         details = (
             _decision_details(decision, execution_context=execution_context, prompt=case.prompt)
             if include_details
@@ -132,7 +166,23 @@ def evaluate_prompt_route_cases(
             or mutation_scope == case.expected_mutation_scope
         )
         timing_ok = elapsed_ms <= case.max_ms
-        ok = actual_route in case.expected_routes and scope_ok and (timing_ok or include_details)
+        provider_ok = not case.expected_provider or provider == case.expected_provider
+        confirmation_ok = (
+            case.expected_requires_confirmation is None
+            or requires_confirmation == case.expected_requires_confirmation
+        )
+        execution_ok = (
+            case.expected_requires_execution is None
+            or requires_execution == case.expected_requires_execution
+        )
+        ok = (
+            actual_route in case.expected_routes
+            and scope_ok
+            and provider_ok
+            and confirmation_ok
+            and execution_ok
+            and (timing_ok or include_details)
+        )
         rows.append(
             PromptRouteEvalRow(
                 id=case.id,
@@ -146,6 +196,10 @@ def evaluate_prompt_route_cases(
                 expected_mutation_scope=case.expected_mutation_scope,
                 max_ms=case.max_ms,
                 timing_ok=timing_ok,
+                code_prompt_profile=dict(case.code_prompt_profile),
+                provider=provider,
+                requires_confirmation=requires_confirmation,
+                requires_execution=requires_execution,
                 details=details,
             )
         )

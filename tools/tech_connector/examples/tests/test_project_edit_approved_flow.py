@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tech_connector.app.main_window_editor import answer_project_index_request
-from tech_connector.services.project_edit_agent_service import (
-    ProjectEditLeafWorkUnits,
-    build_project_edit_plan_from_leaf_work_units,
-    project_edit_leaf_work_units_handoff,
-    project_edit_plan_fingerprint,
-)
 
 
 class TestProjectEditApprovedFlow(unittest.TestCase):
-    def test_approved_handoff_skips_whole_patch_and_runs_three_leaf_workers(self) -> None:
+    def test_approved_handoff_uses_shared_workflow_and_returns_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             tests_dir = root / "tests"
@@ -24,8 +18,12 @@ class TestProjectEditApprovedFlow(unittest.TestCase):
             target = root / "service.py"
             test_path = tests_dir / "test_service.py"
             target.write_text(
-                "def render_errors(results):\n"
-                "    \"\"\"Render errors.\"\"\"\n"
+                "def render_errors(results: list[dict[str, object]]) -> list[str]:\n"
+                "    \"\"\"\n"
+                "    Render validation errors.\n"
+                "    :param results: validation result dictionaries\n"
+                "    :return: concise failure lines\n"
+                "    \"\"\"\n"
                 "    return [str(item.get('message', '')) for item in results if not item.get('ok')]\n",
                 encoding="utf-8",
             )
@@ -42,71 +40,48 @@ class TestProjectEditApprovedFlow(unittest.TestCase):
                 "validation result dictionaries and returns concise failure lines. Reuse it in render_errors "
                 "and add focused unittest coverage."
             )
-            work_units = ProjectEditLeafWorkUnits(
-                helper_name="summarize_validation_failures",
-                target_path=str(target.resolve()),
-                integration_symbol="render_errors",
-                integration_source=target.read_text(encoding="utf-8"),
-                test_path=str(test_path.resolve()),
-                test_anchor_symbol="TestService.test_render_errors",
-                test_anchor_source=(
-                    "def test_render_errors(self):\n"
-                    "    self.assertEqual([], render_errors([]))"
-                ),
-                owner_module="service",
-                target_revision=hashlib.sha1(target.read_bytes()).hexdigest(),
-                test_revision=hashlib.sha1(test_path.read_bytes()).hexdigest(),
-            )
-            grounded_plan = build_project_edit_plan_from_leaf_work_units(objective, work_units)
-            plan_text = (
-                f"Implementation Plan\nObjective: {objective}\nBest target: {target}\n"
-                "Reuse render_errors and TestService.test_render_errors.\n"
-                "Proposed changes: define summarize_validation_failures, integrate it into render_errors, "
-                f"and add focused unittest coverage in {test_path}.\n"
-                "Verify imports, parse, compile, and focused unittest.\n"
-                "Plan self-check: target, integration, test scope, and verification match the request.\n"
-                "Approval produces a preview only and does not write files."
-            )
+            approval_id = "a" * 64
             approved = {
-                "plan": plan_text,
-                "fingerprint": project_edit_plan_fingerprint(grounded_plan),
-                "leaf_work_units": project_edit_leaf_work_units_handoff(work_units),
+                "plan": "Approved implementation plan",
+                "fingerprint": approval_id,
             }
-            calls: list[dict] = []
-
-            def query_model(**kwargs):
-                calls.append(kwargs)
-                prompt = kwargs["user_prompt"]
-                if "Return only one complete top-level function" in prompt:
-                    return (
-                        "def summarize_validation_failures(results: list[dict[str, object]]) -> list[str]:\n"
-                        "    \"\"\"Return messages for failed validation results.\"\"\"\n"
-                        "    return [str(item.get('message', 'Validation failed.')) for item in results "
-                        "if not item.get('ok')]"
-                    )
-                if "complete replacement for render_errors" in prompt:
-                    return (
-                        "def render_errors(results):\n"
-                        "    \"\"\"Render errors.\"\"\"\n"
-                        "    return summarize_validation_failures(results)"
-                    )
-                if "Return one complete unittest method" in prompt:
-                    return (
-                        "import unittest\n"
-                        "from service import summarize_validation_failures\n\n"
-                        "class TestGenerated(unittest.TestCase):\n"
-                        "    def test_summarize_validation_failures(self):\n"
-                        "        self.assertEqual([], summarize_validation_failures([]))"
-                    )
-                self.fail("Unexpected whole-patch or repair model call")
+            workflow = SimpleNamespace(
+                status="ready",
+                approval_id=approval_id,
+                preview=SimpleNamespace(
+                    changes=[
+                        {
+                            "action": "modify",
+                            "path": str(target.resolve()),
+                            "before": target.read_text(encoding="utf-8"),
+                            "after": target.read_text(encoding="utf-8") + "\n# integrated\n",
+                        },
+                        {
+                            "action": "modify",
+                            "path": str(test_path.resolve()),
+                            "before": test_path.read_text(encoding="utf-8"),
+                            "after": test_path.read_text(encoding="utf-8") + "\n# focused coverage\n",
+                        },
+                    ]
+                ),
+                errors=[],
+                implementation_plan={"objective": objective},
+                candidate="",
+                readiness_snapshot=lambda: {
+                    "ready": True,
+                    "status": "ready",
+                    "summary": "Validated preview is ready.",
+                },
+            )
 
             with patch(
                 "tech_connector.services.settings_service.load_settings",
                 return_value={"code_model": "coder"},
             ), patch(
-                "tech_connector.knowledge.search.query_ollama_text",
-                side_effect=query_model,
-            ):
+                "tech_connector.services.project_edit_workflow_service."
+                "run_multi_file_project_edit_workflow",
+                return_value=workflow,
+            ) as run_workflow:
                 _answer, payload = answer_project_index_request(
                     str(target),
                     objective,
@@ -114,12 +89,14 @@ class TestProjectEditApprovedFlow(unittest.TestCase):
                     approved_plan=approved,
                 )
 
-            self.assertEqual(3, len(calls))
-            self.assertEqual(["micro", "small", "micro"], [call["coder_preference"] for call in calls])
-            self.assertTrue(all(not isinstance(call.get("response_format"), dict) for call in calls))
+            run_workflow.assert_called_once()
+            workflow_kwargs = run_workflow.call_args.kwargs
+            self.assertEqual(approval_id, workflow_kwargs["approved_plan_id"])
+            self.assertTrue(workflow_kwargs["dry_run"])
+            self.assertEqual(str(target.resolve()), workflow_kwargs["active_path"])
             self.assertEqual("project_changes", payload["type"])
             self.assertEqual(2, len(payload["changes"]))
-            self.assertEqual(target.read_text(encoding="utf-8"), work_units.integration_source)
+            self.assertEqual(approval_id, payload["approval_id"])
 
 
 if __name__ == "__main__":

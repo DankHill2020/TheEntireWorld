@@ -66,7 +66,7 @@ from tech_connector.models.constants import (
 
 from tech_connector.router.ai_router import AIRouter
 from tech_connector.services.application_service import ApplicationService
-from tech_connector.services.dcc.installer_launchers import (
+from tech_connector.game_engine.integration.installer_launchers import (
     pending_first_time_dcc_installers,
     run_first_time_dcc_installers,
 )
@@ -82,6 +82,7 @@ from tech_connector.services.ollama_service import (
 
 from tech_connector.services.update_service import GitUpdater
 from tech_connector.ui.branding import application_stylesheet
+from tech_connector.ui.design_system import component_stylesheet
 
 from tech_connector.ui.status_bar import format_status_card
 
@@ -210,6 +211,13 @@ class MainWindowCoreMixin:
         self.service = ApplicationService()
         self.setWindowTitle(f"{APP_DISPLAY_NAME} {APP_VERSION}")
         self.resize(1540, 960)
+        try:
+            from tech_connector.api import register_default_ui_window
+
+            register_default_ui_window(self)
+            self.service.command_service.desktop_window = self
+        except Exception:
+            pass
 
         if LOGO_PATH.exists():
             self.setWindowIcon(QIcon(str(LOGO_PATH)))
@@ -338,7 +346,7 @@ class MainWindowCoreMixin:
         except Exception as exc:
             print(f"[UI] Menu install failed: {exc}", flush=True)
 
-        self.setStyleSheet(application_stylesheet())
+        self.setStyleSheet(application_stylesheet() + component_stylesheet())
         self.install_prompt_context_hooks()
         self.restore_window_state_preferences()
 
@@ -801,6 +809,7 @@ class MainWindowCoreMixin:
     def dcc_bridge_setup_ids(self):
         return {
             "blender": "Blender",
+            "3dsmax": "3ds Max",
             "substance_painter": "Substance Painter",
         }
 
@@ -1065,7 +1074,7 @@ class MainWindowCoreMixin:
                         statuses["substance_painter"] = ("warn", "Open (Bridge offline)")
                     else:
                         def compute_substance_setup():
-                            from tech_connector.bridges.substance_painter.install_substance_painter_bridge import (
+                            from tech_connector.installers.install_substance_painter_bridge import (
                                 default_plugin_dir,
                                 plugin_needs_install,
                             )
@@ -1247,7 +1256,7 @@ class MainWindowCoreMixin:
             self.append(f"[Unreal Reflection] Indexing skipped or failed: {error}\n")
 
     def install_blender_bridge_from_menu(self):
-        from tech_connector.services.dcc.dcc_bridge_setup import install_blender_startup_bridge
+        from tech_connector.game_engine.integration.dcc_bridge_setup import install_blender_startup_bridge
 
         result = install_blender_startup_bridge(all_versions=True)
         self.mark_dcc_bridge_setup_seen("blender")
@@ -1277,8 +1286,24 @@ class MainWindowCoreMixin:
         )
         self.append(f"\n[Blender Setup] {result.message}\n")
 
+    def install_3dsmax_bridge_from_menu(self):
+        from tech_connector.game_engine.integration.dcc_bridge_setup import install_3dsmax_startup_bridge
+
+        result = install_3dsmax_startup_bridge()
+        self.mark_dcc_bridge_setup_seen("3dsmax")
+        if result.ok:
+            self.append(f"\n[3ds Max Setup] {result.message}\n")
+            QMessageBox.information(
+                self,
+                "3ds Max Bridge",
+                result.message + ("\n\nRestart 3ds Max to load it." if result.restart_required else ""),
+            )
+            return
+        self.append(f"\n[3ds Max Setup] {result.message}\n")
+        QMessageBox.warning(self, "3ds Max Bridge Setup", result.message)
+
     def copy_blender_script_editor_setup(self):
-        from tech_connector.services.dcc.dcc_bridge_setup import blender_script_editor_snippet
+        from tech_connector.game_engine.integration.dcc_bridge_setup import blender_script_editor_snippet
 
         snippet = blender_script_editor_snippet()
         QGuiApplication.clipboard().setText(snippet)
@@ -1293,7 +1318,7 @@ class MainWindowCoreMixin:
         )
 
     def install_substance_painter_bridge_from_menu(self):
-        from tech_connector.services.dcc.dcc_bridge_setup import install_substance_painter_bridge
+        from tech_connector.game_engine.integration.dcc_bridge_setup import install_substance_painter_bridge
 
         result = install_substance_painter_bridge()
         self.mark_dcc_bridge_setup_seen("substance_painter")
@@ -1324,7 +1349,7 @@ class MainWindowCoreMixin:
         self.append(f"\n[Substance Painter Setup] {result.message}\n")
 
     def copy_substance_painter_script_editor_setup(self):
-        from tech_connector.services.dcc.dcc_bridge_setup import substance_painter_script_editor_snippet
+        from tech_connector.game_engine.integration.dcc_bridge_setup import substance_painter_script_editor_snippet
 
         snippet = substance_painter_script_editor_snippet()
         QGuiApplication.clipboard().setText(snippet)
@@ -1677,6 +1702,10 @@ class MainWindowCoreMixin:
         active_provider, active_model_name, active_raw = self.model_display_parts(
             active_model
         )
+        try:
+            tutorial_mode = bool(self._ms_tutorial_mode())
+        except Exception:
+            tutorial_mode = bool(self.settings.get("tutorial_mode", False))
         task_type = getattr(route, "task_role", "") or role or "general"
         prepared_lower = (prepared_text or "").lower()
         context_markers = (
@@ -1724,6 +1753,8 @@ class MainWindowCoreMixin:
             "knowledge_index_ready": project_index_db_path().exists(),
             "project_intelligence_used": project_intelligence_used,
             "dcc_context_used": dcc_context_used,
+            "tutorial_mode": tutorial_mode,
+            "operation_mode": "tutorial" if tutorial_mode else "standard",
             "dcc_connection": dcc_connection,
             "task_type": task_type,
             "session_role": role or "main",
@@ -1744,7 +1775,13 @@ class MainWindowCoreMixin:
                     "requires_confirmation": prompt_route_decision.get("requires_confirmation", False),
                     "required_context": list(prompt_route_decision.get("required_context") or [])[:8],
                     "reasons": list(prompt_route_decision.get("reasons") or [])[:4],
+                    "user_prompt_preferences": dict(
+                        prompt_route_decision.get("user_prompt_preferences") or {}
+                    ),
                 }
+                metadata["code_prompt_profile"] = dict(
+                    prompt_route_decision.get("user_prompt_preferences") or {}
+                )
                 analysis = prompt_route_decision.get("senior_prompt_analysis") or {}
                 metadata["senior_prompt_analysis"] = {
                     "primary_objective": analysis.get("primary_objective", ""),
@@ -2078,6 +2115,7 @@ class MainWindowCoreMixin:
             "local_only_model": "_chk_local_only",
             "allow_project_modifications": "_chk_allow_modifications",
             "require_confirmation": "_chk_require_confirm",
+            "tutorial_mode": "_chk_tutorial_mode",
             "github_tool_search": "_chk_github_search",
             "show_system_status": "bottom_system_status_toggle_btn",
         }.items():
@@ -2144,6 +2182,7 @@ class MainWindowCoreMixin:
                 "local_only_model": "_chk_local_only",
                 "allow_project_modifications": "_chk_allow_modifications",
                 "require_confirmation": "_chk_require_confirm",
+                "tutorial_mode": "_chk_tutorial_mode",
                 "github_tool_search": "_chk_github_search",
                 "show_system_status": "bottom_system_status_toggle_btn",
             }.items():
@@ -2383,3 +2422,4 @@ class MainWindowCoreMixin:
             super().keyPressEvent(event)
         except Exception:
             event.ignore()
+

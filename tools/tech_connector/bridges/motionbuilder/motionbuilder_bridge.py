@@ -1,5 +1,7 @@
 """Direct MotionBuilder socket bridge."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -8,6 +10,11 @@ from pathlib import Path
 from typing import Optional
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
+from tech_connector.bridges.session_discovery import (
+    candidate_session_ports,
+    discover_open_ports,
+    parse_session_output,
+)
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
 
@@ -266,40 +273,21 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
         str(APP_ROOT),
     ]
 
+    def _candidate_ports(self) -> list[int]:
+        return candidate_session_ports(
+            "motionbuilder",
+            port_files=self.PORT_FILES,
+            environment_variable="MOTIONBUILDER_COMMAND_PORT",
+            default_port=self.DEFAULT_PORT,
+            scan_count_variable="MOTIONBUILDER_COMMAND_PORT_SCAN_COUNT",
+        )
+
+    def find_ports(self, host: str = "127.0.0.1") -> list[int]:
+        return discover_open_ports(self._candidate_ports(), host=host)
+
     def find_port(self, host: str = "127.0.0.1") -> Optional[int]:
-        candidates = []
-
-        for pfile in self.PORT_FILES:
-            if os.path.exists(pfile):
-                try:
-                    with open(pfile, "r") as f:
-                        candidates.append(int(f.read().strip()))
-                except Exception:
-                    pass
-
-        env_port = os.environ.get("MOTIONBUILDER_COMMAND_PORT")
-        if env_port:
-            try:
-                candidates.append(int(env_port))
-            except Exception:
-                pass
-
-        candidates.append(self.DEFAULT_PORT)
-
-        seen = set()
-        for port in candidates:
-            if port in seen:
-                continue
-            seen.add(port)
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.25)
-                    if s.connect_ex((host, port)) == 0:
-                        return port
-            except Exception:
-                pass
-
-        return None
+        ports = self.find_ports(host=host)
+        return ports[0] if ports else None
 
     def execute(self, code: str, timeout: float = 10) -> tuple[bool, str]:
         port = self.find_port()
@@ -308,7 +296,9 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
                 False,
                 "No MotionBuilder bridge found. Run the startup bridge setup, then restart MotionBuilder.",
             )
+        return self.execute_on_port(code, port=port, timeout=timeout)
 
+    def execute_on_port(self, code: str, *, port: int, timeout: float = 10) -> tuple[bool, str]:
         try:
             encoded = base64.b64encode(code.encode("utf-8")).decode("utf-8")
             payload = json.dumps({"code_b64": encoded}).encode("utf-8") + b"\n"
@@ -341,6 +331,32 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
         except Exception as e:
             return False, str(e)
 
+    def session_info(self, port: int | None = None, timeout: float = 3.0) -> dict:
+        port = int(port or self.find_port() or 0)
+        if not port:
+            return {"ok": False, "error": "No MotionBuilder bridge found."}
+        code = """
+import json
+import os
+from pyfbsdk import FBApplication, FBSystem
+system = FBSystem()
+take = getattr(system, "CurrentTake", None)
+print(json.dumps({
+    "pid": os.getpid(),
+    "scene": str(getattr(FBApplication(), "FBXFileName", "") or ""),
+    "take": str(getattr(take, "Name", "") or ""),
+}))
+"""
+        ok, raw = self.execute_on_port(code, port=port, timeout=timeout)
+        data = parse_session_output(raw)
+        data.update({"ok": bool(ok), "port": port})
+        if not ok:
+            data.setdefault("error", str(raw))
+        return data
+
+    def sessions(self, host: str = "127.0.0.1") -> list[dict]:
+        return [self.session_info(port=port) for port in self.find_ports(host=host)]
+
     def call_function(self, function_path: str, args=None, kwargs=None) -> tuple[bool, str]:
         return call_python_function_via_execute(self, function_path, args, kwargs, self.SYS_PATHS)
 
@@ -370,7 +386,7 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
         limit: int = 500,
         **_kwargs,
     ) -> str:
-        from tech_connector.services.dcc.scene_snapshot_provider import motionbuilder_scene_snapshot_code
+        from tech_connector.game_engine.integration.scene_snapshot_provider import motionbuilder_scene_snapshot_code
 
         return motionbuilder_scene_snapshot_code(selected_only=selected_only, limit=limit)
 
@@ -381,18 +397,20 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
         include_geometry: bool = False,
         limit: int = 500,
         timeout: float = 10.0,
+        port: int | None = None,
         **_kwargs,
     ) -> tuple:
-        from tech_connector.services.dcc.scene_snapshot_provider import parse_scene_snapshot_output
+        from tech_connector.game_engine.integration.scene_snapshot_provider import parse_scene_snapshot_output
 
-        ok, raw = self.execute(
-            self.get_scene_snapshot_code(
-                selected_only=selected_only,
-                include_geometry=include_geometry,
-                limit=limit,
-            ),
-            timeout=timeout,
+        code = self.get_scene_snapshot_code(
+            selected_only=selected_only,
+            include_geometry=include_geometry,
+            limit=limit,
         )
+        if port is None:
+            ok, raw = self.execute(code, timeout=timeout)
+        else:
+            ok, raw = self.execute_on_port(code, port=int(port), timeout=timeout)
         if not ok:
             return False, raw
         return parse_scene_snapshot_output(raw, "motionbuilder")
@@ -435,3 +453,4 @@ class MotionBuilderBridge(DCCBridgeDelegateMixin):
 
     def mcp_execute_prompt(self, code: str) -> str:
         return f"Call motionbuilder__motionbuilder_execute_python with code {code!r} and show the raw response."
+

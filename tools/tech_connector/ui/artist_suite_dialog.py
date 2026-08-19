@@ -25,42 +25,42 @@ class ArtistSuiteDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🎨 Production Artist Superpowers Suite")
+        self.setWindowTitle("❖ Production Artist Superpowers Suite")
         self.resize(800, 660)
         self.setup_ui()
 
     def setup_ui(self):
         self.setStyleSheet("""
-            QDialog { background-color: #121212; color: #e0e0e0; }
-            QLabel { color: #b3b3b3; font-weight: bold; font-size: 12px; }
+            QDialog { background-color: #0d141e; color: #e0e0e0; }
+            QLabel { color: #9cdbba; font-weight: bold; font-size: 12px; }
             QLineEdit, QTextEdit, QComboBox {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #333333; border-radius: 4px; padding: 8px;
+                background-color: #080d14; color: #ffffff;
+                border: 1px solid #12324a; border-radius: 4px; padding: 8px;
             }
             QPushButton {
-                background-color: #1e1e1e; color: #ffffff;
-                border: 1px solid #444444; border-radius: 4px; padding: 8px 16px; font-weight: bold;
+                background-color: #0c1c28; color: #16f26a;
+                border: 1px solid #0c7a47; border-radius: 4px; padding: 8px 16px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #0052CC; }
+            QPushButton:hover { background-color: #16f26a; color: #000000; }
         """)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
         form.setSpacing(12)
 
-        header = QLabel("<h2>🎨 Production Artist Superpowers Suite</h2>")
-        header.setStyleSheet("color: #5bd000;")
+        header = QLabel("<h2>❖ Production Artist Superpowers Suite</h2>")
+        header.setStyleSheet("color: #16f26a;")
         form.addRow(header)
 
         self.tool_combo = QComboBox()
         self.tool_combo.addItems([
-            "📸 1-Click Camera Rig Matcher (Match 85mm, f/2.0 in DCC)",
-            "💡 3-Point Studio Light Rig Generator (Spawn Key, Fill, Rim)",
-            "🎨 Color Palette & Swatch Extractor (Export to Substance/UE5)",
-            "👤 Silhouette Readability & Thumbnail Squint Test",
+            "📷 1-Click Camera Rig Matcher (Match 85mm, f/2.0 in DCC)",
+            "☀ 3-Point Studio Light Rig Generator (Spawn Key, Fill, Rim)",
+            "⯌ Color Palette & Swatch Extractor (Export to Substance/UE5)",
+            "◐ Silhouette Readability & Thumbnail Squint Test",
             "🔍 Texel Density & Texture Stretching Auditor",
-            "🖌️ Redline Paint-Over & Markup Annotation Tasker",
-            "🎬 Cinematic Sequencer Motion Estimator",
+            "✎ Redline Paint-Over & Markup Annotation Tasker",
+            "▷ Cinematic Sequencer Motion Estimator",
         ])
         form.addRow("Select Artist Tool:", self.tool_combo)
 
@@ -69,7 +69,7 @@ class ArtistSuiteDialog(QDialog):
         form.addRow("Active Target DCC:", self.dcc_combo)
 
         self.output_view = QTextEdit()
-        self.output_view.setPlainText("""🎨 Selected Tool: 📸 1-Click Camera Rig Matcher
+        self.output_view.setPlainText("""❖ Selected Tool: 📷 1-Click Camera Rig Matcher
 
 Target Settings Matched from Reference:
 • Focal Length: 85mm Portrait Compression
@@ -77,7 +77,7 @@ Target Settings Matched from Reference:
 • Camera Height: 140cm (Chest Level)
 • Sensor: Super 35 Cine Format
 
-Click '🚀 Execute Artist Tool in Active DCC' to spawn this camera directly in your live Unreal Engine 5 or Maya session!""")
+Click '⚡ Execute Artist Tool in Active DCC' to spawn this camera directly in your live Unreal Engine 5 or Maya session!""")
         form.addRow("Tool Execution Details:", self.output_view)
 
         layout.addLayout(form)
@@ -85,12 +85,12 @@ Click '🚀 Execute Artist Tool in Active DCC' to spawn this camera directly in 
         # Bottom Actions
         btn_box = QHBoxLayout()
         
-        btn_preset = QPushButton("💾 Save Tool Preset")
+        btn_preset = QPushButton("⤓ Save Tool Preset")
         btn_preset.clicked.connect(self.save_preset)
         btn_box.addWidget(btn_preset)
 
-        btn_exec = QPushButton("🚀 Execute Artist Tool in Active DCC")
-        btn_exec.setStyleSheet("background: #0052CC; color: #fff;")
+        btn_exec = QPushButton("⚡ Execute Artist Tool in Active DCC")
+        btn_exec.setStyleSheet("background: linear-gradient(135deg, #1e9bff, #16f26a); color: #000000; font-weight: bold;")
         btn_exec.clicked.connect(self.execute_tool)
         btn_box.addWidget(btn_exec)
 

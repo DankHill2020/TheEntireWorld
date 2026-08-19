@@ -10,6 +10,7 @@ Provides a small but robust HTTP client for the Unreal bridge with:
 """
 
 import json
+import logging
 import os
 import socket
 import time
@@ -19,18 +20,22 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from tech_connector.bridges.session_discovery import candidate_session_ports, discover_open_ports
 from tech_connector.dcc_intelligence.runtime import TTLMemoryCache, elapsed_ms, iso_now
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
-
-
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 from tech_connector.services.modular_provider_utils import DCCBridgeDelegateMixin
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class UnrealBridge(DCCBridgeDelegateMixin):
     """Deterministic Unreal communication via HTTP bridge."""
 
-    def __init__(self):
+    def __init__(self, forced_port: int | None = None):
         self.init_delegate("unreal")
+        self._forced_port = int(forced_port) if forced_port else None
 
     PORT_FILES = [
         str(APP_DIR / "unreal_http_port.txt"),
@@ -41,42 +46,28 @@ class UnrealBridge(DCCBridgeDelegateMixin):
     DEFAULT_TIMEOUT = 5.0
     DEFAULT_RETRY_DELAY = 0.2
     LOG_FILE = APP_DIR / "unreal_request_log.jsonl"
+    MAX_LOG_BYTES = 16 * 1024 * 1024
+    MAX_LOG_ARCHIVES = 3
     _health_cache = TTLMemoryCache()
     _request_cache = TTLMemoryCache()
 
+    def _candidate_ports(self) -> list[int]:
+        if self._forced_port:
+            return [self._forced_port]
+        return candidate_session_ports(
+            "unreal",
+            port_files=self.PORT_FILES,
+            environment_variable="UNREAL_HTTP_PORT",
+            default_port=self.DEFAULT_PORT,
+            scan_count_variable="UNREAL_HTTP_PORT_SCAN_COUNT",
+        )
+
+    def find_ports(self, host=HOST) -> list[int]:
+        return discover_open_ports(self._candidate_ports(), host=host)
+
     def find_port(self, host=HOST):
-        candidates = []
-
-        env_port = os.environ.get("UNREAL_HTTP_PORT")
-        if env_port:
-            try:
-                candidates.append(int(env_port))
-            except Exception:
-                pass
-
-        for path in self.PORT_FILES:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    candidates.append(int(f.read().strip()))
-            except Exception:
-                pass
-
-        candidates.append(self.DEFAULT_PORT)
-
-        seen = set()
-        for port in candidates:
-            if port in seen:
-                continue
-            seen.add(port)
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(1.0)
-                    if s.connect_ex((host, port)) == 0:
-                        return port
-            except Exception:
-                pass
-
-        return None
+        ports = self.find_ports(host=host)
+        return ports[0] if ports else None
 
     def _parse_raw(self, raw: str) -> Any:
         try:
@@ -134,11 +125,14 @@ class UnrealBridge(DCCBridgeDelegateMixin):
     def _log_request(self, entry: dict[str, Any]) -> None:
         try:
             log_path = Path(self.LOG_FILE)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(entry, default=str) + "\n")
-        except Exception:
-            pass
+            append_jsonl_record(
+                log_path,
+                entry,
+                max_bytes=self.MAX_LOG_BYTES,
+                archive_count=self.MAX_LOG_ARCHIVES,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            LOGGER.warning("Could not write Unreal request log %s: %s", self.LOG_FILE, exc)
         self._request_cache.set("last_request", dict(entry))
 
     def get_last_request_status(self) -> dict[str, Any] | None:
@@ -684,23 +678,43 @@ print(json.dumps(result))
         normalized["fallback_from"] = failures
         return normalized
 
-    def get_scene_snapshot_code(self, *, selected_only: bool = False, limit: int = 500, **_kwargs) -> str:
-        from tech_connector.services.dcc.scene_snapshot_provider import unreal_scene_snapshot_code
+    def get_scene_snapshot_code(
+        self,
+        *,
+        selected_only: bool = False,
+        include_materials: bool = True,
+        limit: int = 500,
+        **_kwargs,
+    ) -> str:
+        from tech_connector.game_engine.integration.scene_snapshot_provider import unreal_scene_snapshot_code
 
-        return unreal_scene_snapshot_code(selected_only=selected_only, limit=limit)
+        return unreal_scene_snapshot_code(
+            selected_only=selected_only,
+            include_materials=include_materials,
+            limit=limit,
+        )
 
     def get_scene_snapshot(
         self,
         *,
         selected_only: bool = False,
+        include_materials: bool = True,
         limit: int = 500,
         timeout: float = 30.0,
         **_kwargs,
     ) -> tuple:
-        from tech_connector.services.dcc.scene_snapshot_provider import parse_scene_snapshot_output
+        from tech_connector.game_engine.integration.scene_snapshot_provider import parse_scene_snapshot_output
 
-        response = self.execute_python(
-            self.get_scene_snapshot_code(selected_only=selected_only, limit=limit),
+        requested_port = _kwargs.get("port")
+        target = self
+        if requested_port is not None and self._forced_port != int(requested_port):
+            target = type(self)(forced_port=int(requested_port))
+        response = target.execute_python(
+            self.get_scene_snapshot_code(
+                selected_only=selected_only,
+                include_materials=include_materials,
+                limit=limit,
+            ),
             timeout=timeout,
             reset_globals=True,
         )
@@ -721,7 +735,7 @@ print(json.dumps(result))
     ) -> dict[str, Any]:
         """Execute a shared DCC context registry call through this Unreal bridge."""
         try:
-            from tech_connector.services.dcc.context_call_registry import execute_context_call
+            from tech_connector.game_engine.integration.context_call_registry import execute_context_call
         except Exception:
             try:
                 from context_call_registry import execute_context_call
@@ -1231,7 +1245,9 @@ print(json.dumps(out))
         return self.execute_python(script, timeout=timeout, reset_globals=True)
 
     def health_check(self, timeout: float = 1.5) -> dict[str, Any]:
-        cached = self._health_cache.get("health", 5.0)
+        port = self.find_port(self.HOST)
+        cache_key = f"health:{port or 'offline'}"
+        cached = self._health_cache.get(cache_key, 5.0)
         if cached is not None:
             data = dict(cached)
             data["used_memory_cache"] = True
@@ -1260,7 +1276,6 @@ print(json.dumps(out))
             "checks": [],
         }
 
-        port = self.find_port(self.HOST)
         result["port"] = port
         if not port:
             result["error"] = (
@@ -1274,7 +1289,7 @@ print(json.dumps(out))
                     "duration_ms": elapsed_ms(started),
                 }
             )
-            self._health_cache.set("health", dict(result))
+            self._health_cache.set(cache_key, dict(result))
             return result
 
         try:
@@ -1301,7 +1316,7 @@ print(json.dumps(out))
                     "duration_ms": elapsed_ms(started),
                 }
             )
-            self._health_cache.set("health", dict(result))
+            self._health_cache.set(cache_key, dict(result))
             return result
 
         python_probe_started = time.monotonic()
@@ -1390,7 +1405,7 @@ print(json.dumps(out))
                     "duration_ms": elapsed_ms(probe_started),
                 }
             )
-            self._health_cache.set("health", dict(result))
+            self._health_cache.set(cache_key, dict(result))
             return result
 
         check_started = time.monotonic()
@@ -1558,8 +1573,21 @@ print(json.dumps(state))
                 pass
 
         result["latency_ms"] = result["latency_ms"] or elapsed_ms(started)
-        self._health_cache.set("health", dict(result))
+        self._health_cache.set(cache_key, dict(result))
         return result
+
+    def session_info(self, port: int | None = None, timeout: float = 3.0) -> dict[str, Any]:
+        port = int(port or self.find_port() or 0)
+        if not port:
+            return {"ok": False, "error": "No Unreal HTTP bridge found."}
+        bridge = self if self._forced_port == port else type(self)(forced_port=port)
+        health = dict(bridge.health_check(timeout=timeout) or {})
+        health["ok"] = bool(health.get("connected") and health.get("python_available"))
+        health["port"] = port
+        return health
+
+    def sessions(self, host=HOST) -> list[dict[str, Any]]:
+        return [self.session_info(port=port) for port in self.find_ports(host=host)]
 
     def call(
         self,

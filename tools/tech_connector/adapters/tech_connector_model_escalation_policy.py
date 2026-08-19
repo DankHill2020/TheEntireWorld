@@ -10,12 +10,32 @@ class TechConnectorLocalModelEscalationPolicy(ModelTierEscalationPolicy):
 
     name = "tech_connector_local_model_escalation"
 
-    def __init__(self) -> None:
+    def __init__(self, settings: dict | None = None) -> None:
+        """
+        Build local model tiers without performing settings I/O per tier.
+        :param settings: optional already-loaded application settings
+        :return: None
+        """
         try:
-            from tech_connector.services.ollama_service import code_model_for_profile
+            from tech_connector.services.ollama_service import (
+                CODE_MODEL_PROFILES,
+                code_model_for_profile,
+            )
 
             tiers = [
-                ModelTier(tier, "ollama", code_model_for_profile(tier), "local")
+                ModelTier(
+                    tier,
+                    "ollama",
+                    (
+                        code_model_for_profile(tier, settings=settings)
+                        if settings is not None
+                        else CODE_MODEL_PROFILES.get(
+                            tier,
+                            CODE_MODEL_PROFILES["small"],
+                        )
+                    ),
+                    "local",
+                )
                 for tier in ("micro", "small", "standard", "quality", "deep")
             ]
         except Exception:

@@ -243,7 +243,7 @@ def _capability_gaps(operations: list[str], prompt: str) -> list[dict[str, Any]]
 
 def _capability_acquisition_plans(operations: list[str], prompt: str) -> list[dict[str, Any]]:
     try:
-        from tech_connector.services.dcc.dcc_operation_service import build_dcc_capability_gap_plan
+        from tech_connector.game_engine.integration.dcc_operation_service import build_dcc_capability_gap_plan
     except Exception:
         return []
     return [
@@ -416,3 +416,4 @@ def _prepared_variable_script(target_abp: str, system_name: str, variables: list
         "    unreal.EditorAssetLibrary.save_loaded_asset(abp, False)\n"
         "    return {'target_abp': abp_path, 'added_variables': added}\n"
     )
+

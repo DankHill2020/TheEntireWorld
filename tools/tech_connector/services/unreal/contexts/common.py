@@ -115,7 +115,7 @@ def execute_python_json(scanner, source: str, timeout: float = 12.0) -> Dict[str
     the registry normalizes those shapes before context builders consume them.
     """
     try:
-        from tech_connector.services.dcc.context_call_registry import execute_python_context_json
+        from tech_connector.game_engine.integration.context_call_registry import execute_python_context_json
     except Exception:
         try:
             from context_call_registry import execute_python_context_json
@@ -196,3 +196,4 @@ def resolve_unreal_object(scanner, kind: str, query: str = "selected", **kwargs)
         return {"ok": False, "error": f"Unsupported Unreal resolver kind: {kind}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "kind": kind, "query": query}
+

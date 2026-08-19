@@ -22,6 +22,14 @@ REPAIR_STAGE_KEYS = {
 MAX_FUNCTION_REPAIR_CHARS = 8000
 MAX_CLASS_REPAIR_CHARS = 11000
 
+ATOMIC_REPAIR_SYSTEM_PROMPT = """You repair one exact Python owner from supplied evidence.
+Return raw Python only: no Markdown, diff, imports, siblings, or explanation.
+Preserve the public signature and decorators unless the approved contract explicitly
+requires a signature change. Use only verified names and interfaces in the envelope.
+Implement every listed failure while preserving unrelated established behavior.
+If the evidence is insufficient, return the exact owner unchanged; never invent an API.
+"""
+
 
 def prepare_repair_stage(stage: Any) -> tuple[Any, dict[str, Any]]:
     """Enforce ownership and right-size the model context for a repair stage."""
@@ -91,22 +99,23 @@ def validate_repair_response(stage: Any, response: str) -> str:
     if key == "function_repair":
         matching_callables = [
             node
-            for node in ast.walk(tree)
+            for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == symbol.rsplit(".", 1)[-1]
         ]
-        if len(matching_callables) == 1:
+        if len(matching_callables) == 1 and len(tree.body) == 1:
             extracted_nodes = matching_callables
     elif key in {"class_repair", "class_set_repair"}:
         matching_classes = [
             node
-            for node in ast.walk(tree)
+            for node in tree.body
             if isinstance(node, ast.ClassDef)
             and node.name in expected_names
         ]
         if (
             len(matching_classes) == len(expected_names)
             and {node.name for node in matching_classes} == expected_names
+            and len(tree.body) == len(expected_names)
         ):
             extracted_nodes = matching_classes
     owned_nodes = (
@@ -150,8 +159,21 @@ def validate_repair_response(stage: Any, response: str) -> str:
                 f"module-level {node.name} must be callable with no arguments "
                 "because the objective explicitly calls it that way"
             )
-    if key != "class_set_repair" and _placeholder_callable(node):
-        return f"repair response for {symbol} still has a placeholder body"
+    placeholder_owners = [
+        candidate.name
+        for candidate in owned_nodes
+        if _placeholder_owner(candidate)
+    ]
+    if placeholder_owners:
+        if len(placeholder_owners) == 1:
+            return (
+                f"repair response for {placeholder_owners[0]} "
+                "still has a placeholder body"
+            )
+        return (
+            "repair response still has placeholder owner bodies: "
+            + ", ".join(sorted(placeholder_owners))
+        )
     current_source = _owned_source(
         str(getattr(stage, "user_prompt", "") or ""),
         symbol,
@@ -235,6 +257,34 @@ def normalize_repair_response(stage: Any, response: str) -> tuple[str, bool]:
         if len(matching_blocks) == 1:
             text = matching_blocks[0]
             changed = True
+    text, closed_trailing_docstring = _close_trailing_unterminated_triple_quote(
+        text
+    )
+    changed = changed or closed_trailing_docstring
+    if key == "artifact_missing_symbol":
+        symbols = _repair_symbols(
+            stage,
+            str(getattr(stage, "user_prompt", "") or ""),
+        )
+        if len(symbols) == 1 and "." in symbols[0]:
+            container, leaf = symbols[0].split(".", 1)
+            try:
+                member_tree = ast.parse(text)
+            except SyntaxError:
+                member_tree = None
+            if (
+                member_tree is not None
+                and len(member_tree.body) == 1
+                and isinstance(
+                    member_tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)
+                )
+                and member_tree.body[0].name == leaf
+            ):
+                member_source = ast.unparse(member_tree.body[0])
+                text = f"class {container}:\n" + textwrap.indent(
+                    member_source, " " * 4
+                )
+                changed = True
     if key in {"function_repair", "class_repair", "class_set_repair"}:
         try:
             tree = ast.parse(text)
@@ -251,6 +301,31 @@ def normalize_repair_response(stage: Any, response: str) -> tuple[str, bool]:
             text = ast.unparse(tree).strip()
             changed = True
     return text, changed
+
+
+def _close_trailing_unterminated_triple_quote(text: str) -> tuple[str, bool]:
+    """Close one model-truncated triple-quoted literal at end of output.
+
+    :param text: Raw repair response.
+    :return: Response and whether a safe syntax-only close was applied.
+    """
+
+    try:
+        ast.parse(text)
+    except SyntaxError as exc:
+        if "unterminated triple-quoted string literal" not in str(exc.msg):
+            return text, False
+    else:
+        return text, False
+    unmatched = [quote for quote in ('"""', "'''") if text.count(quote) % 2]
+    if len(unmatched) != 1:
+        return text, False
+    repaired = text.rstrip() + "\n" + unmatched[0]
+    try:
+        ast.parse(repaired)
+    except SyntaxError:
+        return text, False
+    return repaired, True
 
 
 def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
@@ -395,11 +470,11 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         ("Original objective:",),
         max_chars=len(user_prompt),
     )
-    if key == "function_repair" and len(objective) > 1200:
-        objective = objective[:1200].rstrip() + "\n[full objective retained by orchestration]"
+    if key == "function_repair" and len(objective) > 600:
+        objective = objective[:600].rstrip() + "\n[full objective retained by orchestration]"
     evidence = _evidence_sections(
         user_prompt,
-        max_chars=1200 if key == "function_repair" else len(user_prompt),
+        max_chars=600 if key == "function_repair" else len(user_prompt),
     )
     canonical_evidence = {
         "module_imports": list(canonical_contract.get("module_imports") or []),
@@ -425,9 +500,9 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             indent=2,
             ensure_ascii=True,
         )
-        if key == "function_repair" and len(rendered_canonical_evidence) > 2800:
+        if key == "function_repair" and len(rendered_canonical_evidence) > 1200:
             rendered_canonical_evidence = (
-                rendered_canonical_evidence[:2800].rstrip()
+                rendered_canonical_evidence[:1200].rstrip()
                 + "\n[remaining verified evidence retained by orchestration]"
             )
         evidence = "\n\n".join(
@@ -435,7 +510,7 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         )
     critical_directives = _critical_directive_sections(
         user_prompt,
-        max_chars=1000 if key == "function_repair" else len(user_prompt),
+        max_chars=500 if key == "function_repair" else len(user_prompt),
     )
     canonical_prompt_hash = hashlib.sha256(
         user_prompt.encode("utf-8")
@@ -474,6 +549,15 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         }
         for index, value in enumerate(requirements, start=1)
     ]
+    algorithmic_guidance = ""
+    if key == "function_repair":
+        requirement_rows = _bound_atomic_requirement_rows(
+            requirement_rows,
+            max_chars=3200,
+        )
+        algorithmic_guidance = _algorithmic_repair_guidance(
+            [str(row.get("failure") or "") for row in requirement_rows]
+        )
     compact_prompt = "\n".join(
         [
             "ATOMIC REPAIR ENVELOPE",
@@ -489,6 +573,9 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             "",
             "Failed requirements:",
             json.dumps(requirement_rows, indent=2),
+            "",
+            "Derived algorithmic invariants:",
+            algorithmic_guidance or "(none; follow the failed requirements directly)",
             "",
             "Canonical repair context:",
             f"- full_prompt_sha256: {canonical_prompt_hash}",
@@ -518,7 +605,8 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         ]
     ).strip()
 
-    after_chars = len(system_prompt) + len(compact_prompt)
+    compact_system_prompt = ATOMIC_REPAIR_SYSTEM_PROMPT.strip()
+    after_chars = len(compact_system_prompt) + len(compact_prompt)
     report.update(
         {
             "after_chars": after_chars,
@@ -536,7 +624,14 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             "required_context_expansion": after_chars > limit,
         }
     )
-    return _with_report(replace(stage, user_prompt=compact_prompt), report), report
+    return _with_report(
+        replace(
+            stage,
+            system_prompt=compact_system_prompt,
+            user_prompt=compact_prompt,
+        ),
+        report,
+    ), report
 
 
 def _critical_directive_sections(prompt: str, *, max_chars: int) -> str:
@@ -609,6 +704,80 @@ def _critical_directive_sections(prompt: str, *, max_chars: int) -> str:
         selected.append(line)
         selected_chars += additional
     return "\n".join(selected).rstrip()
+
+
+def _bound_atomic_requirement_rows(
+    rows: list[dict[str, str]],
+    *,
+    max_chars: int,
+) -> list[dict[str, str]]:
+    """Bound repeated owner failures while preserving each distinct contract.
+
+    :param rows: Canonical owner-specific failure rows.
+    :param max_chars: Maximum serialized character budget.
+    :return: Deduplicated, length-bounded failure rows.
+    """
+
+    candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        failure = re.sub(r"\s+", " ", str(row.get("failure") or "")).strip()
+        if not failure:
+            continue
+        stable_failure = re.sub(
+            r"^[A-Za-z]:[^:]*?\.py:[A-Za-z_][A-Za-z0-9_.]*:\s*",
+            "",
+            failure,
+        )
+        key = stable_failure.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append({
+            "id": str(row.get("id") or f"REPAIR-{len(candidates) + 1:03d}"),
+            "owner": str(row.get("owner") or ""),
+            "failure": stable_failure[:360].rstrip(),
+        })
+    if not candidates:
+        return []
+    per_row_budget = max(120, min(360, max_chars // len(candidates) - 80))
+    retained: list[dict[str, str]] = []
+    consumed = 0
+    for candidate in candidates:
+        bounded = dict(candidate)
+        bounded["failure"] = str(candidate["failure"])[:per_row_budget].rstrip()
+        rendered = json.dumps(bounded, ensure_ascii=True)
+        if consumed + len(rendered) > max_chars:
+            continue
+        retained.append(bounded)
+        consumed += len(rendered)
+    return retained
+
+
+def _algorithmic_repair_guidance(failures: list[str]) -> str:
+    """Derive compact standard-algorithm invariants from approved requirements.
+
+    :param failures: Owner-specific requirement and validation text.
+    :return: Concise implementation guidance grounded only in those failures.
+    """
+
+    text = " ".join(failures).casefold()
+    guidance: list[str] = []
+    dependency_graph = (
+        "depend" in text
+        and any(token in text for token in ("batch", "topolog", "runnable", "cycle"))
+    )
+    if dependency_graph:
+        guidance.extend([
+            "- Build the complete node set from mapping keys and every dependency value.",
+            "- Normalize into a new `remaining` mapping of node -> copied dependency set and initialize `completed` plus a result list.",
+            "- Loop while remaining: `ready = sorted(node for node, deps in remaining.items() if deps <= completed)`.",
+            "- If ready is nonempty, append `tuple(ready)`, add the whole layer to completed, then delete only those ready nodes from remaining.",
+            "- Selecting the entire ready layer before deletion is mandatory: independent tasks share one batch and dependents appear later.",
+            "- If no remaining node is runnable, raise ValueError and include every remaining cycle-involved task in deterministic sorted form.",
+            "- Work from copied sets; never mutate the caller's mapping or dependency collections.",
+        ])
+    return "\n".join(guidance)
 
 
 def _with_report(stage: Any, report: dict[str, Any]) -> Any:
@@ -809,5 +978,63 @@ def _placeholder_callable(node: ast.AST) -> bool:
             and isinstance(getattr(item, "value", None), ast.Constant)
             and item.value.value is Ellipsis
         )
+        or (
+            isinstance(item, ast.Return)
+            and (
+                item.value is None
+                or (
+                    isinstance(item.value, ast.Constant)
+                    and item.value.value is None
+                )
+            )
+        )
+        or (
+            isinstance(item, ast.Raise)
+            and isinstance(item.exc, (ast.Name, ast.Call))
+            and (
+                item.exc.id
+                if isinstance(item.exc, ast.Name)
+                else getattr(item.exc.func, "id", "")
+            )
+            == "NotImplementedError"
+        )
         for item in executable
+    )
+
+
+def _placeholder_owner(node: ast.AST) -> bool:
+    """Return whether an owned declaration contains no substantive behavior.
+
+    :param node: Function or class declaration returned by the model.
+    :return: True when the complete owner is only a placeholder.
+    """
+
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _placeholder_callable(node)
+    if not isinstance(node, ast.ClassDef):
+        return False
+    if _placeholder_callable(node):
+        return True
+    executable = [
+        item
+        for item in node.body
+        if not (
+            isinstance(item, ast.Expr)
+            and isinstance(getattr(item, "value", None), ast.Constant)
+            and isinstance(item.value.value, str)
+        )
+        and not isinstance(item, ast.Pass)
+        and not (
+            isinstance(item, ast.Expr)
+            and isinstance(getattr(item, "value", None), ast.Constant)
+            and item.value.value is Ellipsis
+        )
+    ]
+    methods = [
+        item
+        for item in executable
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    return bool(methods) and len(methods) == len(executable) and all(
+        _placeholder_callable(method) for method in methods
     )

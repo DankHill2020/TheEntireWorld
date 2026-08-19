@@ -726,7 +726,7 @@ class IntentPlanningPipelineTests(unittest.TestCase):
         self.assertEqual("execute_dcc", call["action_type"])
         self.assertEqual("create_rig_from_mapping", call["arguments"]["operation"])
         self.assertTrue(any(
-            candidate.get("source") == "project_index"
+            candidate.get("source") in {"project_index", "project_source_ast"}
             and "create_rig_from_mapping" in str((candidate.get("metadata") or {}).get("symbol") or "")
             for candidate in context.context_candidates
         ))
@@ -1147,7 +1147,7 @@ class PromptProgressObserverTests(unittest.TestCase):
         window._tick_prompt_progress_observers()
         self.assertEqual(1, len(window.messages))
         self.assertIn("Inspecting indexed call relationships", window.messages[0])
-        self.assertIn("Still working on this step", window.messages[0])
+        self.assertIn("Active step:", window.messages[0])
 
         window._tick_prompt_progress_observers()
         self.assertEqual(1, len(window.messages))

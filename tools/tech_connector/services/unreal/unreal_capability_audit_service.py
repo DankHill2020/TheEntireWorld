@@ -18,7 +18,7 @@ CPP_PATH = PLUGIN_ROOT / "Source" / "AIStudioBridge" / "Private" / "AIStudioBrid
 def audit_unreal_capability_catalogs() -> dict[str, Any]:
     manifest = _load_manifest()
     header_functions = _parse_header_functions(HEADER_PATH)
-    cpp_bodies = _parse_cpp_bodies(CPP_PATH)
+    cpp_bodies = _parse_cpp_bodies()
 
     from tech_connector.services.unreal.capability_registry import UNREAL_CAPABILITIES
     from tech_connector.services.unreal.cpp_domain_wrapper_requirements_service import (
@@ -151,6 +151,9 @@ def audit_unreal_capability_catalogs() -> dict[str, Any]:
             "plugin_manifest": str(MANIFEST_PATH),
             "plugin_header": str(HEADER_PATH),
             "plugin_cpp": str(CPP_PATH),
+            "plugin_implementation_files": [
+                str(path) for path in _plugin_implementation_paths()
+            ],
             "operation_registry": "tech_connector.services.unreal.unreal_operation_service.UNREAL_OPERATIONS",
             "capability_registry": "tech_connector.services.unreal.capability_registry.UNREAL_CAPABILITIES",
         },
@@ -278,8 +281,20 @@ def _parse_header_functions(path: Path) -> set[str]:
     return set(re.findall(r"static\s+FString\s+(\w+)\s*\(", text))
 
 
-def _parse_cpp_bodies(path: Path) -> dict[str, dict[str, Any]]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def _plugin_implementation_paths() -> tuple[Path, ...]:
+    from tech_connector.services.unreal.plugin_source_service import plugin_implementation_paths
+
+    return plugin_implementation_paths()
+
+
+def _parse_cpp_bodies(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    from tech_connector.services.unreal.plugin_source_service import read_plugin_implementation
+
+    text = (
+        path.read_text(encoding="utf-8", errors="replace")
+        if path is not None
+        else read_plugin_implementation()
+    )
     matches = list(re.finditer(r"FString\s+UAIStudioBridgeLibrary::(\w+)\s*\(", text))
     bodies: dict[str, dict[str, Any]] = {}
     for index, match in enumerate(matches):
@@ -373,6 +388,20 @@ def _operation_callable_chains(
             "execution_chain_complete": False,
             "failure": "",
         }
+        if str(getattr(operation, "execution_mode", "")) == "user_delegated":
+            delegation = dict(getattr(operation, "delegation", None) or {})
+            row.update({
+                "implementation_layer": "user_delegated",
+                "implementation_source": str(delegation.get("surface") or "Unreal Editor"),
+                "execution_chain_complete": bool(
+                    delegation.get("surface")
+                    and delegation.get("action")
+                    and delegation.get("verification")
+                ),
+                "failure": "" if delegation else "delegation_contract_missing",
+            })
+            rows.append(row)
+            continue
         if not function:
             row["failure"] = "empty_function"
             rows.append(row)

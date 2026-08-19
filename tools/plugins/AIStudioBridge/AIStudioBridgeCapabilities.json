@@ -379,6 +379,54 @@
       "python_call": "unreal.AIStudioBridgeLibrary.remove_object_reference_from_reflected_array(asset_path, property_name, object_path)",
       "operation_aliases": ["asset.array_remove_object_reference"],
       "summary": "Remove an object reference from a reflected UObject array property, save, and report the resulting array count."
+    },
+    {
+      "name": "author_widget_blueprint",
+      "label": "Author Widget Blueprint",
+      "function": "AuthorWidgetBlueprint",
+      "python_call": "unreal.AIStudioBridgeLibrary.author_widget_blueprint(widget_blueprint_path, root_name, text_name, text, save)",
+      "operation_aliases": ["widget.author_canvas_text"],
+      "summary": "Transactionally replace a Widget Blueprint design tree with a CanvasPanel and TextBlock, compile, save, and return structural readback."
+    },
+    {
+      "name": "author_widget_blueprint_from_json",
+      "label": "Author Widget Blueprint From JSON",
+      "function": "AuthorWidgetBlueprintFromJson",
+      "python_call": "unreal.AIStudioBridgeLibrary.author_widget_blueprint_from_json(widget_blueprint_path, widget_spec_json, save)",
+      "operation_aliases": ["widget.author_from_spec"],
+      "summary": "Transactionally author a validated Widget Blueprint hierarchy from supported panel and leaf widget specifications, compile, save, and return structural readback."
+    },
+    {
+      "name": "author_behavior_tree_baseline",
+      "label": "Author Behavior Tree Baseline",
+      "function": "AuthorBehaviorTreeBaseline",
+      "python_call": "unreal.AIStudioBridgeLibrary.author_behavior_tree_baseline(behavior_tree_path, blackboard_path, wait_seconds, save)",
+      "operation_aliases": ["behavior_tree.author_baseline"],
+      "summary": "Transactionally author Root to Selector to Wait editor topology, rebuild the runtime Behavior Tree, bind an optional Blackboard, save, and return dual readback."
+    },
+    {
+      "name": "author_behavior_tree_wait_graph",
+      "label": "Author Behavior Tree Wait Graph",
+      "function": "AuthorBehaviorTreeWaitGraph",
+      "python_call": "unreal.AIStudioBridgeLibrary.author_behavior_tree_wait_graph(behavior_tree_path, blackboard_path, composite_type, wait_seconds, save)",
+      "operation_aliases": ["behavior_tree.author_wait_graph"],
+      "summary": "Transactionally author Root to Selector or Sequence with one or more Wait task children, rebuild runtime data, bind an optional Blackboard, save, and return dual structural readback."
+    },
+    {
+      "name": "author_behavior_tree_task_graph",
+      "label": "Author Mixed Behavior Tree Task Graph",
+      "function": "AuthorBehaviorTreeTaskGraph",
+      "python_call": "unreal.AIStudioBridgeLibrary.author_behavior_tree_task_graph(behavior_tree_path, blackboard_path, composite_type, task_spec_json, save)",
+      "operation_aliases": ["behavior_tree.author_task_graph"],
+      "summary": "Transactionally author a mixed Move To and Wait task graph, resolve Blackboard keys, rebuild runtime data, save, and return editor/runtime structural readback."
+    },
+    {
+      "name": "create_sound_cue_from_wave",
+      "label": "Create Playable Sound Cue From Wave",
+      "function": "CreateSoundCueFromWave",
+      "python_call": "unreal.AIStudioBridgeLibrary.create_sound_cue_from_wave(sound_cue_path, sound_wave_path, processor_spec_json, looping, volume_multiplier, pitch_multiplier, overwrite, save)",
+      "operation_aliases": ["sound_cue.create_from_wave"],
+      "summary": "Create a Sound Cue with a playable Sound Wave root and optional SoundNode processor chain, configure looping, volume, and pitch, synchronize the editor graph, save, and return runtime/editor readback."
     }
   ]
 }

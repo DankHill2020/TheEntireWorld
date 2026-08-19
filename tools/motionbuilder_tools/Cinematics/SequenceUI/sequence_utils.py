@@ -3,6 +3,8 @@ from pyfbsdk_additions import *
 import os
 import sys
 
+from utilities.safe_serialization import parse_literal_collection
+
 _callbacks = {}
 
 
@@ -341,12 +343,21 @@ def get_export_node_data():
     export_dir = None
     export_node = fb.FBFindModelByLabelName('ExportData')
     if export_node:
-        anim_dict = eval(export_node.PropertyList.Find('anims').Data)
-        try:
-            skeletons = eval(export_node.PropertyList.Find('skeletons').Data)
-        except:
-            skeletons = None
-        namespace_skeleton_map = eval(export_node.PropertyList.Find('namespace_map').Data)
+        anim_dict = parse_literal_collection(
+            export_node.PropertyList.Find('anims').Data,
+            dict,
+            {},
+        )
+        skeletons = parse_literal_collection(
+            export_node.PropertyList.Find('skeletons').Data,
+            list,
+            [],
+        )
+        namespace_skeleton_map = parse_literal_collection(
+            export_node.PropertyList.Find('namespace_map').Data,
+            dict,
+            {},
+        )
         uproject_log_cmd = export_node.PropertyList.Find('uproject').Data
         uproject, log_path, cmd_path = uproject_log_cmd.split(',', 2)
         export_dir = export_node.PropertyList.Find('export_directory').Data

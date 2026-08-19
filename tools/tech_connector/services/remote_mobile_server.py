@@ -8,6 +8,7 @@ ApplicationCommandService.
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import html
 from io import BytesIO
 import json
 from pathlib import Path
@@ -120,12 +121,42 @@ MOBILE_INDEX_HTML = r"""<!doctype html>
           <h2>Live Events</h2>
           <div id="events" class="list"></div>
         </div>
+        <div class="panel" data-menu="image_editor" style="grid-column: 1 / -1;">
+          <h2>❖ Mobile Image & Texture Editor</h2>
+          <div class="toolbar" style="margin-bottom:8px">
+            <button onclick="setMobileTool('brush')" id="btnToolBrush" style="border-color:#16f26a; background:#0c1c28; color:#16f26a">🖌 Brush</button>
+            <button onclick="setMobileTool('eraser')" id="btnToolEraser">⌫ Eraser</button>
+            <button onclick="setMobileTool('fill')" id="btnToolFill">⏍ Fill</button>
+            <span class="muted">| Size:</span>
+            <input type="range" id="mobileBrushSize" min="2" max="100" value="18" oninput="updateMobileBrush()" style="width:80px">
+            <span class="muted">Opacity:</span>
+            <input type="range" id="mobileBrushOpacity" min="1" max="100" value="100" oninput="updateMobileBrush()" style="width:80px">
+            <input type="color" id="mobileBrushColor" value="#16f26a" onchange="updateMobileBrush()" style="width:34px; height:28px; padding:0; border:none; cursor:pointer">
+          </div>
+          <div class="toolbar" style="margin-bottom:8px">
+            <span class="muted">🌫 Depth:</span>
+            <button onclick="selectMobileAtmos(1)">1: Haze</button>
+            <button onclick="selectMobileAtmos(2)">2: Mid</button>
+            <button onclick="selectMobileAtmos(3)">3: Base</button>
+            <button onclick="selectMobileAtmos(4)">4: Fore</button>
+            <button onclick="selectMobileAtmos(5)">5: Peak</button>
+            <span class="muted">| Actions:</span>
+            <button onclick="mobileSendToDesktop()" style="background:linear-gradient(135deg, #1e9bff, #16f26a); color:#000; font-weight:bold">📲 Send Image to Desktop</button>
+            <button onclick="mobilePushDcc()">⚡ Push to DCC</button>
+            <button onclick="mobileCaptureDcc()">📸 Capture Viewport</button>
+            <button onclick="clearMobileCanvas()">✕ Clear</button>
+          </div>
+          <div style="position:relative; width:100%; height:380px; background:#04080c; border:1px solid #12324a; border-radius:6px; overflow:hidden; touch-action:none">
+            <canvas id="mobileCanvas" width="960" height="540" style="width:100%; height:100%; display:block; cursor:crosshair; touch-action:none"></canvas>
+          </div>
+        </div>
       </section>
     </main>
   </div>
   <nav id="contextMenu">
     <button onclick="hideMenu(); refreshAll()">Refresh Panel</button>
     <button onclick="hideMenu(); submitPrompt()">Send Prompt</button>
+    <button onclick="hideMenu(); mobileSendToDesktop()">Send Image to Desktop</button>
     <button onclick="hideMenu(); command('request_screenshot', {})">Request Snapshot</button>
     <button onclick="hideMenu(); cancelLatest()">Cancel Latest Job</button>
     <button onclick="hideMenu(); zoomBy(1.15)">Zoom In</button>
@@ -138,6 +169,135 @@ MOBILE_INDEX_HTML = r"""<!doctype html>
     let pressTimer = null;
     const stage = document.getElementById('stage');
     const menu = document.getElementById('contextMenu');
+
+    // Mobile Image Editor State
+    let mobileTool = 'brush';
+    let mobileSize = 18;
+    let mobileOpacity = 1.0;
+    let mobileColor = '#16f26a';
+    let isDrawing = false;
+    let lastX = 0, lastY = 0;
+    const canvas = document.getElementById('mobileCanvas');
+    const ctx = canvas ? canvas.getContext('2d') : null;
+
+    if (ctx) {
+      ctx.fillStyle = '#181c24';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function updateMobileBrush(){
+      mobileSize = Number(document.getElementById('mobileBrushSize').value);
+      mobileOpacity = Number(document.getElementById('mobileBrushOpacity').value) / 100;
+      mobileColor = document.getElementById('mobileBrushColor').value;
+    }
+
+    function setMobileTool(tool){
+      mobileTool = tool;
+      ['Brush','Eraser','Fill'].forEach(t => {
+        const el = document.getElementById('btnTool' + t);
+        if (el) el.style.borderColor = (t.toLowerCase() === tool) ? '#16f26a' : '#075b36';
+      });
+    }
+
+    function getCanvasPos(e){
+      const rect = canvas.getBoundingClientRect();
+      const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+      const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height)
+      };
+    }
+
+    function startDraw(e){
+      e.preventDefault();
+      isDrawing = true;
+      const pos = getCanvasPos(e);
+      lastX = pos.x; lastY = pos.y;
+      if (mobileTool === 'fill') {
+        ctx.fillStyle = mobileColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        isDrawing = false;
+      }
+    }
+
+    function moveDraw(e){
+      if (!isDrawing || !ctx) return;
+      e.preventDefault();
+      const pos = getCanvasPos(e);
+      ctx.save();
+      ctx.globalAlpha = mobileOpacity;
+      ctx.lineWidth = mobileSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (mobileTool === 'eraser') {
+        ctx.strokeStyle = '#181c24';
+      } else {
+        ctx.strokeStyle = mobileColor;
+      }
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      ctx.restore();
+      lastX = pos.x; lastY = pos.y;
+    }
+
+    function stopDraw(e){ isDrawing = false; }
+
+    if (canvas) {
+      canvas.addEventListener('mousedown', startDraw);
+      canvas.addEventListener('mousemove', moveDraw);
+      canvas.addEventListener('mouseup', stopDraw);
+      canvas.addEventListener('touchstart', startDraw, {passive:false});
+      canvas.addEventListener('touchmove', moveDraw, {passive:false});
+      canvas.addEventListener('touchend', stopDraw);
+    }
+
+    function clearMobileCanvas(){
+      if (!ctx) return;
+      ctx.fillStyle = '#181c24';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    async function mobileSendToDesktop(){
+      if (!canvas) return;
+      const dataUrl = canvas.toDataURL('image/png');
+      const res = await command('send_mobile_image_to_desktop', {image_data: dataUrl});
+      if (res && res.ok) {
+        alert('📲 Mobile drawing sent and opened in Desktop Tech Connector Image Editor!');
+      } else {
+        alert('Error sending to desktop: ' + (res.error || 'Unknown'));
+      }
+    }
+
+    async function mobilePushDcc(){
+      if (!canvas) return;
+      const dataUrl = canvas.toDataURL('image/png');
+      const res = await command('push_texture_to_dcc', {image_data: dataUrl, target: 'active_dcc'});
+      if (res && res.ok) {
+        alert('⚡ Mobile texture pushed to active DCC viewport!');
+      } else {
+        alert('Error pushing to DCC: ' + (res.error || 'Unknown'));
+      }
+    }
+
+    async function mobileCaptureDcc(){
+      const res = await command('capture_dcc_viewport', {dcc: 'Autodesk Maya'});
+      if (res && res.image_data && ctx) {
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.src = res.image_data;
+      } else if (res && res.error) {
+        alert('Capture notice: ' + res.error);
+      }
+    }
+
+    function selectMobileAtmos(level){
+      document.getElementById('mobileBrushOpacity').value = Math.max(20, Math.min(100, 100 - (3 - level) * 20));
+      updateMobileBrush();
+    }
+
     function applyZoom(){ stage.style.transform = `scale(${scale})`; stage.style.width = `${100 / scale}%`; localStorage.aiStudioRemoteScale = scale; }
     function zoomBy(v){ scale = Math.max(.45, Math.min(2.8, scale * v)); applyZoom(); }
     function zoomReset(){ scale = 1; applyZoom(); }
@@ -338,31 +498,34 @@ class RemoteMobileServer:
                     return
                 
                 if parsed.path in {"/api/auth/slack/callback", "/api/auth/discord/callback", "/api/auth/atlassian/callback", "/api/auth/clickup/callback"}:
-                    provider = "slack" if "slack" in parsed.path else "discord"
+                    provider = parsed.path.split("/")[-2]
                     query = parse_qs(parsed.query)
                     code = query.get("code", [""])[0]
                     from tech_connector.services.connected_account_service import handle_oauth_callback
                     settings = getattr(command_service.app_service, "settings", {}) if hasattr(command_service, "app_service") and command_service.app_service else {}
                     ok, msg = handle_oauth_callback(provider, code, settings)
-                    
+                    safe_provider = html.escape(provider.title())
+                    safe_message = html.escape(str(msg or ""))
+                    heading = "Connected" if ok else "Setup incomplete"
+                    heading_color = "#16f26a" if ok else "#ffb454"
                     html_resp = f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>{provider.capitalize()} Connected!</title>
+  <title>{safe_provider} {heading}</title>
   <style>
     body {{ background: #080d14; color: #ecfff3; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }}
     .card {{ background: rgba(18, 50, 74, 0.6); padding: 40px; border-radius: 16px; border: 1px solid #16f26a; box-shadow: 0 0 30px rgba(22, 242, 106, 0.3); max-width: 480px; }}
-    h1 {{ color: #16f26a; margin-bottom: 12px; }}
+    h1 {{ color: {heading_color}; margin-bottom: 12px; }}
     p {{ color: #8fd6a5; font-size: 15px; line-height: 1.5; }}
     .badge {{ display: inline-block; padding: 6px 16px; background: rgba(30, 155, 255, 0.2); border: 1px solid #1e9bff; border-radius: 20px; font-weight: bold; color: #ffffff; margin-top: 16px; }}
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>🎉 {provider.capitalize()} Connected!</h1>
-    <p>Zero-Configuration Setup Complete.<br><b>/techconnector</b> slash commands and automated bot responses are now active on your workspace.</p>
-    <div class="badge">You can close this window and start using Slack/Discord!</div>
+    <h1>{safe_provider}: {heading}</h1>
+    <p>{safe_message}</p>
+    <div class="badge">You can close this window and return to Tech Connector.</div>
   </div>
 </body>
 </html>"""
@@ -396,6 +559,9 @@ class RemoteMobileServer:
             def do_POST(self) -> None:
                 parsed = urlparse(self.path)
                 if parsed.path == "/api/slack/events":
+                    if not self._authorized(parsed):
+                        self._send_json({"ok": False, "error": "Unauthorized"}, 401)
+                        return
                     body = self._read_json()
                     if isinstance(body, dict) and body.get("type") == "url_verification":
                         self._send_json({"challenge": body.get("challenge")})
@@ -406,6 +572,9 @@ class RemoteMobileServer:
                     self._send_json(res)
                     return
                 if parsed.path == "/api/slack/slash":
+                    if not self._authorized(parsed):
+                        self._send_json({"ok": False, "error": "Unauthorized"}, 401)
+                        return
                     length = int(self.headers.get("Content-Length", 0))
                     raw_data = self.rfile.read(length).decode("utf-8")
                     from urllib.parse import parse_qs
@@ -437,7 +606,7 @@ class RemoteMobileServer:
                 self._send_json(command_service.execute(str(payload.get("command") or ""), payload.get("payload") or {}))
 
             def _authorized(self, parsed) -> bool:
-                if parsed.path in {"/api/auth/slack/callback", "/api/auth/discord/callback", "/api/auth/atlassian/callback", "/api/auth/clickup/callback", "/api/slack/events", "/api/slack/slash"}:
+                if parsed.path in {"/api/auth/slack/callback", "/api/auth/discord/callback", "/api/auth/atlassian/callback", "/api/auth/clickup/callback"}:
                     return True
 
                 if not token:
@@ -537,6 +706,8 @@ class RemoteMobileServer:
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type, X-AI-Studio-Token")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
 
         def command_service_url() -> str:
             return self.base_url

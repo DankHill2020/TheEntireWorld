@@ -178,4 +178,52 @@ public:
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|Domain")
     static FString RemoveObjectReferenceFromReflectedArray(const FString& AssetPath, FName PropertyName, const FString& ObjectPath);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|UI")
+    static FString AuthorWidgetBlueprint(
+        const FString& WidgetBlueprintPath,
+        FName RootName,
+        FName TextName,
+        const FString& Text,
+        bool bSave = true);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|UI")
+    static FString AuthorWidgetBlueprintFromJson(
+        const FString& WidgetBlueprintPath,
+        const FString& WidgetSpecJson,
+        bool bSave = true);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|AI")
+    static FString AuthorBehaviorTreeBaseline(
+        const FString& BehaviorTreePath,
+        const FString& BlackboardPath,
+        float WaitSeconds = 1.0f,
+        bool bSave = true);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|AI")
+    static FString AuthorBehaviorTreeWaitGraph(
+        const FString& BehaviorTreePath,
+        const FString& BlackboardPath,
+        const FString& CompositeType,
+        const TArray<float>& WaitSeconds,
+        bool bSave = true);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|AI")
+    static FString AuthorBehaviorTreeTaskGraph(
+        const FString& BehaviorTreePath,
+        const FString& BlackboardPath,
+        const FString& CompositeType,
+        const FString& TaskSpecJson,
+        bool bSave = true);
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="Tech Connector|Audio")
+    static FString CreateSoundCueFromWave(
+        const FString& SoundCuePath,
+        const FString& SoundWavePath,
+        const FString& ProcessorSpecJson,
+        bool bLooping = false,
+        float VolumeMultiplier = 1.0f,
+        float PitchMultiplier = 1.0f,
+        bool bOverwrite = false,
+        bool bSave = true);
 };

@@ -1,7 +1,0 @@
-Begin Object Class=/Script/UnrealEd.K2Node_InputKey Name="K2Node_InputKey_Grapple"
-   InputKey=G
-   bConsumeInput=True
-End Object
-Begin Object Class=/Script/UnrealEd.K2Node_CallFunction Name="K2Node_CallFunction_LaunchChar"
-   FunctionReference=(MemberParent=/Script/CoreUObject.Class'"/Script/Engine.Character"',MemberName="LaunchCharacter")
-End Object

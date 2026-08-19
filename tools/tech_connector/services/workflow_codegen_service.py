@@ -474,7 +474,7 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             operation_name = str(symbol.get("operation") or "")
             callable_path = str(symbol.get("function_path") or "")
             lines += [
-                "        from tech_connector.services.dcc.pipeline_operation_runtime_service import execute_pipeline_operation",
+                "        from tech_connector.game_engine.integration.pipeline_operation_runtime_service import execute_pipeline_operation",
                 f"        _operation_params = {{{', '.join(f'{name!r}: {expr}' for name, expr in call_args_by_name.items())}}}",
                 f"        step{idx}_result = execute_pipeline_operation(",
                 f"            {host_name!r}, {operation_name!r}, {callable_path!r}, _operation_params",
@@ -564,3 +564,4 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         f"    return results.get('step{len(ordered_steps)}')",
     ]
     return "\n".join(lines)
+

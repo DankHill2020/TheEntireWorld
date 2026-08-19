@@ -14,6 +14,7 @@ import re
 from typing import Any, Iterable
 
 from tech_connector.models.constants import APP_DIR
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 
 
 EPISODE_PATH = APP_DIR / "unreal_technique_episodes.jsonl"
@@ -134,9 +135,12 @@ def record_technique_episode(
         "reusable": reusable,
     }
     episode_path = Path(path or EPISODE_PATH)
-    episode_path.parent.mkdir(parents=True, exist_ok=True)
-    with episode_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, default=str) + "\n")
+    append_jsonl_record(
+        episode_path,
+        row,
+        max_bytes=16 * 1024 * 1024,
+        archive_count=3,
+    )
     return row
 
 

@@ -115,7 +115,10 @@ def _search_python_api_natural(
     frequencies = store.python_api_term_frequencies([*query_tokens, *corrected])
     discriminating = [
         term
-        for term, _ in sorted(frequencies.items(), key=lambda item: (item[1], item[0]))
+        for term, frequency in sorted(
+            frequencies.items(), key=lambda item: (item[1], item[0])
+        )
+        if frequency > 0
     ][:4]
     focused_rows = []
     focused_strength: dict[str, int] = {}

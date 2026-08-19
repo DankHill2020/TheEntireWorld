@@ -14,6 +14,7 @@ import re
 from typing import Any
 
 from tech_connector.models.constants import APP_DIR
+from tech_connector.services.jsonl_retention_service import append_jsonl_record
 from tech_connector.services.task_playbook_service import best_practice_research_query
 
 
@@ -348,9 +349,12 @@ def promote_verified_feature_recipe(
         },
     }
     recipe_path = Path(path or VERIFIED_RECIPE_PATH)
-    recipe_path.parent.mkdir(parents=True, exist_ok=True)
-    with recipe_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, default=str) + "\n")
+    append_jsonl_record(
+        recipe_path,
+        row,
+        max_bytes=16 * 1024 * 1024,
+        archive_count=3,
+    )
     from tech_connector.services.unreal.technique_episode_store import record_technique_episode
 
     episode = record_technique_episode(

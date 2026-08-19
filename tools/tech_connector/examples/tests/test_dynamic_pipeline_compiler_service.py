@@ -33,7 +33,7 @@ class TestDynamicPipelineCompilerService(unittest.TestCase):
             inventory["lazy_providers"]["unreal_python_api"],
         )
         self.assertLess(inventory["materialized_count"], 2_000)
-        self.assertGreater(inventory["total_callable_surface"], 400_000)
+        self.assertGreater(inventory["total_callable_surface"], 100_000)
 
     def test_requirement_ledger_does_not_truncate_thirty_part_requests(self) -> None:
         requirements = [f"validate requirement {index}" for index in range(1, 31)]

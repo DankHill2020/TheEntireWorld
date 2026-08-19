@@ -25,8 +25,9 @@ to open the provider's official website.
 
 ## Credentials
 
-Provider credentials are read from environment variables. The Studio does not
-store API keys in `settings.json`.
+Provider credentials can be supplied through account login, environment variables,
+or the explicit local credential fields in Settings. Treat the settings file as a
+secret-bearing local file when credential fields are used; never publish it.
 
 ```text
 OpenAI:    OPENAI_API_KEY
@@ -75,18 +76,23 @@ Provider Setup dialog -> Paste API key once -> store in Windows Credential Manag
 
 ## Model Strings
 
-The model selector accepts provider-prefixed model strings:
+The model selector stores provider-prefixed model strings:
 
 ```text
 ollama:qwen2.5-coder:14b
 ollama:qwen3:14b
-openai:gpt-4o-mini
-google:gemini-1.5-pro
-anthropic:claude-3-5-sonnet-latest
+openai:gpt-5.6-terra
+google:gemini-3.1-pro
+anthropic:claude-sonnet-5
 ```
 
-The provider examples are editable because provider model catalogs change over
-time.
+The selector is intentionally not free-form. Built-in compatibility choices are
+merged with the last successful provider catalog refresh, so changing catalogs do
+not require hand-typed identifiers and the selector remains useful offline.
+
+OpenAI API-key requests use `/v1/responses`, including `instructions`, reasoning
+controls, text verbosity, and `text.format` structured output. See
+`CODE_AGENT_WORKFLOW.md` for the visible depth presets and authority contract.
 
 The router settings currently default local code work to
 `qwen2.5-coder:14b` and planning/deep Unreal work to `qwen3:14b`, unless the

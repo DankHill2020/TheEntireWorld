@@ -8,10 +8,39 @@ except:
     PYQT_VERSION = 2
 import threading
 import os
+import re
 from custom_qt import custom_widgets
 from utilities import json_data
 from unreal_tools import unreal_subprocess as usp
 from unreal_tools import unreal_project_data as upd
+from utilities.safe_serialization import parse_literal_collection
+
+
+def _stored_qcolor(value):
+
+    """
+        Parses a QColor representation without executing persisted code.
+
+    :param value: stored QColor string or QColor instance
+    :return: QColor value
+    """
+    if isinstance(value, QtGui.QColor):
+        return value
+    text = str(value or "").strip()
+    match = re.fullmatch(
+        r"(?:QtGui\.)?QColor\.(fromRgbF|fromRgb)\(([-+0-9.eE, ]+)\)",
+        text,
+    )
+    if match:
+        numbers = [part.strip() for part in match.group(2).split(",")]
+        try:
+            if match.group(1) == "fromRgbF":
+                return QtGui.QColor.fromRgbF(*(float(part) for part in numbers))
+            return QtGui.QColor.fromRgb(*(int(float(part)) for part in numbers))
+        except (TypeError, ValueError):
+            pass
+    color = QtGui.QColor(text)
+    return color if color.isValid() else QtGui.QColor("#808080")
 
 
 def is_maya():
@@ -400,7 +429,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
         current_skel = self.skeleton_input.currentText()
         skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
         if type(skel_data) == str:
-            self.skeletons = eval(skel_data)
+            self.skeletons = parse_literal_collection(skel_data, list, [])
         else:
             self.skeletons = skel_data
         self.skeleton_input.clear()
@@ -1131,7 +1160,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
             if self.uproject and not skeletons:
                 skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
                 if type(skel_data) == str:
-                    self.skeletons = eval(skel_data)
+                    self.skeletons = parse_literal_collection(skel_data, list, [])
                 else:
                     self.skeletons = skel_data
             else:
@@ -1156,7 +1185,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
             if animation_data:
                 start, end, namespace, skeleton, color, nodes = animation_data
                 self.add_animation(anim=anim, directory=directory, start=start, end=end, namespace=namespace,
-                                   skeleton=skeleton, color=eval(color), nodes=nodes)
+                                   skeleton=skeleton, color=_stored_qcolor(color), nodes=nodes)
 
         return [self.anim_dict, self.skeletons, self.uproject, self.export_dir]
 

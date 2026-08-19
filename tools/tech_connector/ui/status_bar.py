@@ -6,8 +6,6 @@ from html import escape
 
 from tech_connector.models.constants import (
     APP_ROOT,
-    LOGO_DARK,
-    LOGO_DARK_BLUE,
     STATUS_CARD_COLORS,
     STATUS_CARD_ICONS,
     STATUS_CARD_LABELS,
@@ -62,18 +60,19 @@ def format_status_card(key: str, state: str, detail: str = "") -> tuple[str, str
         compact_detail = _compact_detail(detail or state.title())
         text = f'{icon} <span style="color:{color};">●</span> {escape(compact_detail)}'
         
-    fill = LOGO_DARK
-    if state == "ok":
-        fill = LOGO_DARK
-    elif state == "busy":
-        fill = LOGO_DARK_BLUE
+    fill = "#0c1016"
+    border = "#273241"
+    if state == "busy":
+        fill = "#0d1822"
     elif state == "warn":
         fill = "#120804"
+        border = "#684a20"
     elif state == "bad":
         fill = "#150707"
+        border = "#6e363b"
     stylesheet = (
-        f"padding: 2px 6px; border: 1px solid {color}; border-radius: 5px; "
-        f"background-color: {fill}; color: {color}; font-weight: bold; font-size: 10px;"
+        f"padding: 2px 6px; border: 1px solid {border}; border-radius: 5px; "
+        f"background-color: {fill}; color: #cbd5e1; font-weight: 500; font-size: 10px;"
     )
     return text, stylesheet
 

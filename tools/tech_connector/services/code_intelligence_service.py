@@ -76,7 +76,7 @@ def _top_level_import_targets(tree: ast.Module, current_module: str) -> set[str]
                 if not is_type_checking and not is_main_guard(statement.test):
                     visit(statement.body)
                     visit(statement.orelse)
-            elif isinstance(statement, (ast.Try, ast.TryStar)):
+            elif isinstance(statement, (ast.Try, getattr(ast, "TryStar", ast.Try))):
                 visit(statement.body)
                 for handler in statement.handlers:
                     visit(handler.body)
@@ -154,6 +154,7 @@ def audit_python_package_layout(
         ".git",
         ".index_backups",
         ".pytest_cache",
+        ".tech_connector",
         ".venv",
         "__pycache__",
         "data",
@@ -197,7 +198,7 @@ def audit_python_package_layout(
                 modules.extend(alias.name for alias in node.names)
             for module in modules:
                 root_name = module.split(".", 1)[0]
-                if root_name in first_party_packages:
+                if root_name in first_party_packages and root_name != package_name:
                     unqualified_imports.append(
                         {"path": str(path), "relative_path": relative, "line": node.lineno, "module": module}
                     )

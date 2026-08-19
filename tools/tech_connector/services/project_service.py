@@ -761,164 +761,6 @@ def answer_project_health_request(question: str, active_path: str | None = None,
     return result
 
 
-# --- Project Health Service (merged from project_health_service.py) ---
-
-_HEALTH_CACHE: dict[tuple[str, str, int, tuple[str, ...]], tuple[float, str]] = {}
-_CACHE_TTL_SECONDS = 30.0
-_SYNC_CACHE: dict[tuple[str, tuple[str, ...], int, bool], tuple[float, dict[str, Any]]] = {}
-_SYNC_CACHE_TTL_SECONDS = 20.0
-
-
-@dataclass(frozen=True)
-class ProjectHealthRequest:
-    kind: str
-    scope: str = "project"
-    limit: int = 200
-
-
-def is_project_health_request(question: str) -> bool:
-    q = (question or "").lower()
-    return bool(
-        re.search(
-            r"\b(dead code|dead function|dead functions|dead class|dead classes|unused symbol|unused symbols|unused function|unused functions|unused class|unused classes|unused import|unused imports|not used|not referenced|orphan|orphaned|safe to delete|index stale|out of sync|sync status)\b",
-            q,
-        )
-    )
-
-
-def detect_project_health_request(question: str) -> ProjectHealthRequest:
-    q = (question or "").lower()
-    scope = "all" if any(token in q for token in ("all indexed", "everything", "including engine", "including stdlib")) else "project"
-    limit = 300 if any(token in q for token in ("all", "every")) else 120
-
-    if re.search(r"\b(index stale|out of sync|sync status|changed since|not indexed)\b", q):
-        return ProjectHealthRequest("index_sync", scope, limit)
-    if re.search(r"\b(unused import|unused imports|dead import|dead imports)\b", q):
-        return ProjectHealthRequest("unused_imports", scope, limit)
-    if re.search(r"\b(dead class|dead classes|unused class|unused classes|orphan class|orphan classes)\b", q):
-        return ProjectHealthRequest("unused_classes", scope, limit)
-    if re.search(r"\b(dead function|dead functions|unused function|unused functions|orphan function|orphan functions)\b", q):
-        return ProjectHealthRequest("unused_functions", scope, limit)
-    if re.search(r"\b(dead symbol|dead symbols|unused symbol|unused symbols)\b", q):
-        return ProjectHealthRequest("unused_symbols", scope, limit)
-    if re.search(r"\b(unused file|unused files|dead file|dead files|not imported|never imported|safe to delete)\b", q):
-        return ProjectHealthRequest("unused_files", scope, limit)
-    return ProjectHealthRequest("unused_symbols", scope, limit)
-
-
-def _project_roots(active_path: str | None = None) -> list[str]:
-    roots: list[str] = []
-    try:
-        from tech_connector.services.settings_service import load_settings
-        from tech_connector.models.project import project_roots
-
-        roots.extend(project_roots(load_settings()))
-    except Exception:
-        pass
-
-    if active_path:
-        try:
-            p = Path(active_path).expanduser().resolve()
-            probe = p.parent if p.is_file() else p
-            while probe != probe.parent:
-                if (probe / ".git").exists() or (probe / "app").exists() or (probe / "pyproject.toml").exists():
-                    val = str(probe)
-                    if val not in roots:
-                        roots.insert(0, val)
-                    break
-                probe = probe.parent
-        except Exception:
-            pass
-    return roots
-
-
-def index_sync_summary(active_path: str | None = None, *, limit: int = 40, force: bool = False, scan_new_files: bool = False) -> dict[str, Any]:
-    """Fast cached stale-index summary for the UI."""
-    from tech_connector.knowledge.search import get_index_sync_status
-
-    roots = tuple(_project_roots(active_path))
-    now = time.time()
-    cache_key = (str(active_path or ""), roots, int(limit), bool(scan_new_files))
-    if not force and cache_key in _SYNC_CACHE:
-        ts, cached = _SYNC_CACHE[cache_key]
-        if now - ts < _SYNC_CACHE_TTL_SECONDS:
-            return cached
-
-    result = get_index_sync_status(
-        project_roots=list(roots),
-        limit=limit,
-        scan_new_files=scan_new_files,
-        max_checked=2500,
-    )
-    _SYNC_CACHE[cache_key] = (now, result)
-    return result
-
-
-def format_stale_warning(sync: dict[str, Any]) -> str:
-    if not sync or sync.get("error"):
-        return ""
-    if not sync.get("stale"):
-        return ""
-    total = sync.get("total_stale", 0)
-    changed = sync.get("total_changed", 0)
-    missing = sync.get("total_missing", 0)
-    new = sync.get("total_new", 0)
-    return (
-        f"Note: the project index may be stale. {total} file(s) differ from the last index "
-        f"({changed} changed, {missing} missing, {new} new). Results may be incomplete until quick reindex runs."
-    )
-
-
-def answer_project_health_request(question: str, active_path: str | None = None, *, use_cache: bool = True) -> str:
-    request = detect_project_health_request(question)
-    roots = tuple(_project_roots(active_path))
-    cache_key = (request.kind, request.scope, request.limit, roots)
-    now = time.time()
-    if use_cache and cache_key in _HEALTH_CACHE:
-        ts, cached = _HEALTH_CACHE[cache_key]
-        if now - ts < _CACHE_TTL_SECONDS:
-            return cached
-
-    from tech_connector.knowledge.search import (
-        analyze_unused_classes,
-        analyze_unused_files,
-        analyze_unused_functions,
-        analyze_unused_imports,
-        analyze_unused_symbols,
-        format_graph_analysis_context,
-        format_index_sync_context,
-        format_unused_symbols_context,
-        get_index_sync_status,
-    )
-
-    sync = get_index_sync_status(project_roots=list(roots), scope=request.scope, limit=40, scan_new_files=(request.kind == 'index_sync'), max_checked=5000)
-    warning = format_stale_warning(sync)
-
-    parts = []
-    if warning:
-        parts.append(warning)
-        parts.append("")
-
-    if request.kind == "index_sync":
-        parts.append(format_index_sync_context(sync))
-    elif request.kind == "unused_imports":
-        parts.append(format_graph_analysis_context(analyze_unused_imports(scope=request.scope, limit=request.limit)))
-    elif request.kind == "unused_files":
-        parts.append(format_graph_analysis_context(analyze_unused_files(scope=request.scope, limit=request.limit)))
-    elif request.kind == "unused_classes":
-        parts.append(format_unused_symbols_context(analyze_unused_classes(scope=request.scope, limit=request.limit)))
-    elif request.kind == "unused_functions":
-        parts.append(format_unused_symbols_context(analyze_unused_functions(scope=request.scope, limit=request.limit)))
-    else:
-        parts.append(format_unused_symbols_context(analyze_unused_symbols(scope=request.scope, limit=request.limit)))
-
-    parts.append("")
-    parts.append("Verification: run Quick Index, then rerun this analysis before deleting anything. Static analysis can miss reflection, Qt signals, DCC callbacks, plugin discovery, and dynamic imports.")
-    result = "\n".join(parts).strip()
-    _HEALTH_CACHE[cache_key] = (now, result)
-    return result
-
-
 # --- Project Intelligence Daemon Service (merged from project_intelligence_service.py) ---
 
 class ProjectIntelligenceService:
@@ -1424,6 +1266,7 @@ TARGET_SUBSYSTEM_HINTS = (
             "code agent",
             "agent planning",
             "project edit",
+            "project_edit_agent_service",
             "success contract",
             "ide agent",
             "repo map",
@@ -1493,6 +1336,76 @@ TARGET_SUBSYSTEM_HINTS = (
             "ui/chat_renderer.py",
             "services/prompt/prompt_progress_service.py",
             "tests/test_chat_report_quality.py",
+        ),
+    },
+    {
+        "key": "knowledge_index_progress",
+        "triggers": (
+            "indexing",
+            "index progress",
+            "knowledge index",
+            "still running",
+            "ready while",
+        ),
+        "terms": (
+            "indexing",
+            "knowledge",
+            "progress",
+            "ready",
+            "running",
+            "background",
+        ),
+        "paths": (
+            "services/knowledge_background_service.py",
+            "app/main_window_core.py",
+        ),
+    },
+    {
+        "key": "prompt_threading",
+        "triggers": (
+            "long prompts",
+            "app freezes",
+            "main-thread",
+            "main thread",
+            "prompt freeze",
+        ),
+        "terms": (
+            "prompt",
+            "thread",
+            "freeze",
+            "progress",
+            "dispatch",
+            "background",
+        ),
+        "paths": (
+            "app/main_window_chat_runtime.py",
+            "services/prompt/prompt_dispatch_service.py",
+            "services/prompt/prompt_progress_service.py",
+        ),
+    },
+    {
+        "key": "project_edit_parser",
+        "triggers": (
+            "xml patch",
+            "xml patches",
+            "modify_file",
+            "create_file",
+            "patch parser",
+        ),
+        "terms": (
+            "xml",
+            "patch",
+            "parser",
+            "project",
+            "edit",
+            "error",
+        ),
+        "paths": (
+            "services/project_edit_agent_service.py",
+            "services/project_edit_agent_part_06.py",
+            "services/project_edit_agent_part_05.py",
+            "services/project_edit_agent_part_02.py",
+            "knowledge/search.py",
         ),
     },
 )
@@ -1583,6 +1496,7 @@ def _target_subsystem_hints(text: str) -> list[dict[str, Any]]:
         "jobs",
         "colors",
         "documentation",
+        "validation",
     }
     matched_hints: list[dict[str, Any]] = []
     for hint in TARGET_SUBSYSTEM_HINTS:
@@ -1597,132 +1511,6 @@ def _target_subsystem_hints(text: str) -> list[dict[str, Any]]:
             continue
         matched_hints.append(hint)
     return matched_hints
-
-
-def _target_trigger_matches(lower: str, trigger: str) -> bool:
-    trigger = (trigger or "").lower().strip()
-    if not trigger:
-        return False
-    if " " in trigger or "-" in trigger:
-        return bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(trigger)}(?![A-Za-z0-9_])", lower))
-    return bool(re.search(rf"\b{re.escape(trigger)}\b", lower))
-
-
-def _extend_terms_for_subsystems(terms: list[str], hints: list[dict[str, Any]], limit: int = 32) -> list[str]:
-    expanded = list(terms)
-    for hint in hints:
-        for term in hint.get("terms") or ():
-            if term not in expanded:
-                expanded.append(term)
-    return expanded[:limit]
-
-
-def _resolve_hint_path(path_text: str) -> str:
-    path = Path(path_text)
-    if not path.is_absolute():
-        resolved = (_PACKAGE_ROOT / path_text).resolve()
-        if not resolved.exists() and path_text.startswith("../"):
-            resolved = (_PACKAGE_ROOT / path_text.replace("../", "", 1)).resolve()
-        path = resolved
-    return str(path)
-
-
-def _subsystem_hint_score(path: str, hints: list[dict[str, Any]]) -> int:
-    normalized = str(path or "").replace("\\", "/").lower()
-    score = 0
-    for hint in hints:
-        for hint_path in hint.get("paths") or ():
-            resolved = _resolve_hint_path(str(hint_path)).replace("\\", "/").lower()
-            if normalized == resolved:
-                score += 80
-            elif resolved and (resolved in normalized or normalized.endswith(resolved.split("/")[-1])):
-                score += 25
-    return score
-
-
-def _active_path_matches_terms(active_path: str | None, terms: list[str], hints: list[dict[str, Any]]) -> bool:
-    if not active_path:
-        return False
-    normalized = str(active_path).replace("\\", "/").lower()
-    if _subsystem_hint_score(normalized, hints) > 0:
-        return True
-    meaningful = [term for term in terms if len(term) >= 4]
-    return sum(1 for term in meaningful if term in normalized) >= 2
-
-
-def is_target_discovery_edit_request(text: str) -> bool:
-    """True when a prompt asks the system to locate the right file and edit/add there."""
-    lower = (text or "").lower()
-    wants_target = bool(
-        re.search(r"\b(find|locate|choose|pick|identify|where|best place)\b", lower)
-        and re.search(r"\b(file|module|place|location|where)\b", lower)
-    )
-    wants_change = bool(
-        re.search(r"\b(add|create|write|generate|implement|insert|modify|improve|refactor|fix|update)\b", lower)
-    )
-    names_project_object = bool(
-        re.search(r"\b(project|repo|codebase|tool|function|class|method|module|file|existing|current|ui|pipeline|workflow|editor|service|bridge)\b", lower)
-    )
-    mentions_existing_code = bool(
-        re.search(r"\b(in|inside|to|for)\s+(?:our|the|this|my)?\s*[A-Za-z_][A-Za-z0-9_./\\-]*\.py\b", text or "")
-        or re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(", text or "")
-    )
-    return wants_change and (wants_target or names_project_object or mentions_existing_code)
-
-
-def _path_score(path: str, terms: list[str], active_path: str | None = None) -> int:
-    p = str(path or "").replace("\\", "/").lower()
-    name = Path(p).name.lower()
-    score = 0
-    for term in terms:
-        if term in name:
-            score += 12
-        if term in p:
-            score += 5
-        if term == name or term + ".py" == name or term == Path(p).stem.lower():
-            score += 500
-    if active_path:
-        try:
-            active_parent = str(Path(active_path).resolve().parent).replace("\\", "/").lower()
-            if active_parent and p.startswith(active_parent):
-                score += 8
-        except Exception:
-            pass
-    if any(marker in p for marker in ("test", "example", "archive", "backup", "deprecated")):
-        score -= 10
-    if p.endswith("__init__.py"):
-        score -= 15
-    return score
-
-
-def _add_hint_candidates(file_scores: dict[str, dict[str, Any]], hints: list[dict[str, Any]]) -> None:
-    for hint in hints:
-        for hint_path in hint.get("paths") or ():
-            path = _resolve_hint_path(str(hint_path))
-            if not Path(path).exists():
-                continue
-            if not _is_project_edit_candidate_path(path):
-                continue
-            entry = file_scores.setdefault(path, {"path": path, "score": 0, "symbols": [], "chunks": []})
-            entry["score"] += _subsystem_hint_score(path, [hint])
-
-
-def _is_project_edit_candidate_path(path: str) -> bool:
-    normalized = str(path or "").replace("\\", "/").lower()
-    if not normalized:
-        return False
-    excluded_parts = (
-        "/.venv/",
-        "/venv/",
-        "/site-packages/",
-        "/dist-packages/",
-        ".dist-info/",
-        "/__pycache__/",
-        "/.git/",
-        "/.mypy_cache/",
-        "/.pytest_cache/",
-    )
-    return not any(part in normalized for part in excluded_parts)
 
 
 def _path_allowed_for_edit_scope(path: str, scope: str | None) -> bool:
@@ -1891,6 +1679,9 @@ def _is_project_edit_candidate_path(path: str) -> bool:
         "/.mypy_cache/",
         "/.pytest_cache/",
     )
+    return not any(part in normalized for part in excluded_parts)
+
+
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
     out = []
@@ -2385,7 +2176,8 @@ Response format:
 2. Target file/symbol decision with confidence.
 3. Implementation plan.
 4. Patch or exact code change.
-5. Verification command block, expected output, and pass/fail result.
+5. Verification command or manual validation.
+   Include the exact command or check, expected output, and pass/fail result.
 6. Assumptions, risks, or missing evidence.
 7. Outstanding gates or residual test debt.
 """

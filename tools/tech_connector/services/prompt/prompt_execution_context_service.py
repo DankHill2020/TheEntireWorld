@@ -17,6 +17,8 @@ import threading
 from typing import Any, Iterable
 import urllib.request
 
+from tech_connector.services.file_index_service import FileIndexService
+
 
 _PLANNING_CACHE: dict[str, dict[str, Any]] = {}
 _PLANNING_CACHE_LOCK = threading.Lock()
@@ -508,11 +510,18 @@ def gather_prompt_context_candidates(
         str(understanding.get("primary_route") or "") == "dcc_execute"
         and str(understanding.get("target_symbol") or "")
     ):
+        target_symbol = str(understanding.get("target_symbol") or "")
         _collect_project_file_guesses(
             candidates,
-            str(understanding.get("target_symbol") or ""),
+            target_symbol,
             active_path,
         )
+        if not _context_confirms_callable(target_symbol, candidates):
+            _collect_project_symbol_source_candidates(
+                candidates,
+                target_symbol,
+                facts.get("project_roots") or [],
+            )
 
     for item in candidates:
         item.pop("_key", None)
@@ -592,6 +601,61 @@ def _collect_project_file_guesses(candidates: list[dict[str, Any]], prompt: str,
             )
     except Exception:
         pass
+
+
+def _collect_project_symbol_source_candidates(
+    candidates: list[dict[str, Any]],
+    symbol: str,
+    project_roots: Iterable[str],
+    *,
+    max_files: int = 5000,
+    max_file_bytes: int = 2_000_000,
+) -> None:
+    """
+    Find an exact Python callable when the persisted symbol index is stale.
+    :param candidates: mutable bounded context candidate collection
+    :param symbol: exact requested callable name
+    :param project_roots: allowed project roots to inspect
+    :param max_files: maximum Python files inspected across all roots
+    :param max_file_bytes: maximum source file size inspected
+    :return: None
+    """
+    requested = str(symbol or "").split(".")[-1].strip()
+    if not re.fullmatch(r"[A-Za-z_]\w*", requested):
+        return
+    rows = FileIndexService(db_path=Path()).find_python_symbol_candidates(
+        [requested],
+        project_roots,
+        kinds=("function",),
+        limit=1,
+        max_files=max_files,
+        max_file_bytes=max_file_bytes,
+    )
+    if not rows:
+        return
+    row = rows[0]
+    _add_context_candidate(
+        candidates,
+        kind="file_symbols",
+        value={
+            "file": row.get("path") or "",
+            "symbols": [
+                {
+                    "name": requested,
+                    "kind": "function",
+                    "line": row.get("start_line") or 0,
+                    "signature": row.get("signature") or "",
+                }
+            ],
+        },
+        source="project_source_ast",
+        confidence=0.9,
+        metadata={
+            "symbol": requested,
+            "path": row.get("path") or "",
+            "fallback": "stale_or_missing_symbol_index",
+        },
+    )
 
 
 _PLANNING_SYSTEM = """You are the authoritative planning and intent-validation stage for a coding and DCC assistant.
@@ -696,7 +760,7 @@ def plan_prompt_with_context(
         "instruction": "Build the smallest executable plan that can satisfy and later validate the answer.",
     }
     try:
-        from tech_connector.services.dcc.host_thread_policy_service import build_host_thread_policy
+        from tech_connector.game_engine.integration.host_thread_policy_service import build_host_thread_policy
 
         packet["execution_safety"] = build_host_thread_policy(prompt, understanding)
     except Exception:
@@ -796,7 +860,7 @@ def _repair_planning_result_from_verification(
         ),
     }
     try:
-        from tech_connector.services.dcc.host_thread_policy_service import build_host_thread_policy
+        from tech_connector.game_engine.integration.host_thread_policy_service import build_host_thread_policy
 
         packet["execution_safety"] = build_host_thread_policy(prompt, understanding)
     except Exception:
@@ -1218,6 +1282,43 @@ def _deterministic_planning_result(
         plan["reasons"] = [
             "A material user-owned ambiguity remains, so the long planning path was paused for clarification."
         ]
+
+    if _is_function_backed_artifact_request(prompt):
+        # Known function-backed UI/tool patterns already carry an explicit,
+        # deterministic requirement chain.  Feed that chain to the alignment
+        # verifier instead of the generic fallback steps, which otherwise lose
+        # concrete controls such as catalog search, JSON editing, queued
+        # execution, progress, and error reporting.
+        try:
+            from tech_connector.services.reasoning.goal_gap_capability_rules import (
+                _matched_patterns,
+            )
+
+            pattern_decision = {
+                "route": understanding.get("primary_route") or "target_discovery",
+                "host": understanding.get("host") or contract.get("host_domain") or "",
+                "intent_category": understanding.get("primary_intent") or "",
+                "provider": understanding.get("provider") or "target_discovery",
+            }
+            patterns = _matched_patterns(prompt, pattern_decision)
+            selected = next(
+                (pattern for pattern in patterns if pattern.key == "code.qt_operation_runner_ui"),
+                None,
+            )
+            if selected is not None:
+                plan["steps"] = [
+                    {
+                        "action": node.key,
+                        "objective": node.label,
+                        "success_condition": "; ".join(node.verification),
+                    }
+                    for node in selected.required_chain
+                ]
+                plan["deterministic_pattern"] = selected.key
+        except Exception:
+            # Pattern enrichment is an optimization; the validated fallback
+            # plan remains usable if an optional registry import is unavailable.
+            pass
     return plan
 
 
@@ -1505,7 +1606,7 @@ def _validate_planning_result(
             params,
             context_candidates=context_candidates,
         ):
-            from tech_connector.services.dcc.dcc_operation_service import build_dcc_capability_gap_plan
+            from tech_connector.game_engine.integration.dcc_operation_service import build_dcc_capability_gap_plan
 
             gap = build_dcc_capability_gap_plan(
                 str(cleaned.get("host") or ""),
@@ -1686,7 +1787,7 @@ def _planned_dcc_call(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         ).strip()
         params = dict(arguments.get("params") or arguments.get("payload") or {})
         if operation:
-            from tech_connector.services.dcc.dcc_operation_service import (
+            from tech_connector.game_engine.integration.dcc_operation_service import (
                 resolve_registered_dcc_operation_key,
             )
 
@@ -1698,7 +1799,7 @@ def _planned_dcc_call(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     operation = str(
         plan.get("target") or plan.get("behavior") or "requested_operation"
     ).strip()
-    from tech_connector.services.dcc.dcc_operation_service import (
+    from tech_connector.game_engine.integration.dcc_operation_service import (
         resolve_registered_dcc_operation_key,
     )
 
@@ -1716,7 +1817,7 @@ def _is_verified_dcc_capability(
     *,
     context_candidates: list[dict[str, Any]] | None = None,
 ) -> bool:
-    from tech_connector.services.dcc.dcc_operation_service import registered_dcc_operation
+    from tech_connector.game_engine.integration.dcc_operation_service import registered_dcc_operation
 
     registered = registered_dcc_operation(str(plan.get("host") or ""), operation)
     if registered is not None and operation not in {"api.call", "tool.call"}:
@@ -1740,7 +1841,11 @@ def _context_confirms_callable(
     if not requested:
         return False
     for candidate in candidates:
-        if str(candidate.get("source") or "") not in {"project_index", "current_file_ast"}:
+        if str(candidate.get("source") or "") not in {
+            "project_index",
+            "current_file_ast",
+            "project_source_ast",
+        }:
             continue
         metadata = dict(candidate.get("metadata") or {})
         symbol_text = str(metadata.get("symbol") or "")
@@ -1950,17 +2055,6 @@ def build_prompt_execution_context(
         formulation,
     )
     reference_resolution_needed = _needs_context_reference_resolution(normalized_prompt)
-    try:
-        from tech_connector.services.prompt.prompt_intent_service import (
-            _requires_semantic_composition,
-        )
-
-        semantic_composition_required = _requires_semantic_composition(
-            normalized_prompt,
-            understanding,
-        )
-    except Exception:
-        semantic_composition_required = reference_resolution_needed
     if fast_preview or (
         (deterministic_lookup or deterministic_function_artifact or deterministic_complex_implementation)
         and not reference_resolution_needed
@@ -1991,7 +2085,7 @@ def build_prompt_execution_context(
             context_candidates,
             planning_mode="deterministic_project_lookup",
         )
-    elif deterministic_function_artifact and not semantic_composition_required:
+    elif deterministic_function_artifact:
         planning_result = _deterministic_planning_result(
             normalized_prompt,
             understanding_data,
@@ -2070,7 +2164,10 @@ def build_prompt_execution_context(
 
             if _requires_semantic_composition(normalized_prompt, understanding):
                 operation_plan: dict[str, Any] = {}
-                if (host_hint or str(understanding_data.get("host") or "")).lower() == "unreal":
+                if (
+                    not deterministic_function_artifact
+                    and (host_hint or str(understanding_data.get("host") or "")).lower() == "unreal"
+                ):
                     try:
                         from tech_connector.services.unreal.unreal_operation_service import build_unreal_execution_plan
 
@@ -2593,3 +2690,4 @@ def execution_context_from_dict(data: dict[str, Any] | None) -> PromptExecutionC
         reasoning_pipeline=dict(payload.get("reasoning_pipeline") or {}),
         visible_progress=dict(payload.get("visible_progress") or {}),
     )
+

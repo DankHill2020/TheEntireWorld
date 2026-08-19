@@ -13,9 +13,12 @@ from pathlib import Path
 
 from tech_connector.bridges.blender.blender_bridge import BlenderBridge
 from tech_connector.bridges.houdini.houdini_bridge import HoudiniBridge
+from tech_connector.bridges.photoshop.photoshop_bridge import PhotoshopBridge
+from tech_connector.bridges.gimp.gimp_bridge import GimpBridge
 from tech_connector.bridges.maya.maya_bridge import MayaBridge
 from tech_connector.bridges.motionbuilder.motionbuilder_adapter import MotionBuilderAdapter
 from tech_connector.bridges.motionbuilder.motionbuilder_bridge import MotionBuilderBridge
+from tech_connector.bridges.max.max_bridge import MaxBridge
 from tech_connector.bridges.substance_painter.substance_painter_bridge import SubstancePainterBridge
 from tech_connector.bridges.unity.unity_bridge import UnityBridge
 from tech_connector.bridges.unreal import unreal_intent_parser as _uip
@@ -23,7 +26,7 @@ from tech_connector.bridges.unreal.unreal_bridge import UnrealBridge
 from tech_connector.bridges.unreal.unreal_scanner import UnrealScanner
 from tech_connector.models.constants import TOOLS_ROOT
 from tech_connector.router.intent_router import IntentRouter, RequestIntent
-from tech_connector.services.dcc.dcc_operation_service import dcc_operation_function
+from tech_connector.game_engine.integration.dcc_operation_service import dcc_operation_function
 from tech_connector.services.unreal.unreal_operation_service import (
     build_unreal_execution_plan,
     explain_unreal_execution_plan,
@@ -40,6 +43,9 @@ HOST_ALIASES = {
     "motionbuilder": ("motionbuilder", "motion builder", "mobu"),
     "unity": ("unity", "gameobject", "prefab", "unityeditor"),
     "houdini": ("houdini", "hou", "hip file", "hdri", "vex", "vop", "dop", "sop"),
+    "3dsmax": ("3ds max", "3dsmax", "pymxs", "maxscript", ".max file"),
+    "photoshop": ("photoshop", "psd", "batchplay", "uxp"),
+    "gimp": ("gimp", "python-fu", "script-fu"),
 }
 
 DEFAULT_TOOL_DOMAINS = {
@@ -50,6 +56,9 @@ DEFAULT_TOOL_DOMAINS = {
     "motionbuilder": "motionbuilder_tools",
     "unity": "unity_tools",
     "houdini": "houdini_tools",
+    "3dsmax": "max_tools",
+    "photoshop": "photoshop.command",
+    "gimp": "gimp.command",
 }
 
 TOOL_DOMAIN_ALIASES = {
@@ -131,6 +140,9 @@ class CommandRouter:
         self.maya = MayaBridge()
         self.unreal = UnrealBridge()
         self.motionbuilder = MotionBuilderBridge()
+        self.max = MaxBridge()
+        self.photoshop = PhotoshopBridge()
+        self.gimp = GimpBridge()
         self.motionbuilder_adapter = MotionBuilderAdapter()
         self.substance_painter = SubstancePainterBridge()
         self.unity = UnityBridge()
@@ -221,6 +233,17 @@ class CommandRouter:
                     function_path, args=args, kwargs=kwargs
                 )
                 return "Houdini Function", ok, result
+            if host == "3dsmax":
+                ok, result = self.max.call_function(function_path, args=args, kwargs=kwargs)
+                return "3ds Max Function", ok, result
+            if host == "photoshop":
+                command = function_path.removeprefix("photoshop.command.")
+                ok, result = self.photoshop.execute_command(command, kwargs)
+                return "Photoshop Command", ok, result
+            if host == "gimp":
+                command = function_path.removeprefix("gimp.command.")
+                ok, result = self.gimp.execute_command(command, kwargs)
+                return "GIMP Command", ok, result
             if host == "unity":
                 return (
                     "Unity Function",
@@ -243,6 +266,9 @@ class CommandRouter:
             "motionbuilder": self.motionbuilder,
             "unity": self.unity,
             "houdini": self.houdini,
+            "3dsmax": self.max,
+            "photoshop": self.photoshop,
+            "gimp": self.gimp,
         }.get(host)
 
     def dcc_context_snapshot(self, host: str) -> str:
@@ -355,7 +381,7 @@ class CommandRouter:
 
         try:
             from reasoning_runtime.engine.request_context import RequestContext
-            from tech_connector.services.dcc.dcc_execution_service import (
+            from tech_connector.game_engine.integration.dcc_execution_service import (
                 DccExecutionRequest,
                 default_dcc_execution_adapters,
             )
@@ -369,7 +395,7 @@ class CommandRouter:
 
         operation_params = dict(params or {})
         try:
-            from tech_connector.services.dcc.dcc_operation_service import registered_dcc_operation
+            from tech_connector.game_engine.integration.dcc_operation_service import registered_dcc_operation
 
             operation = registered_dcc_operation(normalized_host, operation_key)
         except Exception:
@@ -3313,3 +3339,4 @@ else:
 
     def get_intent(self, text: str) -> str:
         return IntentRouter.classify_chat_input(text)
+

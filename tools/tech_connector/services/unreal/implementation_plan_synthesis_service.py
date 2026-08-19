@@ -111,7 +111,8 @@ def _unresolved_params(params: dict[str, Any]) -> list[str]:
     return [
         key
         for key, value in params.items()
-        if isinstance(value, str) and value.startswith("<resolve")
+        if isinstance(value, str)
+        and (value.startswith("<resolve") or value.startswith("$"))
     ]
 
 

@@ -7,7 +7,7 @@ directed graph so importing the package does not require an extra dependency.
 """
 from __future__ import annotations
 
-import pickle
+import json
 import re
 from collections import deque
 from pathlib import Path
@@ -156,14 +156,58 @@ class KnowledgeGraph:
         return [item for _score, item in scored[:limit]]
 
     def save(self, path: str | Path):
+        """
+            Saves graph data as non-executable JSON.
+
+        :param path: destination graph file
+        :return: None
+        """
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("wb") as f:
-            pickle.dump(self.g, f)
+        if nx:
+            nodes = [[str(node), dict(attrs)] for node, attrs in self.g.nodes(data=True)]
+            edges = [
+                [str(source), str(destination), dict(attrs)]
+                for source, destination, attrs in self.g.edges(data=True)
+            ]
+        else:
+            nodes = [[str(node), dict(attrs)] for node, attrs in self.g.nodes.items()]
+            edges = [
+                [str(source), str(destination), dict(attrs)]
+                for source, rows in self.g.edges.items()
+                for destination, attrs in rows
+            ]
+        payload = {"schema_version": 1, "nodes": nodes, "edges": edges}
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> "KnowledgeGraph":
+        """
+            Loads validated non-executable JSON graph data.
+
+        :param path: graph file path
+        :return: loaded knowledge graph
+        """
+        source = Path(path)
+        if source.stat().st_size > 256 * 1024 * 1024:
+            raise ValueError("Knowledge graph file exceeds the 256 MiB safety limit")
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            raise ValueError("Unsupported or invalid knowledge graph format")
+        nodes = payload.get("nodes")
+        edges = payload.get("edges")
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            raise ValueError("Knowledge graph must contain node and edge arrays")
         graph = cls()
-        with Path(path).open("rb") as f:
-            graph.g = pickle.load(f)
+        for row in nodes:
+            if not isinstance(row, list) or len(row) != 2 or not isinstance(row[1], dict):
+                raise ValueError("Invalid knowledge graph node row")
+            graph.g.add_node(str(row[0]), **row[1])
+        for row in edges:
+            if not isinstance(row, list) or len(row) != 3 or not isinstance(row[2], dict):
+                raise ValueError("Invalid knowledge graph edge row")
+            graph.g.add_edge(str(row[0]), str(row[1]), **row[2])
         return graph

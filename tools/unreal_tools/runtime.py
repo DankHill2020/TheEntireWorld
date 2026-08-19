@@ -233,6 +233,10 @@ def pie_validate(target_assets=None, expected=None, start_pie=False):
             "assertions": assertions,
             "evidence": evidence,
             "errors": [] if ok else [key for key, passed in assertions.items() if not passed],
+            "parity_checks": {
+                "PIE behavior": ok,
+                "asset registry readback": bool(assertions.get("target_assets_exist")),
+            },
         },
         indent=2,
     )

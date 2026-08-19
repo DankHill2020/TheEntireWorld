@@ -271,8 +271,16 @@ def semantic_alignment_model():
     return SEMANTIC_ALIGNMENT_MODEL
 
 
-def code_model_for_profile(profile: str) -> str:
-    """Return the configured coder for a scoped generation/repair profile."""
+def code_model_for_profile(
+    profile: str,
+    settings: dict | None = None,
+) -> str:
+    """
+    Return the configured coder for a scoped generation or repair profile.
+    :param profile: requested model profile
+    :param settings: optional already-loaded application settings
+    :return: configured or default model identifier
+    """
     normalized = str(profile or "small").strip().lower()
     aliases = {
         "fast": "standard",
@@ -282,14 +290,21 @@ def code_model_for_profile(profile: str) -> str:
     }
     target_profile = aliases.get(normalized, normalized)
 
-    # Allow custom settings overrides
+    # Callers that already own settings pass them through so worker startup does
+    # not repeatedly read and normalize the settings file.
+    resolved_settings = settings
+    if resolved_settings is None:
+        try:
+            from tech_connector.services.settings_service import load_settings
+
+            resolved_settings = load_settings()
+        except Exception:
+            resolved_settings = {}
     try:
-        from tech_connector.services.settings_service import load_settings
-        settings = load_settings()
-        if target_profile == "quality" and settings.get("fast_code_model"):
-            return settings.get("fast_code_model")
+        if target_profile == "quality" and resolved_settings.get("fast_code_model"):
+            return resolved_settings.get("fast_code_model")
         # Check custom mappings for specific profile names as roles
-        custom_mappings = settings.get("custom_model_mappings", {})
+        custom_mappings = resolved_settings.get("custom_model_mappings", {})
         profile_role = f"profile_{target_profile}"
         if profile_role in custom_mappings:
             return custom_mappings[profile_role]
@@ -364,36 +379,68 @@ def missing_required_models():
     return [m for m in REQUIRED_MODELS if m not in installed]
 
 
-def warm_ollama_model(model, keep_alive="2h"):
-    ok, _msg = ensure_ollama_server()
-    if not ok:
-        return False
+def warm_ollama_model(model: str, keep_alive: str | int = "2h") -> bool:
+    """Warm or unload one model through the shared local-provider queue.
+
+    :param model: Ollama model name.
+    :param keep_alive: Ollama residency duration, or zero to unload.
+    :return: True when Ollama accepts and completes the request.
+    """
 
     model = normalize_ollama_model_name(model)
 
-    payload = json.dumps(
-        {
-            "model": model,
-            "prompt": "",
-            "stream": False,
-            "keep_alive": keep_alive,
-        }
-    ).encode("utf-8")
+    def execute_warm_request() -> bool:
+        """Perform the serialized Ollama resource request.
 
-    req = urllib.request.Request(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        :return: True when the resource request succeeds.
+        """
+
+        ok, _msg = ensure_ollama_server()
+        if not ok:
+            return False
+        payload = json.dumps(
+            {
+                "model": model,
+                "prompt": "",
+                "stream": False,
+                "keep_alive": keep_alive,
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(proxy_handler)
+            with opener.open(req, timeout=120) as response:
+                response.read()
+            return True
+        except Exception:
+            return False
+
+    from tech_connector.services.llm_request_queue_service import (
+        LLMQueueError,
+        global_llm_request_queue,
+        llm_queue_lane_options,
     )
+    from tech_connector.services.settings_service import load_settings
 
+    settings = load_settings()
     try:
-        proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(proxy_handler)
-        with opener.open(req, timeout=120) as response:
-            response.read()
-        return True
-    except Exception:
+        return bool(
+            global_llm_request_queue().submit(
+                execute_warm_request,
+                provider="ollama",
+                model=model,
+                category="background",
+                supersede_key=f"ollama-warm:{model}",
+                **llm_queue_lane_options(settings, "ollama"),
+            )
+        )
+    except LLMQueueError:
         return False
 
 

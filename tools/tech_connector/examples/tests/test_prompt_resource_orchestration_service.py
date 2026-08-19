@@ -15,7 +15,8 @@ class TestPromptResourceOrchestrationService(unittest.TestCase):
             {"route": "project_edit", "mutation_scope": "code_change"},
         )
 
-        self.assertEqual("resource_aware_prompt_orchestration_v1", plan["framework"])
+        self.assertEqual("resource_aware_goal_orchestration_v2", plan["framework"])
+        self.assertEqual("resource_aware_prompt_orchestration_v1", plan["compatibility_framework"])
         self.assertEqual(1, plan["local_model_concurrency"])
         self.assertGreaterEqual(plan["deterministic_concurrency"], 2)
         lanes = {lane["key"]: lane for lane in plan["lanes"]}
@@ -24,7 +25,7 @@ class TestPromptResourceOrchestrationService(unittest.TestCase):
         self.assertIn("serialize local model", plan["policy"].lower())
         self.assertIn("early_completion_policy", plan)
         self.assertIn("compiled_pipeline_policy", plan)
-        self.assertEqual("local_plan_or_fast", plan["model_tier_policy"]["context_summarization"])
+        self.assertEqual("local_fast", plan["model_tier_policy"]["context_summarization"])
         self.assertEqual("local_code", plan["model_tier_policy"]["patch_generation"])
         self.assertEqual("none_deterministic_or_local_fast", plan["model_tier_policy"]["rag_sufficiency"])
 

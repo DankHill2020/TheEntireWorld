@@ -1,34 +1,44 @@
 import os
 import json
 import traceback
-import maya.cmds as cmds
-from maya import OpenMayaUI as omui
 import re
-
-maya_version = int(cmds.about(version=True))
-
-if maya_version >= 2025:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    from shiboken6 import wrapInstance
-else:
-    from PySide2 import QtWidgets, QtCore, QtGui
-    from shiboken2 import wrapInstance
-
-from maya_tools.Rigging.mocap import setup_hik
-from maya_tools.Rigging import create_rig
-from maya_tools.Rigging import rig_template
-from maya_tools.Rigging import skinning_utils
-from unreal_tools import unreal_subprocess as usp
-from unreal_tools import unreal_project_data as upd
-from maya_tools.Utilities import joints, dag
 import importlib
 
-importlib.reload(skinning_utils)
+try:
+    import maya.cmds as cmds
+    from maya import OpenMayaUI as omui
+    MAYA_HOST = True
+except ImportError:
+    MAYA_HOST = False
+
+if MAYA_HOST and int(cmds.about(version=True)) < 2025:
+    from PySide2 import QtWidgets, QtCore, QtGui
+    from shiboken2 import wrapInstance
+else:
+    from PySide6 import QtWidgets, QtCore, QtGui
+    from shiboken6 import wrapInstance
+
+if MAYA_HOST:
+    from maya_tools.Rigging.mocap import setup_hik
+    from maya_tools.Rigging import create_rig
+    from maya_tools.Rigging import rig_template
+    from maya_tools.Rigging import skinning_utils
+    from maya_tools.Utilities import joints, dag
+else:
+    from tech_connector.services.dcc.tc_hik_ui_host import (
+        cmds, create_rig, dag, joints, omui, rig_template, setup_hik, skinning_utils,
+    )
+from unreal_tools import unreal_subprocess as usp
+from unreal_tools import unreal_project_data as upd
+from maya_tools.Rigging.mocap.hik_ui_specialized_tabs import HIKSpecializedTabsMixin
+
 importlib.reload(usp)
 importlib.reload(upd)
-importlib.reload(create_rig)
-importlib.reload(rig_template)
-importlib.reload(setup_hik)
+if MAYA_HOST:
+    importlib.reload(skinning_utils)
+    importlib.reload(create_rig)
+    importlib.reload(rig_template)
+    importlib.reload(setup_hik)
 
 script_dir = os.path.dirname(__file__).replace('\\', '/')
 
@@ -134,9 +144,10 @@ class ControlRigPopup(QtWidgets.QDialog):
                                            self.cmd_path)
 
 
-class HIKDefinitionUI(QtWidgets.QDialog):
-    def __init__(self, parent=None):
-        if parent is None:
+class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
+    def __init__(self, parent=None, *, host_mode="maya"):
+        self.host_mode = str(host_mode or ("maya" if MAYA_HOST else "tech_connector"))
+        if parent is None and MAYA_HOST:
             parent = wrapInstance(get_main_window_pointer(), QtWidgets.QMainWindow)
         super(HIKDefinitionUI, self).__init__(parent)
 
@@ -145,11 +156,12 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self.setLayout(QtWidgets.QVBoxLayout())
 
         # Open a Python command port on port 7002 if not already open
-        try:
-            if not cmds.commandPort(":7002", q=True):
-                cmds.commandPort(name=":7002", sourceType="python")
-        except Exception as e:
-            print(f"[HIK UI] Failed to open commandPort 7002: {e}")
+        if MAYA_HOST:
+            try:
+                if not cmds.commandPort(":7002", q=True):
+                    cmds.commandPort(name=":7002", sourceType="python")
+            except Exception as e:
+                print(f"[HIK UI] Failed to open commandPort 7002: {e}")
 
         self.char_name = QtWidgets.QLineEdit("Character1")
         self.char_name.setToolTip("The name of the HumanIK character definition in Maya.")
@@ -570,8 +582,8 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         transfer_skin_btn.setToolTip(
             "Transfer skin weights from selected source mesh(es) to the last selected target mesh. The target must not already have a skinCluster.")
 
-        export_skin_btn.clicked.connect(skinning_utils.export_skin_weights)
-        import_skin_btn.clicked.connect(skinning_utils.import_skin_weights)
+        export_skin_btn.clicked.connect(self.export_skin_weights)
+        import_skin_btn.clicked.connect(self.import_skin_weights)
         transfer_skin_btn.clicked.connect(self.transfer_skin_weights_from_selection)
 
         skin_layout.addWidget(export_skin_btn)
@@ -613,6 +625,13 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         template_btn_row.addWidget(import_template_btn)
         template_btn_row.addWidget(reference_template_btn)
         actions_layout.addLayout(template_btn_row)
+        if self.host_mode != "maya":
+            import_template_btn.setText("Load TC Biped Template")
+            import_template_btn.setToolTip("Instantiate the selected TC-native skeleton template in this scene.")
+            reference_template_btn.hide()
+            template_path_btn.setToolTip("Choose a TC .tcrig.json skeleton template file.")
+            self.rig_template_path_field.setToolTip("Versioned TC-native skeleton template asset.")
+            self.rig_template_namespace_field.setToolTip("Optional namespace for loading another template instance.")
 
         # 1. Create Rig Mapping & Build Full Rig Buttons
         mapping_btn = QtWidgets.QPushButton("Create Rig Mapping")
@@ -975,11 +994,16 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self._refresh_all_module_details()
 
     def pick_rig_template_path(self):
+        file_filter = "Maya Files (*.ma *.mb);;All Files (*.*)"
+        title = "Select Biped Rig Template"
+        if self.host_mode != "maya":
+            file_filter = "TC Rig Templates (*.tcrig.json);;JSON Files (*.json);;All Files (*.*)"
+            title = "Select TC Biped Skeleton Template"
         path, _filter = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Select Biped Rig Template",
+            title,
             self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE,
-            "Maya Files (*.ma *.mb);;All Files (*.*)",
+            file_filter,
         )
         if path:
             self.rig_template_path_field.setText(path.replace("\\", "/"))
@@ -994,13 +1018,28 @@ class HIKDefinitionUI(QtWidgets.QDialog):
                 namespace=namespace,
                 reference=reference,
             )
+            if self.host_mode != "maya":
+                for slot, row in dict(result.get("joint_map") or {}).items():
+                    joint = str((row or {}).get("joint") or "")
+                    if slot in self.fields and joint:
+                        self.fields[slot] = joint
+                        self.update_button_color(slot)
+                if isinstance(result.get("face_map"), dict):
+                    self.default_face_map = result["face_map"]
+                    for key_path, list_widget in self.face_lists.items():
+                        data = self.default_face_map
+                        for key in key_path:
+                            data = data[key]
+                        values = data if isinstance(data, list) else [data] if data else []
+                        self._update_list_widget(list_widget, values)
             self.create_rig_mapping()
             self._load_module_metadata_from_scene(report_missing=False)
             self._refresh_all_module_details()
             QtWidgets.QMessageBox.information(
                 self,
-                "Biped Template Loaded",
-                "Loaded biped rig template.\n\n"
+                "TC Biped Template Loaded" if self.host_mode != "maya" else "Biped Template Loaded",
+                ("Loaded TC-native biped skeleton template.\n\n" if self.host_mode != "maya" else "Loaded biped rig template.\n\n")
+                +
                 f"Root joints: {len(result.get('root_joints') or [])}\n"
                 f"RFL joints: {result.get('rfl_joint_count', 0)}\n"
                 f"New nodes: {result.get('new_node_count', 0)}",
@@ -1321,6 +1360,30 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         except Exception as e:
             cmds.confirmDialog(title="Error", message=f"Failed to create control(s):\n{e}", button=["OK"])
             cmds.warning(f"Failed to create control(s): {e}")
+
+    def export_skin_weights(self):
+        meshes = cmds.ls(selection=True) or []
+        if not meshes:
+            cmds.confirmDialog(
+                title="Export Skin Weights",
+                message="Select one or more skinned meshes to export.",
+                button=["OK"],
+                icon="warning",
+            )
+            return
+        export_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Export Skin Weights", "C:/temp/weights"
+        )
+        if export_dir:
+            return skinning_utils.export_skin_weights(meshes, export_dir)
+
+    def import_skin_weights(self):
+        meshes = cmds.ls(selection=True) or []
+        import_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Import Skin Weights", "C:/temp/weights"
+        )
+        if import_dir:
+            return skinning_utils.import_skin_weights(meshes, import_dir)
 
     def transfer_skin_weights_from_selection(self):
         selection = cmds.ls(selection=True) or []
@@ -3395,9 +3458,29 @@ class HIKDefinitionUI(QtWidgets.QDialog):
         self._refresh_all_module_details()
 
 
-def launch_hik_ui():
-    hik_ui_instance = HIKDefinitionUI()
+def launch_hik_ui(
+    parent=None,
+    *,
+    graph=None,
+    selection_provider=None,
+    undo_callback=None,
+    refresh_callback=None,
+):
+    host_mode = "maya"
+    if graph is not None:
+        if MAYA_HOST:
+            raise RuntimeError("A TC rig graph cannot be bound inside Maya's HIK host mode.")
+        from tech_connector.services.dcc.tc_hik_ui_host import bind_tc_hik_host
+        bind_tc_hik_host(
+            graph,
+            selection_provider=selection_provider,
+            undo_callback=undo_callback,
+            refresh_callback=refresh_callback,
+        )
+        host_mode = "tech_connector"
+    hik_ui_instance = HIKDefinitionUI(parent, host_mode=host_mode)
     hik_ui_instance.show()
+    return hik_ui_instance
 
 
 if __name__ == "__main__":

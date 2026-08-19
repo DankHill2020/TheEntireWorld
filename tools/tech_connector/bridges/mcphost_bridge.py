@@ -320,15 +320,19 @@ class TerminalBridge(QObject):
         self.proc = None
         try:
             if proc and proc.poll() is None:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-                else:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=1.0)
-                    except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    if os.name == "nt":
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            capture_output=True,
+                            check=False,
+                        )
+                    else:
                         proc.kill()
-                        proc.wait(timeout=1.0)
+                    proc.wait(timeout=1.0)
         except Exception:
             try:
                 if proc and proc.poll() is None:

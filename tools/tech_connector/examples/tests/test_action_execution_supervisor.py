@@ -5,8 +5,11 @@ from tech_connector.services.action_execution_engine import (
     ACTION_STATUS_BLOCKED,
     ACTION_STATUS_SUCCEEDED,
     FAILURE_CONFIRMATION,
+    FAILURE_DEPENDENCY,
+    FAILURE_ENVIRONMENT,
     FAILURE_EXECUTION,
     FAILURE_OUTCOME,
+    FAILURE_PERMISSION,
     FAILURE_VALIDATION,
     ActionExecutionEngine,
     ActionHandler,
@@ -66,6 +69,68 @@ class TestActionExecutionSupervisor(unittest.TestCase):
         self.assertEqual(1, result["retry_count"])
         self.assertEqual(2, calls["execute"])
 
+    def test_falsey_bare_handler_results_are_successful_outputs(self):
+        for index, value in enumerate((False, 0, "", [])):
+            with self.subTest(value=value):
+                result = self._engine(
+                    ActionHandler(
+                        "validate",
+                        "falsey-test",
+                        execute_fn=lambda action, context, output=value: output,
+                    )
+                ).execute_action(
+                    {
+                        "type": "validate",
+                        "id": f"falsey_{index}",
+                        "expected_outcomes": [
+                            {"path": "output", "equals": value},
+                        ],
+                    },
+                    ExecutionContext(),
+                )
+
+                self.assertTrue(result["ok"], result)
+
+    def test_implicit_result_contract_detects_failure_evidence(self):
+        failures = (
+            {"error": "boom"},
+            {"status": "failed"},
+            {"exit_code": 7, "output": "command stopped"},
+            {"exception_type": "RuntimeError"},
+        )
+        for index, raw in enumerate(failures):
+            with self.subTest(raw=raw):
+                result = self._engine(
+                    ActionHandler(
+                        "validate",
+                        "implicit-contract-test",
+                        execute_fn=lambda action, context, value=raw: dict(value),
+                    )
+                ).execute_action(
+                    {
+                        "type": "validate",
+                        "id": f"implicit_failure_{index}",
+                        "max_retries": 0,
+                    },
+                    ExecutionContext(),
+                )
+
+                self.assertFalse(result["ok"], result)
+                self.assertEqual(FAILURE_EXECUTION, result["failure_category"])
+
+    def test_explicit_success_cannot_hide_nonempty_error(self):
+        def execute(action, context):
+            return {"ok": True, "error": "boom"}
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {"type": "validate", "id": "contradictory", "max_retries": 0},
+            ExecutionContext(),
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(FAILURE_EXECUTION, result["failure_category"])
+        self.assertEqual("boom", result["diagnosis"])
+
     def test_default_failure_path_produces_repair_plan_without_blind_retry(self):
         calls = {"execute": 0}
 
@@ -124,6 +189,116 @@ class TestActionExecutionSupervisor(unittest.TestCase):
         self.assertEqual(FAILURE_OUTCOME, result["failure_category"])
         self.assertEqual(ACTION_STATUS_BLOCKED, result["status"])
 
+    def test_falsey_outcomes_can_exist_without_being_truthy(self):
+        def execute(action, context):
+            return {
+                "ok": True,
+                "result": {"disabled": False, "count": 0, "value": None},
+            }
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {
+                "type": "validate",
+                "id": "falsey_exists",
+                "expected_outcomes": [
+                    {"path": "result.disabled", "exists": True},
+                    {"path": "result.count", "exists": True},
+                    {"path": "result.value", "exists": True},
+                    {"path": "result.missing", "exists": False},
+                ],
+            },
+            ExecutionContext(),
+        )
+
+        self.assertTrue(result["ok"], result)
+
+    def test_missing_list_index_is_outcome_failure_instead_of_crashing(self):
+        def execute(action, context):
+            return {"ok": True, "result": {"items": []}}
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {
+                "type": "validate",
+                "id": "missing_index",
+                "max_retries": 0,
+                "expected_outcomes": [
+                    {"name": "first item", "path": "result.items.0", "exists": True},
+                ],
+            },
+            ExecutionContext(),
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(FAILURE_OUTCOME, result["failure_category"])
+        self.assertIn("first item", result["diagnosis"])
+        self.assertIn("observed None", result["diagnosis"])
+
+    def test_hostname_attribute_error_is_not_misclassified_as_environment(self):
+        def execute(action, context):
+            return {
+                "ok": False,
+                "error": "AttributeError: Config object has no attribute 'hostname'",
+                "retryable": True,
+            }
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {"type": "validate", "id": "hostname", "max_retries": 0},
+            ExecutionContext(),
+        )
+
+        self.assertEqual(FAILURE_EXECUTION, result["failure_category"])
+        self.assertEqual("repair_code_or_api_usage", result["repair_plan"]["kind"])
+
+    def test_exception_type_alone_drives_dependency_and_syntax_diagnosis(self):
+        dependency = self._engine(
+            ActionHandler(
+                "validate",
+                "dependency-test",
+                execute_fn=lambda action, context: {
+                    "ok": False,
+                    "exception_type": "ModuleNotFoundError",
+                    "retryable": True,
+                },
+            )
+        ).execute_action(
+            {"type": "validate", "id": "dependency", "max_retries": 0},
+            ExecutionContext(),
+        )
+        syntax = self._engine(
+            ActionHandler(
+                "validate",
+                "syntax-test",
+                execute_fn=lambda action, context: {
+                    "ok": False,
+                    "exception_type": "SyntaxError",
+                    "retryable": True,
+                },
+            )
+        ).execute_action(
+            {"type": "validate", "id": "syntax", "max_retries": 0},
+            ExecutionContext(),
+        )
+
+        self.assertEqual(FAILURE_DEPENDENCY, dependency["failure_category"])
+        self.assertIn("ModuleNotFoundError", dependency["diagnosis"])
+        self.assertEqual("repair_code_syntax", syntax["repair_plan"]["kind"])
+
+    def test_environment_diagnosis_preserves_concrete_connection_error(self):
+        def execute(action, context):
+            return {
+                "ok": False,
+                "error": "Maya bridge unavailable at 127.0.0.1:7001",
+                "retryable": True,
+            }
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {"type": "validate", "id": "bridge", "max_retries": 0},
+            ExecutionContext(),
+        )
+
+        self.assertEqual(FAILURE_ENVIRONMENT, result["failure_category"])
+        self.assertIn("127.0.0.1:7001", result["diagnosis"])
+
     def test_retry_exhaustion_preserves_blocker(self):
         def execute(action, context):
             return {"ok": False, "stderr": "IndexError: chain member missing", "retryable": True}
@@ -159,6 +334,27 @@ class TestActionExecutionSupervisor(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(1, calls["execute"])
         self.assertEqual(0, calls["repair"])
+        self.assertEqual("report_non_retryable_gap", result["repair_plan"]["kind"])
+        self.assertFalse(result["repair_plan"]["requires_model_escalation"])
+
+    def test_permission_failure_does_not_propose_automatic_code_repair(self):
+        def execute(action, context):
+            return {
+                "ok": False,
+                "exception_type": "PermissionError",
+                "exception_message": "Access denied: C:/protected/config.json",
+            }
+
+        result = self._engine(ActionHandler("validate", "test", execute_fn=execute)).execute_action(
+            {"type": "validate", "id": "permission", "max_retries": 3},
+            ExecutionContext(),
+        )
+
+        self.assertEqual(FAILURE_PERMISSION, result["failure_category"])
+        self.assertEqual("resolve_permission_boundary", result["repair_plan"]["kind"])
+        self.assertFalse(result["repair_plan"]["requires_model_escalation"])
+        self.assertFalse(result["retryable"])
+        self.assertIn("C:/protected/config.json", result["diagnosis"])
 
     def test_confirmation_required_action_is_not_retried(self):
         def execute(action, context):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tech_connector.services.dcc.coordinate_space_service import (
+from tech_connector.game_engine.scene.coordinate_space_service import (
     convert_camera_payload_between_providers,
     convert_point_between_providers,
     convert_vector_between_providers,
@@ -330,3 +330,71 @@ def test_federated_scene_can_preserve_existing_maya_normal_when_adding_blender()
     blender_proxy = next(proxy for proxy in federated.scene_proxy_objects if proxy.provider_id == "blender")
     assert maya_proxy.center == pytest.approx(maya_proxy_center)
     assert maya_proxy.center[1] > blender_proxy.center[1]
+
+
+def test_federated_scene_composes_embedded_fbx_and_dcc_without_mutating_source_ranges():
+    from tech_connector.ui.three_d_mesh_painter_widget import (
+        FBXMeshModel,
+        MeshVertex3D,
+        SceneProxyInstance,
+        SceneProxyMeshData,
+    )
+
+    native_model = object.__new__(FBXMeshModel)
+    native_model.name = "prop.fbx"
+    native_model.vertices = [
+        MeshVertex3D(-2.0, -2.0, 0.0),
+        MeshVertex3D(2.0, -2.0, 0.0),
+        MeshVertex3D(-2.0, 2.0, 0.0),
+    ]
+    native_model.faces = [(0, 1, 2)]
+    native_model.quad_faces = []
+    native_model.face_colors = []
+    native_model.quad_face_colors = []
+    native_model.face_proxy_indices = [0]
+    native_model.quad_proxy_indices = []
+    native_model.scene_proxy_objects = [SceneProxyInstance(
+        index=0,
+        provider_id="native_fbx",
+        native_id="Prop",
+        name="Prop",
+        center=(0.0, 0.0, 0.0),
+        mesh_data=SceneProxyMeshData(vertex_count=3, face_count=1),
+    )]
+    native_model.source_texture_images = {}
+    native_model.provider_id = "native_fbx"
+    native_model.scene_center = (50.0, 50.0, 0.0)
+    native_model.scene_scale = 0.04
+    native_model.native_fbx_manifest = {"schema": "tech_connector.native_fbx_asset.v1"}
+    native_model.source_path = "C:/show/prop.fbx"
+    native_range_before = native_model.scene_proxy_objects[0].mesh_data.vertex_start
+    maya_snapshot = {
+        "provider_id": "maya",
+        "unit_linear": "centimeters",
+        "objects": [{
+            "native_id": "pPlane1",
+            "name": "pPlane1",
+            "type": "mesh",
+            "bbox": (0.0, 0.0, 0.0, 100.0, 100.0, 0.0),
+            "visible": True,
+        }],
+    }
+
+    combined = FBXMeshModel.from_scene_snapshots(
+        [maya_snapshot],
+        retained_models=[native_model],
+    )
+    repeated = FBXMeshModel.from_scene_snapshots(
+        [maya_snapshot],
+        retained_models=[native_model],
+    )
+
+    assert native_model.scene_proxy_objects[0].mesh_data.vertex_start == native_range_before
+    assert len(combined.scene_proxy_objects) == 2
+    assert len(repeated.vertices) == len(combined.vertices)
+    native_proxy = next(proxy for proxy in combined.scene_proxy_objects if proxy.provider_id == "native_fbx")
+    maya_proxy = next(proxy for proxy in combined.scene_proxy_objects if proxy.provider_id == "maya")
+    assert native_proxy.center == pytest.approx(maya_proxy.center)
+    assert max(abs(vertex.x) for vertex in combined.vertices) <= 2.01
+    assert max(abs(vertex.y) for vertex in combined.vertices) <= 2.01
+

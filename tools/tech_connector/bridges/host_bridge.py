@@ -49,6 +49,27 @@ class HostBridge(Protocol):
         """Return app-native code that prints top-level scene/document objects."""
 
 
+class PortBoundHostBridge:
+    """Pin execute-based helper calls to one explicitly selected DCC endpoint."""
+
+    def __init__(self, bridge: HostBridge, port: int):
+        self.bridge = bridge
+        self.port = int(port)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.bridge, name)
+
+    def find_port(self, host: str = "127.0.0.1") -> int:
+        del host
+        return self.port
+
+    def execute(self, code: str, timeout: float = 10) -> tuple[bool, str]:
+        execute_on_port = getattr(self.bridge, "execute_on_port", None)
+        if not callable(execute_on_port):
+            raise RuntimeError(f"{type(self.bridge).__name__} does not support explicit endpoint execution.")
+        return execute_on_port(code, port=self.port, timeout=timeout)
+
+
 def call_python_function_via_execute(
     bridge: HostBridge,
     function_path: str,

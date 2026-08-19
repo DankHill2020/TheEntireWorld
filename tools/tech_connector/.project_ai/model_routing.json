@@ -1,7 +1,0 @@
-{
-  "embed": "nomic-embed-text",
-  "local_code": "qwen2.5-coder:3b",
-  "local_plan": "qwen3:4b-instruct",
-  "local_deep": "qwen3:4b-instruct",
-  "active": "auto"
-}

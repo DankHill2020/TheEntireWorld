@@ -4,6 +4,8 @@ import maya.api.OpenMaya as om
 from maya_tools.Utilities import joints
 import os
 
+from utilities.safe_serialization import parse_literal_collection
+
 _callbacks = {}
 
 
@@ -279,28 +281,32 @@ def get_export_node_data():
     if cmds.objExists('ExportData'):
         try:
             anims_val = cmds.getAttr('ExportData.anims')
-            anim_dict = eval(anims_val) if anims_val else {}
+            anim_dict = parse_literal_collection(anims_val, dict, {})
         except Exception as e:
             display_warning(f"Failed to parse 'anims' from ExportData: {e}")
             anim_dict = {}
 
         try:
             skel_val = cmds.getAttr('ExportData.skeletons')
-            skeletons = eval(skel_val) if skel_val else []
+            skeletons = parse_literal_collection(skel_val, list, [])
         except Exception as e:
             display_warning(f"Failed to parse 'skeletons' from ExportData: {e}")
             skeletons = []
 
         try:
             ns_map_val = cmds.getAttr('ExportData.namespace_map')
-            namespace_skeleton_map = eval(ns_map_val) if ns_map_val else {}
+            namespace_skeleton_map = parse_literal_collection(ns_map_val, dict, {})
         except Exception as e:
             display_warning(f"Failed to parse 'namespace_map' from ExportData: {e}")
             namespace_skeleton_map = {}
 
         try:
             uproj_val = cmds.getAttr('ExportData.uproject')
-            uproject_data = eval(uproj_val) if uproj_val else [None, None, None]
+            uproject_data = parse_literal_collection(
+                uproj_val,
+                (list, tuple),
+                [None, None, None],
+            )
             if isinstance(uproject_data, list) and len(uproject_data) >= 3:
                 uproject, log_path, cmd_path = uproject_data[:3]
             else:

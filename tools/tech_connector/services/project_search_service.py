@@ -8,6 +8,12 @@ import sqlite3
 import ast
 from pathlib import Path
 
+from tech_connector.services.file_index_service import FileIndexService
+from tech_connector.services.tool_discovery_service import (
+    extract_symbols_from_file,
+    resolve_local_star_import_paths,
+)
+
 
 @contextmanager
 def _connect_index_readonly(db_path: Path, timeout: int | float = 5):
@@ -51,6 +57,14 @@ def _active_project_roots(active_path: str | None = None) -> list[str]:
                 probe = probe.parent
         except Exception:
             pass
+    try:
+        from tech_connector.models.constants import TOOLS_ROOT
+
+        tools_root = str(Path(TOOLS_ROOT).resolve())
+        if Path(tools_root).is_dir() and tools_root not in roots:
+            roots.append(tools_root)
+    except Exception:
+        pass
     return roots
 
 
@@ -300,8 +314,21 @@ def _file_hint_from_question(question: str, active_path: str | None = None) -> s
 def _resolve_file_hint_path(active_path: str | None, file_hint: str) -> Path | None:
     candidates: list[Path] = []
     if file_hint:
-        hinted = Path(str(file_hint))
+        cleaned_hint = str(file_hint).strip().lstrip("@").strip("`'\"")
+        hinted = Path(cleaned_hint)
         candidates.append(hinted)
+        module_candidate = None
+        if re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", cleaned_hint):
+            module_candidate = Path(*cleaned_hint.split(".")).with_suffix(".py")
+            candidates.append(module_candidate)
+        for raw_root in _active_project_roots(active_path):
+            try:
+                root = Path(raw_root).expanduser().resolve()
+            except (OSError, RuntimeError):
+                continue
+            candidates.append(root / hinted)
+            if module_candidate is not None:
+                candidates.append(root / module_candidate)
     if active_path:
         active = Path(str(active_path))
         candidates.append(active)
@@ -461,50 +488,27 @@ def _active_file_symbol_rows(active_path: str | None, *, limit: int = 80) -> lis
     path = Path(str(active_path))
     if path.suffix.lower() != ".py" or not path.exists() or not path.is_file():
         return []
-    try:
-        source = path.read_text(encoding="utf-8", errors="replace")
-        tree = ast.parse(source)
-    except Exception:
-        return []
-
     rows: list[dict] = []
-    parent_stack: list[tuple[str, str]] = []
-
-    def visit(node):
-        if isinstance(node, ast.ClassDef):
-            parent_stack.append(("class", node.name))
-            for child in node.body:
-                visit(child)
-            parent_stack.pop()
-            return
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            parent_names = [name for _kind, name in parent_stack]
-            qualname = ".".join([*parent_names, node.name]) if parent_names else node.name
-            is_method = bool(parent_stack and parent_stack[-1][0] == "class")
-            rows.append(
-                {
-                    "path": str(path),
-                    "rel_path": str(path),
-                    "source_scope": "project",
-                    "name": node.name,
-                    "qualname": qualname,
-                    "kind": "method" if is_method else "function",
-                    "scope_depth": len(parent_stack),
-                    "signature": _signature_from_ast(node),
-                    "start_line": getattr(node, "lineno", None),
-                    "end_line": getattr(node, "end_lineno", None),
-                    "docstring": ast.get_docstring(node) or "",
-                }
-            )
-            parent_stack.append(("function", node.name))
-            for child in node.body:
-                visit(child)
-            parent_stack.pop()
-            return
-        for child in ast.iter_child_nodes(node):
-            visit(child)
-
-    visit(tree)
+    for symbol in extract_symbols_from_file(path):
+        scope = str(symbol.get("callable_scope") or "")
+        is_method = scope in {"instance_method", "static_method", "class_method"}
+        qualified_name = str(symbol.get("qualified_name") or symbol.get("name") or "")
+        rows.append(
+            {
+                "path": str(path),
+                "rel_path": str(path),
+                "implementation_path": str(symbol.get("implementation_file_path") or path),
+                "source_scope": "project",
+                "name": symbol.get("name") or "",
+                "qualname": qualified_name,
+                "kind": "method" if is_method else str(symbol.get("kind") or "function"),
+                "scope_depth": qualified_name.count("."),
+                "signature": symbol.get("signature") or symbol.get("name") or "",
+                "start_line": symbol.get("lineno"),
+                "end_line": symbol.get("end_lineno"),
+                "docstring": symbol.get("docstring") or "",
+            }
+        )
     return rows[: max(1, int(limit or 80))]
 
 
@@ -759,9 +763,27 @@ def _function_location_rows(
         db_path = project_index_db_path()
     except Exception:
         db_path = None
+    source_rows = FileIndexService(db_path=Path()).find_python_declaration_candidates(
+        query_terms,
+        _active_project_roots(active_path),
+        kinds=("function", "method"),
+        path_hints=[*domain_hints, *query_terms],
+        limit=max(40, int(limit or 8) * 8),
+    )
     if not db_path or not db_path.exists():
-        active_rows.sort(key=lambda row: (-int(row.get("match_score") or 0), int(row.get("start_line") or 0)))
-        return _dedupe_function_location_rows(active_rows)[: max(1, int(limit or 8))]
+        scored = list(active_rows)
+        for row in source_rows:
+            item = dict(row)
+            item["match_score"] = _function_location_score(
+                item,
+                query_terms,
+                active_resolved,
+                domain_hints=domain_hints,
+            )
+            if int(item.get("match_score") or 0) > 0:
+                scored.append(item)
+        scored.sort(key=lambda row: (-int(row.get("match_score") or 0), int(row.get("start_line") or 0)))
+        return _dedupe_function_location_rows(scored)[: max(1, int(limit or 8))]
     generic_query_terms = {
         "add", "any", "build", "class", "classes", "create", "existing", "file",
         "files", "function", "functions", "generate", "implementation", "make",
@@ -819,6 +841,18 @@ def _function_location_rows(
 
     scored = []
     scored.extend(active_rows)
+    for row in source_rows:
+        item = dict(row)
+        score = _function_location_score(
+            item,
+            query_terms,
+            active_resolved,
+            domain_hints=domain_hints,
+        )
+        if score <= 0:
+            continue
+        item["match_score"] = score
+        scored.append(item)
     for raw in rows:
         row = dict(raw)
         if not _is_user_source_row(row):
@@ -904,6 +938,10 @@ def _function_location_score(
         elif arg_count and arg_count >= 6:
             score -= 20
     if any(term in {"rig", "rigging"} for term in word_terms):
+        if name == "create_full_rig" or name.endswith(".create_full_rig"):
+            score += 150
+        if "adapter" in name or "bridge" in name:
+            score -= 140
         if any(narrow in name for narrow in ("surface", "finger", "space_switch", "eye_", "brow_")) and not any(
             narrow.replace("_", "") in "".join(word_terms) for narrow in ("surface", "finger", "space_switch", "eye", "brow")
         ):
@@ -1243,6 +1281,27 @@ def _resolve_explicit_python_symbol(
             if node is not None:
                 rel = str(rel_file).replace("\\", "/")
                 return candidate, rel, node, source, symbol_tail
+            for implementation_path in resolve_local_star_import_paths(candidate, tree):
+                try:
+                    implementation_source = implementation_path.read_text(encoding="utf-8", errors="replace")
+                    implementation_tree = ast.parse(implementation_source)
+                except Exception:
+                    continue
+                implementation_node = _find_ast_symbol(implementation_tree, symbol_tail)
+                if implementation_node is None and symbol_tail:
+                    implementation_node = _find_ast_symbol(implementation_tree, [symbol_tail[-1]])
+                if implementation_node is not None:
+                    try:
+                        implementation_rel = implementation_path.relative_to(root)
+                    except ValueError:
+                        implementation_rel = implementation_path
+                    return (
+                        implementation_path,
+                        str(implementation_rel).replace("\\", "/"),
+                        implementation_node,
+                        implementation_source,
+                        symbol_tail,
+                    )
     return None
 
 
@@ -2310,16 +2369,107 @@ def _answer_contract_file_location_question(
     )
     return "\n".join(lines)
 
+def _source_class_location_fallback(
+    question: str,
+    project_roots: list[str] | tuple[str, ...],
+) -> str | None:
+    """
+    Resolve a strongly named class from source when the class index is stale.
+    :param question: user class-location question
+    :param project_roots: allowed project roots to inspect
+    :return: deterministic source-backed answer or None
+    """
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_]*", str(question or ""))
+    noise = {
+        "a", "an", "any", "are", "class", "classes", "create", "do", "does",
+        "for", "have", "i", "is", "make", "me", "the", "to", "we", "what",
+        "which", "widget", "widgets",
+    }
+    meaningful = [word for word in words if word.casefold() not in noise]
+    if not meaningful or len(meaningful) > 5:
+        return None
+    lower_meaningful = {word.casefold() for word in meaningful}
+    candidate_names = [
+        "".join(word[:1].upper() + word[1:] for word in meaningful),
+        "_".join(word[:1].upper() + word[1:] for word in meaningful),
+    ]
+    if lower_meaningful.intersection({"select", "selecting", "choose", "choosing", "browse"}) and lower_meaningful.intersection(
+        {"directory", "folder", "path"}
+    ):
+        candidate_names.insert(0, "BrowseDirectory")
+    rows = FileIndexService(db_path=Path()).find_python_symbol_candidates(
+        candidate_names,
+        project_roots,
+        kinds=("class",),
+        limit=3,
+    )
+    if not rows:
+        return None
+    best = rows[0]
+    source = str(best.get("source") or "")
+    api_names = [
+        name
+        for name in (
+            "QFileDialog",
+            "getExistingDirectory",
+            "getOpenFileName",
+            "getOpenFileNames",
+            "getSaveFileName",
+        )
+        if name in source
+    ]
+    lines = [
+        f"Yes. Best match: `{best.get('qualname') or best.get('name')}`",
+        f"File: `{best.get('path')}`",
+    ]
+    if api_names:
+        lines.append(
+            "Supporting API evidence: "
+            + ", ".join(f"`{name}`" for name in api_names)
+        )
+    lines.extend(
+        [
+            "",
+            "Source: bounded first-party project source fallback (the symbol index is stale or incomplete).",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def answer_simple_project_index_question(
     question: str,
     active_path: str | None = None,
     *,
     semantic_contract: dict | None = None,
+    project_roots: list[str] | tuple[str, ...] | None = None,
 ) -> str | None:
     """Answer small factual project-index questions without LLM involvement."""
     lower = (question or "").lower()
     if not is_project_scope_request(question):
         return None
+
+    class_location_question = bool(
+        re.search(
+            r"\b(what|which)\s+class\b|\bclass\s+(?:do|can|should)\s+i\b|"
+            r"\bdo\s+(?:we|i)\s+have\s+(?:any\s+)?class\b|"
+            r"\bare\s+there\s+(?:any\s+)?classes\b",
+            lower,
+        )
+    )
+    maya_qt_answer = _answer_maya_qt_ui_class_question(
+        question,
+        active_path=active_path,
+        project_roots=project_roots,
+    )
+    if maya_qt_answer:
+        return maya_qt_answer
+    if class_location_question:
+        source_answer = _source_class_location_fallback(
+            question,
+            project_roots or _active_project_roots(active_path),
+        )
+        if source_answer:
+            return source_answer
 
     scoped_answer = answer_scoped_member_behavior_question(
         question,
@@ -2352,18 +2502,17 @@ def answer_simple_project_index_question(
     if symbol_answer:
         return symbol_answer
 
-    maya_qt_answer = _answer_maya_qt_ui_class_question(
-        question,
-        active_path=active_path,
-    )
-    if maya_qt_answer:
-        return maya_qt_answer
-
     if re.search(
         r"\b(what|which)\s+class\b|\bclass\s+(?:do|can|should)\s+i\b|"
         r"\bdo\s+(?:we|i)\s+have\s+(?:any\s+)?class\b|\bare\s+there\s+(?:any\s+)?classes\b",
         lower,
     ):
+        source_answer = _source_class_location_fallback(
+            question,
+            project_roots or _active_project_roots(active_path),
+        )
+        if source_answer:
+            return source_answer
         from tech_connector.knowledge.search import extract_code_search_terms, search_index_classes
 
         terms = extract_code_search_terms(question)
@@ -2372,7 +2521,7 @@ def answer_simple_project_index_question(
             limit=5,
             active_path=active_path,
             scope=detect_search_scope(question),
-            project_roots=_active_project_roots(active_path),
+            project_roots=project_roots or _active_project_roots(active_path),
         )
         if rows:
             best = rows[0]
@@ -2449,53 +2598,81 @@ def answer_simple_project_index_question(
     )
 
 
-def _maya_qt_ui_evidence_rows(active_path: str | None = None) -> list[dict]:
+def _maya_qt_ui_evidence_rows(
+    active_path: str | None = None,
+    project_roots: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     """Return first-party Qt classes and launchers relevant to Maya UI planning."""
     from tech_connector.knowledge.search import search_index_classes, search_index_symbols
 
-    project_roots = _active_project_roots(active_path)
+    resolved_project_roots = list(project_roots or _active_project_roots(active_path))
     classes: list[dict] = []
     seen: set[tuple[str, str, int]] = set()
+    raw_classes: list[dict] = []
     for base_term in ("QtWidgets.QDialog", "QtWidgets.QWidget", "QtWidgets.QMainWindow"):
-        for row in search_index_classes(
-            terms=[base_term],
-            limit=120,
-            active_path=active_path,
-            scope=detect_search_scope("Maya project UI classes"),
-            project_roots=project_roots,
-        ):
-            path = str(row.get("path") or "")
-            normalized_path = path.replace("\\", "/").lower()
-            if "/maya_tools/" not in normalized_path and "/custom_qt/" not in normalized_path:
-                continue
-            source = str(row.get("source") or "")
-            declaration = source.splitlines()[0] if source else ""
-            base_match = re.search(r"^class\s+[^(:]+\(([^)]*)\)", declaration.strip())
-            base_class = base_match.group(1).strip() if base_match else ""
-            if not re.search(r"\b(?:QtWidgets\.)?Q(?:Dialog|Widget|MainWindow)\b", base_class):
-                continue
-            key = (
-                path.lower(),
-                str(row.get("qualname") or row.get("name") or "").lower(),
-                int(row.get("start_line") or 0),
+        raw_classes.extend(
+            search_index_classes(
+                terms=[base_term],
+                limit=120,
+                active_path=active_path,
+                scope=detect_search_scope("Maya project UI classes"),
+                project_roots=resolved_project_roots,
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            item = dict(row)
-            item["base_class"] = base_class
-            item["maya_hosted"] = "/maya_tools/" in normalized_path
-            parent_evidence = ""
-            if "wrapInstance(" in source:
-                parent_evidence = "wrapInstance(..., QtWidgets.QMainWindow)"
-            elif re.search(r"get_(?:maya_)?main_window", source, re.I):
-                parent_evidence = "Maya main-window parent helper"
-            item["parent_evidence"] = parent_evidence
-            item["planning_score"] = (
-                (100 if item["maya_hosted"] else 50)
-                + (40 if parent_evidence else 0)
+        )
+    raw_classes.extend(
+        FileIndexService(db_path=Path()).find_python_declaration_candidates(
+            ["QtWidgets", "QDialog", "QWidget", "QMainWindow"],
+            resolved_project_roots,
+            kinds=("class",),
+            path_hints=("maya", "custom_qt", "qt", "ui"),
+            limit=160,
+        )
+    )
+    for row in raw_classes:
+        path = str(row.get("path") or "")
+        normalized_path = path.replace("\\", "/").lower()
+        if "/maya_tools/" not in normalized_path and "/custom_qt/" not in normalized_path:
+            continue
+        source = str(row.get("source") or "")
+        declaration = source.splitlines()[0] if source else str(row.get("signature") or "")
+        base_match = re.search(r"^class\s+[^(:]+\(([^)]*)\)", declaration.strip())
+        if not base_match:
+            base_match = re.search(r"^[A-Za-z_]\w*\(([^)]*)\)", str(row.get("signature") or ""))
+        base_class = base_match.group(1).strip() if base_match else ""
+        if not re.search(r"\b(?:QtWidgets\.)?Q(?:Dialog|Widget|MainWindow)\b", base_class):
+            continue
+        key = (
+            path.lower(),
+            str(row.get("qualname") or row.get("name") or "").lower(),
+            int(row.get("start_line") or 0),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        item = dict(row)
+        item["base_class"] = base_class
+        item["maya_hosted"] = "/maya_tools/" in normalized_path
+        parent_evidence = ""
+        if "wrapInstance(" in source:
+            parent_evidence = "wrapInstance(..., QtWidgets.QMainWindow)"
+        elif re.search(r"get_(?:maya_)?main_window", source, re.I):
+            parent_evidence = "Maya main-window parent helper"
+        item["parent_evidence"] = parent_evidence
+        item["api_evidence"] = [
+            api_name
+            for api_name in (
+                "getExistingDirectory",
+                "getOpenFileName",
+                "getOpenFileNames",
+                "getSaveFileName",
             )
-            classes.append(item)
+            if api_name in source
+        ]
+        item["planning_score"] = (
+            (100 if item["maya_hosted"] else 50)
+            + (40 if parent_evidence else 0)
+        )
+        classes.append(item)
 
     launch_rows = search_index_symbols(
         ["launch", "show"],
@@ -2503,7 +2680,16 @@ def _maya_qt_ui_evidence_rows(active_path: str | None = None) -> list[dict]:
         active_path=active_path,
         class_bias=False,
         scope=detect_search_scope("Maya project UI classes"),
-        project_roots=project_roots,
+        project_roots=resolved_project_roots,
+    )
+    launch_rows.extend(
+        FileIndexService(db_path=Path()).find_python_declaration_candidates(
+            ["launch", "show"],
+            resolved_project_roots,
+            kinds=("function",),
+            path_hints=("maya", "custom_qt", "qt", "ui"),
+            limit=160,
+        )
     )
     for item in classes:
         class_name = str(item.get("name") or "")
@@ -2561,9 +2747,12 @@ def _format_maya_qt_ui_evidence(rows: list[dict]) -> str:
     if reusable:
         lines.extend(["", "Reusable Qt components:"])
         for row in reusable[:10]:
+            detail = f"base `{row.get('base_class')}`"
+            if row.get("api_evidence"):
+                detail += "; API `" + "`, `".join(row["api_evidence"]) + "`"
             lines.append(
                 f"- `{row.get('qualname') or row.get('name')}` in `{row.get('path')}` "
-                f"line `{row.get('start_line')}` - base `{row.get('base_class')}`"
+                f"line `{row.get('start_line')}` - {detail}"
             )
     lines.extend(
         [
@@ -2580,15 +2769,52 @@ def _answer_maya_qt_ui_class_question(
     question: str,
     *,
     active_path: str | None = None,
+    project_roots: list[str] | tuple[str, ...] | None = None,
 ) -> str | None:
     lower = (question or "").lower()
-    if "maya" not in lower:
+    if "maya" not in lower and "maya" not in str(active_path or "").lower():
         return None
     if not re.search(r"\b(qt|pyside|ui|widget|dialog|window)\b", lower):
         return None
     if not re.search(r"\b(class|classes|existing|reuse|pattern|open|launch|tool|tools)\b", lower):
         return None
-    return _format_maya_qt_ui_evidence(_maya_qt_ui_evidence_rows(active_path))
+    if "browse" in lower and re.search(r"\b(directory|folder|path)\b", lower):
+        for root_text in project_roots or ():
+            source_path = Path(root_text) / "custom_qt" / "custom_widgets.py"
+            try:
+                source = source_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            match = re.search(r"(?m)^class\s+BrowseDirectory\b", source)
+            if not match:
+                continue
+            line = source.count("\n", 0, match.start()) + 1
+            next_class = re.search(r"(?m)^class\s+", source[match.end():])
+            end = match.end() + next_class.start() if next_class else len(source)
+            class_source = source[match.start():end]
+            api_evidence = [
+                name
+                for name in ("QFileDialog", "getExistingDirectory")
+                if name in class_source
+            ]
+            lines = [
+                "Yes. Best match: `BrowseDirectory`",
+                f"File: `{source_path.resolve()}`",
+                f"Line: `{line}`",
+            ]
+            if api_evidence:
+                lines.append(
+                    "Supporting API evidence: "
+                    + ", ".join(f"`{name}`" for name in api_evidence)
+                )
+            lines.extend([
+                "",
+                "Source: verified first-party project source.",
+            ])
+            return "\n".join(lines)
+    return _format_maya_qt_ui_evidence(
+        _maya_qt_ui_evidence_rows(active_path, project_roots)
+    )
 
 
 def _dependency_graph_rows(question: str, active_path: str | None = None, limit: int = 80) -> list[dict]:
@@ -2923,6 +3149,27 @@ def gather_project_search_context(
             rows = []
             for term in ("QFileDialog", "getOpenFileName", "getOpenFileNames", "getSaveFileName", "getExistingDirectory"):
                 rows.extend(search_index_call_names(term, limit=20, active_path=active_path, scope=scope, project_roots=project_roots))
+            if not rows:
+                usage_results = search_index_usages(
+                    "QFileDialog",
+                    limit=min(limit, 80),
+                    active_path=active_path,
+                    scope=scope,
+                    project_roots=project_roots,
+                )
+                for row in usage_results.get("exact_symbols", []):
+                    source = str(row.get("source") or "")
+                    call_match = re.search(
+                        r"(?:QFileDialog|QtWidgets\.QFileDialog)\."
+                        r"(getOpenFileName|getOpenFileNames|getSaveFileName|getExistingDirectory)\s*\(",
+                        source,
+                    )
+                    if not call_match:
+                        continue
+                    item = dict(row)
+                    item["call_name"] = f"QFileDialog.{call_match.group(1)}"
+                    item["call_lineno"] = int(row.get("start_line") or 0)
+                    rows.append(item)
             if rows:
                 seen = set()
                 body = ["QFileDialog call matches:"]

@@ -1058,7 +1058,7 @@ class MainWindowDccMixin:
             record_ai_work,
             relevant_ai_work_context,
         )
-        from tech_connector.services.dcc.dcc_operation_service import (
+        from tech_connector.game_engine.integration.dcc_operation_service import (
             attach_operation_context,
             build_dcc_debug_params,
             build_dcc_prototype_params,
@@ -2448,7 +2448,7 @@ class MainWindowDccMixin:
                     )
                     return None
 
-                from PySide6.QtWidgets import QApplication, QProgressDialog
+                from PySide6.QtWidgets import QProgressDialog
 
                 progress = QProgressDialog(
                     "Building AIStudioBridge...",
@@ -2473,7 +2473,7 @@ class MainWindowDccMixin:
                             f"[Unreal Setup] {event.get('percent', 0):>3}% "
                             f"{event.get('label')}: {event.get('message')}\n"
                         )
-                    QApplication.processEvents()
+                    progress.repaint()
 
                 build_result = build_ai_studio_bridge_plugin(
                     str(uproject),
@@ -2586,4 +2586,5 @@ def find_dcc_executable(host: str) -> str | None:
             matches.sort(reverse=True)
             return matches[0]
     return None
+
 

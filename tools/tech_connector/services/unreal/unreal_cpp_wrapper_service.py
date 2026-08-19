@@ -25,6 +25,12 @@ def _canonical_plugin_text(relative_path: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _canonical_library_implementation_text() -> str:
+    from tech_connector.services.unreal.plugin_source_service import read_plugin_implementation
+
+    return read_plugin_implementation(_canonical_plugin_root())
+
+
 @dataclass
 class WrapperPlan:
     ok: bool
@@ -471,7 +477,8 @@ def create_unreal_cpp_wrapper_plan(
         plugin_root / "AIStudioBridgeCapabilities.json": _manifest_text(spec, python_call),
     }
     body_contract = _function_body_contract(
-        file_map[private_root / "AIStudioBridgeLibrary.cpp"],
+        _canonical_library_implementation_text()
+        or file_map[private_root / "AIStudioBridgeLibrary.cpp"],
         spec,
         python_call,
     )

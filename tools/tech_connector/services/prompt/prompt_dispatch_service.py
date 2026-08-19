@@ -124,7 +124,7 @@ class DccExecutionRouteHandler:
         emit: ProgressCallback,
         activity: ActivityCallback | None = None,
     ) -> EngineResult:
-        from tech_connector.services.dcc.dcc_execution_service import (
+        from tech_connector.game_engine.integration.dcc_execution_service import (
             build_dcc_execution_request,
             default_dcc_execution_adapters,
         )
@@ -950,19 +950,34 @@ class PromptDispatchService:
                 raw_match = matches_request.strip().lower()
                 matches_request = raw_match not in {"false", "0", "no", "off"}
             if bool(plan_verification) and matches_request is False:
+                from tech_connector.services.reasoning.clarification_service import build_plan_mismatch_clarification
+
                 blocker = self._build_plan_mismatch_clarification(decision, route, plan_verification)
+                clarification = None
+                try:
+                    clarification = build_plan_mismatch_clarification(
+                        decision=decision,
+                        route=route,
+                        plan_verification=plan_verification,
+                    )
+                except Exception:
+                    clarification = None
+                metadata = {
+                    "engine_path": "prompt_dispatch",
+                    "result_type": "plan_contract_verification_failed",
+                    "route_decision": dict(decision),
+                    "request_plan_verification": plan_verification,
+                    "execution_route": execution_route,
+                    "route": route,
+                }
+                if clarification is not None:
+                    blocker = clarification.text
+                    metadata.update(clarification.to_metadata())
                 result = EngineResult(
                     action="clarify",
                     label="Plan contract mismatch",
                     text=blocker,
-                    metadata={
-                        "engine_path": "prompt_dispatch",
-                        "result_type": "plan_contract_verification_failed",
-                        "route_decision": dict(decision),
-                        "request_plan_verification": plan_verification,
-                        "execution_route": execution_route,
-                        "route": route,
-                    },
+                    metadata=metadata,
                 )
                 if activity:
                     activity(
@@ -1160,7 +1175,7 @@ class PromptDispatchService:
     def _has_direct_dcc_connection(self, decision: dict) -> bool:
         host = str(decision.get("execution_environment") or decision.get("host") or "").strip().lower()
         try:
-            from tech_connector.services.dcc.dcc_execution_service import _maya_direct_bridge_available, _unreal_direct_bridge_available
+            from tech_connector.game_engine.integration.dcc_execution_service import _maya_direct_bridge_available, _unreal_direct_bridge_available
         except Exception:
             return False
         if host == "maya":
@@ -1317,3 +1332,4 @@ class PromptStagingService:
             user_text=user_text,
             context_items=items[:max_items],
         )
+

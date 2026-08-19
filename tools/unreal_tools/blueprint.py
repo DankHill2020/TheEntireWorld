@@ -54,6 +54,281 @@ def _variable_row(unreal, blueprint, raw_name):
     return {"name": display, "type": _pin_type_summary(pin_type), "category": category}
 
 
+def _compile_and_save(unreal, blueprint, save):
+    compiled = unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
+    if compiled is False:
+        raise RuntimeError("Blueprint compilation failed")
+    status = ""
+    try:
+        status = str(blueprint.get_editor_property("status"))
+    except Exception:
+        pass
+    if "error" in status.lower():
+        raise RuntimeError("Blueprint compilation reported errors: " + status)
+    saved = False
+    if save:
+        saved = bool(unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False))
+        if not saved:
+            raise RuntimeError("Blueprint save failed")
+    return {"compiled": True, "compile_status": status, "saved": saved}
+
+
+def _blueprint_component_rows(unreal, blueprint):
+    subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+    if subsystem is None:
+        raise RuntimeError("SubobjectDataSubsystem is unavailable")
+    library = unreal.SubobjectDataBlueprintFunctionLibrary
+    rows = []
+    seen = set()
+    for handle in subsystem.k2_gather_subobject_data_for_blueprint(blueprint) or []:
+        try:
+            data = library.get_data(handle)
+            if not library.is_component(data):
+                continue
+            component = library.get_object_for_blueprint(data, blueprint)
+            row = {
+                "handle": handle,
+                "component": component,
+                "variable_name": str(library.get_variable_name(data)),
+                "display_name": str(library.get_display_name(data)),
+                "class_path": str(component.get_class().get_path_name()) if component else "",
+                "object_path": str(component.get_path_name()) if component else "",
+            }
+            identity = (row["variable_name"], row["object_path"])
+            if identity in seen:
+                continue
+            seen.add(identity)
+            rows.append(row)
+        except Exception:
+            continue
+    return rows
+
+
+def _resolve_component_class(unreal, component_class):
+    if not isinstance(component_class, str):
+        return component_class
+    value = str(component_class or "").strip()
+    resolved = None
+    if value:
+        try:
+            resolved = unreal.load_class(None, value)
+        except Exception:
+            pass
+    if resolved is None:
+        resolved = getattr(unreal, value.rsplit(".", 1)[-1], None)
+    if resolved is None:
+        raise ValueError("Unreal component class was not found: " + value)
+    return resolved
+
+
+def _unreal_class_path(unreal_class):
+    """
+    Gets the canonical Unreal class path for a Python class proxy or UClass.
+
+    :param unreal_class: Unreal Python class proxy or reflected UClass
+    :return: canonical Unreal class path
+    """
+    try:
+        return str(unreal_class.get_path_name())
+    except TypeError:
+        pass
+    static_class = getattr(unreal_class, "static_class", None)
+    if callable(static_class):
+        reflected_class = static_class()
+        if reflected_class is not None:
+            return str(reflected_class.get_path_name())
+    raise ValueError("Could not resolve an Unreal class path from: " + repr(unreal_class))
+
+
+def _set_component_reference(component, unreal, asset_path):
+    asset = load_asset(unreal, asset_path)
+    if asset is None:
+        raise ValueError("Component asset was not found: " + str(asset_path))
+    for property_name in ("static_mesh", "skeletal_mesh", "sprite", "material"):
+        try:
+            if hasattr(component, "has_editor_property") and not component.has_editor_property(property_name):
+                continue
+            component.set_editor_property(property_name, asset)
+            readback = component.get_editor_property(property_name)
+            if readback is asset or str(getattr(readback, "get_path_name", lambda: "")()) == str(asset.get_path_name()):
+                return property_name
+        except Exception:
+            continue
+    raise RuntimeError("The component exposes no supported asset-reference property")
+
+
+def add_component(
+    blueprint_path,
+    component_class,
+    component_name,
+    asset_path="",
+    attach_bone="",
+    socket_name="",
+    save=True,
+):
+    """Add and verify a Blueprint-authored component through SubobjectDataSubsystem."""
+    import unreal
+
+    blueprint = _load_blueprint(unreal, blueprint_path)
+    resolved_class = _resolve_component_class(unreal, component_class)
+    resolved_class_path = _unreal_class_path(resolved_class)
+    rows = _blueprint_component_rows(unreal, blueprint)
+    row = next((item for item in rows if item["variable_name"] == str(component_name)), None)
+    created = row is None
+    if created:
+        subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+        handles = list(subsystem.k2_gather_subobject_data_for_blueprint(blueprint) or [])
+        if not handles:
+            raise RuntimeError("Could not gather Blueprint subobject data")
+        params = unreal.AddNewSubobjectParams()
+        params.set_editor_property("parent_handle", handles[0])
+        params.set_editor_property("new_class", resolved_class)
+        params.set_editor_property("blueprint_context", blueprint)
+        handle, failure_reason = subsystem.add_new_subobject(params)
+        library = unreal.SubobjectDataBlueprintFunctionLibrary
+        if not library.is_handle_valid(handle):
+            raise RuntimeError("Could not add Blueprint component: " + str(failure_reason))
+        if not subsystem.rename_subobject(handle, str(component_name)):
+            raise RuntimeError("Could not rename Blueprint component: " + str(component_name))
+        rows = _blueprint_component_rows(unreal, blueprint)
+        row = next((item for item in rows if item["variable_name"] == str(component_name)), None)
+    if row is None or row["component"] is None:
+        raise RuntimeError("Blueprint component postcondition readback failed")
+    if resolved_class_path not in row["class_path"]:
+        raise RuntimeError(
+            f"Blueprint component class mismatch: expected {resolved_class_path}, got {row['class_path']}"
+        )
+    asset_property = _set_component_reference(row["component"], unreal, asset_path) if asset_path else ""
+    requested_socket = str(socket_name or attach_bone or "")
+    socket_property = ""
+    if requested_socket:
+        for property_name in ("attach_socket_name", "socket_name"):
+            try:
+                if hasattr(row["component"], "has_editor_property") and not row["component"].has_editor_property(property_name):
+                    continue
+                row["component"].set_editor_property(property_name, requested_socket)
+                if str(row["component"].get_editor_property(property_name)) == requested_socket:
+                    socket_property = property_name
+                    break
+            except Exception:
+                continue
+        if not socket_property:
+            raise RuntimeError("The component exposes no supported attachment socket property")
+    postconditions = _compile_and_save(unreal, blueprint, bool(save))
+    verified = next(
+        (item for item in _blueprint_component_rows(unreal, blueprint) if item["variable_name"] == str(component_name)),
+        None,
+    )
+    if verified is None or resolved_class_path not in verified["class_path"]:
+        raise RuntimeError("Blueprint component did not survive compile/save readback")
+    return json.dumps({
+        "ok": True,
+        "blueprint_path": blueprint_path,
+        "component_name": component_name,
+        "component_class": resolved_class_path,
+        "created": created,
+        "asset_property": asset_property,
+        "socket_property": socket_property,
+        "component": {key: value for key, value in verified.items() if key not in {"handle", "component"}},
+        "postconditions": {
+            **postconditions,
+            "component_readback": True,
+            "component_class_match": True,
+            "asset_reference_readback": not bool(asset_path) or bool(asset_property),
+            "socket_readback": not bool(requested_socket) or bool(socket_property),
+        },
+    }, indent=2)
+
+
+def _member_default_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "(" + ",".join(_member_default_text(item) for item in value) + ")"
+    return str(value)
+
+
+def _equivalent_default(expected, actual):
+    if isinstance(expected, (list, tuple)):
+        return list(expected) == list(actual or [])
+    if isinstance(expected, bool):
+        return bool(actual) is expected
+    if isinstance(expected, (int, float)) and not isinstance(expected, bool):
+        try:
+            return float(actual) == float(expected)
+        except (TypeError, ValueError):
+            return False
+    return str(actual) == str(expected)
+
+
+def create_variable(
+    blueprint_path,
+    variable_name,
+    variable_type,
+    is_array=False,
+    default_value=None,
+    save=True,
+):
+    """Create a typed Blueprint member variable and verify generated-class readback."""
+    import unreal
+
+    blueprint = _load_blueprint(unreal, blueprint_path)
+    graph_names = [str(value) for value in unreal.BlueprintEditorLibrary.list_graph_names(blueprint) or []]
+    graph_name = "EventGraph" if "EventGraph" in graph_names else (graph_names[0] if graph_names else "")
+    if not graph_name:
+        raise RuntimeError("Blueprint has no editable graph for member-variable authoring")
+    graph = _graph_editor(unreal, blueprint, graph_name)
+    existing = {str(value) for value in unreal.BlueprintEditorLibrary.list_member_variable_names(blueprint) or []}
+    created = str(variable_name) not in existing
+    if created:
+        pin_type = unreal.BlueprintEditorLibrary.get_basic_type_by_name(str(variable_type))
+        if pin_type is None:
+            raise ValueError("Unsupported Blueprint variable type: " + str(variable_type))
+        if is_array:
+            container_enum = getattr(getattr(unreal, "PinContainerType", None), "ARRAY", None)
+            if container_enum is None:
+                raise RuntimeError("Blueprint array pin types are unavailable in this Unreal build")
+            pin_type.set_editor_property("container_type", container_enum)
+        if not graph.add_member_variable(
+            str(variable_name), pin_type, _member_default_text(default_value)
+        ):
+            raise RuntimeError("BlueprintGraphEditor rejected member variable: " + str(variable_name))
+    postconditions = _compile_and_save(unreal, blueprint, bool(save))
+    names = {str(value) for value in unreal.BlueprintEditorLibrary.list_member_variable_names(blueprint) or []}
+    if str(variable_name) not in names:
+        raise RuntimeError("Blueprint member variable did not survive compile/save readback")
+    variable = _variable_row(unreal, blueprint, variable_name)
+    default_readback = None
+    default_verified = default_value is None
+    if default_value is not None:
+        try:
+            generated_class = blueprint.generated_class()
+            default_object = unreal.get_default_object(generated_class)
+            default_readback = default_object.get_editor_property(str(variable_name))
+            default_verified = _equivalent_default(default_value, default_readback)
+        except Exception as exc:
+            raise RuntimeError("Blueprint variable default readback failed: " + str(exc)) from exc
+        if not default_verified:
+            raise RuntimeError(
+                f"Blueprint variable default mismatch: expected {default_value!r}, got {default_readback!r}"
+            )
+    return json.dumps({
+        "ok": True,
+        "blueprint_path": blueprint_path,
+        "variable": variable,
+        "is_array": bool(is_array),
+        "created": created,
+        "default_value": default_readback,
+        "postconditions": {
+            **postconditions,
+            "variable_readback": True,
+            "default_readback": default_verified,
+        },
+    }, indent=2, default=str)
+
+
 def scan_blueprint(asset_path, include_graphs=True, include_defaults=True):
     import unreal
 
@@ -90,6 +365,19 @@ def scan_blueprint(asset_path, include_graphs=True, include_defaults=True):
                 result["variables"].append(row)
     except Exception as exc:
         result["warnings"].append(f"variables unavailable: {exc}")
+
+    try:
+        result["components"] = [
+            {
+                "variable_name": row["variable_name"],
+                "display_name": row["display_name"],
+                "class_path": row["class_path"],
+                "object_path": row["object_path"],
+            }
+            for row in _blueprint_component_rows(unreal, bp)
+        ]
+    except Exception as exc:
+        result["warnings"].append(f"components unavailable: {exc}")
 
     try:
         standard_graphs = {"EventGraph", "AnimGraph", "UserConstructionScript"}
@@ -155,11 +443,25 @@ def compile_and_save_blueprint(asset_path):
     ) else []
     if errors:
         return __import__('json').dumps(
-            {'asset_path': asset_path, 'compiled': False, 'errors': list(errors)}, indent=2
+            {
+                'ok': False,
+                'asset_path': asset_path,
+                'compiled': False,
+                'errors': list(errors),
+                'parity_checks': {'Blueprint compile': False},
+            },
+            indent=2,
         )
-    unreal.EditorAssetLibrary.save_asset(asset_path, only_if_is_dirty=False)
+    saved = bool(unreal.EditorAssetLibrary.save_asset(asset_path, only_if_is_dirty=False))
     return __import__('json').dumps(
-        {'asset_path': asset_path, 'compiled': True, 'saved': True}, indent=2
+        {
+            'ok': saved,
+            'asset_path': asset_path,
+            'compiled': True,
+            'saved': saved,
+            'parity_checks': {'Blueprint compile': bool(saved)},
+        },
+        indent=2,
     )
 
 def _graph_editor(unreal, blueprint, graph_name):
@@ -210,10 +512,32 @@ def add_function(blueprint_path, function_name, inputs=None, outputs=None, save=
         if created
         else _graph_editor(unreal, blueprint, function_name)
     )
-    if inputs or outputs:
-        raise NotImplementedError(
-            "Typed function signature authoring needs a reflected signature adapter; the empty graph was not accepted as complete."
-        )
+    for direction, parameters in (("input", inputs or []), ("output", outputs or [])):
+        for parameter in parameters:
+            if isinstance(parameter, str):
+                parameter_name = parameter
+                parameter_type = "wildcard"
+            elif isinstance(parameter, dict):
+                parameter_name = str(parameter.get("name") or "").strip()
+                parameter_type = parameter.get("type") or parameter.get("pin_type") or "wildcard"
+            else:
+                raise ValueError(f"Invalid {direction} parameter specification: {parameter!r}")
+            if not parameter_name:
+                raise ValueError(f"{direction.title()} parameter name cannot be blank")
+            editor_method = getattr(editor, f"add_{direction}_pin", None)
+            library_method = getattr(
+                unreal.BlueprintEditorLibrary,
+                f"add_function_{direction}",
+                None,
+            )
+            if callable(editor_method):
+                editor_method(parameter_name, parameter_type)
+            elif callable(library_method):
+                library_method(blueprint, str(function_name), parameter_name, parameter_type)
+            else:
+                raise RuntimeError(
+                    f"The installed Unreal bridge cannot author typed function {direction}s"
+                )
     unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
     if save:
         unreal.EditorAssetLibrary.save_loaded_asset(blueprint, False)
@@ -226,6 +550,8 @@ def add_function(blueprint_path, function_name, inputs=None, outputs=None, save=
         "blueprint_path": blueprint_path,
         "function_name": function_name,
         "created": created,
+        "inputs": list(inputs or []),
+        "outputs": list(outputs or []),
         "postconditions": {"graph_exists": True, "compiled": True, "saved": bool(save)},
     }, indent=2)
 
@@ -566,6 +892,15 @@ def apply_graph_spec(blueprint_path, graph_name, graph_spec, save=True):
 
 
 def create_from_template(template, asset_path, parent_class="", parameters=None):
+    """
+    Creates or loads a Blueprint and reports only operations actually performed.
+
+    :param template: parent selection hint such as actor or character
+    :param asset_path: destination Unreal content path
+    :param parent_class: optional explicit Unreal parent class path
+    :param parameters: reserved template parameters
+    :return: JSON creation and postcondition receipt
+    """
     import unreal
 
     parameters = parameters or {}
@@ -576,9 +911,16 @@ def create_from_template(template, asset_path, parent_class="", parameters=None)
     parent_obj = unreal.Character
     if parent_class:
         try:
-            parent_obj = unreal.load_object(None, parent_class)
+            parent_obj = unreal.load_class(None, parent_class)
         except Exception:
-            parent_obj = unreal.Character
+            parent_obj = None
+        if parent_obj is None:
+            try:
+                parent_obj = unreal.load_object(None, parent_class)
+            except Exception:
+                parent_obj = None
+        if parent_obj is None:
+            raise ValueError("Unreal parent class was not found: " + str(parent_class))
     elif "actor" in template.lower():
         parent_obj = unreal.Actor
     elif "character" in template.lower() or "locomotion" in template.lower() or "climbing" in template.lower():
@@ -599,45 +941,18 @@ def create_from_template(template, asset_path, parent_class="", parameters=None)
     if not asset:
         raise RuntimeError("Failed to create Blueprint asset")
 
-    # Force compile and save
-    unreal.BlueprintEditorLibrary.compile_blueprint(asset)
-    unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
+    postconditions = _compile_and_save(unreal, asset, True)
+    if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+        raise RuntimeError("Blueprint asset did not survive save readback: " + asset_path)
 
     parent_class_name = parent_obj.__name__ if isinstance(parent_obj, type) else parent_obj.get_name()
 
-    steps = [
-        f"Instantiate Blueprint subclass from parent class '{parent_class_name}'"
-    ]
-    if "locomotion" in template.lower():
-        steps.extend([
-            "Configure default locomotion movement component parameters",
-            "Register input bindings for move forward/right and camera look",
-            "Initialize motion matching database references"
-        ])
-    elif "combat" in template.lower():
-        steps.extend([
-            "Add combo tracking variables (ComboIndex, MaxCombos, LastAttackTime)",
-            "Create state transition variables for combat action sequences",
-            "Map melee animation montage slots"
-        ])
-    elif "dash" in template.lower():
-        steps.extend([
-            "Add dash velocity multiplier, duration, and cooldown variables",
-            "Configure character movement impulse modes for launch velocity",
-            "Bind dash action event trigger"
-        ])
-    elif "climbing" in template.lower() or "climb" in template.lower():
-        steps.extend([
-            "Add climbing status variables (bIsClimbing, ClimbState, ClimbSurfaceNormal)",
-            "Register ledge detection trace and mantle transition overrides",
-            "Create climbing animation slots (ClimbStart, ClimbLoop, ClimbMantle)"
-        ])
+    operations = []
+    if created:
+        operations.append(f"Created Blueprint subclass of '{parent_class_name}'")
     else:
-        steps.extend([
-            "Initialize template-specific node properties",
-            "Verify variables and input action mappings"
-        ])
-    steps.append("Compile and save blueprint asset to Content Browser")
+        operations.append("Loaded existing Blueprint without replacing it")
+    operations.extend(("Compiled Blueprint", "Saved Blueprint", "Verified asset path readback"))
 
     return json.dumps({
         "created": created,
@@ -645,6 +960,13 @@ def create_from_template(template, asset_path, parent_class="", parameters=None)
         "asset_path": asset_path,
         "asset_name": asset_name,
         "parent_class": parent_class_name,
-        "steps_executed": steps,
-        "message": f"Successfully created Blueprint asset from template {template}.",
+        "operations_performed": operations,
+        "steps_executed": operations,
+        "parameters_applied": [],
+        "parameters_ignored": sorted(str(key) for key in parameters),
+        "postconditions": {
+            **postconditions,
+            "asset_exists": True,
+        },
+        "message": "Successfully created Blueprint asset." if created else "Blueprint asset already exists.",
     }, indent=2, default=str)

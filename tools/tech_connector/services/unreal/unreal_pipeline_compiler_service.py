@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from reasoning_runtime.action.action_graph_service import ActionGraph, validate_action_graph
-from tech_connector.services.dcc.operation_contract_service import (
+from tech_connector.game_engine.integration.operation_contract_service import (
     resolve_operation_contract,
 )
 from tech_connector.services.unreal.feature_planning_service import (
@@ -206,3 +206,4 @@ def compile_unreal_operation_pipeline(
     )
     data["validation"] = validate_action_graph(data)
     return data
+

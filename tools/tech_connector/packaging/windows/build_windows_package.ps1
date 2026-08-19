@@ -1,3 +1,4 @@
+
 param(
     [ValidateSet("reasoning-runtime", "full-tools")]
     [string]$Tier = "reasoning-runtime",
@@ -6,7 +7,7 @@ param(
     [string]$Mode = "freeze",
 
     [string]$Version = "",
-    [string]$Python = "python",
+    [string]$Python = "auto",
     [string]$DistRoot = "dist\windows",
     [switch]$NoClean,
     [switch]$SkipDependencyInstall
@@ -22,14 +23,51 @@ function Resolve-RepoRoot {
 function Invoke-Python {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
     $parts = $Python -split " "
-    $exe = $parts[0]
+    $exe = if (Test-Path -LiteralPath $Python) { $Python } else { $parts[0] }
     $baseArgs = @()
-    if ($parts.Length -gt 1) {
+    if ($exe -ne $Python -and $parts.Length -gt 1) {
         $baseArgs = $parts[1..($parts.Length - 1)]
     }
     & $exe @baseArgs @Args
     if ($LASTEXITCODE -ne 0) {
         throw "Python command failed: $Python $($Args -join ' ')"
+    }
+}
+
+function Get-PythonInfo {
+    param([string]$Command)
+    $parts = $Command -split " "
+    $exe = if (Test-Path -LiteralPath $Command) { $Command } else { $parts[0] }
+    $baseArgs = @()
+    if ($exe -ne $Command -and $parts.Length -gt 1) {
+        $baseArgs = $parts[1..($parts.Length - 1)]
+    }
+    $payload = & $exe @baseArgs -c "import json, platform, struct, sys; print(json.dumps({'major': sys.version_info.major, 'minor': sys.version_info.minor, 'micro': sys.version_info.micro, 'implementation': platform.python_implementation(), 'bits': struct.calcsize('P') * 8, 'executable': sys.executable}))"
+    if ($LASTEXITCODE -ne 0 -or -not $payload) {
+        throw "Could not run release Python: $Command"
+    }
+    return ($payload | ConvertFrom-Json)
+}
+
+function Resolve-ReleasePython {
+    param([string]$Requested)
+    if ($Requested -and $Requested -ne "auto") {
+        return $Requested
+    }
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Python\Python314\python.exe"),
+        (Join-Path $env:ProgramFiles "Python314\python.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return "py -3.14"
+}
+
+function Assert-ReleasePython {
+    param($Info)
+    if ($Info.implementation -ne "CPython" -or $Info.major -ne 3 -or $Info.minor -ne 14 -or $Info.bits -ne 64) {
+        throw "Release builds require 64-bit CPython 3.14.x. Found $($Info.implementation) $($Info.major).$($Info.minor).$($Info.micro) ($($Info.bits)-bit) at $($Info.executable)."
     }
 }
 
@@ -60,6 +98,34 @@ function Find-InnoCompiler {
     return ""
 }
 
+function Build-NativeGraphRuntime {
+    param([string]$RepoRoot, [string]$OutputRoot, [string]$StageDir)
+    $cmake = Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if (-not $cmake) {
+        throw "CMake is required to build the TC native graph runtime."
+    }
+    $source = Join-Path $RepoRoot "tech_connector\game_engine\native"
+    $build = Join-Path $OutputRoot "native\graph-runtime"
+    & $cmake.Source -S $source -B $build -A x64 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Native graph runtime configure failed." }
+    & $cmake.Source --build $build --config Release --parallel | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Native graph runtime build failed." }
+    & $cmake.Source --build $build --config Release --target tc_graph_runtime_tests | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Native graph runtime test target failed to build." }
+    $ctest = Join-Path (Split-Path -Parent $cmake.Source) "ctest.exe"
+    & $ctest --test-dir $build -C Release --output-on-failure | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Native graph runtime tests failed." }
+    $dll = Get-ChildItem -LiteralPath $build -Filter tc_graph_runtime.dll -Recurse | Select-Object -First 1
+    if (-not $dll) { throw "Native graph runtime DLL was not produced." }
+    $player = Get-ChildItem -LiteralPath $build -Filter tc_player.exe -Recurse | Select-Object -First 1
+    if (-not $player) { throw "Native TC player executable was not produced." }
+    $destination = Join-Path $StageDir "tech_connector\game_engine\native\bin"
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $destination $dll.Name) -Force
+    Copy-Item -LiteralPath $player.FullName -Destination (Join-Path $destination $player.Name) -Force
+    return (Join-Path $destination $dll.Name)
+}
+
 $repoRoot = Resolve-RepoRoot
 Set-Location $repoRoot
 
@@ -83,6 +149,11 @@ Write-Host "Tier: $Tier"
 Write-Host "Mode: $Mode"
 Write-Host "Version: $Version"
 
+$Python = Resolve-ReleasePython $Python
+$pythonInfo = Get-PythonInfo $Python
+Assert-ReleasePython $pythonInfo
+Write-Host "Python: $($pythonInfo.implementation) $($pythonInfo.major).$($pythonInfo.minor).$($pythonInfo.micro) ($($pythonInfo.bits)-bit)"
+
 $stageArgs = @("tech_connector\packaging\stage_package.py", $Tier, "--out", $stageRoot)
 if ($NoClean) {
     $stageArgs += "--no-clean"
@@ -94,16 +165,26 @@ if ($Mode -eq "stage") {
     exit 0
 }
 
+$nativeGraphDll = Build-NativeGraphRuntime $repoRoot $buildRoot $stageDir
+$nativePlayerExe = Join-Path (Split-Path -Parent $nativeGraphDll) "tc_player.exe"
+
 $venvDir = Join-Path $distRootAbs ".venv-build"
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
+if (Test-Path -LiteralPath $venvPython) {
+    $venvInfo = Get-PythonInfo $venvPython
+    if ($venvInfo.major -ne 3 -or $venvInfo.minor -ne 14 -or $venvInfo.bits -ne 64) {
+        Write-Host "Replacing stale build environment created with Python $($venvInfo.major).$($venvInfo.minor)."
+        Remove-Item -LiteralPath $venvDir -Recurse -Force
+    }
+}
 if (-not (Test-Path -LiteralPath $venvPython)) {
     Invoke-Python -m venv $venvDir
 }
 
 if (-not $SkipDependencyInstall) {
     & $venvPython -m pip install --upgrade pip wheel setuptools
-    & $venvPython -m pip install pyinstaller
-    & $venvPython -m pip install PySide6 fastmcp pywinpty imageio imageio-ffmpeg
+    & $venvPython -m pip install -r tech_connector\packaging\requirements-build.txt
+    & $venvPython -m pip install -r tech_connector\packaging\requirements-runtime.txt
 }
 
 $launcherDir = Join-Path $buildRoot "launcher"
@@ -145,7 +226,8 @@ $pyiArgs = @(
     "--add-data", "$stageDir\tech_connector\knowledge;tech_connector\knowledge",
     "--collect-submodules", "tech_connector",
     "--collect-submodules", "reasoning_runtime",
-    "--collect-submodules", "PySide6",
+    "--add-binary", "$nativeGraphDll;tech_connector\game_engine\native\bin",
+    "--add-binary", "$nativePlayerExe;tech_connector\game_engine\native\bin",
     $launcherPath
 )
 
@@ -169,10 +251,22 @@ if (-not (Test-Path -LiteralPath $frozenExe)) {
     throw "Frozen executable was not created: $frozenExe"
 }
 
+@"
+CPython $($pythonInfo.major).$($pythonInfo.minor).$($pythonInfo.micro)
+$($pythonInfo.bits)-bit
+Built from: $($pythonInfo.executable)
+"@ | Set-Content -LiteralPath (Join-Path $frozenAppDir "PYTHON_RUNTIME.txt") -Encoding ASCII
+
 New-Item -ItemType Directory -Force -Path $zipRoot | Out-Null
 $zipPath = Join-Path $zipRoot "$appName-$Version-win64-portable.zip"
 Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-Compress-Archive -LiteralPath "$frozenAppDir\*" -DestinationPath $zipPath -Force
+Push-Location $frozenAppDir
+try {
+    & tar.exe -a -c -f $zipPath *
+    if ($LASTEXITCODE -ne 0) { throw "Portable ZIP creation failed." }
+} finally {
+    Pop-Location
+}
 Write-Host "Portable zip: $zipPath"
 
 if ($Mode -eq "freeze") {

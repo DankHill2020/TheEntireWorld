@@ -18,7 +18,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
-from tech_connector.services.capability_registry_storage import load_capability_registry_payload
+from tech_connector.services.capability_registry_storage import (
+    capability_registry_payload_exists,
+    load_capability_registry_payload,
+)
 
 
 REGISTRY_SCHEMA_VERSION = "1.0"
@@ -101,8 +104,19 @@ class CapabilityRegistry:
         self._entries: dict = {}
         self._diagnostics: list[dict] = []
         self._seeded = False
-        if self._path.exists():
+        if capability_registry_payload_exists(self._path):
             self.load()
+        self._ensure_builtin_bridges()
+
+    def _ensure_builtin_bridges(self) -> None:
+        """
+        Adds portable built-in DCC bridge capabilities when data is absent or stale.
+
+        :return: None.
+        """
+
+        for entry in _BUILT_IN_BRIDGE_ENTRIES:
+            self._entries.setdefault(entry.id, entry)
 
     # ------------------------------------------------------------------
     # Persistence
@@ -409,8 +423,15 @@ class CapabilityRegistry:
 # ---------------------------------------------------------------------------
 
 def _utc_now() -> str:
-    from datetime import datetime
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    """
+    Gets the current UTC timestamp in registry serialization format.
+
+    :return: ISO-8601 UTC timestamp.
+    """
+
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _make_bridge(id: str, name: str, dcc: str, module: str, cls: str) -> CapabilityEntry:
@@ -441,6 +462,9 @@ _BUILT_IN_BRIDGE_ENTRIES = [
                  "tech_connector.bridges.motionbuilder.motionbuilder_bridge", "MotionBuilderBridge"),
     _make_bridge("bridge_houdini", "Houdini Bridge", "houdini", "tech_connector.bridges.houdini.houdini_bridge", "HoudiniBridge"),
     _make_bridge("bridge_unity", "Unity Bridge", "unity", "tech_connector.bridges.unity.unity_bridge", "UnityBridge"),
+    _make_bridge("bridge_3dsmax", "3ds Max Bridge", "3dsmax", "tech_connector.bridges.max.max_bridge", "MaxBridge"),
+    _make_bridge("bridge_photoshop", "Photoshop Bridge", "photoshop", "tech_connector.bridges.photoshop.photoshop_bridge", "PhotoshopBridge"),
+    _make_bridge("bridge_gimp", "GIMP Bridge", "gimp", "tech_connector.bridges.gimp.gimp_bridge", "GimpBridge"),
 ]
 
 

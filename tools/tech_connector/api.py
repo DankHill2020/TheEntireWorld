@@ -12,6 +12,7 @@ import inspect
 import json
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -31,6 +32,10 @@ from tech_connector.services.api_feature_registry_service import (
 )
 from tech_connector.services.conversation_workspace_service import compatibility_snapshot
 from tech_connector.services.license_entitlement_service import LicenseEntitlement, entitlement_status_row, verify_entitlement
+from tech_connector.services.llm_request_queue_service import (
+    cancel_llm_request as _cancel_llm_request,
+    llm_request_queue_snapshot as _llm_request_queue_snapshot,
+)
 from tech_connector.services.project_validation_intent_service import classify_validation_intent
 from tech_connector.services.prompt.prompt_resource_orchestration_service import (
     build_resource_orchestration_plan,
@@ -58,6 +63,17 @@ DCC_API_ALIASES: dict[str, dict[str, str]] = {
         "find_assets": "unreal_tools.assets.find_asset_path_by_name",
     },
 }
+
+_DEFAULT_UI_WINDOW: Any | None = None
+
+
+def register_default_ui_window(window: Any | None) -> None:
+    global _DEFAULT_UI_WINDOW
+    _DEFAULT_UI_WINDOW = window
+
+
+def get_default_ui_window() -> Any | None:
+    return _DEFAULT_UI_WINDOW
 
 PROMPT_CHAIN_SUCCESS_STATUSES = {"completed", "dry_run"}
 API_VERSION = "2.0"
@@ -605,6 +621,7 @@ class TechConnectorHeadlessAPI:
         command_router: Any = None,
         runtime_kernel: Any = None,
         runtime_packages: Iterable[Any] | None = None,
+        ui_window: Any | None = None,
     ) -> None:
         self.settings = dict(settings if settings is not None else load_settings())
         self.project_root = str(Path(project_root).expanduser().resolve()) if project_root else str(self.settings.get("active_project") or "")
@@ -613,7 +630,15 @@ class TechConnectorHeadlessAPI:
         self.command_router = command_router if command_router is not None else CommandRouter()
         self.runtime_kernel = runtime_kernel
         self.runtime_packages = tuple(runtime_packages or ())
+        self._ui_window = ui_window
         self.dcc = DccAPINamespace(self)
+        self.kingdom = GameEngineAPINamespace(self)
+        self.game_engine = self.kingdom
+        self.garden = SceneViewerAPINamespace(self)
+        self.scene_viewer = self.garden
+        self.ophanim = ImageEditorAPINamespace(self)
+        self.image_editor = self.ophanim
+        self.ui = UiAPINamespace(self, ui_window=self._ui_window)
         self.call_dcc_function = DccFunctionCaller(self)
         self.reasoning = ReasoningRuntimeNamespace(self)
         self.runtime = self.reasoning
@@ -644,8 +669,33 @@ class TechConnectorHeadlessAPI:
     def verify_license(self) -> dict[str, Any]:
         return self.entitlement_status()
 
+    def attach_ui_window(self, ui_window: Any | None) -> None:
+        self._ui_window = ui_window
+        self.ui.attach_window(ui_window)
+        self.features._populated = False
+
     def capabilities(self) -> dict[str, Any]:
         return self.reasoning.capabilities()
+
+    def llm_queue_status(self) -> dict[str, Any]:
+        """
+            Returns process-wide LLM queue telemetry.
+        :return: queue depth, capacity, counters, and request snapshots
+        """
+        return _llm_request_queue_snapshot()
+
+    def cancel_llm_request(
+        self,
+        request_id: str,
+        reason: str = "Cancelled by API request.",
+    ) -> bool:
+        """
+            Cancels queued work or detaches from an active provider request.
+        :param request_id: queue request correlation identifier
+        :param reason: user-facing cancellation reason
+        :return: whether an active request was found
+        """
+        return _cancel_llm_request(request_id, reason)
 
     def _populate_feature_registry(self, registry: APIFeatureRegistry) -> None:
         """Register public API modules plus each installed runtime adapter."""
@@ -715,6 +765,17 @@ class TechConnectorHeadlessAPI:
             lifecycle_stage="execution",
         )
         add(
+            "llm.queue",
+            "reasoning",
+            "Provider-aware LLM scheduling telemetry and targeted cancellation.",
+            {
+                "status": self.llm_queue_status,
+                "cancel": self.cancel_llm_request,
+            },
+            dependencies=("reasoning.runtime",),
+            lifecycle_stage="orchestration",
+        )
+        add(
             "planning.action_graph",
             "planning",
             "Natural-language action graph planning and execution.",
@@ -757,6 +818,73 @@ class TechConnectorHeadlessAPI:
             {"call": self._invoke_dcc_feature},
             permissions=("official_api_access", "connected_dcc_bridge"),
             lifecycle_stage="execution",
+        )
+        add(
+            "execution.game_engine",
+            "execution",
+            "Drive game-engine authoring, runtime setup, and graph execution in The Kingdom.",
+            {
+                "access_contract": self.kingdom.access_contract,
+                "configure_runtime": self.kingdom.configure_runtime,
+                "create_effect": self.kingdom.create_effect,
+                "update_running_game": self.kingdom.update_running_game,
+                "plan_playtest": self.kingdom.plan_playtest,
+                "create_character": self.kingdom.create_character,
+                "decide_character": self.kingdom.decide_character,
+                "execute_world_intelligence": self.kingdom.execute_world_intelligence,
+                "create_game_experience": self.kingdom.create_game_experience,
+                "validate_game_experience": self.kingdom.validate_game_experience,
+                "create_presentation": self.kingdom.create_presentation,
+                "preview_presentation": self.kingdom.preview_presentation,
+                "graph_to_code": self.kingdom.graph_to_code,
+                "code_to_graph": self.kingdom.code_to_graph,
+                "compile_graph": self.kingdom.compile_graph,
+                "execute_graph": self.kingdom.execute_graph,
+                "create_graph_runtime": self.kingdom.create_graph_runtime,
+            },
+            permissions=("official_api_access",),
+            lifecycle_stage="execution",
+            source="tech_connector.game_engine.runtime.tc_engine_api.engine",
+        )
+        add(
+            "execution.scene_viewer",
+            "execution",
+            "Issue commands against the active scene viewer session and route adaptive scene graph operations.",
+            {
+                "commands": self.garden.commands,
+                "route": self.garden.route,
+                "execute": self.garden.execute_active,
+                "target": self.garden.target,
+                "target_from_proxy": self.garden.target_from_proxy,
+                "active_viewer": self.garden.active_viewer,
+                "register_active_viewer": self.garden.register_active_viewer,
+                "unregister_active_viewer": self.garden.unregister_active_viewer,
+            },
+            permissions=("official_api_access", "connected_viewer_bridge"),
+            lifecycle_stage="execution",
+            source="tech_connector.viewer_cmds",
+        )
+        add(
+            "interaction.image_editor",
+            "interaction",
+            "Capture DCC viewport buffers, open/save image documents, and launch Ophanim tabs.",
+            {
+                "capture_viewport": self.ophanim.capture_viewport,
+                "open_image": self.ophanim.open_image,
+                "capture_and_open": self.ophanim.capture_and_open,
+            },
+            permissions=("official_api_access",),
+            lifecycle_stage="interaction",
+            source="tech_connector.ui.image_editor_widget",
+        )
+        add(
+            "interaction.ui",
+            "interaction",
+            "Execute desktop UI actions by name, stream the mirrored action catalog, and call discovered actions directly.",
+            self.ui.feature_handlers(),
+            permissions=("official_api_access",),
+            lifecycle_stage="interaction",
+            source="tech_connector.api",
         )
         add(
             "intelligence.dcc_catalog",
@@ -1458,8 +1586,649 @@ class DccFunctionCaller:
         return self._api.dcc.aliases()
 
 
+class GameEngineAPINamespace:
+    """High-level namespace for The Kingdom / game-engine operations."""
+
+    def __init__(self, api: TechConnectorHeadlessAPI) -> None:
+        self._api = api
+
+    def _run(self, operation: str, action: Callable[[], Any], *, schema: str) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            result = action()
+            tag = self._api._tag(entitlement, operation=operation)
+            if self._api.project_root:
+                write_project_provenance_marker(self._api.project_root, tag)
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": schema,
+                    "operation": operation,
+                    "value": _serialize_public_value(result),
+                },
+                entitlement=entitlement.to_dict(),
+                provenance=tag,
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def _engine(self):
+        from tech_connector.game_engine.runtime import tc_engine_api
+
+        return tc_engine_api.engine
+
+    def _access_contract(self):
+        from tech_connector.game_engine.runtime.tc_engine_api import engine_access_contract
+
+        return engine_access_contract()
+
+    def access_contract(self) -> APIResult:
+        return self._run(
+            "kingdom.access_contract",
+            lambda: self._access_contract(),
+            schema=f"{API_SCHEMA}.game_engine_access_contract",
+        )
+
+    def configure_runtime(
+        self,
+        world: Any,
+        *,
+        target: str = "desktop",
+        goal: str = "balanced",
+        quality: str = "auto",
+        backend: str = "auto",
+        adaptive: bool = True,
+        tick_rate: int | None = None,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.configure_runtime",
+            lambda: self._engine().configure_runtime(
+                world,
+                target=target,
+                goal=goal,
+                quality=quality,
+                backend=backend,
+                adaptive=adaptive,
+                tick_rate=tick_rate,
+            ),
+            schema=f"{API_SCHEMA}.game_engine.configure_runtime",
+        )
+
+    def create_effect(
+        self,
+        preset: str,
+        *,
+        target: str = "desktop",
+        goal: str = "balanced",
+        quality: str = "auto",
+        seed: int = 1,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.create_effect",
+            lambda: self._engine().create_effect(
+                preset,
+                target=target,
+                goal=goal,
+                quality=quality,
+                seed=seed,
+            ),
+            schema=f"{API_SCHEMA}.game_engine.create_effect",
+        )
+
+    def update_running_game(
+        self,
+        scene_document: Any,
+        scene_path: str | Path,
+        *,
+        force_full: bool = False,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.update_running_game",
+            lambda: self._engine().update_running_game(
+                scene_document,
+                scene_path,
+                force_full=force_full,
+            ),
+            schema=f"{API_SCHEMA}.game_engine.update_running_game",
+        )
+
+    def plan_playtest(
+        self,
+        *,
+        target: str = "desktop",
+        session_mode: str = "play_in_editor",
+        changed_modes: list[str] | tuple[str, ...] = (),
+        session_connected: bool = False,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.plan_playtest",
+            lambda: self._engine().plan_playtest(
+                target=target,
+                session_mode=session_mode,
+                changed_modes=changed_modes,
+                session_connected=session_connected,
+            ),
+            schema=f"{API_SCHEMA}.game_engine.plan_playtest",
+        )
+
+    def create_character(self, world: Any, profile: Any) -> APIResult:
+        return self._run(
+            "kingdom.create_character",
+            lambda: self._engine().create_character(world, profile),
+            schema=f"{API_SCHEMA}.game_engine.create_character",
+        )
+
+    def decide_character(
+        self,
+        world: Any,
+        character_id: str,
+        actions: Any,
+        *,
+        available_affordances: Any = (),
+        now: float = 0.0,
+        model_proposal: Any = None,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.decide_character",
+            lambda: self._engine().decide_character(
+                world,
+                character_id,
+                actions,
+                available_affordances=available_affordances,
+                now=now,
+                model_proposal=model_proposal,
+            ),
+            schema=f"{API_SCHEMA}.game_engine.decide_character",
+        )
+
+    def execute_world_intelligence(
+        self,
+        world: Any,
+        runtime_state: Any,
+        command: str,
+        **payload: Any,
+    ) -> APIResult:
+        return self._run(
+            "kingdom.execute_world_intelligence",
+            lambda: self._engine().execute_world_intelligence(world, runtime_state, command, **payload),
+            schema=f"{API_SCHEMA}.game_engine.execute_world_intelligence",
+        )
+
+    def create_game_experience(self, profile_id: str, game_types: Any, **options: Any) -> APIResult:
+        return self._run(
+            "kingdom.create_game_experience",
+            lambda: self._engine().create_game_experience(profile_id, game_types, **options),
+            schema=f"{API_SCHEMA}.game_engine.create_game_experience",
+        )
+
+    def validate_game_experience(self, profile: Any) -> APIResult:
+        return self._run(
+            "kingdom.validate_game_experience",
+            lambda: self._engine().validate_game_experience(profile),
+            schema=f"{API_SCHEMA}.game_engine.validate_game_experience",
+        )
+
+    def create_presentation(self, profile_id: str, visual_style: str, **options: Any) -> APIResult:
+        return self._run(
+            "kingdom.create_presentation",
+            lambda: self._engine().create_presentation(profile_id, visual_style, **options),
+            schema=f"{API_SCHEMA}.game_engine.create_presentation",
+        )
+
+    def preview_presentation(self, profile: Any, **options: Any) -> APIResult:
+        return self._run(
+            "kingdom.preview_presentation",
+            lambda: self._engine().preview_presentation(profile, **options),
+            schema=f"{API_SCHEMA}.game_engine.preview_presentation",
+        )
+
+    def graph_to_code(self, program: Any) -> APIResult:
+        return self._run(
+            "kingdom.graph_to_code",
+            lambda: self._engine().graph_to_code(program),
+            schema=f"{API_SCHEMA}.game_engine.graph_to_code",
+        )
+
+    def code_to_graph(self, source_code: str, previous: Any = None) -> APIResult:
+        return self._run(
+            "kingdom.code_to_graph",
+            lambda: self._engine().code_to_graph(source_code, previous=previous),
+            schema=f"{API_SCHEMA}.game_engine.code_to_graph",
+        )
+
+    def compile_graph(self, program_or_manifest: Any) -> APIResult:
+        return self._run(
+            "kingdom.compile_graph",
+            lambda: self._engine().compile_graph(program_or_manifest),
+            schema=f"{API_SCHEMA}.game_engine.compile_graph",
+        )
+
+    def execute_graph(self, program_or_manifest: Any, context: Any, **options: Any) -> APIResult:
+        return self._run(
+            "kingdom.execute_graph",
+            lambda: self._engine().execute_graph(program_or_manifest, context, **options),
+            schema=f"{API_SCHEMA}.game_engine.execute_graph",
+        )
+
+    def create_graph_runtime(self, program_or_manifest: Any, context: Any, **options: Any) -> APIResult:
+        return self._run(
+            "kingdom.create_graph_runtime",
+            lambda: self._engine().create_graph_runtime(program_or_manifest, context, **options),
+            schema=f"{API_SCHEMA}.game_engine.create_graph_runtime",
+        )
+
+
+class SceneViewerAPINamespace:
+    """High-level namespace for The Garden / live scene command operations."""
+
+    def __init__(self, api: TechConnectorHeadlessAPI) -> None:
+        self._api = api
+
+    def _run(self, operation: str, action: Callable[[], Any], *, schema: str) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            result = action()
+            tag = self._api._tag(entitlement, operation=operation)
+            if self._api.project_root:
+                write_project_provenance_marker(self._api.project_root, tag)
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": schema,
+                    "operation": operation,
+                    "value": _serialize_public_value(result),
+                },
+                entitlement=entitlement.to_dict(),
+                provenance=tag,
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def _viewer(self):
+        from tech_connector import viewer_cmds
+        return viewer_cmds
+
+    def commands(self) -> APIResult:
+        return self._run(
+            "garden.commands",
+            lambda: self._viewer().commands(),
+            schema=f"{API_SCHEMA}.scene_viewer.commands",
+        )
+
+    def route(self, command: str, command_target: Any, **kwargs: Any) -> APIResult:
+        return self._run(
+            "garden.route",
+            lambda: self._viewer().route(command, command_target, **kwargs),
+            schema=f"{API_SCHEMA}.scene_viewer.route",
+        )
+
+    def execute_active(self, command: str, **kwargs: Any) -> APIResult:
+        return self._run(
+            "garden.execute_active",
+            lambda: self._viewer().execute_active(command, **kwargs),
+            schema=f"{API_SCHEMA}.scene_viewer.execute_active",
+        )
+
+    def target(self, *args: Any, **kwargs: Any) -> APIResult:
+        return self._run(
+            "garden.target",
+            lambda: self._viewer().target(*args, **kwargs),
+            schema=f"{API_SCHEMA}.scene_viewer.target",
+        )
+
+    def target_from_proxy(self, *args: Any, **kwargs: Any) -> APIResult:
+        return self._run(
+            "garden.target_from_proxy",
+            lambda: self._viewer().target_from_proxy(*args, **kwargs),
+            schema=f"{API_SCHEMA}.scene_viewer.target_from_proxy",
+        )
+
+    def active_viewer(self) -> APIResult:
+        def _snapshot() -> dict[str, Any]:
+            viewer_payload = self.active_viewer_payload()
+            return {
+                "viewer": viewer_payload,
+                "has_active_viewer": bool(viewer_payload),
+            }
+
+        return self._run(
+            "garden.active_viewer",
+            _snapshot,
+            schema=f"{API_SCHEMA}.scene_viewer.active_viewer",
+        )
+
+    def active_viewer_payload(self) -> Any:
+        from tech_connector.game_engine.integration.active_viewer_command_service import active_viewer as _active_viewer
+
+        viewer = _active_viewer()
+        if viewer is None:
+            return None
+        return {
+            "type": viewer.__class__.__name__,
+            "module": viewer.__class__.__module__,
+            "repr": str(viewer),
+        }
+
+    def register_active_viewer(self, viewer: Any) -> APIResult:
+        def _run_register() -> dict[str, Any]:
+            from tech_connector.game_engine.integration.active_viewer_command_service import register_active_viewer
+
+            register_active_viewer(viewer)
+            return {"registered": True}
+
+        return self._run(
+            "garden.register_active_viewer",
+            _run_register,
+            schema=f"{API_SCHEMA}.scene_viewer.register_active_viewer",
+        )
+
+    def unregister_active_viewer(self, viewer: Any) -> APIResult:
+        def _run_unregister() -> dict[str, Any]:
+            from tech_connector.game_engine.integration.active_viewer_command_service import unregister_active_viewer
+
+            unregister_active_viewer(viewer)
+            return {"unregistered": True}
+
+        return self._run(
+            "garden.unregister_active_viewer",
+            _run_unregister,
+            schema=f"{API_SCHEMA}.scene_viewer.unregister_active_viewer",
+        )
+
+
+class ImageEditorAPINamespace:
+    """High-level namespace for Ophanim image-editor and viewport capture tooling."""
+
+    def __init__(self, api: TechConnectorHeadlessAPI) -> None:
+        self._api = api
+
+    def _run(self, operation: str, action: Callable[[], Any], *, schema: str) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            result = action()
+            tag = self._api._tag(entitlement, operation=operation)
+            if self._api.project_root:
+                write_project_provenance_marker(self._api.project_root, tag)
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": schema,
+                    "operation": operation,
+                    "value": _serialize_public_value(result),
+                },
+                entitlement=entitlement.to_dict(),
+                provenance=tag,
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def _editor(self):
+        from tech_connector.ui.image_editor_widget import ImageEditorWindow
+
+        return ImageEditorWindow
+
+    def capture_viewport(self, dcc_name: str = "Autodesk Maya", *, as_data_url: bool = True, return_path: bool = False) -> APIResult:
+        def _capture() -> dict[str, Any]:
+            from pathlib import Path
+            from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+            import base64
+            import tempfile
+            from tech_connector.ui.image_editor_widget import capture_dcc_viewport_to_image
+
+            qimg = capture_dcc_viewport_to_image(dcc_name)
+            if qimg is None or qimg.isNull():
+                return {"ok": False, "error": f"Viewport capture returned empty image for {dcc_name}."}
+            result: dict[str, Any] = {
+                "width": int(qimg.width()),
+                "height": int(qimg.height()),
+                "format": str(qimg.format()),
+            }
+            if return_path:
+                path = Path(tempfile.gettempdir()) / f"tc_ophanim_capture_{int(time.time()*1000)}.png"
+                if qimg.save(str(path), "PNG"):
+                    result.update({"path": str(path), "saved": True})
+                else:
+                    result.update({"saved": False, "path": str(path)})
+            if as_data_url:
+                ba = QByteArray()
+                buffer = QBuffer(ba)
+                buffer.open(QIODevice.WriteOnly)
+                qimg.save(buffer, "PNG")
+                result["data_url"] = "data:image/png;base64," + base64.b64encode(ba.data()).decode("ascii")
+                result["ok"] = True
+            else:
+                result["ok"] = True
+            return result
+
+        return self._run(
+            "ophanim.capture_viewport",
+            _capture,
+            schema=f"{API_SCHEMA}.ophanim.capture_viewport",
+        )
+
+    def open_image(self, image_path: str = "", *, show: bool = True) -> APIResult:
+        def _open() -> dict[str, Any]:
+            editor = self._editor().open_for_image(image_path)
+            if show:
+                if not editor.isVisible():
+                    editor.show()
+                editor.raise_()
+                editor.activateWindow()
+            result: dict[str, Any] = {
+                "opened": bool(editor),
+                "window_id": id(editor),
+                "image_path": str(image_path or ""),
+            }
+            if show:
+                result["visible"] = bool(editor.isVisible())
+            return result
+
+        return self._run(
+            "ophanim.open_image",
+            _open,
+            schema=f"{API_SCHEMA}.ophanim.open_image",
+        )
+
+    def capture_and_open(self, dcc_name: str = "Autodesk Maya") -> APIResult:
+        def _open_capture() -> dict[str, Any]:
+            from tech_connector.ui.image_editor_widget import capture_dcc_viewport_to_image
+
+            qimg = capture_dcc_viewport_to_image(dcc_name)
+            if qimg is None or qimg.isNull():
+                return {"ok": False, "error": f"Viewport capture returned empty image for {dcc_name}."}
+            editor = self._editor()
+            win = editor._instances[-1] if editor._instances else editor.open_for_image("")
+            now = int(time.time())
+            if hasattr(win, "add_new_canvas_tab"):
+                win.add_new_canvas_tab(title=f"Capture_{dcc_name.replace(' ', '')}_{now}.png", qimage=qimg)
+                win.show()
+                win.raise_()
+                win.activateWindow()
+            return {
+                "ok": True,
+                "dcc_name": dcc_name,
+                "window_id": id(win),
+            }
+
+        return self._run(
+            "ophanim.capture_and_open",
+            _open_capture,
+            schema=f"{API_SCHEMA}.ophanim.capture_and_open",
+        )
+
+
+class UiAPINamespace:
+    """Mirror the attached desktop UI action surface through API calls."""
+
+    _MODULE_PREFIX = "tech_connector.app."
+
+    def __init__(self, api: TechConnectorHeadlessAPI, ui_window: Any | None = None) -> None:
+        self._api = api
+        self._ui_window = ui_window
+
+    def attach_window(self, ui_window: Any | None) -> None:
+        self._ui_window = ui_window
+
+    def _run(self, operation: str, action: Callable[[], Any], *, schema: str) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            result = action()
+            tag = self._api._tag(entitlement, operation=operation)
+            if self._api.project_root:
+                write_project_provenance_marker(self._api.project_root, tag)
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": schema,
+                    "operation": operation,
+                    "value": _serialize_public_value(result),
+                },
+                entitlement=entitlement.to_dict(),
+                provenance=tag,
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def _require_window(self) -> Any:
+        if self._ui_window is None:
+            raise RuntimeError("No UI window is attached to this API instance.")
+        return self._ui_window
+
+    def _action_names(self) -> list[str]:
+        window = self._ui_window
+        if window is None:
+            return []
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for name in dir(window):
+            if not name or name.startswith("_"):
+                continue
+            attr = getattr(window, name, None)
+            if not callable(attr):
+                continue
+            module = str(getattr(attr, "__module__", ""))
+            if not module.startswith(self._MODULE_PREFIX):
+                continue
+            qualname = str(getattr(attr, "__qualname__", ""))
+            if "." not in qualname:
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        names.sort()
+        return names
+
+    def _action_handler(self, action: str) -> Callable[..., APIResult]:
+        def _invoke(*args: Any, **kwargs: Any) -> APIResult:
+            return self.invoke(action, *args, **kwargs)
+
+        _invoke.__name__ = action
+        return _invoke
+
+    def feature_handlers(self) -> dict[str, Callable[..., Any]]:
+        handlers: dict[str, Callable[..., Any]] = {
+            "catalog": self.catalog,
+            "actions": self.actions,
+            "invoke": self.invoke,
+        }
+        for action in self._action_names():
+            handlers[action] = self._action_handler(action)
+        return handlers
+
+    def catalog(self) -> APIResult:
+        return self._run(
+            "ui.catalog",
+            lambda: {
+                "attached": bool(self._ui_window),
+                "actions": self._action_names(),
+            },
+            schema=f"{API_SCHEMA}.ui.catalog",
+        )
+
+    def actions(self) -> APIResult:
+        return self.catalog()
+
+    def invoke(self, action: str, *args: Any, **kwargs: Any) -> APIResult:
+        action = str(action or "").strip()
+        if not action:
+            return APIResult(ok=False, error="UI action is required.")
+
+        def _invoke_action() -> Any:
+            window = self._require_window()
+            method = getattr(window, action, None)
+            if method is None or not callable(method):
+                raise AttributeError(f"UI action not found: {action}")
+            return method(*args, **kwargs)
+
+        return self._run(
+            f"ui.invoke:{action}",
+            _invoke_action,
+            schema=f"{API_SCHEMA}.ui.invoke",
+        )
+
+    def __getattr__(self, name: str) -> Callable[..., APIResult]:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in ("catalog", "actions", "invoke", "feature_handlers"):
+            raise AttributeError(name)
+        if name in self._action_names():
+
+            def _caller(*args: Any, **kwargs: Any) -> APIResult:
+                return self.invoke(name, *args, **kwargs)
+
+            _caller.__name__ = name
+            return _caller
+        raise AttributeError(name)
+
+
 def create_api(**kwargs: Any) -> TechConnectorHeadlessAPI:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     return TechConnectorHeadlessAPI(**kwargs)
+
+
+def llm_queue_status() -> dict[str, Any]:
+    """
+        Returns process-wide LLM queue telemetry.
+    :return: queue depth, capacity, counters, and request snapshots
+    """
+    return _llm_request_queue_snapshot()
+
+
+def cancel_llm_request(
+    request_id: str,
+    reason: str = "Cancelled by API request.",
+) -> bool:
+    """
+        Cancels queued work or detaches from an active provider request.
+    :param request_id: queue request correlation identifier
+    :param reason: user-facing cancellation reason
+    :return: whether an active request was found
+    """
+    return _cancel_llm_request(request_id, reason)
 
 
 def verify_license(settings: dict[str, Any] | None = None, *, license_secret: str | None = None) -> dict[str, Any]:
@@ -1467,55 +2236,78 @@ def verify_license(settings: dict[str, Any] | None = None, *, license_secret: st
 
 
 def plan_prompt(prompt: str, **kwargs: Any) -> dict[str, Any]:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     return TechConnectorHeadlessAPI(**kwargs).plan_prompt(prompt)
 
 
 def plan_prompt_chain(prompts: str | list[str] | tuple[str, ...], **kwargs: Any) -> dict[str, Any]:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     return TechConnectorHeadlessAPI(**kwargs).plan_prompt_chain(prompts)
 
 
 def execute_action_graph(graph: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api = TechConnectorHeadlessAPI(
         settings=kwargs.pop("settings", None),
         project_root=kwargs.pop("project_root", None),
         license_secret=kwargs.pop("license_secret", None),
         require_entitlement=kwargs.pop("require_entitlement", True),
+        ui_window=kwargs.pop("ui_window", None),
     )
     return api.execute_action_graph(graph, **kwargs)
 
 
 def execute_prompt_chain(prompts: str | list[str] | tuple[str, ...], **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api = TechConnectorHeadlessAPI(
         settings=kwargs.pop("settings", None),
         project_root=kwargs.pop("project_root", None),
         license_secret=kwargs.pop("license_secret", None),
         require_entitlement=kwargs.pop("require_entitlement", True),
         command_router=kwargs.pop("command_router", None),
+        ui_window=kwargs.pop("ui_window", None),
     )
     return api.execute_prompt_chain(prompts, **kwargs)
 
 
 def call_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api_kwargs = {
         key: kwargs.pop(key)
         for key in list(kwargs.keys())
-        if key in {"settings", "project_root", "license_secret", "require_entitlement"}
+        if key in {"settings", "project_root", "license_secret", "require_entitlement", "ui_window"}
     }
     call_kwargs = kwargs.pop("kwargs", None)
     return TechConnectorHeadlessAPI(**api_kwargs).call_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
 
 
 def call_dcc_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api_kwargs = {
         key: kwargs.pop(key)
         for key in list(kwargs.keys())
-        if key in {"settings", "project_root", "license_secret", "require_entitlement", "command_router"}
+        if key in {"settings", "project_root", "license_secret", "require_entitlement", "command_router", "ui_window"}
     }
     call_kwargs = kwargs.pop("kwargs", None)
     return TechConnectorHeadlessAPI(**api_kwargs).call_dcc_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
 
 
 def _reasoning_api_from_kwargs(kwargs: dict[str, Any]) -> TechConnectorHeadlessAPI:
+    kwargs = dict(kwargs)
+    if "ui_window" not in kwargs:
+        kwargs["ui_window"] = get_default_ui_window()
     api_kwargs = {
         key: kwargs.pop(key)
         for key in list(kwargs.keys())
@@ -1527,26 +2319,39 @@ def _reasoning_api_from_kwargs(kwargs: dict[str, Any]) -> TechConnectorHeadlessA
             "command_router",
             "runtime_kernel",
             "runtime_packages",
+            "ui_window",
         }
     }
     return TechConnectorHeadlessAPI(**api_kwargs)
 
 
 def reasoning_capabilities(**kwargs: Any) -> dict[str, Any]:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     return _reasoning_api_from_kwargs(kwargs).reasoning.capabilities()
 
 
 def reasoning_snapshot(prompt: str = "", **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api = _reasoning_api_from_kwargs(kwargs)
     return api.reasoning.snapshot(prompt, context=kwargs.pop("context", None))
 
 
 def prepare_reasoning_request(prompt: str, **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api = _reasoning_api_from_kwargs(kwargs)
     return api.reasoning.prepare(prompt, context=kwargs.pop("context", None))
 
 
 def run_reasoning(prompt: str, **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
     api = _reasoning_api_from_kwargs(kwargs)
     return api.reasoning.run(
         prompt,

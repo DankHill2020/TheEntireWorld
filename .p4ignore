@@ -1,0 +1,78 @@
+# ----------------------
+# Unreal Engine
+# ----------------------
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+build/
+
+# ----------------------
+# Visual Studio / IDEs
+# ----------------------
+.vs/
+.vsconfig
+.vscode/
+.idea/
+*.code-workspace
+*.sln
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+
+# ----------------------
+# User-specific settings
+# ----------------------
+*.DotSettings.user
+
+# ----------------------
+# Logs & temp files
+# ----------------------
+*.log
+*.tmp
+
+# ----------------------
+# OS junk
+# ----------------------
+Thumbs.db
+.DS_Store
+
+# ----------------------
+# Python (your tools)
+# ----------------------
+__pycache__/
+*.pyc
+# Tech Connector local package outputs
+tools/dist/
+tools/.release_iter_test/
+tools/.release_stage_test/
+tools/.release_stage_test_full/
+tools/.pytest_cache/
+tools/scratch/
+tools/*_port.txt
+
+# Tech Connector local IDE, agent, environment, and runtime state
+tools/.tech_connector/
+tools/.venv/
+tools/.vscode/
+tools/.ai_studio/
+tools/.git/
+tools/.idea/
+tools/.project_ai/
+tools/.pytest_cache/
+tools/.release_iter_test/
+tools/.release_stage_test/
+tools/.release_stage_test_full/
+tools/tech_connector/.continue/
+tools/tech_connector/.idea/
+tools/tech_connector/.project_ai/
+tools/tech_connector/.pytest_cache/
+tools/tech_connector/__pycache__/
+tools/tech_connector/.agents/
+tools/tech_connector/.ai_studio/
+# Large local source art and generated registry monoliths stay out of Perforce.
+ArtSource/Rigs/*.ma
+ArtSource/Rigs/*.mb
+ArtSource/Rigs/**/*.fbx
+tools/tech_connector/data/capability_registry.json

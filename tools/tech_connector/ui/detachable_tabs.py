@@ -212,7 +212,7 @@ class DetachableTabWidget(QTabWidget):
         self._detached_panel_factory: Callable[["DetachableTabWidget"], QWidget | None] | None = None
         self._tab_close_handler: Callable[["DetachableTabWidget", int], None] | None = None
 
-        self.setTabsClosable(False)
+        self.setTabsClosable(True)
         self.setMovable(True)
         self.setAcceptDrops(True)
         self.setDocumentMode(True)

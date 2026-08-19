@@ -236,6 +236,91 @@
 
       <section class="grid">
 
+        <!-- Standalone Offline Mobile Touch Image & Texture Editor Panel -->
+        <div class="panel wide image-editor-panel" data-menu="standalone-image-editor" id="standaloneImageEditorPanel">
+          <div class="panel-header">
+            <h2>🎨 Standalone Mobile Touch Image & Texture Editor</h2>
+            <div class="toolbar">
+              <span class="pill status-pill" id="editorOfflineStatus">⚡ Offline Standalone Mode</span>
+              <button data-action="mobile-save-local" class="primary-btn">💾 Save Local Canvas</button>
+              <button data-action="mobile-export-png">⤓ Export PNG</button>
+              <button data-action="mobile-send-pc" class="primary-btn">📲 Send to PC</button>
+              <button data-action="mobile-push-dcc">⚡ Push to DCC</button>
+            </div>
+          </div>
+
+          <!-- Main Mobile Canvas Toolbar -->
+          <div class="mobile-canvas-toolbar-grid">
+            <div class="toolbar-row">
+              <button id="mToolBrush" class="active" data-action="m-set-tool" data-tool="brush">🖌 Brush</button>
+              <button id="mToolAirbrush" data-action="m-set-tool" data-tool="airbrush">💨 Airbrush</button>
+              <button id="mToolPencil" data-action="m-set-tool" data-tool="pencil">✏️ Pencil</button>
+              <button id="mToolEraser" data-action="m-set-tool" data-tool="eraser">⌫ Eraser</button>
+              <button id="mToolFill" data-action="m-set-tool" data-tool="fill">⏍ Fill</button>
+              <button id="mToolPicker" data-action="m-set-tool" data-tool="picker">⯎ Picker</button>
+            </div>
+            
+            <div class="toolbar-row">
+              <span class="muted small">Size:</span>
+              <input type="range" id="mBrushSize" min="1" max="150" value="18" style="width:80px">
+              <span class="muted small">Opacity:</span>
+              <input type="range" id="mBrushOpacity" min="1" max="100" value="100" style="width:80px">
+              <input type="color" id="mBrushColor" value="#16f26a" style="width:36px; height:28px; border:none; border-radius:4px; cursor:pointer">
+              
+              <span class="muted small">Tilt:</span>
+              <input type="range" id="mBrushTilt" min="-100" max="100" value="0" style="width:70px" title="Brush Lean Angle (-1.0 to +1.0)">
+              
+              <span class="muted small">Mask:</span>
+              <select id="mBrushMask">
+                <option value="none">Circle (Soft Edge)</option>
+                <option value="airbrush">Soft Airbrush</option>
+                <option value="chalk">Chalk Grain</option>
+                <option value="grunge">Grunge Stencil</option>
+                <option value="square">Square Chisel</option>
+              </select>
+            </div>
+
+            <div class="toolbar-row">
+              <span class="muted small">🌫 Atmospheric Depth:</span>
+              <button data-action="m-set-atmos" data-level="1">1: Haze</button>
+              <button data-action="m-set-atmos" data-level="2">2: Mid</button>
+              <button data-action="m-set-atmos" data-level="3">3: Base</button>
+              <button data-action="m-set-atmos" data-level="4">4: Fore</button>
+              <button data-action="m-set-atmos" data-level="5">5: Peak</button>
+            </div>
+
+            <div class="toolbar-row">
+              <span class="muted small">✨ Art Style Filters:</span>
+              <button data-action="m-apply-filter" data-filter="cel">🎨 Cel Shaded Toon</button>
+              <button data-action="m-apply-filter" data-filter="sketch">📝 Notebook Sketch</button>
+              <button data-action="m-apply-filter" data-filter="sepia">📜 Sepia Vintage</button>
+              <button data-action="m-apply-filter" data-filter="pixel">👾 8-Bit Pixel Art</button>
+              
+              <span class="muted small">| Layers:</span>
+              <button data-action="m-add-layer">+ Layer</button>
+              <button data-action="m-delete-layer">✕ Layer</button>
+              <button data-action="m-clear-canvas">Clear Layer</button>
+            </div>
+          </div>
+
+          <!-- Touch Canvas & Layer Workspace -->
+          <div class="mobile-editor-workspace">
+            <div class="mobile-canvas-container" id="mCanvasContainer">
+              <canvas id="mobileStandaloneCanvas" width="1280" height="720"></canvas>
+            </div>
+            
+            <div class="mobile-layer-panel">
+              <div class="layer-panel-header">
+                <b>Layers Stack</b>
+                <span class="muted small" id="mLayerCount">1 Layer</span>
+              </div>
+              <div id="mLayerList" class="m-layer-list">
+                <!-- Dynamic layer rows -->
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Slack / Discord / Webhook Messaging Integration Panel -->
         <div class="panel wide" data-menu="messaging">
           <div class="panel-header">

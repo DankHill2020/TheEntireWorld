@@ -346,7 +346,7 @@ def test_openai_planning_schema_is_forward_compatible(monkeypatch):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return io.BytesIO(
                 json.dumps(
-                    {"choices": [{"message": {"content": '{"ok":true}'}}]}
+                    {"output_text": '{"ok":true}'}
                 ).encode("utf-8")
             )
 
@@ -363,7 +363,8 @@ def test_openai_planning_schema_is_forward_compatible(monkeypatch):
         },
     )
 
-    schema_config = captured["payload"]["response_format"]["json_schema"]
+    schema_config = captured["payload"]["text"]["format"]
+    assert schema_config["type"] == "json_schema"
     assert schema_config["strict"] is False
 
 

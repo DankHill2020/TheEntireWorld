@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
@@ -88,6 +89,73 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=onerror)
 
 
+def write_package_manifest(package_root: Path, tier: str) -> Path:
+    """
+        Writes a deterministic inventory for a staged package.
+
+    :param package_root: staged package directory
+    :param tier: package tier identifier
+    :return: generated manifest path
+    """
+    manifest_path = package_root / "PACKAGE_MANIFEST.json"
+    entries = []
+    for path in sorted(package_root.rglob("*")):
+        if not path.is_file() or path == manifest_path:
+            continue
+        content = path.read_bytes()
+        entries.append(
+            {
+                "path": path.relative_to(package_root).as_posix(),
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+    payload = {
+        "schema_version": 1,
+        "tier": tier,
+        "file_count": len(entries),
+        "total_bytes": sum(entry["size"] for entry in entries),
+        "files": entries,
+    }
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def validate_staged_package(package_root: Path) -> None:
+    """
+        Validates legal, install, and generated-artifact release boundaries.
+
+    :param package_root: staged package directory
+    :return: None
+    """
+    required = (
+        "tech_connector/LICENSE.md",
+        "tech_connector/README.md",
+        "tech_connector/CONTRIBUTING.md",
+        "tech_connector/packaging/requirements-runtime.txt",
+    )
+    missing = [value for value in required if not (package_root / value).is_file()]
+    if missing:
+        raise RuntimeError(
+            "Staged package is missing required release files: " + ", ".join(missing)
+        )
+    forbidden = []
+    for path in package_root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(package_root)
+        if "__pycache__" in relative.parts or path.suffix.lower() in {".pyc", ".pyo"}:
+            forbidden.append(relative.as_posix())
+    if forbidden:
+        raise RuntimeError(
+            "Staged package contains generated Python caches: "
+            + ", ".join(forbidden[:20])
+        )
+
+
 def stage_package(tier: str, output_dir: Path, clean: bool = True) -> Path:
     manifest = load_manifest()
     tiers = manifest.get("tiers") or {}
@@ -108,6 +176,8 @@ def stage_package(tier: str, output_dir: Path, clean: bool = True) -> Path:
         f"{cfg.get('display_name', tier)}\n\n{cfg.get('description', '')}\n",
         encoding="utf-8",
     )
+    validate_staged_package(out)
+    write_package_manifest(out, tier)
     return out
 
 

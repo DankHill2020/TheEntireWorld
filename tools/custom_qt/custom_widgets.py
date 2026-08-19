@@ -8,6 +8,39 @@ except ImportError:
 from functools import partial
 
 
+class LabeledSlider(QtWidgets.QWidget):
+    """Compact integer slider with a stable label and live value readout."""
+
+    valueChanged = QtCore.Signal(int)
+
+    def __init__(self, text, min_val=0, max_val=100, default_val=0, parent=None):
+        super(LabeledSlider, self).__init__(parent)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QtWidgets.QLabel(str(text))
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setRange(int(min_val), int(max_val))
+        self.value_label = QtWidgets.QLabel()
+        self.value_label.setMinimumWidth(36)
+        self.value_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        layout.addWidget(self.label)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.value_label)
+        self.slider.valueChanged.connect(self._on_value_changed)
+        self.slider.setValue(int(default_val))
+        self.value_label.setText(str(self.slider.value()))
+
+    def _on_value_changed(self, value):
+        self.value_label.setText(str(int(value)))
+        self.valueChanged.emit(int(value))
+
+    def value(self):
+        return self.slider.value()
+
+    def setValue(self, value):
+        self.slider.setValue(int(value))
+
+
 class ModelessContinueDialog(QtWidgets.QDialog):
     def __init__(self, title: str, message: str, parent=None):
         super().__init__(parent)

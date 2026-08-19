@@ -1284,6 +1284,11 @@ class PipelineNodeView(QGraphicsView):
         for symbol in all_symbols[:80]:
             self._add_tool_symbol_action(all_menu, tool_actions, symbol, include_context_in_title=True)
         if len(all_symbols) > 80:
+            more_action = all_menu.addAction(
+                f"Type in the filter to search all tools ({len(all_symbols) - 80} more)"
+            )
+            more_action.setEnabled(False)
+        if len(all_symbols) > 80:
             more_action = all_menu.addAction(f"Type in the filter to search {len(all_symbols) - 80} more...")
             more_action.setEnabled(False)
 

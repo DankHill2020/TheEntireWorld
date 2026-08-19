@@ -8,7 +8,7 @@ Use GitHub for engineers, TDs, and contributors who want to inspect code, fix bu
 
 Expected user:
 - Wants the repository.
-- Has or can install Python 3.11.
+- Has or can install 64-bit CPython 3.14 for source development and release builds.
 - May edit DCC bridge scripts, UI modules, plugins, or pipeline logic.
 - Accepts developer setup steps.
 
@@ -91,6 +91,9 @@ Preferred first implementation:
 5. Keep optional DCC bridge installation as an in-app action, not as a forced installer side effect.
 
 The installed app must not depend on the install path being named `tools`.
+Release builds are frozen with the latest CPython 3.14 patch release. The build
+script rejects older interpreters and records the exact bundled patch version in
+`PYTHON_RUNTIME.txt`. Installed users do not need a separate Python installation.
 
 ## macOS Build Strategy
 

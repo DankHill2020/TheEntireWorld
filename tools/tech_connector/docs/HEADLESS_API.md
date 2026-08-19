@@ -30,6 +30,11 @@ front end for review, confirmation, node editing, and status. The headless API
 uses the same planner, action graph, DCC bridge, execution, repair, and
 provenance stack for scripts, CI, local services, or another application.
 
+Process-wide LLM queue telemetry and targeted cancellation are also available
+through `api.llm_queue_status()` and `api.cancel_llm_request(request_id)`. See
+[LLM_QUEUE_MANAGEMENT.md](LLM_QUEUE_MANAGEMENT.md) for scheduling categories,
+configuration, deadlines, superseding, and cancellation semantics.
+
 ## Reasoning Runtime API
 
 API version 2 exposes the same shared reasoning runtime used by Tech Connector's

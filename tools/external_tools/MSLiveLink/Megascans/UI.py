@@ -126,7 +126,7 @@ class LiveLinkUI(QWidget):
         self.MainLayout.addLayout(self.checks_l)
 
         self.applytoSel = QCheckBox("Apply Material to Selection")
-        self.applytoSel.setToolTip("Applies the imported material(s) to your selection\?n prior to the import.")
+        self.applytoSel.setToolTip("Applies the imported material(s) to your selection\nprior to the import.")
         self.applytoSel.setChecked( self.Importer.getApplyToSelection())
         self.applytoSel.setFixedHeight(30)
         self.applytoSel.setStyleSheet(stylesheet_)
