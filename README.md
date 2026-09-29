@@ -1,5 +1,37 @@
-# TheEntireWorld
-Downloadable Tools for DCC and Content Creation Pipelines; Starting with Animation and Cinematic Exporter for Maya and Motionbuilder with imports into Unreal 5.5, adding Human IK Builder for maya in the most recent version, Which also can generate the unreal modular control rig
+# TheEntireWorld — Legacy Repository
+
+> **This public repository is now a legacy migration and compatibility surface.**
+>
+> The current source-available Tech Connector Core is maintained at
+> **[DankHill2020/TechConnector](https://github.com/DankHill2020/TechConnector)**.
+> New Core downloads, documentation, licensing information, and updates should
+> come from that repository.
+
+The complete first-party **Official Tools Bundle** is now a separate optional,
+account-gated product. It may be installed beside Core or added through Core's
+existing project/tool directory settings. Do not treat files remaining in this
+legacy public history as the current private bundle release.
+
+Tech Connector is source-available, not unrestricted open-source software.
+Downloading or cloning source does not create an activated entitlement. Current
+official use requires a registered account, verified email, acceptance of the
+applicable versioned agreement, and a valid signed entitlement. See the
+[current license](https://github.com/DankHill2020/TechConnector/blob/main/LICENSE)
+and [source-access model](https://github.com/DankHill2020/TechConnector/blob/main/tech_connector/docs/SOURCE_ACCESS_MODEL.md).
+
+Historical revisions and third-party components remain governed by the terms
+that applied to those specific revisions or components. This migration notice
+does not retroactively revoke rights previously granted under another license.
+The repository has not been archived yet so existing links and legacy workflows
+continue to resolve.
+
+---
+
+## Legacy documentation
+
+Downloadable tools for DCC and content-creation pipelines, including animation
+and cinematic exporters for Maya and MotionBuilder, Unreal integration, and the
+Human IK builder described below.
 
 Instructions for first time using:
 

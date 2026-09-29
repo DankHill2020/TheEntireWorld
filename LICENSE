@@ -1,0 +1,26 @@
+TheEntireWorld Legacy Repository License Notice
+
+Copyright (c) 2026 The Entire World, LLC. All rights reserved.
+
+This repository is retained as a public legacy and migration surface. The
+current Tech Connector Core source and controlling Tech Connector Community
+Source License are maintained at:
+
+https://github.com/DankHill2020/TechConnector
+
+Unless a file, directory, dependency, asset, or historical revision states
+different terms, first-party Tech Connector material at the current branch tip
+is source-available and is not offered as unrestricted open-source software.
+Viewing or cloning this repository does not by itself grant permission to
+redistribute, sublicense, resell, host, or commercially exploit current Tech
+Connector material, and it does not create an activated entitlement.
+
+Historical revisions and third-party components remain governed by the license
+terms that applied to those specific revisions or components. In particular,
+this notice does not retroactively revoke an earlier license grant. Separate
+notices, upstream licenses, and written agreements continue to control where
+applicable.
+
+The current first-party Official Tools Bundle is distributed separately through
+an account-gated channel. Files visible in this legacy repository or its history
+must not be represented as the current private Official Tools release.
