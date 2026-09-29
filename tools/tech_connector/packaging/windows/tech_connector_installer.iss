@@ -17,6 +17,10 @@ ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#ExeName}
+LicenseFile={#LicenseFile}
+InfoBeforeFile={#InfoBeforeFile}
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

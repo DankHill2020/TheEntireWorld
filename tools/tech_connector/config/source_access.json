@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "status": "not_configured",
+  "distribution_model": "public_core_account_gated_official_tools",
+  "public_repository_contains_complete_source": true,
+  "public_repository_contains_core_source": true,
+  "official_tools_bundle_account_gated": false,
+  "verified_at": "",
+  "review_reference": ""
+}

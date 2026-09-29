@@ -19,7 +19,7 @@ from tech_connector.services.settings_service import (
     save_settings,
     update_mcp_config,
 )
-from tech_connector.models.constants import set_active_project_root
+from tech_connector.models.constants import APP_DIR, set_active_project_root
 from tech_connector.models.project import all_roots, project_roots, recent_projects, set_active_project
 from tech_connector.services.source_policy import apply_source_policy, live_sources_enabled
 from tech_connector.services.application_command_service import ApplicationCommandService
@@ -29,6 +29,9 @@ from tech_connector.services.project_directory_service import (
     resolve_project_directories,
     update_project_directory_settings,
 )
+
+
+_ACTIVE_PROJECT = object()
 
 
 class LazyCommandRouter:
@@ -66,6 +69,9 @@ class ApplicationService:
         command_router=None,
         prompt_router=None,
         output_cleaner=None,
+        licensing_context=None,
+        licensing_activation_client=None,
+        license_acceptance_store=None,
     ):
         self._load_settings_fn = load_settings_fn
         self._save_settings_fn = save_settings_fn
@@ -77,6 +83,19 @@ class ApplicationService:
         self._index_worker_cls = index_worker_cls
 
         self.settings = settings if settings is not None else self._load_settings_fn()
+        if licensing_context is not None:
+            self.licensing_context = licensing_context
+        else:
+            from tech_connector.licensing.context import LicensingContext
+
+            self.licensing_context = LicensingContext.from_defaults(APP_DIR)
+        self._licensing_activation_client = licensing_activation_client
+        if license_acceptance_store is not None:
+            self._license_acceptance_store = license_acceptance_store
+        else:
+            from tech_connector.licensing.acceptance import FileLicenseAcceptanceStore
+
+            self._license_acceptance_store = FileLicenseAcceptanceStore(APP_DIR / "licensing")
         self.project_directories = apply_project_directory_environment(self.settings)
         set_active_project_root(self.settings.get("active_project") or None)
 
@@ -111,15 +130,129 @@ class ApplicationService:
         self.mcphost_ready = False
         self.mcphost_use_pty = False
 
+    @staticmethod
+    def development_entitlement_bypass_allowed() -> bool:
+        """Allow source contributors to work locally, never frozen releases."""
+        from tech_connector.services.licensing_startup_policy import (
+            development_entitlement_bypass_allowed,
+        )
+
+        return development_entitlement_bypass_allowed()
+
+    def evaluate_current_entitlement(self, *, commercial_use=None, project_root=_ACTIVE_PROJECT):
+        from tech_connector.models.constants import APP_VERSION
+
+        if project_root is _ACTIVE_PROJECT:
+            project_root = str(self.settings.get("active_project") or "") or None
+        else:
+            project_root = str(project_root or "") or None
+        if commercial_use is None:
+            commercial_use = bool(self.settings.get("tech_connector_commercial_use", True))
+        # Opening the licensed application shell is not itself use of an
+        # unregistered commercial project. Community project registration is
+        # enforced as soon as a concrete project is selected.
+        commercial_use = bool(commercial_use and project_root)
+
+        return self.licensing_context.evaluate(
+            project_root=project_root,
+            product=self.licensing_context.configuration.product,
+            app_major_version=str(APP_VERSION).lstrip("vV").split(".", 1)[0],
+            commercial_use=commercial_use,
+        )
+
+    def licensing_activation_client(self):
+        if self._licensing_activation_client is None:
+            from tech_connector.licensing.activation_client import LicensingActivationClient
+
+            self._licensing_activation_client = LicensingActivationClient.from_defaults(
+                APP_DIR,
+                self.licensing_context,
+            )
+        return self._licensing_activation_client
+
+    def authorize_host_bridges(self, evaluation):
+        """Issue a metadata-free local DCC capability from a valid entitlement."""
+        from tech_connector.bridges.session_authorization import (
+            bridge_session_path_for_context,
+            ensure_bridge_session_for_evaluation,
+        )
+
+        return ensure_bridge_session_for_evaluation(
+            evaluation,
+            path=bridge_session_path_for_context(self.licensing_context),
+        )
+
+    def record_license_acceptance(self, evaluation):
+        """Persist readable evidence from a verified, policy-allowed entitlement."""
+        claims = getattr(evaluation, "claims", None)
+        decision = getattr(evaluation, "decision", None)
+        if claims is None or decision is None or not decision.allowed:
+            raise ValueError("cannot record acceptance from a denied entitlement")
+        return self._license_acceptance_store.record_verified_entitlement(claims)
+
+    @property
+    def license_acceptance_receipts_path(self) -> Path:
+        return self._license_acceptance_store.path
+
     def reload_settings(self) -> None:
         self.settings = self._load_settings_fn()
         self.project_directories = apply_project_directory_environment(self.settings)
 
     def all_roots(self) -> List[str]:
-        return all_roots(self.settings)
+        return self._roots_with_authorized_tool_bundles(all_roots(self.settings))
 
     def project_roots(self) -> List[str]:
-        return project_roots(self.settings)
+        return self._roots_with_authorized_tool_bundles(project_roots(self.settings))
+
+    def _roots_with_authorized_tool_bundles(self, roots) -> List[str]:
+        from tech_connector.models.constants import APP_VERSION
+        from tech_connector.services.tool_bundle_service import (
+            compose_project_roots_with_bundles,
+        )
+
+        evaluation = self.evaluate_current_entitlement(
+            commercial_use=False,
+            project_root=None,
+        )
+        claims = evaluation.claims if evaluation.decision.allowed else None
+        return list(
+            compose_project_roots_with_bundles(
+                self.settings,
+                roots,
+                claims,
+                str(APP_VERSION),
+            )
+        )
+
+    def configured_tool_bundles(self):
+        """Return locally configured first-party bundles without scanning projects."""
+        from tech_connector.services.tool_bundle_service import discover_tool_bundles
+
+        return discover_tool_bundles(self.settings)
+
+    def tool_bundle_access(self):
+        """Evaluate optional bundles against the current signed entitlement."""
+        from tech_connector.models.constants import APP_VERSION
+        from tech_connector.services.tool_bundle_service import evaluate_tool_bundles
+
+        evaluation = self.evaluate_current_entitlement(
+            commercial_use=False,
+            project_root=None,
+        )
+        claims = evaluation.claims if evaluation.decision.allowed else None
+        return evaluate_tool_bundles(self.settings, claims, str(APP_VERSION))
+
+    def authorized_tool_bundle_roots(self):
+        """Expose official tool roots only when the bundle capability is signed."""
+        from tech_connector.models.constants import APP_VERSION
+        from tech_connector.services.tool_bundle_service import authorized_tool_roots
+
+        evaluation = self.evaluate_current_entitlement(
+            commercial_use=False,
+            project_root=None,
+        )
+        claims = evaluation.claims if evaluation.decision.allowed else None
+        return authorized_tool_roots(self.settings, claims, str(APP_VERSION))
 
     def save_settings(self, settings: Optional[Dict[str, Any]] = None) -> None:
         if settings is not None:

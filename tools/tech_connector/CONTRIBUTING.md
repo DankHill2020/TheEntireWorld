@@ -23,6 +23,21 @@ In plain language:
 This is what allows community edits to be merged without blocking future
 commercial licensing.
 
+## Source-development setup
+
+Install dependencies explicitly in a dedicated CPython 3.14 environment. The
+source launcher deliberately does not install packages or rewrite DCC/MCP
+configuration during startup.
+
+Contributors who need to exercise the desktop without a production account may
+set `TECH_CONNECTOR_DEV_LICENSE_BYPASS=1` while running directly from source.
+Frozen releases ignore this flag. It is a development convenience only and does
+not create a commercial entitlement or alter the license terms.
+
+Legacy shared-secret test fixtures additionally require
+`TECH_CONNECTOR_ALLOW_LEGACY_ENTITLEMENT=1`; frozen releases ignore that flag as
+well.
+
 ## What Contributions Do Not Allow
 
 Contributing does not give anyone the right to resell Tech Connector.

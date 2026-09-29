@@ -77,6 +77,39 @@ if errorlevel 2 (
 )
 
 echo.
+echo Running Tech Connector publication gates...
+pushd "%REPO%\tools"
+py -3.14 tech_connector\packaging\release_gate.py --source-root .
+if errorlevel 1 (
+    popd
+    echo [ERROR] Publication safety checks failed. Nothing was staged.
+    pause
+    exit /b 1
+)
+py -3.14 -m pytest -q tech_connector\tests\test_stage_package_security.py tech_connector\tests\test_release_hardening.py tech_connector\tests\test_secure_settings.py tech_connector\tests\test_application_entitlement_gate.py tech_connector\tests\test_licensing_configuration.py tech_connector\tests\test_licensing_foundation.py tech_connector\tests\test_licensing_activation_client.py tech_connector\tests\test_licensing_http_adapters.py tech_connector\tests\test_host_bridge_entitlement.py tech_connector\tests\test_license_activation_dialog.py tech_connector\tests\test_release_python_contract.py
+if errorlevel 1 (
+    popd
+    echo [ERROR] Required Tech Connector release tests failed. Nothing was staged.
+    pause
+    exit /b 1
+)
+py -3.14 tech_connector\packaging\stage_package.py reasoning-runtime --out .release_public_audit
+if errorlevel 1 (
+    popd
+    echo [ERROR] Tech Connector package staging failed. Nothing was staged.
+    pause
+    exit /b 1
+)
+py -3.14 tech_connector\packaging\smoke_test_package.py .release_public_audit\reasoning-runtime
+if errorlevel 1 (
+    popd
+    echo [ERROR] Tech Connector staged-package smoke test failed. Nothing was staged.
+    pause
+    exit /b 1
+)
+popd
+
+echo.
 echo Clearing anything already staged from previous runs...
 git reset
 if errorlevel 1 goto git_error

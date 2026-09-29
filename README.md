@@ -1,4 +1,23 @@
 # TheEntireWorld
+
+> **Source available — not open source. Account activation is required.**
+>
+> Downloading a GitHub release, cloning this repository, or downloading its ZIP
+> does not create an activated license or grant unrestricted commercial use. On
+> first launch, Tech Connector requires a registered account with a verified
+> email, acceptance of the applicable versioned license terms, and activation
+> of the user/device. The application remains locked until it receives and
+> verifies a signed entitlement. Community users must also register each
+> commercial project before using Tech Connector on that project.
+>
+> Copyright remains with **The Entire World, LLC**. See [LICENSE](LICENSE) and
+> the [full Tech Connector license](tools/tech_connector/LICENSE.md).
+>
+> Tech Connector Core is publicly source-available. The complete Official Tools Bundle
+> is one optional account-gated product that can be downloaded
+> separately and used with Core through its existing project/tool directories.
+> See the [source and product-access model](tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md).
+
 Downloadable Tools for DCC and Content Creation Pipelines; Starting with Animation and Cinematic Exporter for Maya and Motionbuilder with imports into Unreal 5.5, adding Human IK Builder for maya in the most recent version, Which also can generate the unreal modular control rig
 
 Instructions for first time using:

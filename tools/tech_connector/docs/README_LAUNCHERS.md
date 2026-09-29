@@ -11,6 +11,11 @@ first-run dependency check, then starts the UI with:
 pyw -3.14 -m tech_connector.app.main_window
 ```
 
+The public source launcher does not set a development-license bypass. First
+launch requires registered-account sign-in, verified email, acceptance of the
+applicable versioned terms, and successful activation before the main window is
+constructed. Downloading or cloning the repository is not activation.
+
 Installs missing Python dependencies:
 - PySide6
 - fastmcp

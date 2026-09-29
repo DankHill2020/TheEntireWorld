@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theentireworld.com/schemas/source_access_grant.v1.schema.json",
+  "title": "Tech Connector Source Access Grant",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "grant_id",
+    "account_id",
+    "license_id",
+    "offer_id",
+    "product_id",
+    "required_capability",
+    "agreement_acceptance_id",
+    "provider",
+    "provider_user_id",
+    "repository_class",
+    "covered_major_versions",
+    "status",
+    "policy_version",
+    "requested_at"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "grant_id": {"type": "string", "minLength": 1},
+    "account_id": {"type": "string", "minLength": 1},
+    "organization_id": {"type": "string"},
+    "license_id": {"type": "string", "minLength": 1},
+    "offer_id": {"type": "string", "minLength": 1},
+    "product_id": {"const": "official_tools_bundle"},
+    "required_capability": {"const": "official_tools_bundle"},
+    "seat_assignment_id": {"type": "string"},
+    "agreement_acceptance_id": {"type": "string", "minLength": 1},
+    "provider": {"const": "github"},
+    "provider_user_id": {"type": "string", "minLength": 1},
+    "provider_login": {"type": "string"},
+    "repository_class": {
+      "enum": [
+        "official_tools_current",
+        "official_tools_major_version",
+        "official_tools_enterprise",
+        "community_current",
+        "indie_current",
+        "major_version",
+        "enterprise_current",
+        "enterprise_major_version",
+        "custom"
+      ]
+    },
+    "covered_major_versions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "status": {
+      "enum": ["requested", "invited", "active", "suspended", "revoked"]
+    },
+    "policy_version": {"type": "string", "minLength": 1},
+    "requested_at": {"type": "string", "format": "date-time"},
+    "invited_at": {"type": "string", "format": "date-time"},
+    "accepted_at": {"type": "string", "format": "date-time"},
+    "suspended_at": {"type": "string", "format": "date-time"},
+    "revoked_at": {"type": "string", "format": "date-time"},
+    "last_reconciled_at": {"type": "string", "format": "date-time"},
+    "administrative_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "reason", "recorded_at"],
+      "properties": {
+        "actor_id": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "recorded_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+THE ENTIRE WORLD TECH CONNECTOR
+
+Tech Connector is source-available software, not unrestricted open-source
+software. Installation and use are governed by the license shown on the next
+page and by any versioned entitlement or project terms accepted for your
+account or organization.
+
+The licensing service receives only the minimum metadata needed for identity,
+entitlement, registered-project identifiers, and device activation. Project
+assets, scenes, source files, animation data, and other creative work are not
+uploaded for licensing.
+
+Production releases must be signed by The Entire World and downloaded from an
+official distribution location. Do not continue if the installer signature is
+missing or invalid.

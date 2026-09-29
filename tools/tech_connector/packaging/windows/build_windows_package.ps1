@@ -1,7 +1,7 @@
 
 param(
-    [ValidateSet("reasoning-runtime", "full-tools")]
-    [string]$Tier = "reasoning-runtime",
+    [ValidateSet("core", "official-tools", "combined", "reasoning-runtime", "full-tools")]
+    [string]$Tier = "core",
 
     [ValidateSet("stage", "freeze", "installer")]
     [string]$Mode = "freeze",
@@ -9,11 +9,46 @@ param(
     [string]$Version = "",
     [string]$Python = "auto",
     [string]$DistRoot = "dist\windows",
+    [string]$SigningCertificateThumbprint = "",
+    [string]$TimestampUrl = "http://timestamp.digicert.com",
+    [switch]$RequireCodeSigning,
     [switch]$NoClean,
     [switch]$SkipDependencyInstall
 )
 
 $ErrorActionPreference = "Stop"
+
+function Sign-ReleaseFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not $SigningCertificateThumbprint) {
+        if ($RequireCodeSigning) {
+            throw "Code signing is required but no -SigningCertificateThumbprint was supplied."
+        }
+        return
+    }
+    $thumbprint = $SigningCertificateThumbprint.Replace(" ", "")
+    $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -ErrorAction SilentlyContinue
+    if (-not $certificate) {
+        throw "Code-signing certificate was not found in Cert:\CurrentUser\My: $thumbprint"
+    }
+    $signature = Set-AuthenticodeSignature `
+        -LiteralPath $Path `
+        -Certificate $certificate `
+        -HashAlgorithm SHA256 `
+        -TimestampServer $TimestampUrl
+    if ($signature.Status -ne "Valid") {
+        throw "Authenticode signing failed for '$Path': $($signature.StatusMessage)"
+    }
+}
+
+function Write-Sha256Sidecar {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    $digest = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sidecar = "$resolved.sha256"
+    "$digest  $([System.IO.Path]::GetFileName($resolved))" | Set-Content -LiteralPath $sidecar -Encoding ASCII
+    return $sidecar
+}
 
 function Resolve-RepoRoot {
     $scriptPath = Split-Path -Parent $PSCommandPath
@@ -129,6 +164,16 @@ function Build-NativeGraphRuntime {
 $repoRoot = Resolve-RepoRoot
 Set-Location $repoRoot
 
+$canonicalTier = switch ($Tier) {
+    "reasoning-runtime" { "core" }
+    "full-tools" { "combined" }
+    default { $Tier }
+}
+
+if ($canonicalTier -eq "official-tools" -and $Mode -ne "stage") {
+    throw "The Official Tools Bundle is a content package. Use -Mode stage, then archive/sign the staged inventory; it is not a standalone executable."
+}
+
 if (-not $Version) {
     $Version = Read-AppVersion $repoRoot
 }
@@ -140,8 +185,8 @@ $buildRoot = Join-Path $distRootAbs "build\$Tier"
 $freezeRoot = Join-Path $distRootAbs "frozen\$Tier"
 $installerRoot = Join-Path $distRootAbs "installer"
 $zipRoot = Join-Path $distRootAbs "portable"
-$appName = if ($Tier -eq "reasoning-runtime") { "TechConnectorReasoningRuntime" } else { "TechConnectorFullTools" }
-$productName = if ($Tier -eq "reasoning-runtime") { "Tech Connector Reasoning Runtime" } else { "Tech Connector Full Tools" }
+$appName = if ($canonicalTier -eq "core") { "TechConnectorCore" } else { "TechConnectorCombined" }
+$productName = if ($canonicalTier -eq "core") { "Tech Connector Core" } else { "Tech Connector + Official Tools Bundle" }
 $exeName = "TechConnector"
 
 Write-Host "Repo: $repoRoot"
@@ -153,6 +198,14 @@ $Python = Resolve-ReleasePython $Python
 $pythonInfo = Get-PythonInfo $Python
 Assert-ReleasePython $pythonInfo
 Write-Host "Python: $($pythonInfo.implementation) $($pythonInfo.major).$($pythonInfo.minor).$($pythonInfo.micro) ($($pythonInfo.bits)-bit)"
+
+if ($Mode -eq "installer") {
+    if (-not $SigningCertificateThumbprint) {
+        throw "Installer releases require -SigningCertificateThumbprint."
+    }
+    $RequireCodeSigning = $true
+    Invoke-Python tech_connector\packaging\release_gate.py --source-root $repoRoot --production
+}
 
 $stageArgs = @("tech_connector\packaging\stage_package.py", $Tier, "--out", $stageRoot)
 if ($NoClean) {
@@ -231,7 +284,7 @@ $pyiArgs = @(
     $launcherPath
 )
 
-if ($Tier -eq "full-tools") {
+if ($canonicalTier -eq "combined") {
     if (Test-Path -LiteralPath "$stageDir\maya_tools") {
         $pyiArgs += @("--add-data", "$stageDir\maya_tools;maya_tools")
     }
@@ -257,6 +310,14 @@ $($pythonInfo.bits)-bit
 Built from: $($pythonInfo.executable)
 "@ | Set-Content -LiteralPath (Join-Path $frozenAppDir "PYTHON_RUNTIME.txt") -Encoding ASCII
 
+if ($SigningCertificateThumbprint -or $RequireCodeSigning) {
+    Get-ChildItem -LiteralPath $frozenAppDir -Recurse -File | Where-Object {
+        $_.Extension -in @(".exe", ".dll")
+    } | ForEach-Object {
+        Sign-ReleaseFile $_.FullName
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $zipRoot | Out-Null
 $zipPath = Join-Path $zipRoot "$appName-$Version-win64-portable.zip"
 Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
@@ -268,6 +329,8 @@ try {
     Pop-Location
 }
 Write-Host "Portable zip: $zipPath"
+$zipChecksum = Write-Sha256Sidecar $zipPath
+Write-Host "Portable checksum: $zipChecksum"
 
 if ($Mode -eq "freeze") {
     Write-Host "Frozen app: $frozenAppDir"
@@ -276,10 +339,7 @@ if ($Mode -eq "freeze") {
 
 $iscc = Find-InnoCompiler
 if (-not $iscc) {
-    Write-Warning "Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6 to produce installer EXEs."
-    Write-Host "Frozen app remains available at: $frozenAppDir"
-    Write-Host "Portable zip remains available at: $zipPath"
-    exit 0
+    throw "Inno Setup compiler (ISCC.exe) was not found; installer mode cannot complete."
 }
 
 New-Item -ItemType Directory -Force -Path $installerRoot | Out-Null
@@ -292,7 +352,19 @@ $iss = Join-Path $repoRoot "tech_connector\packaging\windows\tech_connector_inst
     "/DOutputDir=$installerRoot" `
     "/DOutputBaseFilename=$appName-$Version-win64-setup" `
     "/DExeName=$exeName.exe" `
+    "/DLicenseFile=$(Join-Path $repoRoot 'tech_connector\LICENSE.md')" `
+    "/DInfoBeforeFile=$(Join-Path $repoRoot 'tech_connector\packaging\windows\installer_info.txt')" `
     $iss
 
+if ($LASTEXITCODE -ne 0) {
+    throw "Inno Setup failed with exit code $LASTEXITCODE."
+}
+
 $installer = Join-Path $installerRoot "$appName-$Version-win64-setup.exe"
+if (-not (Test-Path -LiteralPath $installer)) {
+    throw "Installer was not created: $installer"
+}
+Sign-ReleaseFile $installer
 Write-Host "Installer: $installer"
+$installerChecksum = Write-Sha256Sidecar $installer
+Write-Host "Installer checksum: $installerChecksum"

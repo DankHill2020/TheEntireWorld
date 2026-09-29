@@ -1,0 +1,14 @@
+{
+  "$schema": "tech_connector/docs/schemas/tool_bundle.v1.schema.json",
+  "schema": "tech_connector.tool_bundle.v1",
+  "package_id": "the_entire_world.official_tools",
+  "display_name": "The Entire World Official Tools Bundle",
+  "version": "6.7",
+  "compatible_connector_versions": ">=6.7,<7.0",
+  "required_capability": "official_tools_bundle",
+  "tool_roots": [
+    "blender_tools", "houdini_tools", "max_tools", "maya_tools",
+    "motionbuilder_tools", "substance_painter_tools", "unreal_tools",
+    "utilities", "plugins", "custom_qt"
+  ]
+}

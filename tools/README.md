@@ -1,5 +1,18 @@
 # Tech Connector Tools
 
+> **Source available — not open source. Account activation is required.**
+>
+> Downloading a GitHub release, cloning this repository, or downloading its ZIP
+> does not create an activated license or grant unrestricted commercial use. On
+> first launch, Tech Connector requires a registered account with a verified
+> email, acceptance of the applicable versioned license terms, and activation
+> of the user/device. The application remains locked until it receives and
+> verifies a signed entitlement. Community users must also register each
+> commercial project before using Tech Connector on that project.
+>
+> See the [Tech Connector Community Source License](tech_connector/LICENSE.md)
+> and [licensing overview](tech_connector/README.md#download-account-and-activation).
+
 Tech Connector is a local-first AI production environment for digital content
 creation (DCC) applications and game engines. This repository contains the
 desktop application, prompt-to-code and repair workflows, project analysis,
@@ -11,6 +24,18 @@ hosts may embed older Python runtimes, so host bridge code preserves compatibili
 with the Python version shipped by each supported application.
 
 ## Quick start
+
+The source launcher follows the same activation flow as an installed build. It
+does not provide an automatic development or Community-license bypass. After
+the dependencies are installed, the first launch opens the account,
+license-acceptance, and activation flow before the main application can open.
+
+Tech Connector Core is intended to remain publicly source-available. The
+complete first-party Official Tools Bundle is a separate, account-gated product
+that can be installed beside Core or added through the existing project/tool
+directory settings. Users can continue using their own project directories and
+independent tools without that bundle. See the
+[source and product-access model](tech_connector/docs/SOURCE_ACCESS_MODEL.md).
 
 From PowerShell in the repository root:
 

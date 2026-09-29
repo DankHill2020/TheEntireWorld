@@ -1,9 +1,4 @@
-"""Stage Tech Connector release package tiers.
-
-This creates a clean source payload for either the lean reasoning runtime or
-the full tools package. Frozen executable and installer steps can consume the
-staged folder.
-"""
+"""Stage composable Tech Connector Core and Official Tools deliverables."""
 
 from __future__ import annotations
 
@@ -89,7 +84,14 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=onerror)
 
 
-def write_package_manifest(package_root: Path, tier: str) -> Path:
+def write_package_manifest(
+    package_root: Path,
+    tier: str,
+    *,
+    requested_tier: str = "",
+    product_id: str = "",
+    required_capability: str = "",
+) -> Path:
     """
         Writes a deterministic inventory for a staged package.
 
@@ -113,6 +115,9 @@ def write_package_manifest(package_root: Path, tier: str) -> Path:
     payload = {
         "schema_version": 1,
         "tier": tier,
+        "requested_tier": requested_tier or tier,
+        "product_id": product_id,
+        "required_capability": required_capability,
         "file_count": len(entries),
         "total_bytes": sum(entry["size"] for entry in entries),
         "files": entries,
@@ -124,44 +129,85 @@ def write_package_manifest(package_root: Path, tier: str) -> Path:
     return manifest_path
 
 
-def validate_staged_package(package_root: Path) -> None:
+def validate_staged_package(
+    package_root: Path,
+    required_files: list[str] | tuple[str, ...] | None = None,
+) -> None:
     """
         Validates legal, install, and generated-artifact release boundaries.
 
     :param package_root: staged package directory
     :return: None
     """
-    required = (
+    required = tuple(required_files or (
         "tech_connector/LICENSE.md",
+        "tech_connector/PRIVACY.md",
         "tech_connector/README.md",
         "tech_connector/CONTRIBUTING.md",
         "tech_connector/packaging/requirements-runtime.txt",
-    )
+    ))
     missing = [value for value in required if not (package_root / value).is_file()]
     if missing:
         raise RuntimeError(
             "Staged package is missing required release files: " + ", ".join(missing)
         )
     forbidden = []
+    sensitive = []
+    sensitive_suffixes = {".key", ".p12", ".pfx"}
+    sensitive_names = {
+        ".env",
+        "production_secrets.json",
+        "service_account.json",
+    }
+    # Build PEM sentinels at runtime so this scanner does not flag its own
+    # source after the packaging helpers are copied into a release payload.
+    private_key_markers = tuple(
+        f"-----BEGIN {label}-----".encode("ascii")
+        for label in (
+            "PRIVATE KEY",
+            "RSA PRIVATE KEY",
+            "EC PRIVATE KEY",
+            "OPENSSH PRIVATE KEY",
+        )
+    )
     for path in package_root.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(package_root)
         if "__pycache__" in relative.parts or path.suffix.lower() in {".pyc", ".pyo"}:
             forbidden.append(relative.as_posix())
+        lowered_name = path.name.casefold()
+        if path.suffix.casefold() in sensitive_suffixes or lowered_name in sensitive_names:
+            sensitive.append(relative.as_posix())
+            continue
+        try:
+            if path.stat().st_size <= 5_000_000:
+                content = path.read_bytes()
+                if any(marker in content for marker in private_key_markers):
+                    sensitive.append(relative.as_posix())
+        except OSError:
+            continue
     if forbidden:
         raise RuntimeError(
             "Staged package contains generated Python caches: "
             + ", ".join(forbidden[:20])
+        )
+    if sensitive:
+        raise RuntimeError(
+            "Staged package contains a private key or production-secret artifact: "
+            + ", ".join(sensitive[:20])
         )
 
 
 def stage_package(tier: str, output_dir: Path, clean: bool = True) -> Path:
     manifest = load_manifest()
     tiers = manifest.get("tiers") or {}
-    if tier not in tiers:
-        raise SystemExit(f"Unknown tier '{tier}'. Valid tiers: {', '.join(sorted(tiers))}")
-    cfg = tiers[tier]
+    aliases = manifest.get("aliases") or {}
+    canonical_tier = str(aliases.get(tier) or tier)
+    if canonical_tier not in tiers:
+        choices = sorted({*tiers, *aliases})
+        raise SystemExit(f"Unknown tier '{tier}'. Valid tiers: {', '.join(choices)}")
+    cfg = tiers[canonical_tier]
     root = repo_root()
     out = output_dir.resolve() / tier
     if clean and out.exists():
@@ -176,14 +222,27 @@ def stage_package(tier: str, output_dir: Path, clean: bool = True) -> Path:
         f"{cfg.get('display_name', tier)}\n\n{cfg.get('description', '')}\n",
         encoding="utf-8",
     )
-    validate_staged_package(out)
-    write_package_manifest(out, tier)
+    validate_staged_package(out, list(cfg.get("required_files") or []))
+    write_package_manifest(
+        out,
+        canonical_tier,
+        requested_tier=tier,
+        product_id=str(cfg.get("product_id") or ""),
+        required_capability=str(cfg.get("required_capability") or ""),
+    )
     return out
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stage Tech Connector package tier payloads.")
-    parser.add_argument("tier", choices=sorted((load_manifest().get("tiers") or {}).keys()))
+    manifest = load_manifest()
+    tier_choices = sorted(
+        {
+            *(manifest.get("tiers") or {}).keys(),
+            *(manifest.get("aliases") or {}).keys(),
+        }
+    )
+    parser.add_argument("tier", choices=tier_choices)
     parser.add_argument("--out", default="dist/staged", help="Output directory for staged payloads.")
     parser.add_argument("--no-clean", action="store_true", help="Do not delete an existing staged folder first.")
     args = parser.parse_args()

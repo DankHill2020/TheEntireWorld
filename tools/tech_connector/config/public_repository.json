@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "files": [
+    {"source": "README.md", "target": "README.md"},
+    {"source": "LICENSE", "target": "LICENSE"},
+    {"source": "tools/README.md", "target": "tools/README.md"},
+    {"source": "tools/tech_connector/README.md", "target": "tools/tech_connector/README.md"},
+    {"source": "tools/tech_connector/LICENSE.md", "target": "tools/tech_connector/LICENSE.md"},
+    {"source": "tools/tech_connector/PRIVACY.md", "target": "tools/tech_connector/PRIVACY.md"},
+    {"source": "tools/tech_connector/CONTRIBUTING.md", "target": "tools/tech_connector/CONTRIBUTING.md"},
+    {"source": "tools/tech_connector/docs/COMMERCIAL_MODEL.md", "target": "tools/tech_connector/docs/COMMERCIAL_MODEL.md"},
+    {"source": "tools/tech_connector/docs/LICENSING_ARCHITECTURE.md", "target": "tools/tech_connector/docs/LICENSING_ARCHITECTURE.md"},
+    {"source": "tools/tech_connector/docs/LICENSING_BACKEND_API.md", "target": "tools/tech_connector/docs/LICENSING_BACKEND_API.md"},
+    {"source": "tools/tech_connector/docs/LICENSING_BACKEND_CONTRACT.md", "target": "tools/tech_connector/docs/LICENSING_BACKEND_CONTRACT.md"},
+    {"source": "tools/tech_connector/docs/LICENSING_LAUNCH_READINESS.md", "target": "tools/tech_connector/docs/LICENSING_LAUNCH_READINESS.md"},
+    {"source": "tools/tech_connector/docs/PRICING_MODEL_DRAFT.md", "target": "tools/tech_connector/docs/PRICING_MODEL_DRAFT.md"},
+    {"source": "tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md", "target": "tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md"},
+    {"source": "tools/tech_connector/docs/SOURCE_REPOSITORY_MIGRATION.md", "target": "tools/tech_connector/docs/SOURCE_REPOSITORY_MIGRATION.md"},
+    {"source": "tools/tech_connector/docs/schemas/source_access_grant.v1.schema.json", "target": "tools/tech_connector/docs/schemas/source_access_grant.v1.schema.json"},
+    {"source": "tools/tech_connector/docs/schemas/tool_bundle.v1.schema.json", "target": "tools/tech_connector/docs/schemas/tool_bundle.v1.schema.json"},
+    {"source": "tools/tech_connector/packaging/repository_root/public.gitignore", "target": ".gitignore"},
+    {"source": "tools/tech_connector/packaging/repository_root/.github/workflows/tech-connector-public-boundary.yml", "target": ".github/workflows/tech-connector-public-boundary.yml"}
+  ]
+}

@@ -9,36 +9,43 @@ need Python on their machine.
 Run the convenience wrapper from the repository root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\Build_TechConnector_Windows_Package.ps1 -Tier reasoning-runtime -Mode freeze
+powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\Build_TechConnector_Windows_Package.ps1 -Tier core -Mode freeze
 ```
 
 ## Package Tiers
 
-- `reasoning-runtime`: lean app package for normal website downloads.
-- `full-tools`: larger studio/contributor package with DCC tools and plugins.
+- `core`: the Tech Connector application without the Official Tools Bundle.
+- `official-tools`: the separately downloadable content bundle (`stage` only).
+- `combined`: Core plus the complete Official Tools Bundle.
+
+`reasoning-runtime` and `full-tools` remain compatibility aliases for `core`
+and `combined`.
 
 ## Build Modes
 
 Stage package contents without freezing:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode stage
+powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier core -Mode stage
 ```
 
 Create the installed app and portable ZIP:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode freeze
+powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier core -Mode freeze
 ```
 
 Create the Inno Setup installer EXE:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier reasoning-runtime -Mode installer
+powershell -ExecutionPolicy Bypass -File tech_connector\packaging\windows\build_windows_package.ps1 -Tier core -Mode installer -SigningCertificateThumbprint <thumbprint>
 ```
 
-Use `-Tier full-tools` for the complete package. Installer mode requires Inno
-Setup 6; without it, the script retains the frozen app and portable ZIP.
+Use `-Tier combined` for the combined package. Use `-Tier official-tools -Mode
+stage` for the separately downloadable bundle. Installer mode fails closed
+unless Inno Setup 6, production HTTPS licensing endpoints, entitlement public
+keys, and a current-user Authenticode code-signing certificate are configured.
+Local `stage` and `freeze` modes remain available for unsigned iteration.
 
 ## Outputs
 
@@ -55,8 +62,8 @@ The freeze builds and tests the C++ graph runtime, packages its DLL, and writes
 ## Smoke Tests
 
 ```powershell
-python tech_connector\packaging\smoke_test_package.py dist\windows\staged\reasoning-runtime
-python tech_connector\packaging\smoke_test_package.py dist\windows\frozen\reasoning-runtime\TechConnector\TechConnector.exe
+python tech_connector\packaging\smoke_test_package.py dist\windows\staged\core
+python tech_connector\packaging\smoke_test_package.py dist\windows\frozen\core\TechConnector\TechConnector.exe
 ```
 
 ## Iteration Notes

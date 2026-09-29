@@ -5,6 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
+from tech_connector.services.credential_store import default_credential_store
 from tech_connector.models.constants import (
     APP_DIR,
     APP_ROOT,
@@ -17,6 +18,24 @@ from tech_connector.models.constants import (
 
 _RELOCATABLE_SETTINGS = {"config", "model_cache_dir", "db_path", "index_cache_dir"}
 _RESOURCE_PROFILE_VERSION = 2
+_SECRET_SETTING_KEYS = frozenset(
+    {
+        "tech_connector_license_token",
+        "github_token",
+        "p4_passwd",
+        "slack_webhook_url",
+        "slack_bot_token",
+        "discord_webhook_url",
+        "discord_bot_token",
+        "email_password",
+        "atlassian_api_token",
+        "mod_tech_labs_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "gemini_api_key",
+        "xai_api_key",
+    }
+)
 
 
 def _relocate_legacy_app_path(value: object) -> object:
@@ -37,11 +56,12 @@ def _relocate_saved_settings(data: dict) -> dict:
     for key in _RELOCATABLE_SETTINGS:
         if key in relocated:
             relocated[key] = _relocate_legacy_app_path(relocated[key])
-    extra_dirs = relocated.get("extra_dirs")
-    if isinstance(extra_dirs, list):
-        relocated["extra_dirs"] = [
-            _relocate_legacy_app_path(value) for value in extra_dirs
-        ]
+    for list_key in ("extra_dirs", "tool_bundle_dirs"):
+        values = relocated.get(list_key)
+        if isinstance(values, list):
+            relocated[list_key] = [
+                _relocate_legacy_app_path(value) for value in values
+            ]
     return relocated
 
 
@@ -71,9 +91,21 @@ def best_config() -> str:
     return DEFAULT_CONFIGS[0]
 
 
-def load_settings() -> dict:
+def _write_settings_payload(data: dict) -> None:
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = SETTINGS_PATH.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    temporary.replace(SETTINGS_PATH)
+
+
+def _credential_store(store=None):
+    return store if store is not None else default_credential_store(APP_DIR)
+
+
+def load_settings(*, credential_store=None) -> dict:
     defaults = {
         "extra_dirs": [],
+        "tool_bundle_dirs": [],
         "first_run_complete": False,
         "model": DEFAULT_MODEL,
         "config": best_config(),
@@ -146,9 +178,9 @@ def load_settings() -> dict:
         "tech_connector_allow_offline_community": False,
         "tech_connector_account_email": "",
         "tech_connector_license_token": "",
+        "tech_connector_commercial_use": True,
         "tos_accepted": False,
-        "tos_version": "v2026.1",
-        "activation_log_endpoint": "",
+        "tos_version": "v2026.2",
         "telemetry_opt_in": False,
         "unreal_auto_snapshot_on_connect": False,
         "unreal_auto_reflect_on_connect": False,
@@ -289,12 +321,23 @@ def load_settings() -> dict:
             data = _relocate_saved_settings(
                 json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
             )
+            store = _credential_store(credential_store)
+            migrated = False
+            for key in _SECRET_SETTING_KEYS:
+                plaintext_value = str(data.pop(key, "") or "")
+                if plaintext_value:
+                    store.save(key, plaintext_value)
+                    migrated = True
+            if migrated:
+                _write_settings_payload(data)
             cfg_path = data.get("config")
             if cfg_path and not Path(cfg_path).exists():
                 data["config"] = best_config()
             merged = dict(defaults)
             merged.update(data)
             merged = _apply_resource_profile_migration(merged, data)
+            for key in _SECRET_SETTING_KEYS:
+                merged[key] = store.load(key)
             if (
                 not bool(merged.get("allow_30b_deep_route", False))
                 and str(merged.get("router_local_deep", "")).strip() == "qwen3:4b-instruct"
@@ -303,12 +346,24 @@ def load_settings() -> dict:
             return merged
         except Exception:
             pass
+    store = _credential_store(credential_store)
+    for key in _SECRET_SETTING_KEYS:
+        defaults[key] = store.load(key)
     return defaults
 
 
-def save_settings(data: dict) -> None:
-    APP_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+def save_settings(data: dict, *, credential_store=None) -> None:
+    store = _credential_store(credential_store)
+    sanitized = dict(data)
+    for key in _SECRET_SETTING_KEYS:
+        if key not in sanitized:
+            continue
+        value = str(sanitized.pop(key) or "")
+        if value:
+            store.save(key, value)
+        else:
+            store.delete(key)
+    _write_settings_payload(sanitized)
 
 
 def install_components_to_tools() -> None:

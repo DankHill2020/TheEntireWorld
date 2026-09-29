@@ -1,9 +1,20 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
+*.bak
+*~
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx
+production_secrets.json
+service_account.json
 
 # Local IDE, agent, environment, and runtime state.
 .tech_connector/
+.tech_connector_project
 .venv/
 .vscode/
 .ai_studio/
@@ -27,6 +38,7 @@ dist/
 
 # Generated indices/caches that exceed normal GitHub blob limits.
 tech_connector/data/capability_registry.json
+tech_connector/data/capability_registry/
 tech_connector/data/ai_intel.db*
 tech_connector/tech_connector/
 tech_connector/project_analysis/*.db

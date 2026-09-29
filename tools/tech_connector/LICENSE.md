@@ -2,6 +2,8 @@
 
 Copyright (c) 2026 The Entire World, LLC. All rights reserved.
 
+License version: TC-2026.2
+
 This license governs use of the accompanying software, source code, binaries,
 resources, examples, and documentation ("Software"). If you use the Software,
 you accept this license. If you do not accept it, do not use the Software.
@@ -9,6 +11,15 @@ you accept this license. If you do not accept it, do not use the Software.
 This Software is source-available. It is not licensed as Open Source Software
 under the Open Source Initiative definition because commercial use may require
 a separate commercial license.
+
+Downloading a release, cloning the repository, or downloading a source archive
+does not create an activated entitlement and does not by itself authorize
+running or commercially using the Software. Except for viewing, studying, and
+evaluating source as permitted below, each official user must register an
+account, verify an email address, accept the applicable versioned terms, and
+activate an authorized user/device before running the Software. The applicable
+signed entitlement controls the license type, customer segment, projects,
+versions, support, seats/devices, offline period, and any project terms.
 
 ## 1. Definitions
 
@@ -22,9 +33,30 @@ a separate commercial license.
   production company, client services company, government contractor, or other
   organization in connection with revenue-generating work, internal production,
   paid services, commercial intellectual property, or commercial products.
-* "Attributable Revenue" means gross revenue directly attributable to products,
-  services, assets, productions, workflows, or tools created, accelerated,
-  automated, exported, processed, or materially enabled by the Software.
+* "Registered Project" means a project identified by a unique Tech Connector
+  project ID and registered to an accepted License through an official account.
+* "Project Receipts" means all amounts received or receivable from the
+  Registered Project over its lifetime, subject to the receipt inclusions,
+  refunds, chargebacks, taxes collected for authorities, and other adjustments
+  stated in the accepted project terms.
+* "Eligible Project Costs" means costs actually paid or incurred that are
+  documented, ordinary, necessary, reasonable in amount, and directly and
+  primarily attributable to creating, producing, distributing, supporting, or
+  marketing the Registered Project. A shared cost counts only to the extent a
+  documented, consistent, and proportionate allocation is attributable to the
+  Registered Project. A cost paid to an owner, affiliate, or other related
+  party counts only up to the lower of actual cost or an arm's-length fair
+  market amount for genuine goods or services. Unpaid owner or founder labor
+  counts only if the accepted project terms provide a pre-agreed, capped labor
+  allowance supported by contemporaneous time records.
+* "Adjusted Project Profit" means cumulative Project Receipts over the entire
+  lifetime of a Registered Project minus cumulative Eligible Project Costs.
+  Owner draws, dividends, profit distributions, income taxes, financing costs,
+  unrelated or excessive overhead, artificial management fees, inflated
+  related-party charges, entity-level income taxes, financing costs not directly
+  attributable to the project, penalties, personal expenses, non-economic
+  accounting allocations, reimbursed costs, and costs counted against another
+  project are not Eligible Project Costs.
 * "Modifications" means changes, enhancements, extensions, bug fixes, plugins,
   adapters, integrations, or derivative works based on the Software.
 * "Output" means games, films, animations, images, assets, code, pipelines,
@@ -45,7 +77,8 @@ Subject to this license, The Entire World, LLC grants You a worldwide,
 non-exclusive, non-transferable, royalty-free license to:
 
 * view, study, and evaluate the source code;
-* run the Software locally;
+* run the Software locally after completing required account registration,
+  license acceptance, and user/device activation;
 * make and use Modifications for Your own Individual Use or Community Use;
 * use the Software to create Outputs; and
 * share feedback, issues, patches, and contributions with the project.
@@ -59,11 +92,19 @@ Training. Licensed users may automate Software capabilities only through the
 Software, an Official API, or another access method expressly authorized by The
 Entire World, LLC.
 
-## 3. Startup and Small-Studio Grace
+## 3. Community Commercial Use and Small-Studio Grace
 
-Commercial Use is permitted without royalty while Attributable Revenue from
-that Commercial Use is less than USD $500,000 in a rolling 12-month period,
-provided that You otherwise comply with this license.
+Commercial Use under the Community license requires a verified account,
+acceptance of the applicable license terms, and registration of each commercial
+project. No residual is owed on the first USD $500,000 of Adjusted Project
+Profit for a Registered Project. Only Adjusted Project Profit above that
+threshold may be subject to a residual under the accepted project terms.
+
+Receipts and costs may not be shifted between related entities or projects,
+projects may not be artificially divided, and transactions may not be
+recharacterized for the principal purpose of avoiding the threshold or
+residual. Substantially identical editions, ports, releases, or components may
+be treated as one Registered Project as provided in the accepted project terms.
 
 This grace is intended to keep the Software accessible to independent creators,
 small studios, and early-stage teams. It does not permit redistribution,
@@ -72,18 +113,19 @@ product except as allowed in Section 5.
 
 ## 4. Commercial Success License
 
-Once Attributable Revenue from Commercial Use reaches or exceeds USD $500,000
-in a rolling 12-month period, continued Commercial Use requires a written
-commercial license from The Entire World, LLC.
+Once a Registered Project exceeds USD $500,000 in Adjusted Project Profit,
+continued Community commercial use is governed by the residual terms accepted
+for that project or by a separate written license. The applicable residual may
+vary based on organization size and other terms shown before acceptance. Terms
+are versioned and are not supplied by hardcoded client-side pricing logic.
 
-Unless a separate written agreement says otherwise, the default royalty for a
-Commercial Success License is a rolling 1.0% to 5.0% success share of Attributable Revenue
-above the USD $500,000 threshold. Of this success share residual, The Entire World
-takes half (50%) and the other half (50%) is put directly towards supporting other independent
-creators, community projects, and industry initiatives.
+Accepted project terms may use a marginal residual schedule. Under a marginal
+schedule, each rate applies only to the portion of Adjusted Project Profit
+inside its stated bracket; entering a higher bracket does not retroactively
+apply that higher rate to profit in a lower bracket.
 
-No royalty is owed on revenue below the threshold. If You never make money from
-use of the Software, You never owe a royalty.
+No residual is owed on Adjusted Project Profit at or below the threshold. If a
+Registered Project never exceeds the threshold, no residual is owed for it.
 
 ## 5. Enterprise, IP, Redistribution, and Hosted Use
 
@@ -99,7 +141,7 @@ A separate written commercial license is required before You may:
 * provide the Software as a hosted service, SaaS product, cloud service,
   marketplace product, plugin platform, or externally accessible tool; or
 * use the Software to provide paid automation or production services to third
-  parties above the revenue threshold in Section 3.
+  parties outside the Community project terms in Sections 3 and 4.
 
 ## 6. Restrictions
 

@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("reasoning-runtime", "full-tools")]
-    [string]$Tier = "reasoning-runtime",
+    [ValidateSet("core", "official-tools", "combined", "reasoning-runtime", "full-tools")]
+    [string]$Tier = "core",
 
     [ValidateSet("stage", "freeze", "installer")]
     [string]$Mode = "freeze",

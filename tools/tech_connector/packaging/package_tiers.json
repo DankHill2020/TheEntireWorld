@@ -1,9 +1,21 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "aliases": {
+    "reasoning-runtime": "core",
+    "full-tools": "combined"
+  },
   "tiers": {
-    "reasoning-runtime": {
-      "display_name": "Tech Connector Reasoning Runtime",
-      "description": "Lean installed app for chat, reasoning, model/provider setup, pipeline editing, and app orchestration without the full tools depot.",
+    "core": {
+      "product_id": "tech_connector.core",
+      "display_name": "Tech Connector Core",
+      "description": "The licensed Tech Connector application. It can use user-owned project and tool directories without the Official Tools Bundle.",
+      "required_files": [
+        "tech_connector/LICENSE.md",
+        "tech_connector/PRIVACY.md",
+        "tech_connector/README.md",
+        "tech_connector/CONTRIBUTING.md",
+        "tech_connector/packaging/requirements-runtime.txt"
+      ],
       "include": [
         "tech_connector/app",
         "tech_connector/adapters",
@@ -19,6 +31,7 @@
         "tech_connector/game_engine",
         "tech_connector/installers",
         "tech_connector/knowledge",
+        "tech_connector/licensing",
         "tech_connector/models",
         "tech_connector/project_analysis",
         "tech_connector/router",
@@ -28,6 +41,7 @@
         "tech_connector/docs",
         "tech_connector/packaging",
         "tech_connector/LICENSE.md",
+        "tech_connector/PRIVACY.md",
         "tech_connector/README.md",
         "tech_connector/CONTRIBUTING.md",
         "tech_connector/api.py",
@@ -40,87 +54,71 @@
         "reasoning_runtime"
       ],
       "exclude": [
-        ".git",
-        "**/__pycache__",
-        "**/.pytest_cache",
-        "**/.agents",
-        "**/.continue",
-        "**/.idea",
-        "**/.ai_studio",
-        "**/.build",
-        "**/.project_ai",
-        "**/.tech_connector",
-        "**/*.bak",
-        "**/*.db",
-        "**/*.db-shm",
-        "**/*.db-wal",
-        "**/*.log",
-        "**/*.pyc",
-        "**/*.pyo",
-        "**/*.sqlite",
-        "**/*.sqlite-shm",
-        "**/*.sqlite-wal",
-        "**/scratch*",
-        "**/tests",
-        "**/test_*.py",
-        "tech_connector/knowledge/index/legacy",
-        "tech_connector/knowledge/index",
-        "tech_connector/data/capability_registry.json",
-        "tech_connector/project_analysis/*.db",
-        "external_tools",
-        "maya_tools",
-        "motionbuilder_tools",
-        "plugins",
-        "custom_qt"
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
+        "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*.db",
+        "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
+        "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
+        "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/knowledge/index/legacy", "tech_connector/knowledge/index",
+        "tech_connector/data/capability_registry.json", "tech_connector/data/capability_registry",
+        "tech_connector/project_analysis/*.db"
       ]
     },
-    "full-tools": {
-      "display_name": "Tech Connector Full Tools Package",
-      "description": "Complete tools package for technical artists, pipeline developers, DCC bridges, examples, and source-adjacent workflows.",
+    "official-tools": {
+      "product_id": "official_tools_bundle",
+      "required_capability": "official_tools_bundle",
+      "display_name": "The Entire World Official Tools Bundle",
+      "description": "The complete optional first-party DCC and pipeline tool collection. Install it beside Core or add its directory to Tech Connector.",
+      "required_files": [
+        "official_tools_bundle.json",
+        "OFFICIAL_TOOLS_README.md",
+        "tech_connector/LICENSE.md"
+      ],
       "include": [
-        "tech_connector",
-        "reasoning_runtime",
-        "blender_tools",
-        "houdini_tools",
-        "max_tools",
-        "maya_tools",
-        "motionbuilder_tools",
-        "substance_painter_tools",
-        "unreal_tools",
-        "utilities",
-        "plugins",
-        "custom_qt"
+        "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md", "tech_connector/LICENSE.md",
+        "blender_tools", "houdini_tools", "max_tools", "maya_tools",
+        "motionbuilder_tools", "substance_painter_tools", "unreal_tools",
+        "utilities", "plugins", "custom_qt"
       ],
       "exclude": [
-        ".git",
-        "**/__pycache__",
-        "**/.pytest_cache",
-        "**/.agents",
-        "**/.continue",
-        "**/.idea",
-        "**/.ai_studio",
-        "**/.build",
-        "**/.project_ai",
-        "**/.tech_connector",
-        "**/*.bak",
-        "**/*.db",
-        "**/*.db-shm",
-        "**/*.db-wal",
-        "**/*.log",
-        "**/*.pyc",
-        "**/*.pyo",
-        "**/*.sqlite",
-        "**/*.sqlite-shm",
-        "**/*.sqlite-wal",
-        "**/scratch*",
-        "**/tests",
-        "**/test_*.py",
-        "tech_connector/knowledge/index/legacy",
-        "tech_connector/knowledge/index",
-        "tech_connector/data/capability_registry.json",
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
+        "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*.db",
+        "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
+        "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
+        "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/data/capability_registry",
+        "external_tools/downloaded_code", "external_tools/downloaded_assets"
+      ]
+    },
+    "combined": {
+      "product_id": "tech_connector.combined",
+      "required_capability": "official_tools_bundle",
+      "display_name": "Tech Connector + Official Tools Bundle",
+      "description": "A convenience package containing Core and the complete Official Tools Bundle. The products retain separate entitlement capabilities.",
+      "required_files": [
+        "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md",
+        "tech_connector/LICENSE.md", "tech_connector/PRIVACY.md",
+        "tech_connector/README.md", "tech_connector/packaging/requirements-runtime.txt"
+      ],
+      "include": [
+        "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md", "tech_connector",
+        "reasoning_runtime", "blender_tools", "houdini_tools", "max_tools",
+        "maya_tools", "motionbuilder_tools", "substance_painter_tools",
+        "unreal_tools", "utilities", "plugins", "custom_qt"
+      ],
+      "exclude": [
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
+        "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*.db",
+        "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
+        "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
+        "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/knowledge/index/legacy", "tech_connector/knowledge/index",
+        "tech_connector/data/capability_registry.json", "tech_connector/data/capability_registry",
         "tech_connector/project_analysis/*.db",
-        "external_tools/downloaded_code",
-        "external_tools/downloaded_assets"
+        "external_tools/downloaded_code", "external_tools/downloaded_assets"
       ]
     }
   }
