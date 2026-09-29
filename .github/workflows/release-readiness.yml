@@ -1,0 +1,59 @@
+# Install this file at repository root as .github/workflows/release-readiness.yml.
+name: Release readiness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      production_gate:
+        description: Run the fail-closed production evidence gate
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install focused test dependencies
+        shell: pwsh
+        run: python -m pip install pytest cryptography keyring packaging
+      - name: Licensing and release tests
+        shell: pwsh
+        run: >-
+          python -m pytest
+          tools/tech_connector/tests/test_licensing_foundation.py
+          tools/tech_connector/tests/test_licensing_configuration.py
+          tools/tech_connector/tests/test_licensing_activation_client.py
+          tools/tech_connector/tests/test_licensing_desktop_gate.py
+          tools/tech_connector/tests/test_licensing_http_adapters.py
+          tools/tech_connector/tests/test_application_entitlement_gate.py
+          tools/tech_connector/tests/test_host_bridge_entitlement.py
+          tools/tech_connector/tests/test_license_acceptance_store.py
+          tools/tech_connector/tests/test_release_hardening.py
+      - name: Public-source release gate
+        shell: pwsh
+        run: python tools/tech_connector/packaging/release_gate.py --source-root tools
+
+  production-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.production_gate
+    needs: validate
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Fail closed unless every external control is verified
+        shell: pwsh
+        run: python tools/tech_connector/packaging/release_gate.py --source-root tools --production
