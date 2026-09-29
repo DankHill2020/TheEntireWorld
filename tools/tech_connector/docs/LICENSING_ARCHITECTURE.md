@@ -17,12 +17,13 @@ Production private keys, account records, organization membership, canonical
 license terms, payments, accounting, and entitlement issuance belong to a
 separate private backend.
 
-Source and product distribution use a hybrid boundary. Tech Connector Core can
-be publicly source-available, while the complete first-party Official Tools
-Bundle is a separately downloadable, account-gated product. Backend services,
-signing, billing, accounting, administration, and enterprise-only components
-remain private. GitHub App and OAuth secrets never enter the client or signed
-entitlement. See [SOURCE_ACCESS_MODEL.md](SOURCE_ACCESS_MODEL.md).
+Source and product distribution use a public-monorepo/private-services
+boundary. Tech Connector Core and the complete first-party Official Tools
+source are publicly source-available together. Official Tools execution and
+official release/update delivery remain capability-controlled. Backend
+services, signing, billing, accounting, administration, and enterprise-only
+components remain private. GitHub App and OAuth secrets never enter the client
+or signed entitlement. See [SOURCE_ACCESS_MODEL.md](SOURCE_ACCESS_MODEL.md).
 
 Authentication sessions are short-lived and separate from signed offline
 entitlements. Refresh credentials must be stored through an operating-system

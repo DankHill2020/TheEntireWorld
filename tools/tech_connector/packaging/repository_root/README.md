@@ -12,11 +12,12 @@ registered account, verified email, acceptance of the applicable versioned
 license, and a signed entitlement. The client caches that signed entitlement
 for its allowed offline period; private signing keys never ship in this repo.
 
-The optional **Official Tools Bundle** is distributed separately through an
-account-gated download or private repository. It can be installed beside Core
-or added through Core's existing project/tool directory settings. User-owned
-project directories and independently obtained tools remain usable without the
-bundle entitlement.
+The optional **Official Tools Bundle** source is part of the complete public
+monorepo. Official release packages may still distribute it separately or with
+Core. It can be installed beside Core or added through Core's existing
+project/tool directory settings. User-owned project directories and
+independently obtained tools remain usable without the bundle entitlement;
+official bundle execution requires its signed capability.
 
 ## Privacy boundary
 

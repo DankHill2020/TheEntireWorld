@@ -59,30 +59,36 @@ The browser flow owns account creation, established-provider authentication,
 email verification, organization selection, agreement acceptance, recovery,
 and bot/abuse controls. Tech Connector never collects a password.
 
-## Account portal source access
+## Account portal release and support access
 
-Source-repository linking is a browser/account-portal workflow, not a desktop
+The complete Core and Official Tools source is public. Account linking is
+therefore not an access boundary for that source. It remains a browser/account-
+portal workflow for signed installers, versioned release archives, updates,
+support downloads, and genuinely private enterprise components—not a desktop
 licensing endpoint and not part of `licensing.json`. After verified-account
 authentication, the portal may expose provider-neutral operations equivalent
 to:
 
 - begin GitHub identity linking with a one-time state-bound OAuth transaction;
 - complete the callback and bind the stable provider-user ID;
-- list eligible source versions and existing grants;
-- request an invitation only after the controlling agreement is accepted;
+- list eligible release versions and existing delivery grants;
+- request a protected download or enterprise invitation only after the
+  controlling agreement is accepted;
 - show invitation/grant/reconciliation status; and
 - unlink or replace an identity using step-up authentication.
 
 The private backend—not the browser and not the desktop client—maps a valid
-license and named seat to configured repositories/teams. A narrowly scoped
-GitHub App performs invitations and removals. It stores no App installation
-token in the account session, entitlement token, downloadable source, or client
-configuration. Callback state, webhooks, invitation requests, and membership
-changes are single-use or idempotent as appropriate and are audited.
+license and named seat to protected delivery channels or enterprise
+repositories. A narrowly scoped provider app may perform invitations and
+removals. It stores no installation token in the account session, entitlement
+token, downloadable artifact, or client configuration. Callback state,
+webhooks, invitation requests, and membership changes are single-use or
+idempotent as appropriate and are audited.
 
-Perpetual version coverage must use separate repositories or separately
-generated source archives; granting access to a branch in a repository that
-contains future majors is not an acceptable entitlement boundary. See
+Perpetual version coverage for official binaries, updates, support, and private
+enterprise components must use separately generated archives or protected
+delivery records. Public source history is not the perpetual entitlement
+boundary. See
 [SOURCE_ACCESS_MODEL.md](SOURCE_ACCESS_MODEL.md).
 
 ## Login poll

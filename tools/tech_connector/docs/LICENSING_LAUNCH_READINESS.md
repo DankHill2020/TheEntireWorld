@@ -38,9 +38,9 @@ It does not claim that every Tech Connector product feature is production-ready.
   acceptance receipt before host authorization. License Management shows its
   exact path and opens it for the user; a receipt-write failure prevents the
   licensed application shell from starting.
-- The product-access model now separates public source-available Core from the
-  single account-gated Official Tools Bundle, while retaining verified account
-  acceptance, least-privilege grants, reconciliation, revocation limits, and
+- The product-access model now publishes Core and the single Official Tools
+  Bundle in one source-available monorepo while retaining verified account
+  acceptance, signed execution capabilities, revocation limits, and
   provider-secret isolation.
 - A packaged privacy/data-handling draft now documents the implemented data
   boundary, and the production gate fails until counsel marks it approved.
@@ -54,25 +54,21 @@ These cannot be completed safely in the public client repository:
   governing law, remedies, privacy notice, and tax treatment.
 - Deploy the private account, organization, agreement, project, activation, and
   entitlement service described in `LICENSING_BACKEND_API.md`.
-- Split public Core from the complete Official Tools Bundle. Deploy the private
-  GitHub App or authenticated-download broker, require recorded agreement
-  acceptance before bundle access, and validate Community, annual,
-  perpetual-major, Enterprise, and Custom grants end to end.
-- After independent verification, update `config/source_access.json` with the
-  operational status, UTC verification time, and internal review reference.
-  The production release gate intentionally fails while Official Tools remain
-  in the public Core repository or the bundle broker is unverified.
-- Execute and retain evidence for every phase in
-  `SOURCE_REPOSITORY_MIGRATION.md`; use clean-history public Core and private
-  Official Tools repositories rather than deleting paths from the old branch.
+- Deploy authenticated release/update delivery, require recorded agreement
+  acceptance before issuing execution entitlements, and validate Community,
+  annual, perpetual-major, Enterprise, and Custom grants end to end. Public
+  source visibility is not used as an entitlement boundary.
+- Reverify `config/source_access.json` whenever the repository boundary changes;
+  complete source belongs in the public monorepo, while signing, identity,
+  billing, accounting, administration, and deployment systems remain private.
 - Store the production Ed25519 signing key in KMS/HSM, configure rotation and
   revocation procedures, and publish only approved public verification keys.
 - Configure real HTTPS endpoints and run `release_gate.py --production`.
 - Provision the Authenticode certificate and complete a clean-machine signed
   installer/uninstaller test on supported Windows versions.
 - Keep the repository-root README, LICENSE, and GitHub workflow checks installed
-  in the public landing repository, without complete protected source or
-  private build/security components.
+  in the public monorepo, without private services, signing material, production
+  credentials, or security-sensitive deployment components.
 - Establish monitoring, backups, rate limits, abuse controls, incident response,
   support escalation, and an emergency entitlement-key rotation drill.
 

@@ -1,10 +1,12 @@
 {
-  "schema_version": 2,
-  "status": "not_configured",
-  "distribution_model": "public_core_account_gated_official_tools",
+  "schema_version": 3,
+  "status": "operational_verified",
+  "distribution_model": "public_complete_tools_monorepo",
   "public_repository_contains_complete_source": true,
   "public_repository_contains_core_source": true,
-  "official_tools_bundle_account_gated": false,
-  "verified_at": "",
-  "review_reference": ""
+  "official_tools_source_public": true,
+  "official_tools_execution_entitlement_required": true,
+  "private_services_excluded": true,
+  "verified_at": "2026-09-29T05:39:48Z",
+  "review_reference": "the-entire-world-public-monorepo-review-2026-09-29"
 }

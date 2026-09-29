@@ -1,46 +1,51 @@
 # Tech Connector Source and Product Access
 
-Status: production target — the public Core boundary and account-gated Official
-Tools distribution must be operationally verified before mainstream release.
+Status: operational repository model — complete public source-available
+monorepo with entitlement-controlled official execution and private services.
 
 Tech Connector adapts the useful parts of Epic's account and entitlement model
-without copying its repository boundary. Tech Connector Core is intended to be
-publicly visible under the source-available license. The complete Official Tools
-Bundle is a separate optional product delivered through an account-gated
-download or repository. Backend, signing, billing, accounting, administration,
-and enterprise-only systems remain private.
+without requiring source secrecy. `DankHill2020/TheEntireWorld` is the complete
+public monorepo: Tech Connector Core and the first-party Official Tools source
+are publicly source-available under the controlling license. Repository
+visibility is not a runtime entitlement, an unrestricted open-source grant, or
+permission for commercial exploitation.
 
 Because a public GitHub repository can be cloned anonymously, accepting terms
-cannot technically be a prerequisite to viewing or downloading public Core
-source. The repository prominently surfaces the controlling license, and the
+cannot technically be a prerequisite to viewing or downloading its source. The
+repository therefore surfaces the controlling license prominently, while the
 official application requires verified-account activation and acceptance before
-startup. Possessing source does not create an activated or commercial
-entitlement, and removing a client check does not create one.
+startup. Possessing or modifying source does not create an activated or
+commercial entitlement, and removing a client check does not create one.
 
 ## Product boundary
 
-### Public source-available Core
+### Complete public monorepo
 
-The Core repository may contain the desktop and headless clients, public local
+The public repository contains the desktop and headless clients, public local
 APIs, bridge protocols, SDK interfaces, examples, local project-directory and
 user-owned tool discovery, client-side entitlement verification using public
-keys only, documentation, and credential-free build scripts. Client
-verification code is not treated as a secret: security derives from asymmetric
-signatures and backend authority, not from hiding the verifier.
+keys only, documentation, credential-free build scripts, and the complete
+first-party Official Tools source beneath `tools/`.
 
-### Account-gated Official Tools Bundle
+Client verification code is not treated as a secret: security derives from
+asymmetric signatures, backend authority, immutable acceptance records, and
+the license—not from hiding the verifier. Public visibility does not permit
+redistribution, sublicensing, resale, hosted access, or commercial use outside
+the accepted license or a separate written agreement.
+
+### Entitlement-controlled Official Tools Bundle
 
 The Official Tools Bundle is one product containing all approved first-party
 Maya, Blender, Houdini, 3ds Max, MotionBuilder, Substance Painter, Unreal,
 utility, plugin, and Qt tooling. It is not divided into separately licensed
 individual tool packs.
 
-The bundle can be downloaded independently, installed beside Core, or included
-in a combined package. Its root contains `official_tools_bundle.json`. Users add
-that root through Tech Connector's existing project/tool directory settings.
-Core discovers the manifest locally and exposes its tool roots only when the
-signed entitlement includes the `official_tools_bundle` capability. Paths and
-file contents are not sent to the licensing service.
+Its source is included in the public monorepo. Official combined installers,
+standalone bundle packages, updates, execution, and support remain governed by
+the signed `official_tools_bundle` capability. The bundle can be packaged with
+Core, installed beside Core, or added through Tech Connector's existing
+project/tool directory settings. The local `official_tools_bundle.json`
+manifest identifies the collection without uploading its path or contents.
 
 Users may always point Core at their own project directories and independently
 obtained tools. An absent Tools Bundle entitlement must not disable ordinary
@@ -57,21 +62,26 @@ user-owned directories.
 
 ## Access sequence
 
-1. A user may inspect or clone public Core source under the surfaced license.
-2. Before Core starts officially, the user creates an account, verifies email,
-   accepts the exact agreement, and activates a supported device.
+1. A user may inspect or clone the complete public monorepo under the surfaced
+   source-available license.
+2. Before the official application starts, the user creates an account,
+   verifies email, accepts the exact agreement, and activates a supported
+   device.
 3. The backend stores an immutable acceptance receipt and issues a signed Core
    entitlement with the applicable license, project, version, support, seat,
    device, and offline claims.
-4. If an offer includes the Official Tools Bundle, the same entitlement also
-   contains `official_tools_bundle`.
-5. The portal provides the authorized private download or repository grant for
-   the complete bundle.
-6. Core validates the cached signature and capability locally. Community
-   commercial projects still require project registration and signed terms.
+4. If an offer includes Official Tools, the entitlement also contains
+   `official_tools_bundle`; the client checks that capability before exposing
+   official bundle execution.
+5. The account portal may provide signed installers, versioned archives,
+   updates, or support downloads covered by the entitlement. Those delivery
+   channels are conveniences and update boundaries, not claims that the public
+   source is confidential.
+6. Community commercial projects still require project registration and signed
+   project terms.
 
-Public Core source and an already downloaded bundle cannot be remotely erased.
-Revocation can prevent future official downloads, updates, hosted services, and
+Public source and already downloaded packages cannot be remotely erased.
+Revocation can prevent future official updates, hosted services, support, and
 valid refreshed entitlements, while the accepted agreement continues to govern
 retained copies. Official clients never delete or upload customer work as a
 license-remediation action.
@@ -88,18 +98,22 @@ Indie and Enterprise seats remain assigned to named human users.
 
 ## Operational controls
 
-- Build public Core and the account-gated Tools Bundle from explicit manifests.
-- Reject generated state, databases, downloaded dependencies, private keys, and
-  production secrets during staging.
+- Publish the complete intended source tree while excluding generated state,
+  databases, downloaded dependencies, private keys, credentials, private
+  services, and production secrets.
+- Build Core-only, Official-Tools-only, and combined artifacts from explicit
+  manifests, even though their source shares one public repository.
 - Sign official installers and publish SHA-256 inventories.
 - Record agreement versions and content hashes in immutable backend receipts.
-- Grant private bundle repositories through a narrowly permissioned GitHub App
-  or provide authenticated signed downloads.
-- Reconcile eligibility after license, seat, or organization changes without
-  collecting local project content.
+- Use a narrowly permissioned GitHub App only for optional account-linked
+  releases, support downloads, or genuinely private enterprise components;
+  GitHub App keys never belong in the public client.
+- Reconcile entitlement eligibility after license, seat, or organization
+  changes without collecting local project content.
 - Audit grants, removals, administrative overrides, and entitlement changes.
 
 Epic's workflow remains a useful reference for verified accounts, accepted
-agreements, GitHub identity linking, and repository invitations. Tech Connector
-differs intentionally by making Core publicly source-available and gating the
-complete optional Official Tools Bundle rather than every source file.
+agreements, identity linking, and entitlement-backed downloads. Tech Connector
+differs intentionally: the complete Core and Official Tools source is public,
+while private authority, official execution, services, updates, and commercial
+rights remain license-controlled.

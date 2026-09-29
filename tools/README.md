@@ -19,6 +19,11 @@ desktop application, prompt-to-code and repair workflows, project analysis,
 viewer tools, and direct integrations for Unreal Engine, Maya, Blender,
 MotionBuilder, Houdini, Substance 3D Painter, and 3ds Max.
 
+See the [complete product overview](../README.md) for the current v6.7 package
+map, Garden/Kingdom authoring and runtime workflow, Community/Indie/Enterprise/
+Custom licensing paths, launch pricing direction, host qualification status,
+and release-readiness boundary.
+
 The project currently targets Python 3.14 for the desktop shell. Individual DCC
 hosts may embed older Python runtimes, so host bridge code preserves compatibility
 with the Python version shipped by each supported application.
@@ -30,11 +35,13 @@ does not provide an automatic development or Community-license bypass. After
 the dependencies are installed, the first launch opens the account,
 license-acceptance, and activation flow before the main application can open.
 
-Tech Connector Core is intended to remain publicly source-available. The
-complete first-party Official Tools Bundle is a separate, account-gated product
-that can be installed beside Core or added through the existing project/tool
-directory settings. Users can continue using their own project directories and
-independent tools without that bundle. See the
+This public source-available monorepo contains Tech Connector Core and the
+complete first-party Official Tools Bundle. Public source visibility does not
+grant an activated runtime or commercial entitlement. Official Tools execution
+is controlled by the signed `official_tools_bundle` capability, while release
+packages may combine the products or install the bundle beside Core through the
+existing project/tool directory settings. Users can continue using their own
+project directories and independent tools without that bundle capability. See the
 [source and product-access model](tech_connector/docs/SOURCE_ACCESS_MODEL.md).
 
 From PowerShell in the repository root:
@@ -64,6 +71,12 @@ Canonical DCC bridge implementations live under `tech_connector/bridges/`.
 Installer scripts under `tech_connector/installers/` bootstrap those bridges
 inside their host applications.
 
+Host-specific Official Tools guides:
+
+- [Maya](maya_tools/README.md)
+- [MotionBuilder](motionbuilder_tools/README.md)
+- [Unreal](unreal_tools/README.md)
+
 ## Validation
 
 ```powershell
@@ -84,7 +97,8 @@ release packages.
 ## Documentation and contribution
 
 - [Tech Connector overview](tech_connector/README.md)
-- [Documentation index](tech_connector/docs/README.md)
+- [UI features guide](tech_connector/docs/UI_FEATURES_GUIDE.md)
+- [Package architecture](tech_connector/docs/PACKAGE_ARCHITECTURE.md)
 - [Contributing](tech_connector/CONTRIBUTING.md)
 - [License](tech_connector/LICENSE.md)
 

@@ -41,13 +41,14 @@ def test_public_github_surface_requires_activation_and_forbids_launcher_bypass()
     assert "requires account sign-in, license acceptance, and activation" in launcher
 
 
-def test_source_access_model_defines_public_core_and_gated_tools() -> None:
+def test_source_access_model_defines_public_monorepo_and_gated_execution() -> None:
     source_access = (
         PACKAGE_ROOT / "docs" / "SOURCE_ACCESS_MODEL.md"
     ).read_text(encoding="utf-8")
     normalized = " ".join(source_access.split())
 
     assert "publicly source-available" in normalized
+    assert "complete public monorepo" in normalized
     assert "Official Tools Bundle is one product" in normalized
     assert "official_tools_bundle" in normalized
     assert "own project directories" in normalized
@@ -93,26 +94,24 @@ def test_production_gate_accepts_counsel_approved_privacy_notice(tmp_path) -> No
     assert validate_production_legal_approval(tmp_path) == []
 
 
-def test_production_gate_rejects_unverified_public_source_distribution() -> None:
-    failures = validate_production_source_access(TOOLS_ROOT)
-
-    assert "production Core/Official Tools distribution is not operational and verified" in failures
-    assert "production public repository still contains complete protected source" in failures
-    assert "production Official Tools Bundle is not account-gated" in failures
+def test_production_gate_accepts_verified_public_monorepo_distribution() -> None:
+    assert validate_production_source_access(TOOLS_ROOT) == []
 
 
-def test_production_gate_accepts_verified_account_gated_source_distribution(tmp_path) -> None:
+def test_production_gate_accepts_verified_public_monorepo_contract(tmp_path) -> None:
     config = tmp_path / "tech_connector" / "config"
     config.mkdir(parents=True)
     (config / "source_access.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "status": "operational_verified",
-                "distribution_model": "public_core_account_gated_official_tools",
-                "public_repository_contains_complete_source": False,
+                "distribution_model": "public_complete_tools_monorepo",
+                "public_repository_contains_complete_source": True,
                 "public_repository_contains_core_source": True,
-                "official_tools_bundle_account_gated": True,
+                "official_tools_source_public": True,
+                "official_tools_execution_entitlement_required": True,
+                "private_services_excluded": True,
                 "verified_at": "2026-09-28T20:00:00Z",
                 "review_reference": "launch-review-2026-09",
             }

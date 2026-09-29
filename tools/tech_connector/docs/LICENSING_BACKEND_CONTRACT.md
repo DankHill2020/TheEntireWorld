@@ -31,16 +31,17 @@ least-privilege and audited. The local client receipt is a readable convenience
 copy; the backend acceptance record and its representation in a verified signed
 entitlement remain authoritative.
 
-## Account-gated Official Tools access
+## Entitlement-controlled Official Tools access
 
-Official Tools Bundle source/download access follows
-[SOURCE_ACCESS_MODEL.md](SOURCE_ACCESS_MODEL.md). Agreement acceptance must be
-authoritative and committed before a repository invitation is requested. The
-private bundle-access broker consumes account, organization, license,
-named-seat, accepted-agreement, and covered-major-version records; it never
-trusts a customer-selected tier or a desktop-client assertion.
+Official Tools execution and official release/update access follow
+[SOURCE_ACCESS_MODEL.md](SOURCE_ACCESS_MODEL.md). The bundle source is publicly
+visible, but agreement acceptance must be authoritative and committed before a
+signed execution entitlement or protected release download is issued. The
+private delivery broker consumes account, organization, license, named-seat,
+accepted-agreement, and covered-major-version records; it never trusts a
+customer-selected tier or a desktop-client assertion.
 
-The source-access broker is a private backend adapter. GitHub OAuth secrets,
+The release-delivery broker is a private backend adapter. GitHub OAuth secrets,
 GitHub App keys, installation tokens, organization IDs, repository IDs, team
 IDs, and administrative APIs do not belong in the desktop client or public
 configuration. Grants are idempotent, least-privilege, version-scoped,
@@ -50,13 +51,14 @@ The public provider-neutral grant contract is
 `docs/schemas/source_access_grant.v1.schema.json`; private database tables may
 be normalized differently but must preserve its required relationships.
 
-Repository or authenticated-download access is not the entitlement itself. A
-linked identity may download only bundle versions covered by its grant, while
-running official Tech Connector clients still requires the separately signed
-offline entitlement and `official_tools_bundle` capability. Public Core source
-does not require a private repository invitation.
-Revoking source access cannot recall an existing clone, so the accepted license
-continues to govern retained copies and modifications.
+Repository visibility or authenticated-download access is not the entitlement
+itself. A linked identity may download protected artifacts only for versions
+covered by its grant, while running official Tech Connector clients still
+requires the separately signed offline entitlement and
+`official_tools_bundle` capability. Public Core and Official Tools source do
+not require a private repository invitation. Revoking a delivery grant cannot
+recall an existing clone or download, so the accepted license continues to
+govern retained copies and modifications.
 
 ## Minimum client-to-server metadata
 

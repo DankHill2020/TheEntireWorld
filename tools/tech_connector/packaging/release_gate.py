@@ -187,7 +187,7 @@ def validate_github_root_surface(source_root: Path) -> list[str]:
             "account activation is required": "activation warning",
             "does not create an activated license": "download warning",
             "official tools bundle": "Official Tools warning",
-            "account-gated product": "account-gated product warning",
+            "complete public source-available monorepo": "public monorepo boundary",
             "tools/tech_connector/docs/source_access_model.md": "source-access model link",
         }.items():
             if phrase not in text:
@@ -221,26 +221,30 @@ def validate_production_legal_approval(source_root: Path) -> list[str]:
 
 
 def validate_production_source_access(source_root: Path) -> list[str]:
-    """Block production until the Core/Official Tools boundary is verified."""
+    """Block production until the public-monorepo/private-services boundary is verified."""
     path = source_root / "tech_connector/config/source_access.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [f"production source-access status is unreadable: {exc}"]
     failures = []
-    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+    if not isinstance(payload, dict) or payload.get("schema_version") != 3:
         failures.append("production source-access status schema is not supported")
         return failures
-    if payload.get("distribution_model") != "public_core_account_gated_official_tools":
-        failures.append("production source distribution does not use the Core/Official Tools boundary")
+    if payload.get("distribution_model") != "public_complete_tools_monorepo":
+        failures.append("production source distribution does not use the complete public tools monorepo")
     if payload.get("status") != "operational_verified":
-        failures.append("production Core/Official Tools distribution is not operational and verified")
-    if payload.get("public_repository_contains_complete_source") is not False:
-        failures.append("production public repository still contains complete protected source")
+        failures.append("production public tools monorepo is not operational and verified")
+    if payload.get("public_repository_contains_complete_source") is not True:
+        failures.append("production public repository does not contain the complete intended source")
     if payload.get("public_repository_contains_core_source") is not True:
         failures.append("production public repository does not contain the intended Core source")
-    if payload.get("official_tools_bundle_account_gated") is not True:
-        failures.append("production Official Tools Bundle is not account-gated")
+    if payload.get("official_tools_source_public") is not True:
+        failures.append("production Official Tools source is not declared public")
+    if payload.get("official_tools_execution_entitlement_required") is not True:
+        failures.append("production Official Tools execution entitlement is not required")
+    if payload.get("private_services_excluded") is not True:
+        failures.append("production private services are not excluded from the public repository")
     if not str(payload.get("verified_at") or "").strip():
         failures.append("production source-access verification time is missing")
     if not str(payload.get("review_reference") or "").strip():

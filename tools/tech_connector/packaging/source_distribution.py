@@ -89,8 +89,8 @@ def validate_public_landing(root: Path, entries: tuple[tuple[Path, Path], ...] |
     license_text = (root / "LICENSE").read_text(encoding="utf-8").casefold()
     if "account activation is required" not in readme:
         raise RuntimeError("public landing README lacks the account-activation warning")
-    if "official tools bundle" not in readme or "account-gated" not in readme:
-        raise RuntimeError("public landing README lacks the Official Tools access warning")
+    if "official tools bundle" not in readme or "official_tools_bundle" not in readme:
+        raise RuntimeError("public landing README lacks the Official Tools entitlement warning")
     if "source-available" not in license_text or "activated entitlement" not in license_text:
         raise RuntimeError("public landing LICENSE lacks source-available activation terms")
 

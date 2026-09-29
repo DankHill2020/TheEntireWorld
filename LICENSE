@@ -2,9 +2,10 @@ Tech Connector Source-Available License Notice
 
 Copyright (c) 2026 The Entire World, LLC. All rights reserved.
 
-The Tech Connector software under tools/tech_connector is source-available,
-not unrestricted open-source software. It is governed by the controlling
-license at tools/tech_connector/LICENSE.md.
+The Tech Connector software and first-party tools under tools/ are
+source-available, not unrestricted open-source software. Except for content
+that carries a separate third-party notice, they are governed by the
+controlling license at tools/tech_connector/LICENSE.md.
 
 Viewing, downloading, or cloning this repository does not grant permission to
 redistribute, sublicense, resell, host, or commercially exploit Tech Connector
