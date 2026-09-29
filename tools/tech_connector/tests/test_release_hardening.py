@@ -155,6 +155,17 @@ def test_production_readiness_requires_evidence_for_every_control(tmp_path) -> N
     assert validate_production_readiness(tmp_path) == []
 
 
+def test_external_signing_assembly_is_fail_closed_and_verifies_frozen_binaries() -> None:
+    script = (
+        PACKAGE_ROOT / "packaging" / "windows" / "assemble_signed_installer.ps1"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(script.split())
+    assert "--source-root $repoRoot --production" in normalized
+    assert "verify_windows_signatures.ps1" in script
+    assert "-Recurse -ExpectedPublisher $ExpectedPublisher" in normalized
+    assert normalized.index("verify_windows_signatures.ps1") < normalized.index("& $iscc")
+
+
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
     package = tmp_path / "stage"
     module = package / "tech_connector" / "__init__.py"

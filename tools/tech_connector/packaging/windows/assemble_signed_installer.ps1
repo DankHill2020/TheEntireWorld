@@ -8,10 +8,9 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..\..")).Path
-$toolsRoot = Split-Path -Parent $repoRoot
 Set-Location $repoRoot
 
-python tech_connector\packaging\release_gate.py --source-root $toolsRoot --production
+python tech_connector\packaging\release_gate.py --source-root $repoRoot --production
 if ($LASTEXITCODE -ne 0) { throw "Production release gate failed." }
 
 $freezeRoot = Join-Path $repoRoot "$DistRoot\frozen\$Tier\TechConnector"
@@ -53,4 +52,3 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE
 $installer = Join-Path $installerRoot "$appName-$Version-win64-setup.exe"
 if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created." }
 Write-Output $installer
-
