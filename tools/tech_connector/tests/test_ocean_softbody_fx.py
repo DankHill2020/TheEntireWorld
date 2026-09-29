@@ -8,6 +8,7 @@ from tech_connector.game_engine.runtime.tc_effect_system_service import create_e
 from tech_connector.game_engine.runtime.tc_ocean_surface_service import create_ocean_surface
 from tech_connector.game_engine.runtime.tc_simulation_ir_service import compile_simulation_world
 from tech_connector.game_engine.runtime.tc_simulation_runtime_service import SimulationRuntimeInstance
+from tech_connector.game_engine.runtime.tc_simulation_service import signed_mesh_volume
 
 
 def test_ocean_surface_is_deterministic_normalized_and_wake_aware() -> None:
@@ -55,11 +56,18 @@ def test_softbody_and_ocean_presets_execute_real_simulation_domains() -> None:
     ocean = create_effect_world("ocean", quality="realtime", seed=7)
     assert len(jello.particles) == 8 and len(jello.volume_constraints) == 1
     assert {particle.phase for particle in jello.particles} == {"softbody"}
+    assert jello.substeps == 3
+    assert jello.constraint_iterations == 3
     assert len(ocean.deformable_surfaces) == 1
     assert {"softbody", "effect"} <= set(compile_simulation_world(jello, backend="reference_cpu").domains)
     assert {"surface", "effect"} <= set(compile_simulation_world(ocean, backend="reference_cpu").domains)
     for _ in range(10): jello.step(1.0 / 60.0); ocean.step(1.0 / 60.0)
     assert all(math.isfinite(value) for particle in jello.particles for value in particle.position)
+    current_volume = abs(signed_mesh_volume(
+        [particle.position for particle in jello.particles], jello.surface_faces,
+    ))
+    rest_volume = abs(jello.volume_constraints[0].rest_volume)
+    assert current_volume == pytest.approx(rest_volume, rel=0.08)
     assert ocean.deformable_surfaces[0].time_seconds == pytest.approx(10.0 / 60.0)
 
 
