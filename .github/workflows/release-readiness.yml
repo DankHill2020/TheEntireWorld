@@ -29,7 +29,9 @@ jobs:
           python-version: '3.14'
       - name: Install focused test dependencies
         shell: pwsh
-        run: python -m pip install pytest cryptography keyring packaging PySide6
+        run: >-
+          python -m pip install pytest keyring packaging
+          -r tools/tech_connector/packaging/requirements-runtime.txt
       - name: Licensing and release tests
         shell: pwsh
         run: >-
