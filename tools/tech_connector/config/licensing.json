@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "tech_connector",
-  "issuer": "https://license.theentireworld.com",
+  "issuer": "https://license.theentireworld.net",
   "audience": "tech-connector",
   "clock_skew_seconds": 60,
   "maximum_offline_days": 90,

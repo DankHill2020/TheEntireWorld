@@ -102,3 +102,9 @@ def test_loader_rejects_non_object_endpoint_configuration(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="endpoints must be a JSON object"):
         load_licensing_configuration(path)
+
+
+def test_checked_in_configuration_uses_the_production_license_origin() -> None:
+    configuration = load_licensing_configuration()
+
+    assert configuration.issuer == "https://license.theentireworld.net"
