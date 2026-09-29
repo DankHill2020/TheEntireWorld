@@ -86,6 +86,8 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
             background: {tokens.surface_hover};
             color: {tokens.text};
         }}
+        QMenu::item:disabled {{ color: {tokens.text_subtle}; }}
+        QMenu::separator {{ height: 1px; background: {tokens.border}; margin: 5px 8px; }}
         QGroupBox {{
             background: {tokens.surface};
             border: 1px solid {tokens.border};
@@ -106,6 +108,23 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
         QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
             background: {tokens.text_subtle};
         }}
+        QSplitter::handle {{ background: {tokens.border}; }}
+        QSplitter::handle:hover {{ background: {tokens.accent_pressed}; }}
+        QTreeView::item, QListView::item {{ padding: 3px 5px; }}
+        QTreeView::item:hover, QListView::item:hover {{ background: {tokens.surface_hover}; }}
+        QTreeView::item:selected, QListView::item:selected {{
+            background: {tokens.accent_pressed}; color: {tokens.text};
+        }}
+        QProgressBar {{
+            background: {tokens.surface}; border: 1px solid {tokens.border};
+            border-radius: {tokens.radius_small}px; color: {tokens.text_muted}; text-align: center;
+        }}
+        QProgressBar::chunk {{ background: {tokens.accent}; border-radius: {tokens.radius_small}px; }}
+        QToolTip {{
+            background: {tokens.surface_raised}; color: {tokens.text};
+            border: 1px solid {tokens.border_strong}; border-radius: {tokens.radius_small}px;
+            padding: 7px 9px;
+        }}
         QWidget#appHeader {{
             background: {tokens.canvas};
             border-bottom: 1px solid {tokens.border};
@@ -118,6 +137,20 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
         QFrame#projectPanelActions, QFrame#systemStatusHeader {{
             background: {tokens.surface};
             border: 1px solid {tokens.border};
+            border-radius: {tokens.radius}px;
+        }}
+        QFrame#uxGettingStartedCard {{
+            background: {tokens.surface_raised};
+            border: 1px solid {tokens.accent_pressed};
+            border-radius: 9px;
+        }}
+        QFrame[uiRole="onboardingStep"] {{
+            background: {tokens.surface};
+            border: 1px solid {tokens.border};
+            border-radius: {tokens.radius}px;
+        }}
+        QFrame#uxContextGuide, QFrame#uxContextRecipe {{
+            background: {tokens.surface}; border: 1px solid {tokens.border};
             border-radius: {tokens.radius}px;
         }}
         QLabel[uiRole="title"] {{
@@ -231,6 +264,7 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
             border-color: {tokens.border_strong};
             color: {tokens.text};
         }}
+        QTabBar::tab:hover {{ background: {tokens.surface_hover}; color: {tokens.text}; }}
     """
 
 

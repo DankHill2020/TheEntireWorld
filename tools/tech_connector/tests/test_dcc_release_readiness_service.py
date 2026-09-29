@@ -153,3 +153,33 @@ def test_verified_receipt_without_a_session_pin_remains_unqualified() -> None:
 
     assert unity["status"] == "structural"
     assert "workflow_receipt.pinned_session_receipt" in unity["evidence_gates"]
+
+
+def test_release_readiness_discovers_default_receipt_ledgers_only_when_unspecified(monkeypatch) -> None:
+    calls = []
+
+    def ledger(name):
+        def load():
+            calls.append(name)
+            return {"receipts": {}}
+        return load
+
+    monkeypatch.setattr(readiness_service, "qualification_ledger", ledger("qualification"))
+    monkeypatch.setattr(readiness_service, "workflow_receipt_ledger", ledger("workflow"))
+    monkeypatch.setattr(readiness_service, "source_parity_ledger", ledger("source_parity"))
+
+    audit_dcc_release_readiness(
+        verify_live_source_sessions=False,
+        verify_live_host_sessions=False,
+    )
+    assert calls == ["qualification", "workflow", "source_parity"]
+
+    calls.clear()
+    audit_dcc_release_readiness(
+        qualification_receipts={},
+        workflow_receipts={},
+        source_parity_receipts={},
+        verify_live_source_sessions=False,
+        verify_live_host_sessions=False,
+    )
+    assert calls == []

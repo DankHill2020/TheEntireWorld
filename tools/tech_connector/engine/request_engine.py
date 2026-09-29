@@ -1544,6 +1544,36 @@ class RequestEngine:
     def process(self, context: RequestContext) -> EngineResult:
         self.emit("intent", "Understanding your request...")
         self.activity(ActivityEvent("intent", "Request received", context.text, status="info"))
+        # A caller-supplied route is authoritative continuation state.  In
+        # particular, approval resumes carry ``approved=True`` here.  Dispatch
+        # it before any fresh classification so the original prompt cannot be
+        # reinterpreted as a brand-new, unapproved request and loop back to the
+        # same confirmation card.
+        extras = dict(context.extras or {})
+        supplied_route = dict(extras.get("prompt_route_decision") or {})
+        if supplied_route:
+            try:
+                return self._dispatch_preclassified(supplied_route, context)
+            except Exception as exc:
+                self.activity(
+                    ActivityEvent(
+                        "error",
+                        "Preclassified route dispatch failed",
+                        str(exc),
+                        status="error",
+                    )
+                )
+                return EngineResult(
+                    action="error",
+                    label="Prompt Dispatcher",
+                    text=f"Prompt dispatch failed: {exc}",
+                    metadata={
+                        "engine_path": "prompt_dispatch",
+                        "error": str(exc),
+                        "result_type": "error",
+                        "route_decision": supplied_route,
+                    },
+                )
         # Exact symbol and high-confidence project lookups do not benefit from
         # constructing the full code-understanding packet first. Keeping these
         # deterministic fast paths ahead of runtime preparation avoids a large
@@ -1632,31 +1662,6 @@ class RequestEngine:
                 )
         except Exception:
             pass
-        extras = dict(context.extras or {})
-        supplied_route = dict(extras.get("prompt_route_decision") or {})
-        if supplied_route:
-            try:
-                return self._dispatch_preclassified(supplied_route, context)
-            except Exception as exc:
-                self.activity(
-                    ActivityEvent(
-                        "error",
-                        "Preclassified route dispatch failed",
-                        str(exc),
-                        status="error",
-                    )
-                )
-                return EngineResult(
-                    action="error",
-                    label="Prompt Dispatcher",
-                    text=f"Prompt dispatch failed: {exc}",
-                    metadata={
-                        "engine_path": "prompt_dispatch",
-                        "error": str(exc),
-                        "result_type": "error",
-                        "route_decision": supplied_route,
-                    },
-                )
         route_decision: dict = {}
         execution_context = None
         try:

@@ -187,13 +187,73 @@ Implemented and covered by headless tests:
   CPU/CuPy CUDA discovery. CUDA remains unavailable unless a working provider and solver
   kernels are both present; provider discovery alone never claims GPU execution.
 - Native/reference equivalence, persistent-allocation, fallback, and 20k-particle stress tests.
+- Deterministic graph-colored native XPBD distance and area constraints, attachment solving,
+  ragged closed-volume preservation, plastic/breakable distance state, and stable spatial-hash
+  viscosity/cohesion neighbors for liquid, goo, and jello-style materials.
+- A working provider-neutral GPU particle executor with persistent float32 device buffers,
+  supported force fields, plane/sphere collisions, resident reuse, and asynchronous-ready
+  transfer boundaries. Qualified native D3D11 is selected on Windows, with CuPy/CUDA as the
+  portable array-provider path; `gpu_compute` is installed only after a real device probe.
+- Native deterministic spatial-hash self-contact, BVH/refittable triangle-mesh collision,
+  moving-surface response, and reformable bond creation/healing/breaking now execute inside
+  the resident particle pipeline instead of forcing reference playback.
+- Persistent native sparse-volume SoA state covers vectorized dissipation, fuel/flame,
+  cooling, buoyancy, compaction, memory, and active-cell telemetry with reference baselines.
+- Native and provider-GPU volume buffers support explicit authoritative residency, zero-transfer
+  repeat ticks, deferred compaction/readback, and safe ownership handoff to CPU execution.
+- The provider-neutral GPU path includes graph-colored float32 XPBD distance/area constraints,
+  attachments, bounded pairwise self/material neighbors, and persistent sparse combustion
+  buffers. It also includes a bounded vector particle/triangle closest-point kernel with moving
+  mesh response. Pairwise work fails closed above 2,048 particles and mesh work above two
+  million particle-triangle candidates.
+- The native D3D11 path now keeps distance-constraint endpoint, parameter, lambda, position,
+  and velocity buffers resident per independent world session. Deterministic graph coloring
+  removes write conflicts, XPBD compliance is solved on-device, compiled profile iterations
+  are honored, and upload/readback/dispatch telemetry includes the constraint stage. Collapsed
+  links recover from relative velocity with a deterministic axis fallback. Breaking, plasticity,
+  and reforming remain explicitly capability-gated to native CPU rather than silently diverging.
+- Authoritative D3D11 worlds skip stable topology validation after qualification and expose an
+  explicit constraint-dirty hook for live edits. A local 10,000-particle/9,999-link chain with
+  eight XPBD iterations measured a 0.133 ms median resident CPU submission across five warm
+  ticks, with zero upload and zero readback; this is submission latency, not a GPU timestamp.
+- Composable physics fields now share one authored contract across reference CPU, native SoA,
+  provider GPU, and native D3D11. Qualified modes include directional/uniform gravity, gusting
+  velocity-relative wind, inverse-square point gravity, attractor/repulsor/radial fields, vortex,
+  continuous deterministic turbulence, linear/quadratic drag, and provider/native buoyancy.
+  Controls include enable, inner/outer radius, falloff power, acceleration clamp, drag, gust,
+  frequency, noise scale, seed, and ambient density. D3D11 keeps spatial field records resident;
+  buoyancy remains provider/native until particle density joins the D3D particle layout.
+- The provider-GPU neighbor stage now uses sorted spatial-hash cells and 27-cell local candidate
+  expansion rather than an N-by-N distance matrix. It supports up to two million particles with
+  an explicit eight-million-candidate density guard and reports candidate pressure in receipts.
+- Sparse native/provider volume buffers now optionally retain neighbor topology, divergence, and
+  Jacobi pressure arrays for velocity projection. Pressure iterations and projection strength are
+  authored properties and default off for compatibility; regression scenes verify reduced
+  divergence and reference/native/provider agreement.
+- A synchronized local D3D11 field stress run covering 20,000 particles and four combined fields
+  measured 1.075 ms for ten warm ticks plus final readback (0.107 ms/tick on that device).
+- Native D3D11 mesh collision now compiles the canonical refittable triangle BVH into contiguous
+  node bounds, integer child/leaf metadata, and leaf-ordered triangle vertices. A bounded 64-level
+  compute traversal performs sphere/AABB rejection, closest-triangle contact, moving-surface
+  friction, and restitution without CPU candidate queries; topology/refit signatures control
+  resident uploads and deeper trees fail closed.
+- Native D3D11 self-collision now uses a persistent multi-pass spatial hash: power-of-two bucket
+  clearing, atomic particle insertion, exact 27-cell validation to reject hash collisions, and a
+  race-free Jacobi correction into a scratch position buffer before device-local copyback. Local
+  traversal is never silently truncated, pinned/frozen collision obstacles remain capability-gated,
+  and the qualified world bound is two million particles. A synchronized sparse 10,000-particle
+  stress run measured 19.766 ms for ten warm ticks plus final readback (1.977 ms/tick locally).
 
 Still required before a production game-runtime claim:
 
-- Native constraint, material-neighbor, mesh-collision, sparse-volume, and task-graph kernels.
-- Compute GPU solver executor; the device/provider boundary is present but no GPU solver is installed.
+- Native continuous self-contact/CCD, multilayer contact caching, parallel task-graph islands,
+  and vectorized mesh candidate batches.
+- Native D3D11 shaders for area/volume XPBD and material-neighbor broadphase; those stages
+  currently run on the CuPy-compatible provider path and fall back to native CPU on D3D11.
+- D3D11 material-neighbor hashing, indirect rendering,
+  and cross-device determinism qualification.
 - GPU-resident particle, constraint, collision, event, and indirect-render buffers.
 - Production cloth self-contact/CCD, tearing, remeshing, multilayer friction, and wrinkle validation.
-- Production sparse-fluid/combustion solver and physically based volume renderer.
+- Production sparse-fluid advection/pressure projection, combustion chemistry, and physically based volume renderer.
 - Engine renderer integration for mesh particles, ribbons, beams, decals, lights, distortion, refraction, and volumes.
 - Replication codecs, platform determinism qualification, memory pools, streaming simulation LOD, and stress baselines.

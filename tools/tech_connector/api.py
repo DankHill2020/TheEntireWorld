@@ -16,9 +16,10 @@ import time
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
-from tech_connector.models.constants import APP_ROOT
+from tech_connector.licensing.context import LicensingContext
+from tech_connector.models.constants import APP_DIR, APP_ROOT, APP_VERSION
 from tech_connector.router.command_router import CommandRouter
 from tech_connector.services.action_execution_engine import (
     ActionExecutionEngine,
@@ -31,7 +32,14 @@ from tech_connector.services.api_feature_registry_service import (
     APIFeatureRegistry,
 )
 from tech_connector.services.conversation_workspace_service import compatibility_snapshot
-from tech_connector.services.license_entitlement_service import LicenseEntitlement, entitlement_status_row, verify_entitlement
+from tech_connector.services.license_entitlement_service import (
+    LICENSE_TOKEN_PREFIX,
+    LicenseEntitlement,
+    entitlement_from_signed_evaluation,
+    entitlement_status_from_entitlement,
+    entitlement_status_row,
+    verify_entitlement,
+)
 from tech_connector.services.llm_request_queue_service import (
     cancel_llm_request as _cancel_llm_request,
     llm_request_queue_snapshot as _llm_request_queue_snapshot,
@@ -622,11 +630,33 @@ class TechConnectorHeadlessAPI:
         runtime_kernel: Any = None,
         runtime_packages: Iterable[Any] | None = None,
         ui_window: Any | None = None,
+        licensing_context: LicensingContext | None = None,
+        commercial_use: bool = True,
+        app_major_version: str | None = None,
     ) -> None:
         self.settings = dict(settings if settings is not None else load_settings())
         self.project_root = str(Path(project_root).expanduser().resolve()) if project_root else str(self.settings.get("active_project") or "")
         self.license_secret = license_secret
-        self.require_entitlement = require_entitlement
+        from tech_connector.services.licensing_startup_policy import (
+            development_entitlement_bypass_allowed,
+        )
+
+        # Source-development bypass remains explicit and is never honored by a
+        # frozen production build.
+        self.require_entitlement = bool(require_entitlement) or not development_entitlement_bypass_allowed()
+        shared_context = licensing_context
+        if shared_context is None and ui_window is not None:
+            shared_context = getattr(
+                getattr(ui_window, "service", None),
+                "licensing_context",
+                None,
+            )
+        self.licensing_context = shared_context or LicensingContext.from_defaults(APP_DIR)
+        self.commercial_use = bool(commercial_use)
+        self.app_major_version = str(
+            app_major_version
+            or str(APP_VERSION).lstrip("vV").split(".", 1)[0]
+        )
         self.command_router = command_router if command_router is not None else CommandRouter()
         self.runtime_kernel = runtime_kernel
         self.runtime_packages = tuple(runtime_packages or ())
@@ -645,10 +675,32 @@ class TechConnectorHeadlessAPI:
         self.features = APIFeatureNamespace(self)
 
     def entitlement(self) -> LicenseEntitlement:
+        signed_token = self._signed_entitlement_token()
+        if signed_token:
+            evaluation = self.licensing_context.evaluate(
+                token=signed_token,
+                project_root=self.project_root or None,
+                product=self.licensing_context.configuration.product,
+                app_major_version=self.app_major_version,
+                commercial_use=self.commercial_use,
+            )
+            return entitlement_from_signed_evaluation(evaluation)
         return verify_entitlement(self.settings, secret=self.license_secret)
 
     def entitlement_status(self) -> dict[str, Any]:
+        signed_token = self._signed_entitlement_token()
+        if signed_token:
+            return entitlement_status_from_entitlement(
+                self.entitlement(),
+                configured=True,
+            )
         return entitlement_status_row(self.settings, secret=self.license_secret)
+
+    def _signed_entitlement_token(self) -> str:
+        token = self.licensing_context.token(
+            str(self.settings.get("tech_connector_license_token") or "")
+        )
+        return token if token and not token.startswith(f"{LICENSE_TOKEN_PREFIX}.") else ""
 
     def _require_unlocked(self) -> LicenseEntitlement:
         entitlement = self.entitlement()
@@ -656,6 +708,29 @@ class TechConnectorHeadlessAPI:
             raise PermissionError(entitlement.reason or "Tech Connector license login is required.")
         if self.require_entitlement and "official_api_access" not in entitlement.capabilities:
             raise PermissionError("This license tier does not include official API access.")
+        signed_token = self._signed_entitlement_token()
+        if signed_token:
+            try:
+                from tech_connector.bridges.session_authorization import (
+                    bridge_session_path_for_context,
+                    ensure_bridge_session_for_evaluation,
+                )
+
+                evaluation = self.licensing_context.evaluate(
+                    token=signed_token,
+                    project_root=self.project_root or None,
+                    product=self.licensing_context.configuration.product,
+                    app_major_version=self.app_major_version,
+                    commercial_use=self.commercial_use,
+                )
+                ensure_bridge_session_for_evaluation(
+                    evaluation,
+                    path=bridge_session_path_for_context(self.licensing_context),
+                )
+            except Exception:
+                # Non-DCC API operations remain usable. A real DCC endpoint
+                # independently rejects requests without the local capability.
+                pass
         return entitlement
 
     def _tag(self, entitlement: LicenseEntitlement, *, operation: str = "", output_path: str | Path = "") -> dict[str, Any]:
@@ -2259,6 +2334,9 @@ def execute_action_graph(graph: dict[str, Any], **kwargs: Any) -> dict[str, Any]
         license_secret=kwargs.pop("license_secret", None),
         require_entitlement=kwargs.pop("require_entitlement", True),
         ui_window=kwargs.pop("ui_window", None),
+        licensing_context=kwargs.pop("licensing_context", None),
+        commercial_use=kwargs.pop("commercial_use", True),
+        app_major_version=kwargs.pop("app_major_version", None),
     )
     return api.execute_action_graph(graph, **kwargs)
 
@@ -2274,6 +2352,9 @@ def execute_prompt_chain(prompts: str | list[str] | tuple[str, ...], **kwargs: A
         require_entitlement=kwargs.pop("require_entitlement", True),
         command_router=kwargs.pop("command_router", None),
         ui_window=kwargs.pop("ui_window", None),
+        licensing_context=kwargs.pop("licensing_context", None),
+        commercial_use=kwargs.pop("commercial_use", True),
+        app_major_version=kwargs.pop("app_major_version", None),
     )
     return api.execute_prompt_chain(prompts, **kwargs)
 
@@ -2285,7 +2366,10 @@ def call_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
     api_kwargs = {
         key: kwargs.pop(key)
         for key in list(kwargs.keys())
-        if key in {"settings", "project_root", "license_secret", "require_entitlement", "ui_window"}
+        if key in {
+            "settings", "project_root", "license_secret", "require_entitlement", "ui_window",
+            "licensing_context", "commercial_use", "app_major_version",
+        }
     }
     call_kwargs = kwargs.pop("kwargs", None)
     return TechConnectorHeadlessAPI(**api_kwargs).call_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
@@ -2298,7 +2382,11 @@ def call_dcc_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
     api_kwargs = {
         key: kwargs.pop(key)
         for key in list(kwargs.keys())
-        if key in {"settings", "project_root", "license_secret", "require_entitlement", "command_router", "ui_window"}
+        if key in {
+            "settings", "project_root", "license_secret", "require_entitlement",
+            "command_router", "ui_window", "licensing_context", "commercial_use",
+            "app_major_version",
+        }
     }
     call_kwargs = kwargs.pop("kwargs", None)
     return TechConnectorHeadlessAPI(**api_kwargs).call_dcc_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
@@ -2320,6 +2408,9 @@ def _reasoning_api_from_kwargs(kwargs: dict[str, Any]) -> TechConnectorHeadlessA
             "runtime_kernel",
             "runtime_packages",
             "ui_window",
+            "licensing_context",
+            "commercial_use",
+            "app_major_version",
         }
     }
     return TechConnectorHeadlessAPI(**api_kwargs)

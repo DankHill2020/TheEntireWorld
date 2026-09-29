@@ -243,6 +243,15 @@ class MainWindowEditorMixin:
         scene = self._choose_tc_scene()
         if not scene:
             return False
+        return self.play_tc_scene_path(scene)
+
+    def play_tc_scene_path(self, scene: str) -> bool:
+        """Launch a known level without reopening the legacy scene picker."""
+        scene = str(Path(scene).resolve()) if scene else ""
+        if not scene or not Path(scene).is_file():
+            QMessageBox.warning(self, "Level unavailable", "Save or choose a .tcscene level before playing.")
+            return False
+        self.settings["last_tc_player_scene"] = scene
         active = getattr(self, "_tc_player_worker", None)
         if active is not None and active.isRunning():
             QMessageBox.information(self, "Player active", "A TC player action is already running.")
@@ -291,6 +300,7 @@ class MainWindowEditorMixin:
         self.poll_tc_runtime_log()
         self.engine_stop_btn.setEnabled(False)
         self.engine_console_output.appendPlainText("TC Play In Editor stopped.")
+        self._set_kingdom_session_state("ready", "Playtest stopped. Editing state is preserved in Garden.")
         return True
 
     def _tc_play_started(self, session) -> None:
@@ -310,6 +320,7 @@ class MainWindowEditorMixin:
             f"TC standalone PIE started (PID {session.process.pid}).\n"
             f"Runtime profile: {session.profile_log}"
         )
+        self._set_kingdom_session_state("playing", f"Playing current level (PID {session.process.pid})")
 
     def poll_tc_runtime_log(self) -> None:
         session = getattr(self, "_tc_pie_session", None)
@@ -353,6 +364,7 @@ class MainWindowEditorMixin:
             self.engine_stop_btn.setEnabled(False)
             self.engine_console_target.setText("Target: active TC scene")
             self.engine_console_output.appendPlainText(f"TC Play In Editor exited with code {return_code}.")
+            self._set_kingdom_session_state("ready", f"Playtest exited with code {return_code}.")
 
     def _tc_player_built(self, receipt) -> None:
         self.engine_build_player_btn.setEnabled(True)
@@ -369,6 +381,7 @@ class MainWindowEditorMixin:
         self.engine_build_player_btn.setEnabled(True)
         self._tc_player_worker = None
         self.engine_console_output.appendPlainText(f"TC player action failed: {message}")
+        self._set_kingdom_session_state("error", str(message))
 
     def update_cursor_status(self):
         if not hasattr(self, "editor_status_label"):
@@ -2967,6 +2980,8 @@ class MainWindowEditorMixin:
         path = QFileDialog.getExistingDirectory(self, "Load Project", start)
         if not path:
             return
+        if not self.authorize_project_path(path):
+            return
         active = self.service.set_active_project(path)
         self.settings = self.service.settings
         self.update_project_header()
@@ -2980,6 +2995,8 @@ class MainWindowEditorMixin:
             return
         path = self.recent_project_box.currentData()
         if not path:
+            return
+        if not self.authorize_project_path(path):
             return
         active = self.service.set_active_project(path)
         self.settings = self.service.settings

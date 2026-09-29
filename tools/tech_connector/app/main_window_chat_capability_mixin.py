@@ -1,5 +1,11 @@
 """Capability routing, clarification, and response methods for chat runtime."""
 
+from __future__ import annotations
+
+from __future__ import annotations
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -543,10 +549,16 @@ class MainWindowChatCapabilityMixin:
             approve_btn.setToolTip("Use the selected context and continue the pending operation")
             approve_btn.clicked.connect(self._submit_chat_clarification_form)
             layout.addWidget(approve_btn)
-        cancel_btn = QPushButton("Deny" if not is_confirmation else "Cancel")
-        cancel_btn.setToolTip("Cancel this pending operation")
-        cancel_btn.clicked.connect(lambda checked=False: self._submit_chat_clarification_value("cancel"))
-        layout.addWidget(cancel_btn)
+        has_cancel_control = any(
+            str(control.get("value") or "").strip().lower() in {"cancel", "deny"}
+            for control in controls
+            if str(control.get("type") or "") == "button"
+        )
+        if not has_cancel_control:
+            cancel_btn = QPushButton("Deny" if not is_confirmation else "Cancel")
+            cancel_btn.setToolTip("Cancel this pending operation")
+            cancel_btn.clicked.connect(lambda checked=False: self._submit_chat_clarification_value("cancel"))
+            layout.addWidget(cancel_btn)
         layout.addStretch(1)
         widget.setVisible(True)
         for control in controls[:6]:

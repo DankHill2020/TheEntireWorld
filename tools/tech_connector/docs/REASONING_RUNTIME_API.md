@@ -1029,9 +1029,11 @@ Constructor arguments are accepted by these functions:
 
 - `settings`
 - `project_root`
-- `license_secret`
 - `require_entitlement`
 - `command_router`
+- `licensing_context`
+- `commercial_use`
+- `app_major_version`
 
 Operation-specific arguments remain separate:
 

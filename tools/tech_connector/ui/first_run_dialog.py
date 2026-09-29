@@ -1,5 +1,7 @@
 """First-run setup dialog."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -41,16 +43,20 @@ class FirstRunDialog(QDialog):
         title = QLabel("Set up Tech Connector")
         set_ui_role(title, "title")
         title_column.addWidget(title)
-        subtitle = QLabel("Choose which projects and tools should be searchable")
+        subtitle = QLabel("A two-minute setup for project-aware answers and safer tool actions")
         set_ui_role(subtitle, "muted")
         title_column.addWidget(subtitle)
         brand.addLayout(title_column)
         brand.addStretch(1)
         layout.addLayout(brand)
 
+        step = QLabel("STEP 1 OF 2  •  Choose what Tech Connector may search")
+        set_ui_role(step, "sectionTitle")
+        layout.addWidget(step)
+
         info = QLabel(
-            "The current project is indexed by default. Add extra project/tool folders below "
-            "only when you want them included in the AST index."
+            "The current project is included automatically. Add another folder only when its files should be used "
+            "for search, code understanding, or answers. This does not upload, modify, or execute those files."
         )
         info.setWordWrap(True)
         set_ui_role(info, "muted")
@@ -61,6 +67,10 @@ class FirstRunDialog(QDialog):
         layout.addWidget(directories_title)
 
         self.dir_list = QListWidget()
+        self.dir_list.setAccessibleName("Indexed project and tool directories")
+        self.dir_list.setToolTip(
+            "Folders Tech Connector can index for project-aware search. Default folders cannot be removed here."
+        )
         for d in ASSUMED_DIRS:
             item = QListWidgetItem("[default] " + d)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
@@ -75,23 +85,41 @@ class FirstRunDialog(QDialog):
         add_btn = QPushButton("Add Tool/Project Directory")
         configure_button(add_btn, "folder", text="Add directory", role="secondary")
         add_btn.clicked.connect(self.add_dir)
+        add_btn.setToolTip("Add another project or tools folder to the searchable knowledge index.")
         row.addWidget(add_btn)
 
         remove_btn = QPushButton("Remove Selected Extra")
         configure_button(remove_btn, "close", text="Remove selected", role="danger")
         remove_btn.clicked.connect(self.remove_selected_extra)
+        remove_btn.setToolTip("Remove the selected extra folder from future indexing. Files on disk are not deleted.")
         row.addWidget(remove_btn)
         layout.addLayout(row)
 
-        self.auto_index = QCheckBox("Build AST knowledge index after setup")
+        next_step = QLabel("STEP 2 OF 2  •  Prepare project knowledge")
+        set_ui_role(next_step, "sectionTitle")
+        layout.addWidget(next_step)
+
+        self.auto_index = QCheckBox("Index new and changed files after setup (recommended)")
         self.auto_index.setChecked(bool(self.settings.get("auto_index_on_first_run", True)))
+        self.auto_index.setToolTip(
+            "Builds a local searchable index so questions can use real files and symbols. "
+            "You can rebuild or disable indexing later from Project Tools."
+        )
         layout.addWidget(self.auto_index)
+
+        outcome = QLabel(
+            "After setup: load a project, ask what you want in ordinary language, and review the context strip before sending. "
+            "Tech Connector will surface relevant tools when they are needed."
+        )
+        outcome.setWordWrap(True)
+        set_ui_role(outcome, "muted")
+        layout.addWidget(outcome)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         configure_button(
             buttons.button(QDialogButtonBox.Ok),
             "check",
-            text="Save setup",
+            text="Save and continue",
             role="primary",
         )
         configure_button(

@@ -1,6 +1,12 @@
 """Extracted MainWindow methods. Generated from the uploaded monolithic file."""
 
 
+from __future__ import annotations
+
+from __future__ import annotations
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -1713,6 +1719,12 @@ class MainWindowUiMixin:
         workflows_layout.addWidget(workflows_splitter, 1)
         self.workspace_tabs.addTab(workflows_tab, "Pipelines")
 
+        # Assets is a first-class engine workspace, matching the familiar
+        # Content Browser / Project / FileSystem role in other editors. Keep it
+        # after legacy tabs so older index-based routes remain compatible.
+        self._assets_workspace_tab = self._build_assets_workspace_tab()
+        self.workspace_tabs.addTab(self._assets_workspace_tab, "Assets")
+
         self.workspace_area_splitter = QSplitter(Qt.Horizontal)
         self.workspace_area_splitter.setChildrenCollapsible(False)
         self.workspace_area_splitter.setHandleWidth(8)
@@ -2304,30 +2316,57 @@ class MainWindowUiMixin:
     def _build_the_kingdom_workspace_tab(self):
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(7)
 
-        header = QLabel("The Kingdom Runtime Workspace")
-        header.setStyleSheet("font-weight: bold; color: #b9dcff; font-size: 14px;")
-        layout.addWidget(header)
+        header_row = QHBoxLayout()
+        header = QLabel("Play & Build  ·  Kingdom")
+        header.setStyleSheet("font-weight: 700; color: #e9f5ff; font-size: 15px;")
+        header_row.addWidget(header)
+        self.kingdom_mode_badge = QLabel("EDIT READY")
+        self.kingdom_mode_badge.setStyleSheet(
+            "background:#123029; color:#63f2ad; border:1px solid #246b53; "
+            "border-radius:9px; padding:2px 8px; font-size:10px; font-weight:700;"
+        )
+        header_row.addWidget(self.kingdom_mode_badge)
+        header_row.addStretch(1)
+        layout.addLayout(header_row)
+
+        subtitle = QLabel("Garden authors the level. Kingdom plays the same saved .tcscene as an isolated runtime copy.")
+        subtitle.setStyleSheet("color:#91a8ba; font-size:11px;")
+        layout.addWidget(subtitle)
 
         action_row = QHBoxLayout()
-        play_btn = QPushButton("Play")
-        play_btn.setToolTip("Run the current .tcscene flow in the runtime launcher.")
-        play_btn.clicked.connect(self.play_tc_scene)
+        garden_btn = QPushButton("Edit Level in Garden")
+        garden_btn.setToolTip("Open the authoritative asset and level editing viewport.")
+        garden_btn.clicked.connect(self.open_garden_workspace_tab)
+
+        sync_btn = QPushButton("Sync Changes")
+        sync_btn.setToolTip("Save the Garden level and publish changed chunks to a connected playtest.")
+        sync_btn.clicked.connect(self._save_and_sync_garden_level)
+
+        play_btn = QPushButton("▶  Play Current Level")
+        play_btn.setObjectName("primaryAction")
+        play_btn.setToolTip("Save the Garden level and launch that exact .tcscene in Play In Editor.")
+        play_btn.clicked.connect(self._play_current_garden_level)
 
         stop_btn = QPushButton("Stop")
         stop_btn.setToolTip("Stop an active runtime session.")
         stop_btn.clicked.connect(self.stop_tc_play_in_editor)
+        stop_btn.setEnabled(False)
+        self.kingdom_play_btn = play_btn
+        self.kingdom_stop_btn = stop_btn
 
-        build_player_btn = QPushButton("Build Player")
+        build_player_btn = QPushButton("Package…")
         build_player_btn.setToolTip("Build a standalone runtime player from this scene.")
         build_player_btn.clicked.connect(self.build_tc_windows_player)
 
-        engine_btn = QPushButton("Open Engine Console")
-        engine_btn.setToolTip("Jump to the Editor tab for full runtime console controls.")
+        engine_btn = QPushButton("Console")
+        engine_btn.setToolTip("Open advanced runtime diagnostics and command controls.")
         engine_btn.clicked.connect(lambda: self._ensure_visible_workspace_tab("Editor"))
 
+        action_row.addWidget(garden_btn)
+        action_row.addWidget(sync_btn)
         action_row.addWidget(play_btn)
         action_row.addWidget(stop_btn)
         action_row.addWidget(build_player_btn)
@@ -2335,6 +2374,95 @@ class MainWindowUiMixin:
         action_row.addStretch(1)
         layout.addLayout(action_row)
 
+        self.kingdom_level_label = QLabel("Level: No Garden level connected")
+        self.kingdom_level_label.setStyleSheet(
+            "background:#0b141d; color:#b9d6e8; border:1px solid #1d3242; border-radius:4px; padding:6px 9px;"
+        )
+        layout.addWidget(self.kingdom_level_label)
+
+        workspace = QSplitter(Qt.Horizontal, container)
+        workspace.setChildrenCollapsible(False)
+
+        hierarchy_panel = QFrame(workspace)
+        hierarchy_layout = QVBoxLayout(hierarchy_panel)
+        hierarchy_layout.setContentsMargins(7, 7, 7, 7)
+        hierarchy_layout.addWidget(QLabel("WORLD OUTLINER"))
+        self.kingdom_world_outliner = QTreeWidget(hierarchy_panel)
+        self.kingdom_world_outliner.setHeaderLabels(["Actor", "Type"])
+        self.kingdom_world_outliner.setMinimumWidth(210)
+        hierarchy_layout.addWidget(self.kingdom_world_outliner, 1)
+        workspace.addWidget(hierarchy_panel)
+
+        viewport_panel = QFrame(workspace)
+        viewport_panel.setObjectName("kingdomViewportPanel")
+        viewport_layout = QVBoxLayout(viewport_panel)
+        viewport_layout.setContentsMargins(0, 0, 0, 0)
+        viewport_toolbar = QHBoxLayout()
+        viewport_toolbar.setContentsMargins(8, 5, 8, 5)
+        viewport_toolbar.addWidget(QLabel("RUNTIME PREVIEW"))
+        viewport_toolbar.addStretch(1)
+        self.kingdom_viewport_status = QLabel("Waiting for a Garden level")
+        self.kingdom_viewport_status.setStyleSheet("color:#7fd7ff; font-size:10px;")
+        viewport_toolbar.addWidget(self.kingdom_viewport_status)
+        viewport_layout.addLayout(viewport_toolbar)
+        try:
+            from tech_connector.ui.three_d_gpu_viewport import ThreeDGpuViewport
+
+            self.kingdom_runtime_viewport = ThreeDGpuViewport(viewport_panel)
+            self.kingdom_runtime_viewport.setMinimumSize(440, 300)
+            viewport_layout.addWidget(self.kingdom_runtime_viewport, 1)
+        except Exception as exc:
+            self.kingdom_runtime_viewport = None
+            unavailable = QLabel(
+                "Runtime preview is unavailable on this graphics backend.\n"
+                "Level editing remains available in Garden.\n\n" + str(exc)
+            )
+            unavailable.setAlignment(Qt.AlignCenter)
+            unavailable.setStyleSheet("background:#05090d; color:#8fa5b5; padding:24px;")
+            viewport_layout.addWidget(unavailable, 1)
+        workspace.addWidget(viewport_panel)
+
+        details_panel = QFrame(workspace)
+        details_layout = QVBoxLayout(details_panel)
+        details_layout.setContentsMargins(8, 7, 8, 7)
+        details_layout.addWidget(QLabel("DETAILS"))
+        self.kingdom_details_title = QLabel("Nothing selected")
+        self.kingdom_details_title.setStyleSheet("color:#e7f6ff; font-weight:700; font-size:13px;")
+        details_layout.addWidget(self.kingdom_details_title)
+        self.kingdom_details_body = QLabel(
+            "Select an actor to inspect it. Asset transforms and materials are edited in Garden; gameplay behavior runs here."
+        )
+        self.kingdom_details_body.setWordWrap(True)
+        self.kingdom_details_body.setStyleSheet("color:#91a8ba;")
+        details_layout.addWidget(self.kingdom_details_body)
+        details_layout.addStretch(1)
+        details_panel.setMinimumWidth(220)
+        workspace.addWidget(details_panel)
+        workspace.setStretchFactor(0, 0)
+        workspace.setStretchFactor(1, 1)
+        workspace.setStretchFactor(2, 0)
+        workspace.setSizes([230, 900, 260])
+        layout.addWidget(workspace, 1)
+
+        def _inspect_runtime_actor():
+            item = self.kingdom_world_outliner.currentItem()
+            if item is None:
+                return
+            self.kingdom_details_title.setText(item.text(0))
+            self.kingdom_details_body.setText(
+                f"Type: {item.text(1) or 'Scene object'}\n\n"
+                "Authoring source: Garden\nRuntime source: synchronized level snapshot"
+            )
+
+        self.kingdom_world_outliner.itemSelectionChanged.connect(_inspect_runtime_actor)
+
+        advanced_toggle = QPushButton("Advanced Runtime Commands  ›")
+        advanced_toggle.setCheckable(True)
+        advanced_toggle.setToolTip("Show the low-level command field. Most users do not need this.")
+        layout.addWidget(advanced_toggle)
+        advanced_panel = QWidget(container)
+        advanced_layout = QVBoxLayout(advanced_panel)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
         command_row = QHBoxLayout()
         command_label = QLabel("Runtime Command:")
         command_row.addWidget(command_label)
@@ -2355,13 +2483,290 @@ class MainWindowUiMixin:
 
         run_btn.clicked.connect(_run_command)
         command_row.addWidget(run_btn)
-        layout.addLayout(command_row)
+        advanced_layout.addLayout(command_row)
 
         hint = QLabel("Output is shown in the shared Engine Console panel on the Editor tab.")
         hint.setStyleSheet("color: #84b5ff; font-size: 11px;")
-        layout.addWidget(hint)
-        layout.addStretch(1)
+        advanced_layout.addWidget(hint)
+        advanced_panel.setVisible(False)
+        advanced_toggle.toggled.connect(advanced_panel.setVisible)
+        advanced_toggle.toggled.connect(
+            lambda checked: advanced_toggle.setText("Advanced Runtime Commands  ⌄" if checked else "Advanced Runtime Commands  ›")
+        )
+        layout.addWidget(advanced_panel)
+        self._update_kingdom_level_context()
+        QTimer.singleShot(0, self._sync_kingdom_preview_from_garden)
         return container
+
+    def _build_assets_workspace_tab(self):
+        from tech_connector.services.project_directory_service import resolve_project_directories
+        from tech_connector.ui.game_engine.asset_browser import AssetBrowserWidget
+        from tech_connector.ui.game_engine.asset_editor_routing import AssetEditorRouter
+
+        directories = resolve_project_directories(getattr(self, "settings", {}) or {})
+        browser = AssetBrowserWidget(directories.game_project, parent=self)
+        router = AssetEditorRouter()
+        router.register("garden", "Garden", self._open_asset_in_garden)
+        specialized_routes = {"garden", "ophanim", "texture", "media", "code_graph", "generic"}
+        editor_ids = {
+            descriptor.editor_id for descriptor in browser.registry.all()
+            if descriptor.editor_id not in specialized_routes
+        }
+        for editor_id in sorted(editor_ids):
+            router.register(editor_id, "Asset Editor", self._open_asset_in_dedicated_editor)
+        router.register("ophanim", "Ophanim", self._open_asset_in_ophanim)
+        router.register("texture", "Ophanim", self._open_asset_in_ophanim)
+        router.register("media", "Ophanim", self._open_asset_in_ophanim)
+        router.register("code_graph", "Editor", self._open_asset_in_code_editor)
+        for editor_id in ("generic",):
+            router.register(editor_id, "Assets", self._open_asset_in_assets_inspector)
+        self.asset_editor_router = router
+        browser.assetActivated.connect(self._open_asset_from_browser)
+        browser.statusMessage.connect(self._show_asset_browser_status)
+        self.asset_browser = browser
+        return browser
+
+    def _show_asset_browser_status(self, message: str) -> None:
+        text = str(message or "")
+        if not text:
+            return
+        status = getattr(self, "status_label", None)
+        if status is not None and hasattr(status, "setText"):
+            status.setText(text)
+        append = getattr(self, "append", None)
+        if callable(append):
+            append(f"\n[Assets] {text}\n")
+
+    def _open_asset_from_browser(self, path: str, type_id: str, _asset_id: str = "") -> None:
+        source = str(path or "")
+        kind = str(type_id or "")
+        if not source:
+            return
+        browser = getattr(self, "asset_browser", None)
+        descriptor = browser.registry.descriptor(kind) if browser is not None else None
+        router = getattr(self, "asset_editor_router", None)
+        if descriptor is None or router is None:
+            self._show_asset_browser_status(f"No editor route is registered for {Path(source).name}.")
+            return
+        receipt = router.open(source, descriptor, _asset_id)
+        self._show_asset_browser_status(receipt.message)
+
+    def _open_asset_in_garden(self, path: str, descriptor, asset_id: str) -> bool:
+        self.open_garden_workspace_tab()
+        viewer = self._garden_viewer_widget()
+        if viewer is None:
+            return False
+        if descriptor.type_id == "tc.level":
+            loaded, _message = viewer.load_federated_scene_file(path, interactive=True)
+            return bool(loaded)
+        if hasattr(viewer, "select_asset_for_authoring"):
+            return bool(viewer.select_asset_for_authoring(path, descriptor.type_id, asset_id))
+        return True
+
+    def _open_asset_in_ophanim(self, path: str, descriptor, _asset_id: str) -> bool:
+        self.open_ophanim_workspace_tab()
+        editor = getattr(self, "_ophanim_workspace_tab", None)
+        if editor is None:
+            return False
+        loader_name = "load_project_file" if descriptor.type_id == "tc.image_project" else "load_image"
+        loader = getattr(editor, loader_name, None)
+        return bool(loader(path)) if callable(loader) else False
+
+    def _open_asset_in_code_editor(self, path: str, _descriptor, _asset_id: str) -> bool:
+        if not hasattr(self, "open_file_at_line"):
+            return False
+        self.open_file_at_line(path, 1)
+        return True
+
+    def _open_asset_in_assets_inspector(self, _path: str, _descriptor, _asset_id: str) -> bool:
+        self._ensure_visible_workspace_tab("Assets")
+        return True
+
+    def _build_asset_editor_workspace_tab(self):
+        from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor
+
+        browser = getattr(self, "asset_browser", None)
+        if browser is None:
+            self._ensure_visible_workspace_tab("Assets")
+            browser = getattr(self, "asset_browser", None)
+        if browser is None:
+            return None
+        editor = DedicatedAssetEditor(
+            browser.project_root, browser.database, browser.registry, parent=self
+        )
+        editor.previewRequested.connect(self._preview_asset_from_dedicated_editor)
+        editor.locateRequested.connect(self._locate_asset_in_browser)
+        editor.statusMessage.connect(self._show_asset_browser_status)
+        self.dedicated_asset_editor = editor
+        return editor
+
+    def _open_asset_in_dedicated_editor(self, _path: str, _descriptor, asset_id: str) -> bool:
+        self._show_workspace_tab(
+            "Asset Editor", "_asset_editor_workspace_tab", self._build_asset_editor_workspace_tab
+        )
+        editor = getattr(self, "dedicated_asset_editor", None)
+        return bool(editor and editor.open_asset(asset_id))
+
+    def _preview_asset_from_dedicated_editor(self, path: str, type_id: str, asset_id: str) -> None:
+        browser = getattr(self, "asset_browser", None)
+        descriptor = browser.registry.descriptor(type_id) if browser is not None else None
+        if descriptor is None:
+            return
+        if type_id in {"tc.texture", "tc.video", "tc.image_project"}:
+            self._open_asset_in_ophanim(path, descriptor, asset_id)
+        else:
+            self.open_garden_workspace_tab()
+            viewer = self._garden_viewer_widget()
+            placeable = {
+                "tc.static_mesh", "tc.skeletal_mesh", "tc.prefab", "tc.effect_system",
+                "tc.simulation_profile", "tc.audio_clip", "tc.behavior", "tc.gameplay_graph",
+            }
+            if viewer is not None and type_id in placeable and hasattr(viewer, "place_asset_from_browser"):
+                viewer.place_asset_from_browser(
+                    {"path": path, "type_id": type_id, "asset_id": asset_id, "name": Path(path).name}
+                )
+            else:
+                self._open_asset_in_garden(path, descriptor, asset_id)
+
+    def _locate_asset_in_browser(self, asset_id: str) -> None:
+        from tech_connector.ui.game_engine.asset_browser import ASSET_ID_ROLE
+
+        self._ensure_visible_workspace_tab("Assets")
+        browser = getattr(self, "asset_browser", None)
+        if browser is None:
+            return
+        browser.search_edit.clear()
+        browser.set_family_filter("")
+        browser.set_folder_filter("")
+        for index in range(browser.asset_tree.topLevelItemCount()):
+            item = browser.asset_tree.topLevelItem(index)
+            if str(item.data(0, ASSET_ID_ROLE) or "") == str(asset_id):
+                browser.asset_tree.setCurrentItem(item)
+                browser.asset_tree.scrollToItem(item)
+                break
+
+    def _garden_viewer_widget(self):
+        garden_tab = getattr(self, "_garden_workspace_tab", None)
+        if garden_tab is None:
+            return None
+        return getattr(garden_tab, "garden_viewer", garden_tab)
+
+    def _update_kingdom_level_context(self) -> None:
+        viewer = self._garden_viewer_widget()
+        level_label = getattr(self, "kingdom_level_label", None)
+        status_label = getattr(self, "kingdom_viewport_status", None)
+        outliner = getattr(self, "kingdom_world_outliner", None)
+        if viewer is None:
+            if level_label is not None:
+                level_label.setText("Level: No Garden level connected — choose ‘Edit Level in Garden’ to begin")
+            return
+        path = str(getattr(viewer, "_federated_scene_path", "") or "")
+        dirty = bool(getattr(getattr(viewer, "_scene_lifecycle", None), "dirty", False))
+        level_name = Path(path).name if path else "Untitled Garden Level"
+        if level_label is not None:
+            level_label.setText(f"Level: {level_name}{'  •  Unsaved changes' if dirty else '  •  Synced'}")
+        if outliner is not None:
+            outliner.clear()
+            proxies = list(getattr(getattr(viewer, "mesh", None), "scene_proxy_objects", []) or [])
+            for index, proxy in enumerate(proxies):
+                getter = proxy.get if hasattr(proxy, "get") else lambda key, default=None: getattr(proxy, key, default)
+                name = str(getter("name") or getter("object_name") or getter("path") or f"Actor {index + 1}")
+                kind = str(getter("type") or getter("object_type") or getter("provider_id") or "Scene object")
+                outliner.addTopLevelItem(QTreeWidgetItem([name, kind]))
+            if not proxies:
+                outliner.addTopLevelItem(QTreeWidgetItem(["No compiled actors yet", "Open or create assets in Garden"]))
+        if status_label is not None:
+            status_label.setText("Previewing the Garden scene" if path else "Unsaved Garden scene")
+
+    def _sync_kingdom_preview_from_garden(self) -> bool:
+        viewer = self._garden_viewer_widget()
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        if viewer is None:
+            self._update_kingdom_level_context()
+            return False
+        if preview is not None:
+            try:
+                preview.set_scene(
+                    viewer.mesh,
+                    dict(getattr(viewer, "_dcc_deformation_bindings", {}) or {}),
+                    topology_signature=str(getattr(viewer, "_last_scene_topology_signature", "") or ""),
+                )
+                camera = getattr(viewer, "viewport_camera", None)
+                if camera is not None:
+                    preview.set_camera(camera.eye, camera.target, camera.fov_degrees, camera.aspect_ratio)
+                world = getattr(viewer, "simulation_world", None)
+                if world is not None:
+                    preview.update_effects(world)
+            except Exception as exc:
+                if getattr(self, "kingdom_viewport_status", None) is not None:
+                    self.kingdom_viewport_status.setText(f"Preview fallback: {exc}")
+        self._update_kingdom_level_context()
+        return True
+
+    def _save_and_sync_garden_level(self) -> str:
+        viewer = self._garden_viewer_widget()
+        if viewer is None:
+            self.open_garden_workspace_tab()
+            viewer = self._garden_viewer_widget()
+        if viewer is None:
+            return ""
+        path = str(getattr(viewer, "_federated_scene_path", "") or "")
+        saved = viewer._save_federated_scene_to_path(path) if path else viewer.save_federated_scene_dialog()
+        if not saved:
+            self._set_kingdom_session_state("ready", "Level was not saved; playtest was not changed.")
+            return ""
+        path = str(getattr(viewer, "_federated_scene_path", "") or "")
+        self.settings["last_tc_player_scene"] = path
+        self._sync_kingdom_preview_from_garden()
+        self._set_kingdom_session_state("ready", "Garden changes saved and synchronized.")
+        garden_status = getattr(self, "garden_sync_status", None)
+        if garden_status is not None:
+            garden_status.setText("SYNCED")
+        return path
+
+    def _play_current_garden_level(self) -> bool:
+        path = self._save_and_sync_garden_level()
+        if not path:
+            return False
+        self.open_the_kingdom_workspace_tab()
+        self._set_kingdom_session_state("launching", f"Launching {Path(path).name}…")
+        return self.play_tc_scene_path(path)
+
+    def _set_kingdom_session_state(self, state: str, message: str) -> None:
+        badge = getattr(self, "kingdom_mode_badge", None)
+        status = getattr(self, "kingdom_viewport_status", None)
+        labels = {
+            "playing": ("PLAYING", "background:#183b2d; color:#65f2a7; border-color:#2b8b61;"),
+            "launching": ("LAUNCHING", "background:#29334a; color:#8fd4ff; border-color:#42658c;"),
+            "error": ("NEEDS ATTENTION", "background:#46252b; color:#ff9ca8; border-color:#88424e;"),
+            "ready": ("EDIT READY", "background:#123029; color:#63f2ad; border-color:#246b53;"),
+        }
+        text, colors = labels.get(str(state), labels["ready"])
+        if badge is not None:
+            badge.setText(text)
+            badge.setStyleSheet(f"{colors} border-style:solid; border-width:1px; border-radius:9px; padding:2px 8px; font-size:10px; font-weight:700;")
+        if status is not None:
+            status.setText(str(message))
+        play_button = getattr(self, "kingdom_play_btn", None)
+        stop_button = getattr(self, "kingdom_stop_btn", None)
+        if play_button is not None:
+            play_button.setEnabled(state not in {"playing", "launching"})
+        if stop_button is not None:
+            stop_button.setEnabled(state == "playing")
+        garden_play = getattr(self, "garden_play_mode_btn", None)
+        garden_edit = getattr(self, "garden_edit_mode_btn", None)
+        garden_status = getattr(self, "garden_sync_status", None)
+        if garden_play is not None:
+            active = state in {"playing", "launching"}
+            garden_play.setChecked(active)
+            if active and garden_edit is not None:
+                garden_edit.setChecked(False)
+            elif not active and garden_edit is not None and not getattr(
+                getattr(self, "garden_simulate_mode_btn", None), "isChecked", lambda: False
+            )():
+                garden_edit.setChecked(True)
+        if garden_status is not None and state in {"playing", "launching", "error"}:
+            garden_status.setText({"playing": "PLAYING", "launching": "LAUNCHING", "error": "ERROR"}[state])
 
     def _build_ophanim_workspace_tab(self):
         try:
@@ -2373,11 +2778,51 @@ class MainWindowUiMixin:
 
     def _build_garden_workspace_tab(self):
         try:
-            from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
+            from tech_connector.services.project_directory_service import resolve_project_directories
+            from tech_connector.ui.game_engine.engine_workspace import EngineWorkspaceWindow
         except Exception as exc:
             QMessageBox.warning(self, "The Garden unavailable", str(exc))
             return None
-        return ThreeDMeshPainterViewport(parent=self)
+        directories = resolve_project_directories(getattr(self, "settings", {}) or {})
+        workspace = EngineWorkspaceWindow(directories.game_project, parent=self)
+        workspace.garden_viewer = workspace.viewport
+        workspace.viewport.invert_orbit_x = bool(self.settings.get("garden_invert_orbit_x", False))
+        workspace.viewport.invert_orbit_y = bool(self.settings.get("garden_invert_orbit_y", False))
+        workspace.playRequested.connect(lambda path: (self.open_the_kingdom_workspace_tab(), self.play_tc_scene_path(path)))
+        workspace.statusMessage.connect(self._show_asset_browser_status)
+        self.garden_edit_mode_btn = workspace.edit_action
+        self.garden_simulate_mode_btn = workspace.simulate_action
+        self.garden_play_mode_btn = workspace.play_action
+        self.garden_sync_status = workspace.status_label
+        self.engine_workspace = workspace
+        return workspace
+
+    def _set_garden_workspace_mode(self, mode: str) -> bool:
+        selected = str(mode or "edit").casefold()
+        if selected not in {"edit", "simulate", "play"}:
+            raise ValueError(f"Unknown Garden workspace mode: {mode}")
+        viewer = self._garden_viewer_widget()
+        if viewer is None:
+            return False
+        if hasattr(viewer, "set_simulation_playing"):
+            viewer.set_simulation_playing(selected == "simulate")
+        buttons = {
+            "edit": getattr(self, "garden_edit_mode_btn", None),
+            "simulate": getattr(self, "garden_simulate_mode_btn", None),
+            "play": getattr(self, "garden_play_mode_btn", None),
+        }
+        for key, button in buttons.items():
+            if button is not None:
+                button.setChecked(key == selected)
+        badge = getattr(self, "garden_sync_status", None)
+        if badge is not None:
+            badge.setText({"edit": "EDITING", "simulate": "SIMULATING", "play": "LAUNCHING"}[selected])
+        if selected == "play":
+            if self._play_current_garden_level():
+                return True
+            self._set_garden_workspace_mode("edit")
+            return False
+        return True
 
     def open_editor_workspace_tab(self):
         self._ensure_visible_workspace_tab("Editor")

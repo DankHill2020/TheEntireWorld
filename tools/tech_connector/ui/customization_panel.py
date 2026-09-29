@@ -1,5 +1,7 @@
 """Customization Panel for Swappable Models, Services, and Extensibility Settings."""
 
+from __future__ import annotations
+
 import json
 import importlib
 import sys

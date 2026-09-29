@@ -2,12 +2,31 @@
 
 The Studio separates two kinds of requests.
 
+## Local authorization boundary
+
+Official direct-host requests include a short-lived random bridge capability
+issued after Tech Connector validates the signed entitlement. The capability is
+restricted to supported host IDs, lasts no more than 12 hours, and is removed
+when the standalone application exits, the installation is deactivated, or the
+user signs out. It contains no account, project, scene, or financial metadata.
+
+The capability is added automatically. Do not place it in scripts, logs,
+screenshots, bug reports, project files, or source control. A bridge reporting
+`bridge_authorization_required` should be recovered by opening and activating
+Tech Connector—not by disabling the bridge check.
+
+This is a local same-user authorization boundary, not a sandbox against malware
+already running as that operating-system user. The session file is a bearer
+capability protected by a short lifetime and the user's application-data
+permissions. Any process that can read that user's private files or modify the
+installed client must be treated as already inside the local trust boundary.
+
 ## 1. Direct Host Actions
 
 Fast deterministic calls that do not need the LLM.
 
 ```text
-UI -> Maya commandPort -> result
+UI -> Maya authenticated JSON socket -> result
 UI -> Unreal HTTP bridge -> result
 UI -> Blender socket bridge -> result
 UI -> Substance Painter socket bridge -> result
@@ -53,9 +72,11 @@ modify a system
 
 ## Maya
 
-Maya direct actions use `maya_execute_and_capture` through the commandPort.
-Natural chat prompts can now route built-in generated Maya operations through
-that same bridge for navigation, selection, connections, constraints,
+Maya direct actions use a bounded localhost JSON socket. The server validates
+the automatically supplied host session before decoding code, then schedules
+execution on Maya's main thread and returns structured JSON. Natural chat
+prompts can route built-in generated Maya operations through that bridge for
+navigation, selection, connections, constraints,
 materials, skinning, `maya.cmds`, `maya.api.OpenMaya`, legacy `maya.OpenMaya`,
 and importable `maya_tools.*` calls.
 
@@ -84,7 +105,8 @@ Payload:
 {
   "function": "unreal_tools.get_skeletons.get_all_assets_of_type",
   "args": ["Skeleton", "/Game/"],
-  "kwargs": {}
+  "kwargs": {},
+  "bridge_session": "<automatically supplied; never hardcode>"
 }
 ```
 
@@ -196,12 +218,21 @@ current scene
 scene GameObjects
 debug project / find broken
 prototype / create / implement
-raw C# / editor execution through the Unity bridge
+typed asset, material, prefab, scene, and inspection commands
 ```
 
-Unity is present in the direct UI and bridge code. It still needs plugin
-registry parity before it is documented as a full plugin target alongside Maya,
-Unreal, Blender, Substance Painter, and MotionBuilder.
+Arbitrary C# evaluation is disabled in the Unity Editor bridge. Each typed
+request carries the automatically supplied host session and is rejected before
+main-thread dispatch when activation is absent or expired.
+
+## Photoshop development status
+
+The current Photoshop UXP bridge prototype cannot read Tech Connector's
+protected session file without a UXP-compatible pairing flow. It is therefore
+disabled in ordinary and frozen builds and is not an official licensed
+endpoint. Source developers can opt into the prototype only by enabling both
+the explicit development license bypass and
+`TECH_CONNECTOR_ENABLE_EXPERIMENTAL_PHOTOSHOP_BRIDGE=1`.
 
 ## UI Buttons
 

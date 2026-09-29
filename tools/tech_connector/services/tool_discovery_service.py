@@ -1,5 +1,7 @@
 """Service for indexing and discovering project internal functions and ingested third-party tools."""
 
+from __future__ import annotations
+
 import ast
 import time
 from collections import OrderedDict
@@ -378,13 +380,20 @@ def extract_symbols_from_file(file_path: Path) -> list[dict]:
 def list_internal_functions(
     project_roots: list[str],
     *,
-    max_files: int = 1500,
-    time_budget_seconds: float = 5.0,
+    max_files: int | None = 1500,
+    time_budget_seconds: float | None = 5.0,
 ) -> list[dict]:
+    """Discover Python symbols below the supplied project roots.
+
+    ``None`` disables the corresponding safety limit.  Interactive callers can
+    keep the bounded defaults, while background inventory jobs can request a
+    complete catalog for the project selected in the UI.
+    """
     all_funcs = []
     skip_dirs = {"external_tools", "thirdparty", "venv", ".venv", ".git", "__pycache__", "build", "dist", ".agents", ".gemini", "node_modules", ".idea", ".vscode", "tests", ".ai_studio", "Intermediate", "Saved", "DerivedDataCache"}
     started = time.monotonic()
     scanned = 0
+    scanned_paths: set[str] = set()
     
     for root in project_roots:
         root_path = Path(root)
@@ -392,13 +401,22 @@ def list_internal_functions(
             continue
             
         for path in root_path.rglob("*.py"):
-            if scanned >= max_files or time.monotonic() - started >= time_budget_seconds:
+            if max_files is not None and scanned >= max_files:
+                return all_funcs
+            if time_budget_seconds is not None and time.monotonic() - started >= time_budget_seconds:
                 return all_funcs
             # Check if any parent part is in skip_dirs
             if any(part in skip_dirs for part in path.parts):
                 continue
             if not path.is_file():
                 continue
+            try:
+                path_key = str(path.resolve()).casefold()
+            except OSError:
+                path_key = str(path).casefold()
+            if path_key in scanned_paths:
+                continue
+            scanned_paths.add(path_key)
             scanned += 1
             all_funcs.extend(extract_symbols_from_file(path))
             

@@ -124,13 +124,13 @@ class MainWindowDccMixin:
     def direct_maya_execute(self, code, label="Maya Direct", timeout=5):
         port = self.command_router.maya.find_port()
         if not port:
-            self.set_card("maya", "bad", "No commandPort")
+            self.set_card("maya", "bad", "Bridge not found")
             self.last_user_prompt = f"[{label}] {code}"
             self.append(f"\nYOU [{label}]:\n```python\n{code}\n```\n")
             self.append(
-                "[Maya Direct] No Maya commandPort found. Start Maya and run maya_command_port_setup.py.\n"
+                "[Maya Direct] No authenticated Maya bridge found. Start Maya and update its Tech Connector bridge.\n"
             )
-            self._prompt_launch_missing_dcc_bridge("maya", "Maya commandPort was not found.", lambda: self.direct_maya_execute(code, label, timeout), label)
+            self._prompt_launch_missing_dcc_bridge("maya", "The authenticated Maya bridge was not found.", lambda: self.direct_maya_execute(code, label, timeout), label)
             return
         self.set_card("maya", "busy", f"Executing :{port}")
         self.last_user_prompt = f"[{label}] {code}"
@@ -194,13 +194,13 @@ class MainWindowDccMixin:
         }.get(preset, "Maya Preset")
         port = self.command_router.maya.find_port()
         if not port:
-            self.set_card("maya", "bad", "No commandPort")
+            self.set_card("maya", "bad", "Bridge not found")
             self.append(
-                "[Maya Direct] No Maya commandPort found. Start Maya and run maya_command_port_setup.py.\n"
+                "[Maya Direct] No authenticated Maya bridge found. Start Maya and update its Tech Connector bridge.\n"
             )
             self._prompt_launch_missing_dcc_bridge(
                 "maya",
-                "Maya commandPort was not found.",
+                "The authenticated Maya bridge was not found.",
                 lambda l=label: {
                     "Maya Selection": self.direct_maya_selection,
                     "Maya File": self.direct_maya_file,
@@ -215,9 +215,9 @@ class MainWindowDccMixin:
     def _emit_maya_preset(self, label, ok, result, port=None):
         port = port or self.command_router.maya.find_port()
         if not port:
-            self.set_card("maya", "bad", "No commandPort")
+            self.set_card("maya", "bad", "Bridge not found")
             self.append(
-                "[Maya Direct] No Maya commandPort found. Start Maya and run maya_command_port_setup.py.\n"
+                "[Maya Direct] No authenticated Maya bridge found. Start Maya and update its Tech Connector bridge.\n"
             )
             return
         code = {
@@ -253,9 +253,9 @@ class MainWindowDccMixin:
         self.append(f"\nYOU [{label}]:\n```python\n# Call function\n{call_str}\n```\n")
         port = self.command_router.maya.find_port()
         if not port:
-            self.set_card("maya", "bad", "No commandPort")
+            self.set_card("maya", "bad", "Bridge not found")
             self.append(
-                "[Maya Direct] No Maya commandPort found. Start Maya and run maya_command_port_setup.py.\n"
+                "[Maya Direct] No authenticated Maya bridge found. Start Maya and update its Tech Connector bridge.\n"
             )
             return
         self.set_card("maya", "busy", f"Executing :{port}")
@@ -2392,6 +2392,8 @@ class MainWindowDccMixin:
             return None
 
         uproject = Path(selected)
+        if not self.authorize_project_path(str(uproject.parent)):
+            return None
         try:
             self.service.set_active_project(str(uproject.parent))
             self.settings = self.service.settings

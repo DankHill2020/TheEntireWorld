@@ -1,5 +1,7 @@
 """Ollama model install/check/warm helpers for Tech Connector."""
 
+from __future__ import annotations
+
 import json
 import os
 import re

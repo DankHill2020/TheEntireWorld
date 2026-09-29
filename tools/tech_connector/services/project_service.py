@@ -256,10 +256,28 @@ def _exact_index_path_batches(paths: list[str]) -> list[list[str]]:
 
 
 def _exact_index_command(script: Path, paths: list[str]) -> list[str]:
-    command = [sys.executable, str(script), "--no-graph"]
+    command = [
+        sys.executable,
+        str(script),
+        "--no-graph",
+        "--no-fts",
+        "--no-symbol-lookup",
+    ]
     roots: list[str] = []
     for path in paths:
         command.extend(["--file", path])
+        for root in _project_roots(path):
+            if root not in roots:
+                roots.append(root)
+    for root in roots:
+        command.extend(["--root", root])
+    return command
+
+
+def _exact_index_finalize_command(script: Path, paths: list[str]) -> list[str]:
+    command = [sys.executable, str(script), "--graph-only"]
+    roots: list[str] = []
+    for path in paths:
         for root in _project_roots(path):
             if root not in roots:
                 roots.append(root)
@@ -307,7 +325,12 @@ def _run_exact_index_command(
             return True, output
         transient = any(
             marker in output.casefold()
-            for marker in ("database is locked", "database table is locked", "database is busy")
+            for marker in (
+                "database is locked",
+                "database table is locked",
+                "database is busy",
+                "knowledge index build already running",
+            )
         )
         if transient and attempt < 2:
             time.sleep(0.5 * (attempt + 1))
@@ -340,6 +363,7 @@ def _run_project_index_update_queue(debounce_seconds: float) -> None:
             batches = _exact_index_path_batches(pending)
             updated_count = 0
             failure = ""
+            deferred_for_active_build = False
             for batch_index, batch in enumerate(batches, start=1):
                 _set_project_index_status(
                     mode="updating",
@@ -352,13 +376,45 @@ def _run_project_index_update_queue(debounce_seconds: float) -> None:
                     startupinfo=startupinfo,
                 )
                 if not ok:
+                    if "knowledge index build already running" in process_detail.casefold():
+                        remaining = [
+                            path
+                            for remaining_batch in batches[batch_index - 1 :]
+                            for path in remaining_batch
+                        ]
+                        with _INDEX_UPDATE_LOCK:
+                            _INDEX_UPDATE_PENDING.update(remaining)
+                            queued_count = len(_INDEX_UPDATE_PENDING)
+                        _set_project_index_status(
+                            mode="queued",
+                            pending=queued_count,
+                            last_error="",
+                            detail="Waiting for the active knowledge index build to finish",
+                        )
+                        deferred_for_active_build = True
+                        break
                     failure = (
                         f"Exact index batch {batch_index}/{len(batches)} "
                         f"failed: {process_detail}"
                     )
                     break
                 updated_count += len(batch)
-            if failure:
+            if not failure and not deferred_for_active_build and pending:
+                _set_project_index_status(
+                    mode="updating",
+                    pending=0,
+                    detail="Finalizing knowledge search tables",
+                    last_error="",
+                )
+                ok, process_detail = _run_exact_index_command(
+                    _exact_index_finalize_command(script, pending),
+                    startupinfo=startupinfo,
+                )
+                if not ok:
+                    failure = f"Knowledge index finalization failed: {process_detail}"
+            if deferred_for_active_build:
+                pass
+            elif failure:
                 _set_project_index_status(
                     mode="error",
                     pending=0,
@@ -787,7 +843,11 @@ class ProjectIntelligenceService:
     ) -> Optional[Dict[str, Any]]:
         self._last_error = None
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        headers = {"Content-Type": "application/json"} if payload is not None else {}
+        from tech_connector.bridges.session_authorization import bridge_session_token
+
+        headers = {"X-Tech-Connector-Bridge-Session": bridge_session_token("unreal")}
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
             f"{self.base_url}{path}", data=data, headers=headers, method=method
         )

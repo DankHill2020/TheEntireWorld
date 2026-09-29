@@ -1922,8 +1922,16 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             list_internal_functions,
         )
 
-        roots = self.all_roots() if hasattr(self, "all_roots") else []
-        symbols = list_internal_functions(roots)
+        # The Node Graph catalog follows the project selected in the UI.  This
+        # runs on the background indexing thread, so finish the inventory rather
+        # than returning a misleading partial list after the interactive
+        # scanner's five-second safety budget.
+        roots = self.project_roots() if hasattr(self, "project_roots") else []
+        symbols = list_internal_functions(
+            roots,
+            max_files=None,
+            time_budget_seconds=None,
+        )
 
         ext_tools = self.settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
         if Path(ext_tools).exists():

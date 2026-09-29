@@ -64,6 +64,8 @@ def apply_main_window_layout_refinement(window) -> None:
     _simplify_project_width_controls(window)
     _hide_advanced_top_controls(window)
     _apply_saved_system_status_visibility(window)
+    from tech_connector.ui.ux_polish import apply_main_window_ux_polish
+    apply_main_window_ux_polish(window)
 
 
 def _install_status_visibility_api(window) -> None:
@@ -198,7 +200,8 @@ def _move_project_actions_to_left_panel(window) -> None:
     if hasattr(window, "build_dependency_graph_only"):
         graph_btn.clicked.connect(window.build_dependency_graph_only)
     else:
-        graph_btn.setEnabled(False)
+        from tech_connector.ui.ux_polish import explain_disabled
+        explain_disabled(graph_btn, "Build the knowledge index before creating a dependency graph.")
     row2.addWidget(graph_btn)
     install_btn = QPushButton("Install")
     configure_button(install_btn, "package", text="Install", role="secondary")

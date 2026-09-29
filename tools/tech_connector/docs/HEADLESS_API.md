@@ -12,11 +12,6 @@ complete examples, read
 from tech_connector.api import TechConnectorHeadlessAPI
 
 api = TechConnectorHeadlessAPI(
-    settings={
-        "tech_connector_license_token": "...",
-        "tech_connector_require_login": True,
-    },
-    license_secret="verification-secret",
     project_root="C:/project",
 )
 
@@ -210,8 +205,6 @@ experimenting outside the desktop app:
 ```python
 # 1. Create/load the same licensed API boundary the UI uses.
 api = TechConnectorHeadlessAPI(
-    settings=settings,
-    license_secret=license_secret,
     project_root="C:/project",
 )
 
@@ -361,17 +354,20 @@ Offline community/source-view mode does not unlock programmable API access.
 
 ### `TechConnectorHeadlessAPI(...)`
 
-- `settings`: Optional settings dictionary. Use this to pass
-  `tech_connector_license_token`, `tech_connector_require_login`, active project
-  settings, or test overrides. If omitted, Tech Connector loads saved settings.
+- `settings`: Optional non-secret settings dictionary. If omitted, Tech
+  Connector loads saved settings and the OS-protected entitlement cache.
 - `project_root`: Optional project directory used for prompt planning,
   provenance markers, and Python import roots.
-- `license_secret`: Verification secret for signed license tokens. Production
-  clients should receive this from the licensed deployment/runtime, not hardcode
-  it in user scripts.
-- `require_entitlement`: When `True`, API calls require a verified license tier
-  with `official_api_access`. Use `False` only for status checks, tests, or
-  non-executing tooling.
+- `licensing_context`: Optional licensing adapter override for embedded hosts and
+  tests. Production clients verify cached entitlements using the public keys in
+  `config/licensing.json`; no shared verification secret belongs in a client.
+- `commercial_use`: Declares whether the current operation is commercial so
+  Community project-registration and accepted-terms rules can be evaluated.
+- `app_major_version`: Optional host-version override for embedded tests. Normal
+  clients use the current Tech Connector major version automatically.
+- `require_entitlement`: Retained for source-development compatibility. Official
+  execution remains entitled unless an explicit non-frozen contributor bypass
+  is enabled; status and diagnostics remain available while locked.
 - `command_router`: Optional router override, mainly for tests or embedded
   services. Normal callers can omit it.
 

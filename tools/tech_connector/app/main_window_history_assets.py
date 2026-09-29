@@ -1,5 +1,11 @@
 """Main application window — thin orchestration layer."""
 
+from __future__ import annotations
+
+from __future__ import annotations
+
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -1973,16 +1979,19 @@ class MainWindowHistoryAssetsMixin:
             anthropic_key = anthropic_key_edit.text().strip()
             xai_key = xai_key_edit.text().strip()
 
+            tools_project = tools_project_edit.text().strip()
+            if not tools_project:
+                QMessageBox.warning(dialog, "Project Directories", "Tools Project is required.")
+                return
+            if not self.authorize_project_path(tools_project):
+                return
+
             self.settings["gemini_api_key"] = gemini_key
             self.settings["google_api_key"] = gemini_key
             self.settings["openai_api_key"] = openai_key
             self.settings["anthropic_api_key"] = anthropic_key
             self.settings["xai_api_key"] = xai_key
 
-            tools_project = tools_project_edit.text().strip()
-            if not tools_project:
-                QMessageBox.warning(dialog, "Project Directories", "Tools Project is required.")
-                return
             previous_tools_project = str(self.settings.get("active_project") or "")
             resolved_directories = self.service.set_project_directories(
                 tools_project=tools_project,

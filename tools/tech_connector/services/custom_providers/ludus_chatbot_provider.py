@@ -1,5 +1,7 @@
 """Mock Ludus Chatbot/Reasoning Provider streaming realistic context-sensitive Ludus sessions."""
 
+from __future__ import annotations
+
 import time
 from typing import Callable, List
 

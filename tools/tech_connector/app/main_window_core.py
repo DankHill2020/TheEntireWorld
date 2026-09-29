@@ -1,5 +1,11 @@
 """Extracted MainWindow methods. Generated from the uploaded monolithic file."""
 
+from __future__ import annotations
+
+from __future__ import annotations
+
+from __future__ import annotations
+
 import os
 import sys
 import threading
@@ -203,12 +209,20 @@ class MainWindowCoreMixin:
             return widget
         return self.fallback_editor
 
-    def __init__(self, *args, preload_for_splash: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        preload_for_splash: bool = False,
+        application_service=None,
+        license_preflight_complete: bool = False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self._preload_for_splash = bool(preload_for_splash)
+        self._license_preflight_complete = bool(license_preflight_complete)
         self._deferred_startup_model_install_missing = None
 
-        self.service = ApplicationService()
+        self.service = application_service or ApplicationService()
         self.setWindowTitle(f"{APP_DISPLAY_NAME} {APP_VERSION}")
         self.resize(1540, 960)
         try:
@@ -307,6 +321,7 @@ class MainWindowCoreMixin:
         self._last_completed_startup_stage_at = 0.0
         self._deferred_terms_prompt = False
         self._deferred_first_run_prompt = False
+        self._startup_prompts_started = False
         self._restoring_window_state = False
         self._window_state_save_pending = False
         self._restore_window_show_mode = ""
@@ -504,11 +519,21 @@ class MainWindowCoreMixin:
         QTimer.singleShot(int(1900 * scale), lambda: setattr(self, "_startup_defer_expensive_status", False))
         self._schedule_startup_step("symbol cache", 5000 if preload else 9000, self.start_async_symbol_indexing)
         self.status.setText("Ready")
-        if not self.settings.get("tos_accepted", False):
+        try:
+            from tech_connector.app.tos_dialog import TERMS_VERSION
+
+            terms_current = bool(self.settings.get("tos_accepted", False)) and str(
+                self.settings.get("tos_version") or ""
+            ) == TERMS_VERSION
+        except Exception:
+            terms_current = False
+        if not terms_current:
             if preload:
                 self._deferred_terms_prompt = True
             else:
                 QTimer.singleShot(900, lambda: self.show_terms_if_needed() and self.run_deferred_startup_prompts())
+        elif not preload:
+            QTimer.singleShot(900, self.run_deferred_startup_prompts)
         if not self.settings.get("first_run_complete"):
             if preload:
                 self._deferred_first_run_prompt = True
@@ -600,22 +625,32 @@ class MainWindowCoreMixin:
             pass
 
     def run_deferred_startup_prompts(self):
-        if bool(getattr(self, "_deferred_terms_prompt", False)):
+        # This method can be reached by both ordinary first-paint startup and
+        # the splash reveal coordinator. A modal dialog starts a nested Qt
+        # event loop, so a second queued callback can otherwise enter here and
+        # stack another activation dialog on top of the first one.
+        if bool(getattr(self, "_startup_prompts_started", False)):
+            return
+        self._startup_prompts_started = True
+        preflight_complete = bool(getattr(self, "_license_preflight_complete", False))
+        if not preflight_complete and bool(getattr(self, "_deferred_terms_prompt", False)):
             self._deferred_terms_prompt = False
             if not self.show_terms_if_needed():
                 return
+        if not preflight_complete and not self.show_entitlement_if_needed():
+            return
         if bool(getattr(self, "_deferred_first_run_prompt", False)):
             self._deferred_first_run_prompt = False
             QTimer.singleShot(0, self.show_first_run)
 
     def show_terms_if_needed(self) -> bool:
         try:
-            from tech_connector.app.tos_dialog import ensure_tos_accepted
+            from tech_connector.app.tos_dialog import TERMS_VERSION, ensure_tos_accepted
             accepted = bool(ensure_tos_accepted(self))
             if accepted:
                 try:
                     self.settings["tos_accepted"] = True
-                    self.settings["tos_version"] = "v2026.1"
+                    self.settings["tos_version"] = TERMS_VERSION
                 except Exception:
                     pass
             return accepted
@@ -623,7 +658,106 @@ class MainWindowCoreMixin:
             raise
         except Exception as exc:
             print(f"[Startup] Terms dialog failed: {exc}", flush=True)
+            QMessageBox.critical(
+                self,
+                "Terms unavailable",
+                "Tech Connector could not display or verify the current license terms and will close. "
+                "Restart the application or contact support if the problem continues.",
+            )
+            QTimer.singleShot(0, QApplication.instance().quit)
+            return False
+
+    def show_entitlement_if_needed(self) -> bool:
+        """Require a signed entitlement before enabling the official desktop app."""
+        reason = "A valid Tech Connector entitlement is required."
+        try:
+            from tech_connector.app.licensing_gate import ensure_entitlement
+
+            allowed, reason, warnings = ensure_entitlement(self.service, parent=self)
+        except Exception as exc:
+            allowed = False
+            reason = str(exc) or reason
+            warnings = ()
+        if allowed:
+            for warning in warnings:
+                self.append(f"\n[License] {warning}\n")
             return True
+        QMessageBox.critical(self, "Activation required", reason)
+        QTimer.singleShot(0, QApplication.instance().quit)
+        return False
+
+    def authorize_project_path(
+        self,
+        project_path: str,
+        *,
+        commercial_use: bool | None = None,
+    ) -> bool:
+        """Authorize a candidate project before it becomes active locally."""
+        try:
+            from tech_connector.app.licensing_gate import ensure_entitlement
+
+            allowed, reason, warnings = ensure_entitlement(
+                self.service,
+                project_root=project_path,
+                commercial_use=commercial_use,
+                parent=self,
+            )
+        except Exception as exc:
+            allowed = False
+            reason = str(exc) or "The project entitlement could not be verified."
+            warnings = ()
+        if allowed:
+            for warning in warnings:
+                self.append(f"\n[License] {warning}\n")
+            return True
+        QMessageBox.warning(
+            self,
+            "Project authorization required",
+            reason or "This license does not authorize the selected project.",
+        )
+        return False
+
+    def show_license_management_dialog(self) -> None:
+        from tech_connector.app.license_activation_dialog import LicenseManagementDialog
+
+        evaluation = self.service.evaluate_current_entitlement()
+        dialog = LicenseManagementDialog(
+            self.service.licensing_activation_client(),
+            evaluation,
+            self,
+            commercial_use=bool(
+                self.settings.get("tech_connector_commercial_use", True)
+            ),
+            acceptance_receipts_path=self.service.license_acceptance_receipts_path,
+        )
+        dialog.exec()
+        if dialog.session_removed:
+            QMessageBox.information(
+                self,
+                "License session removed",
+                "Tech Connector will close. Sign in again to reactivate this installation.",
+            )
+            QTimer.singleShot(0, QApplication.instance().quit)
+            return
+        refreshed_evaluation = self.service.evaluate_current_entitlement()
+        if refreshed_evaluation.decision.allowed:
+            self.service.record_license_acceptance(refreshed_evaluation)
+        desired_commercial_use = dialog.commercial_use_checkbox.isChecked()
+        current_commercial_use = bool(
+            self.settings.get("tech_connector_commercial_use", True)
+        )
+        if desired_commercial_use == current_commercial_use:
+            return
+        active_project = str(self.settings.get("active_project") or "")
+        if active_project and not self.authorize_project_path(
+            active_project,
+            commercial_use=desired_commercial_use,
+        ):
+            return
+        self.settings["tech_connector_commercial_use"] = desired_commercial_use
+        self.service.save_settings()
+        use_label = "commercial" if desired_commercial_use else "noncommercial"
+        self.append(f"\n[License] Current project use set to {use_label}.\n")
 
     def _prepare_hidden_first_show(self):
         if self.isVisible():

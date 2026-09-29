@@ -1,5 +1,7 @@
 """External tool review, manifest, and ranking helpers."""
 
+from __future__ import annotations
+
 import json
 import re
 from datetime import datetime

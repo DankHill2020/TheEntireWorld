@@ -371,10 +371,23 @@ class MainWindowWorkflowAuthoringMixin:
             self._report_workflow_builder_event(f"Could not validate pipeline data flow: {exc}")
             return []
         if issues:
-            self._report_workflow_builder_event(
-                f"Pipeline data flow needs attention: {len(issues)} input(s) need a value or connection."
+            warning_key = tuple(
+                sorted(
+                    (
+                        str(issue.get("step_id") or ""),
+                        str(issue.get("input") or ""),
+                        str(issue.get("message") or ""),
+                    )
+                    for issue in issues
+                )
             )
+            if warning_key != getattr(self, "_last_pipeline_data_flow_warning_key", None):
+                self._last_pipeline_data_flow_warning_key = warning_key
+                self._report_workflow_builder_event(
+                    f"Pipeline data flow needs attention: {len(issues)} input(s) need a value or connection."
+                )
         elif hasattr(self, "wf_test_status"):
+            self._last_pipeline_data_flow_warning_key = None
             try:
                 current = self.wf_test_status.text()
                 if "data flow" in current.lower() or "needs attention" in current.lower():

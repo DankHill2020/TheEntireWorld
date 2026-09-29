@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import json
 import os
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping
@@ -129,19 +128,9 @@ def initialize_tc_project_directories(
             path.mkdir(parents=True, exist_ok=True)
             created.append(path)
     if create_game and not directories.custom_game_project:
-        marker = directories.game_project / ".tech_connector_project"
-        if not marker.exists():
-            marker.write_text(
-                json.dumps(
-                    {
-                        "schema": "tech_connector.project.v1",
-                        "game_project": str(directories.game_project),
-                        "art_source": str(directories.art_source),
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+        from tech_connector.licensing.project_identity import ensure_project_identity
+
+        ensure_project_identity(directories.game_project)
     return tuple(created)
 
 

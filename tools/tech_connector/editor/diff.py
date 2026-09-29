@@ -1,5 +1,7 @@
 """Deterministic patch building and application."""
 
+from __future__ import annotations
+
 import difflib
 import re
 from pathlib import Path

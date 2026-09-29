@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import json
 import os
@@ -76,7 +77,7 @@ LOCK_PATH = DB_PATH.with_suffix(".build.lock")
 SKIP_DIRS = {
     "__pycache__", ".git", ".svn", ".idea", ".vs",
     "Intermediate", "Saved", "DerivedDataCache", "Binaries",
-    "Build", ".pytest_cache", "node_modules", ".ai_studio",
+    "Build", ".pytest_cache", ".venv", "venv", "node_modules", ".ai_studio",
     ".codex",
     ".continue",
     ".agents"
@@ -127,14 +128,61 @@ class PythonSymbol:
     unreal_refs: list[str]
     string_literals: list[str]
 
-def acquire_build_lock():
-    try:
-        fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode("utf-8"))
-        os.close(fd)
-        return True
-    except FileExistsError:
+def _process_is_alive(pid: int) -> bool:
+    if pid <= 0:
         return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        # Windows reports an invalid PID as EINVAL/WinError 87 rather than
+        # ProcessLookupError on some Python versions.
+        if exc.errno in {errno.ESRCH, errno.EINVAL} or getattr(exc, "winerror", 0) == 87:
+            return False
+        return True
+    return True
+
+
+def _remove_stale_build_lock() -> bool:
+    try:
+        raw_owner = LOCK_PATH.read_text(encoding="utf-8").strip()
+        owner_pid = int(raw_owner)
+    except FileNotFoundError:
+        return True
+    except (OSError, TypeError, ValueError):
+        # Do not steal a lock while another process may still be writing it.
+        try:
+            if max(0.0, datetime.now().timestamp() - LOCK_PATH.stat().st_mtime) < 5.0:
+                return False
+        except OSError:
+            return True
+        owner_pid = 0
+    if owner_pid and _process_is_alive(owner_pid):
+        return False
+    try:
+        LOCK_PATH.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def acquire_build_lock():
+    for attempt in range(2):
+        try:
+            fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, str(os.getpid()).encode("utf-8"))
+            finally:
+                os.close(fd)
+            return True
+        except FileExistsError:
+            if attempt == 0 and _remove_stale_build_lock():
+                continue
+            return False
+    return False
 
 
 def release_build_lock():
@@ -281,13 +329,22 @@ def _root_for_path(path: Path, roots: list[Path]) -> Path:
 def stale_file_plan(conn: sqlite3.Connection, roots: list[Path]) -> tuple[list[tuple[Path, Path]], list[Path], dict[str, int]]:
     """Return changed/new files plus missing indexed files without parsing unchanged files."""
     cur = conn.cursor()
-    indexed_rows = cur.execute(
+    all_indexed_rows = cur.execute(
         """
         SELECT root, path, rel_path, ext, size, mtime, sha1, source_scope
         FROM files
         ORDER BY path
         """
     ).fetchall()
+    resolved_roots = [root.expanduser().resolve() for root in roots]
+    indexed_rows = []
+    for row in all_indexed_rows:
+        try:
+            indexed_path = Path(row[1]).expanduser().resolve()
+        except Exception:
+            continue
+        if any(_path_is_within(indexed_path, root) for root in resolved_roots):
+            indexed_rows.append(row)
     indexed_by_path = {str(row[1]): row for row in indexed_rows}
     indexed_norm = set()
     for row in indexed_rows:
@@ -1015,7 +1072,7 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, *, symbols_only
             text = f"Asset file: {path.name}"
     else:
         text = read_text(path)
-        if not text:
+        if not text and path.stat().st_size > 0:
             return False
 
     try:
@@ -1034,6 +1091,14 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, *, symbols_only
 
     if row and row[1] == sha and row[2] == str(root) and row[3] == rel and (row[4] or "") == module and (row[5] or "project") == source_scope:
         if symbols_only or not _file_needs_rich_index(conn, int(row[0]), ext):
+            # Perforce syncs and restores can change filesystem timestamps
+            # without changing file contents. Refresh cheap metadata here so
+            # stale-only planning does not queue the same unchanged file on
+            # every pass.
+            cur.execute(
+                "UPDATE files SET size = ?, mtime = ? WHERE id = ?",
+                (stat.st_size, stat.st_mtime, int(row[0])),
+            )
             return False
 
     clear_file(conn, path)
@@ -1602,6 +1667,11 @@ def parse_args(argv: list[str] | None = None):
         help="Skip FTS rebuild. Useful when running graph-only in the background.",
     )
     parser.add_argument(
+        "--no-symbol-lookup",
+        action="store_true",
+        help="Skip the global symbol lookup rebuild for an exact-file batch.",
+    )
+    parser.add_argument(
         "--symbols-only",
         action="store_true",
         help="Bootstrap mode: index file metadata and Python symbols/imports, but skip chunks, FTS, assets, calls, and graph.",
@@ -1736,8 +1806,11 @@ def main(argv: list[str] | None = None):
                 continue
 
         changed_index = bool(updated or removed or args.full)
-        if changed_index or symbol_lookup_needs_rebuild(conn):
+        if not args.no_symbol_lookup and (changed_index or symbol_lookup_needs_rebuild(conn)):
             rebuild_symbol_lookup_table(conn)
+        elif args.no_symbol_lookup:
+            print("")
+            print("Skipping symbol lookup rebuild (--no-symbol-lookup).")
         if args.symbols_only:
             print("")
             print("Skipping dependency graph: symbols-only bootstrap mode.")

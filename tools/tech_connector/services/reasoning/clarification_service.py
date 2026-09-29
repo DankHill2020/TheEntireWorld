@@ -517,8 +517,18 @@ def build_confirmation(
         rendering_mechanism="deterministic",
     )
     request.ui_controls = [
-        {"type": "button", "value": "confirm", "label": "Approve"},
-        {"type": "button", "value": "cancel", "label": "Deny"},
+        {
+            "type": "button",
+            "value": "confirm",
+            "label": "Approve",
+            "tooltip": "Run this exact prepared operation once",
+        },
+        {
+            "type": "button",
+            "value": "cancel",
+            "label": "Deny",
+            "tooltip": "Cancel this operation without making the described change",
+        },
     ]
     text = render_confirmation(request, context)
     return ClarificationRenderResult(
@@ -679,22 +689,74 @@ def render_confirmation(request: ClarificationRequest, context: RequestContext) 
             f"This will modify {scope} (Risk level: {risk}). Use Approve or Deny below."
         )
     
-    args_lines = []
     exec_req = request.execution_request or {}
     keyword_args = exec_req.get("keyword_args") or request.route_decision.get("keyword_args") or {}
     positional_args = exec_req.get("positional_args") or request.route_decision.get("positional_args") or []
-    
-    if positional_args:
-        args_lines.append("Positional Arguments:")
-        for arg in positional_args:
-            args_lines.append(f"  - `{repr(arg)}`")
-    if keyword_args:
-        args_lines.append("Arguments:")
-        for key, val in keyword_args.items():
-            args_lines.append(f"  - `{key}`: `{repr(val)}`")
-            
-    args_block = "\n" + "\n".join(args_lines) if args_lines else ""
-    return f"I'm ready to execute `{target}`.{args_block}\n\nThis will modify {scope} (Risk level: {risk}). Use Approve or Deny below."
+    host = str(request.execution_environment or exec_req.get("execution_environment") or "the connected application")
+    host_label = host.replace("_", " ").title()
+    code = str(keyword_args.get("code") or "")
+    operation = str(request.confirmation.get("operation") or exec_req.get("target_identifier") or target)
+
+    if host.lower() == "maya" and "create_rig_from_mapping" in code:
+        heading = "Create a control rig in Maya"
+    else:
+        friendly = operation.rsplit(".", 1)[-1].replace("_", " ").strip()
+        heading = f"Run {friendly or 'the prepared operation'} in {host_label}"
+
+    effects = []
+    if code:
+        line_count = len(code.splitlines())
+        effects.append(f"Run the prepared {line_count}-line Python script in the connected {host_label} session.")
+        root_match = re.search(r"\broot_joint\s*=\s*['\"]([^'\"]+)['\"]", code)
+        if root_match:
+            effects.append(f"Use `{root_match.group(1)}` as the root joint in the current scene.")
+        if "create_rig_from_mapping" in code:
+            effects.append("Create or modify the mapped rig hierarchy and control nodes in the current Maya scene.")
+    else:
+        effects.append(f"Execute `{target}` in the connected {host_label} session.")
+
+    visible_args = []
+    for index, value in enumerate(positional_args[:4], start=1):
+        visible_args.append(f"argument {index} = `{str(value)[:120]}`")
+    for key, value in keyword_args.items():
+        if key in {"code", "timeout", "timeout_seconds", "maya_port"}:
+            continue
+        visible_args.append(f"{key} = `{str(value)[:120]}`")
+        if len(visible_args) >= 6:
+            break
+
+    scope_labels = {
+        "dcc_scene_mutation": f"the current {host_label} scene",
+        "file_mutation": "project files",
+        "project_mutation": "the active project",
+        "external_side_effect": "an external service",
+    }
+    affected = scope_labels.get(str(scope), str(scope).replace("_", " "))
+    risk_detail = {
+        "high": "This can substantially change scene content and may not be fully reversible outside the host's undo/history.",
+        "medium": "This changes application state; review the target before continuing.",
+        "low": "This makes a limited state change.",
+    }.get(str(risk).lower(), "This operation changes application state.")
+
+    lines = [
+        f"Approval required: {heading}",
+        "",
+        "What will happen:",
+        *[f"- {effect}" for effect in effects],
+    ]
+    if visible_args:
+        lines.extend(["", "Key inputs:", *[f"- {item}" for item in visible_args]])
+    lines.extend(
+        [
+            "",
+            f"Affected scope: {affected}",
+            f"Risk: {str(risk).title()} — {risk_detail}",
+            "",
+            "Approval applies only to this exact prepared execution. Future scene changes will require their own approval.",
+            "Use Approve or Deny below: Approve runs it now; Deny leaves the scene unchanged.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def ui_controls_for_request(request: ClarificationRequest) -> list[dict[str, Any]]:

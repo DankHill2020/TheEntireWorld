@@ -545,6 +545,8 @@ def build_main_menu_bar(window) -> QMenuBar:
     terminal_tools_menu.addAction("Stage Current File Command", _call_if_present(window, "run_current_file_in_terminal"))
 
     studio_menu = tools_menu.addMenu("Tech Connector Tools")
+    _add_if_present(studio_menu, "License & Activation...", window, "show_license_management_dialog")
+    studio_menu.addSeparator()
     _add_if_present(studio_menu, "Install Components", window, "install_components")
     _add_if_present(studio_menu, "Diagnostics / Health Check", window, "health_check")
     _add_if_present(studio_menu, "Add Missing Docstrings", window, "add_docstrings_to_current_file")
