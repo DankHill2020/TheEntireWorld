@@ -410,6 +410,8 @@ class _ProviderLane:
     def _cancel_locked(self, job: _QueueJob, reason: str) -> None:
         if job in self._pending:
             self._pending.remove(job)
+        if job.cancel_event is not None:
+            job.cancel_event.set()
         job.status = "cancelled"
         job.error = LLMQueueCancelledError(reason)
         job.finished_at = time.monotonic()

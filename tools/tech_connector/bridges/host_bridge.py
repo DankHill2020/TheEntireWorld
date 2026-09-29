@@ -76,6 +76,7 @@ def call_python_function_via_execute(
     args: Optional[Sequence[Any]] = None,
     kwargs: Optional[Dict[str, Any]] = None,
     sys_paths: Optional[Sequence[str]] = None,
+    timeout: float = 10.0,
 ) -> tuple[bool, str]:
     """Call an importable Python function through a host bridge execute method."""
     payload = {
@@ -100,7 +101,7 @@ try:
 except Exception:
     traceback.print_exc()
 """
-    return bridge.execute(code)
+    return bridge.execute(code, timeout=max(0.1, float(timeout)))
 
 
 # ---------------------------------------------------------------------------

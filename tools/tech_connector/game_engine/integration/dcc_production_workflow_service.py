@@ -32,6 +32,7 @@ from tech_connector.models.constants import APP_DIR
 WORKFLOW_SCHEMA = "tech_connector.dcc_production_workflows.v1"
 WORKFLOW_RECEIPT_SCHEMA = "tech_connector.dcc_workflow_receipt.v2"
 WORKFLOW_LEDGER_SCHEMA = "tech_connector.dcc_workflow_receipt_ledger.v1"
+WORKFLOW_EVENT_SCHEMA = "tech_connector.dcc_workflow_event.v1"
 DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS = 24.0 * 60.0 * 60.0
 DEFAULT_WORKFLOW_LEDGER_PATH = Path(APP_DIR) / "dcc_workflow_receipts.json"
 
@@ -446,6 +447,8 @@ def execute_dcc_workflow(
     confirm_mutating: bool = False,
     delegated_step_receipts: dict[str, dict[str, Any]] | None = None,
     executor: Callable[[str, str, str, dict[str, Any], int | None], Any] | None = None,
+    cancel_token: Any = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> DccWorkflowReceipt:
     plan = plan_dcc_workflow(
         workflow_key, workspace=workspace, step_inputs=step_inputs, session_port=session_port,
@@ -464,8 +467,49 @@ def execute_dcc_workflow(
     artifact_readback_complete = True
     parity_results: dict[str, bool] = {}
     delegation_receipts = dict(delegated_step_receipts or {})
+    cancelled = False
+    total_steps = len(plan["steps"])
+
+    def publish(event: str, *, row: dict[str, Any] | None = None, message: str = "") -> None:
+        if progress_callback is None:
+            return
+        index = int((row or {}).get("index") or 0)
+        payload = {
+            "schema": WORKFLOW_EVENT_SCHEMA,
+            "event": event,
+            "workflow": plan["workflow"],
+            "host": plan["host"],
+            "session_port": plan["session_port"],
+            "step_index": index,
+            "step_count": total_steps,
+            "operation": str((row or {}).get("operation") or ""),
+            "label": str((row or {}).get("label") or ""),
+            "progress_percent": round((index / total_steps) * 100.0, 1) if total_steps else 100.0,
+            "elapsed_seconds": round(time.perf_counter() - started, 6),
+            "message": message,
+        }
+        try:
+            progress_callback(payload)
+        except Exception:
+            pass
+
+    publish("workflow_started", message=f"Running {total_steps} workflow steps.")
     for row in plan["steps"]:
+        is_set = getattr(cancel_token, "is_set", None)
+        token_value = (
+            is_set() if callable(is_set)
+            else getattr(cancel_token, "cancelled", cancel_token)
+        )
+        if callable(token_value):
+            token_value = token_value()
+        if bool(token_value):
+            cancelled = True
+            readback_complete = False
+            errors.append(f"Cancelled before {row['operation']}; no later steps were dispatched.")
+            publish("workflow_cancelled", row=row, message=errors[-1])
+            break
         step_started = time.perf_counter()
+        publish("step_started", row=row, message=f"Running {row['label']}.")
         if row["execution_mode"] == "user_delegated":
             delegated = dict(
                 delegation_receipts.get(row["operation"])
@@ -500,6 +544,10 @@ def execute_dcc_workflow(
             "duration_ms": (time.perf_counter() - step_started) * 1000.0,
         }
         receipts.append(receipt)
+        publish(
+            "step_completed" if ok else "step_failed", row=row,
+            message=(f"Completed {row['label']}." if ok else str(output.get("error") or output)),
+        )
         if row["readback"] and ok:
             raw_parity = output.get("parity_checks")
             if isinstance(raw_parity, dict):
@@ -566,7 +614,10 @@ def execute_dcc_workflow(
         missing_gates.append("artifact_readback")
     if not parity_readback_complete:
         missing_gates.append("parity_readback")
-    if errors:
+    if cancelled:
+        missing_gates.append("workflow_cancelled")
+        status = "cancelled"
+    elif errors:
         status = "failed"
     elif readback_complete and artifact_readback_complete and parity_readback_complete:
         status = "verified"
@@ -579,6 +630,10 @@ def execute_dcc_workflow(
     except Exception:
         bridge_implementation = {}
     workflow_contract_digest = stable_receipt_digest(asdict(workflow))
+    publish(
+        "workflow_completed" if status == "verified" else "workflow_stopped",
+        message=f"Workflow {status.replace('_', ' ')}.",
+    )
     integrity = {
         "schema": WORKFLOW_RECEIPT_SCHEMA,
         "checked_at": checked_at,
@@ -894,7 +949,7 @@ def _normalize_execution_result(raw: Any) -> tuple[bool, dict[str, Any]]:
 
 __all__ = [
     "DEFAULT_WORKFLOW_LEDGER_PATH", "DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS", "DccProductionWorkflow", "DccWorkflowReceipt", "DccWorkflowStep",
-    "PRODUCTION_WORKFLOWS", "WORKFLOW_LEDGER_SCHEMA", "WORKFLOW_RECEIPT_SCHEMA", "WORKFLOW_SCHEMA",
+    "PRODUCTION_WORKFLOWS", "WORKFLOW_EVENT_SCHEMA", "WORKFLOW_LEDGER_SCHEMA", "WORKFLOW_RECEIPT_SCHEMA", "WORKFLOW_SCHEMA",
     "attach_workflow_receipt_to_scene", "execute_dcc_workflow", "plan_dcc_workflow",
     "resolve_workflow_session_port", "store_workflow_receipt", "validate_workflow_catalog", "validate_workflow_receipt", "workflow_receipt_ledger",
 ]

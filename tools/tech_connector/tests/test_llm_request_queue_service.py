@@ -454,6 +454,42 @@ def test_duplicate_active_request_id_is_rejected_without_losing_owner() -> None:
     queue.shutdown()
 
 
+def test_cancelling_running_request_signals_cooperative_provider() -> None:
+    """Propagate API cancellation into provider/tool work that can stop safely."""
+
+    queue = LLMRequestQueue()
+    cancel_event = threading.Event()
+    started = threading.Event()
+    worker_stopped = threading.Event()
+
+    def cooperative_work() -> None:
+        started.set()
+        assert cancel_event.wait(2)
+        worker_stopped.set()
+
+    thread, results, errors = _start_submission(
+        queue,
+        cooperative_work,
+        provider="ollama",
+        model="test",
+        request_id="cooperative-running",
+        cancel_event=cancel_event,
+    )
+    assert started.wait(1)
+
+    assert queue.cancel("cooperative-running", "User cancelled generation.") is True
+    thread.join(2)
+    assert worker_stopped.wait(1)
+
+    assert results == []
+    assert len(errors) == 1
+    assert isinstance(errors[0], LLMQueueCancelledError)
+    _wait_until(lambda: queue.snapshot()["running"] == 0)
+    recent = queue.snapshot()["lanes"]["ollama"]["recent_requests"]
+    assert recent[-1]["status"] == "cancelled"
+    queue.shutdown()
+
+
 def test_production_router_enforces_local_model_concurrency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

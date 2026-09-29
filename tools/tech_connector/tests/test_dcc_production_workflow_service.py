@@ -190,6 +190,42 @@ def test_workflow_stops_after_first_failed_step_without_retrying_mutation(tmp_pa
     assert len(receipt.errors) == 1
 
 
+def test_workflow_progress_and_cancellation_stop_before_next_host_mutation(tmp_path) -> None:
+    import threading
+
+    calls = []
+    events = []
+    cancel = threading.Event()
+
+    def executor(_host, operation, _callable_name, _params, _session_port):
+        calls.append(operation)
+        return {"ok": True}
+
+    def progress(event):
+        events.append(event)
+        if event["event"] == "step_completed":
+            cancel.set()
+
+    receipt = execute_dcc_workflow(
+        "motionbuilder.retarget_plot",
+        workspace=tmp_path,
+        session_port=7011,
+        confirm_mutating=True,
+        executor=executor,
+        cancel_token=cancel,
+        progress_callback=progress,
+    )
+
+    assert receipt.status == "cancelled"
+    assert calls == ["io.import_fbx"]
+    assert "workflow_cancelled" in receipt.missing_gates
+    assert [event["event"] for event in events] == [
+        "workflow_started", "step_started", "step_completed",
+        "workflow_cancelled", "workflow_stopped",
+    ]
+    assert all(event["schema"] == workflow_service.WORKFLOW_EVENT_SCHEMA for event in events)
+
+
 def test_session_resolution_refuses_to_guess_between_multiple_endpoints(monkeypatch) -> None:
     class Bridge:
         def find_ports(self):
