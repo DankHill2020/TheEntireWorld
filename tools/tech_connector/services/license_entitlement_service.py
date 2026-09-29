@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 
 LICENSE_TOKEN_PREFIX = "tc1"
-DEFAULT_REVENUE_THRESHOLD_USD = 500_000
+DEFAULT_COMMUNITY_PROFIT_THRESHOLD_USD = 500_000
 
 TIER_CAPABILITIES = {
     "community": {
@@ -63,9 +63,9 @@ class LicenseEntitlement:
     source: str = "none"
     reason: str = ""
     expires_at: str = ""
-    revenue_threshold_usd: int = DEFAULT_REVENUE_THRESHOLD_USD
-    royalty_percent: float = 2.0
-    royalty_cap_percent: float = 3.0
+    profit_threshold_usd: int = DEFAULT_COMMUNITY_PROFIT_THRESHOLD_USD
+    residual_rate_basis_points: int = 0
+    terms_id: str = ""
     capabilities: tuple[str, ...] = ()
     resale_allowed: bool = False
     redistribution_allowed: bool = False
@@ -83,7 +83,14 @@ class LicenseEntitlement:
 def _b64url_decode(value: str) -> bytes:
     value = value.strip()
     padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+    decoded = base64.b64decode(
+        (value + padding).encode("ascii"),
+        altchars=b"-_",
+        validate=True,
+    )
+    if _b64url_encode(decoded) != value:
+        raise ValueError("base64url value is not canonical")
+    return decoded
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -190,9 +197,13 @@ def entitlement_from_payload(payload: dict[str, Any], *, source: str, reason: st
         source=source,
         reason=reason,
         expires_at=str(payload.get("expires_at") or ""),
-        revenue_threshold_usd=int(payload.get("revenue_threshold_usd") or DEFAULT_REVENUE_THRESHOLD_USD),
-        royalty_percent=float(payload.get("royalty_percent") or 2.0),
-        royalty_cap_percent=float(payload.get("royalty_cap_percent") or 3.0),
+        profit_threshold_usd=int(
+            payload.get("profit_threshold_usd")
+            or payload.get("revenue_threshold_usd")
+            or DEFAULT_COMMUNITY_PROFIT_THRESHOLD_USD
+        ),
+        residual_rate_basis_points=int(payload.get("residual_rate_basis_points") or 0),
+        terms_id=str(payload.get("terms_id") or ""),
         capabilities=tuple(sorted(capabilities)),
         resale_allowed=False,
         redistribution_allowed=bool(payload.get("redistribution_allowed", False)),
@@ -200,6 +211,47 @@ def entitlement_from_payload(payload: dict[str, Any], *, source: str, reason: st
         ai_training_allowed=False,
         direct_code_reuse_allowed=False,
         official_api_required=True,
+    )
+
+
+def entitlement_from_signed_evaluation(evaluation: Any) -> LicenseEntitlement:
+    """Adapt a project-aware signed evaluation for legacy API/status consumers."""
+    claims = getattr(evaluation, "claims", None)
+    decision = getattr(evaluation, "decision", None)
+    if claims is None or decision is None:
+        return LicenseEntitlement(
+            unlocked=False,
+            tier="locked",
+            source="signed_entitlement",
+            reason=str(getattr(decision, "reason", "Signed entitlement verification failed.")),
+            capabilities=(),
+        )
+    terms = claims.terms
+    threshold_usd = (
+        terms.profit_threshold_minor // 100
+        if terms is not None and terms.currency == "USD"
+        else DEFAULT_COMMUNITY_PROFIT_THRESHOLD_USD
+    )
+    return LicenseEntitlement(
+        unlocked=bool(decision.allowed),
+        tier=claims.license.type.value if decision.allowed else "locked",
+        account_email=claims.principal.email,
+        account_id=claims.principal.account_id,
+        organization=claims.principal.organization_name,
+        license_id=claims.license.license_id,
+        source="signed_entitlement",
+        reason=decision.reason,
+        expires_at=claims.offline.expires_at.isoformat(),
+        profit_threshold_usd=threshold_usd,
+        residual_rate_basis_points=terms.rate_basis_points if terms is not None else 0,
+        terms_id=terms.terms_id if terms is not None else "",
+        capabilities=claims.capabilities if decision.allowed else (),
+        redistribution_allowed=bool(
+            decision.allowed and "redistribution" in claims.capabilities
+        ),
+        hosted_access_allowed=bool(
+            decision.allowed and "hosted_access" in claims.capabilities
+        ),
     )
 
 
@@ -211,6 +263,19 @@ def verify_entitlement(
     now: datetime | None = None,
 ) -> LicenseEntitlement:
     """Verify the user's current entitlement from saved login/license settings."""
+    from tech_connector.services.licensing_startup_policy import legacy_entitlement_allowed
+
+    if not legacy_entitlement_allowed():
+        return LicenseEntitlement(
+            unlocked=False,
+            tier="locked",
+            source="legacy_disabled",
+            reason=(
+                "Legacy shared-secret entitlements are disabled. Sign in to receive a "
+                "public-key verified Tech Connector entitlement."
+            ),
+            capabilities=(),
+        )
     token = str(settings.get("tech_connector_license_token") or os.environ.get("TECH_CONNECTOR_LICENSE_TOKEN") or "").strip()
     email = str(settings.get("tech_connector_account_email") or "").strip()
     require_login = bool(settings.get("tech_connector_require_login", True))
@@ -259,6 +324,21 @@ def clear_license_login(settings: dict[str, Any]) -> dict[str, Any]:
 
 def entitlement_status_row(settings: dict[str, Any], **verify_kwargs: Any) -> dict[str, Any]:
     entitlement = verify_entitlement(settings, **verify_kwargs)
+    return entitlement_status_from_entitlement(
+        entitlement,
+        configured=bool(
+            settings.get("tech_connector_license_token")
+            or settings.get("tech_connector_account_email")
+        ),
+    )
+
+
+def entitlement_status_from_entitlement(
+    entitlement: LicenseEntitlement,
+    *,
+    configured: bool,
+) -> dict[str, Any]:
+    """Build the existing status-row contract from any entitlement source."""
     label = entitlement.tier.title() if entitlement.unlocked else "Locked"
     account = entitlement.account_email or entitlement.organization or entitlement.license_id
     mode = f"{label} ({account})" if account else label
@@ -267,7 +347,7 @@ def entitlement_status_row(settings: dict[str, Any], **verify_kwargs: Any) -> di
         "name": "Tech Connector License",
         "category": "License",
         "connected": entitlement.unlocked,
-        "configured": bool(settings.get("tech_connector_license_token") or settings.get("tech_connector_account_email")),
+        "configured": bool(configured),
         "mode": mode,
         "tier": entitlement.tier,
         "capabilities": list(entitlement.capabilities),
@@ -283,15 +363,42 @@ def entitlement_status_row(settings: dict[str, Any], **verify_kwargs: Any) -> di
     }
 
 
+def verify_signed_entitlement_token(token: str, *, now: datetime | None = None):
+    """Verify a production-format entitlement using public client configuration."""
+    from tech_connector.licensing.configuration import load_licensing_configuration
+
+    configuration = load_licensing_configuration()
+    return configuration.build_verifier().verify(token, now=now)
+
+
+def requires_community_residual(
+    settings: dict[str, Any],
+    *,
+    adjusted_project_profit_usd: int,
+    **verify_kwargs: Any,
+) -> bool:
+    """Return whether Community project profit has crossed its signed threshold."""
+    entitlement = verify_entitlement(settings, **verify_kwargs)
+    if not entitlement.unlocked:
+        return True
+    if entitlement.tier in {"perpetual", "custom"}:
+        return False
+    if "enterprise_pipeline" in entitlement.capabilities or (
+        "commercial_use" in entitlement.capabilities and entitlement.tier not in {"community", "personal"}
+    ):
+        return False
+    return int(adjusted_project_profit_usd or 0) > entitlement.profit_threshold_usd
+
+
 def requires_commercial_license(
     settings: dict[str, Any],
     *,
     annual_attributable_revenue_usd: int,
     **verify_kwargs: Any,
 ) -> bool:
-    entitlement = verify_entitlement(settings, **verify_kwargs)
-    if not entitlement.unlocked:
-        return True
-    if "enterprise_pipeline" in entitlement.capabilities or "commercial_use" in entitlement.capabilities:
-        return False
-    return int(annual_attributable_revenue_usd or 0) >= entitlement.revenue_threshold_usd
+    """Deprecated legacy wrapper; new callers must use project-profit policy."""
+    return requires_community_residual(
+        settings,
+        adjusted_project_profit_usd=annual_attributable_revenue_usd,
+        **verify_kwargs,
+    )

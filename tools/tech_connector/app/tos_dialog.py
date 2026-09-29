@@ -1,22 +1,18 @@
-"""Signed Terms of Service acceptance dialog for Tech Connector."""
+"""Local license-notice acknowledgement for Tech Connector."""
 
 from __future__ import annotations
 
 import datetime
-import json
-import socket
-import sys
-import threading
-import urllib.request
+from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -24,13 +20,19 @@ from PySide6.QtWidgets import (
 )
 
 from tech_connector.services.settings_service import load_settings, save_settings
+from tech_connector.models.constants import APP_DIR
+from tech_connector.licensing.acceptance import FileLicenseAcceptanceStore
 
 
-TERMS_VERSION = "v2026.1"
+TERMS_VERSION = "v2026.2"
+
+
+def acceptance_receipt_store() -> FileLicenseAcceptanceStore:
+    return FileLicenseAcceptanceStore(APP_DIR / "licensing")
 
 
 class TermsOfServiceDialog(QDialog):
-    """First-open modal dialog requiring a signed license acceptance."""
+    """First-open notice; authoritative account acceptance happens online."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,7 +86,7 @@ class TermsOfServiceDialog(QDialog):
         header_layout = QHBoxLayout()
         title_label = QLabel("Terms of Service & Licensing")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
-        badge_label = QLabel(f"{TERMS_VERSION} - Signature Required")
+        badge_label = QLabel(f"{TERMS_VERSION} - Acceptance Required")
         badge_label.setStyleSheet(
             "background-color: rgba(60, 179, 113, 0.15); color: #3cb371; "
             "border: 1px solid #3cb371; border-radius: 6px; padding: 4px 8px; "
@@ -96,8 +98,9 @@ class TermsOfServiceDialog(QDialog):
         layout.addLayout(header_layout)
 
         subtitle = QLabel(
-            "Before using The Entire World Tech Connector, review and sign the "
-            "Community Source License summary below. The full license controls."
+            "Before using The Entire World Tech Connector, review the Community "
+            "Source License summary below. The full license controls. Commercial "
+            "and custom terms are accepted through your verified account."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("font-size: 13px; color: #cbd5e1;")
@@ -114,12 +117,12 @@ class TermsOfServiceDialog(QDialog):
         for title, body, color in (
             (
                 "Free Creator & Community Use",
-                "Free for individuals, students, educators, hobbyists, nonprofits, open-source projects, independent creators, and small studios below $500,000 USD in attributable revenue.",
+                "Free for individuals, students, educators, hobbyists, nonprofits, and open-source projects. Community commercial projects owe no residual on the first $500,000 USD of Adjusted Project Profit.",
                 "#3cb371",
             ),
             (
                 "Commercial Success License",
-                "Above the $500,000 USD threshold, continued commercial use requires a written commercial license. The public summary describes a marginal 1.0% to 5.0% commercial-success share unless a separate agreement says otherwise.",
+                "Community commercial projects must be registered. No residual is owed on the first $500,000 USD of lifetime Adjusted Project Profit. Profit uses actual documented project costs, with arm's-length limits for owner and affiliate charges.",
                 "#7c5cff",
             ),
             (
@@ -159,27 +162,19 @@ class TermsOfServiceDialog(QDialog):
             "border-radius: 8px; padding: 12px;"
         )
         sig_layout = QVBoxLayout(sig_box)
-        sig_label = QLabel("Legal Signature Required")
+        sig_label = QLabel("Local License Notice")
         sig_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 12px;")
-        self.sig_input = QLineEdit()
-        self.sig_input.setPlaceholderText("Type full legal name or authorized studio representative name")
-        self.sig_input.setStyleSheet(
-            "background-color: #0b1320; border: 1px solid #3cb371; color: #3cb371; "
-            "font-family: monospace; font-size: 13px; padding: 6px 10px; border-radius: 4px;"
+        self.acknowledgement_checkbox = QCheckBox(
+            "I have read and agree to the Tech Connector Community Source License."
         )
-        self.sig_input.textChanged.connect(self._validate_signature)
-        self.sig_checkbox = QCheckBox(
-            "I am authorized to bind myself or my entity to these terms and I agree to the Tech Connector Community Source License."
-        )
-        self.sig_checkbox.setStyleSheet("color: #cbd5e1; font-size: 11px;")
-        self.sig_checkbox.toggled.connect(self._validate_signature)
+        self.acknowledgement_checkbox.setStyleSheet("color: #cbd5e1; font-size: 11px;")
+        self.acknowledgement_checkbox.toggled.connect(self._validate_acknowledgement)
         sig_layout.addWidget(sig_label)
-        sig_layout.addWidget(self.sig_input)
-        sig_layout.addWidget(self.sig_checkbox)
+        sig_layout.addWidget(self.acknowledgement_checkbox)
         layout.addWidget(sig_box)
 
         btn_layout = QHBoxLayout()
-        self.accept_btn = QPushButton("Sign & Accept Terms")
+        self.accept_btn = QPushButton("Acknowledge & Continue")
         self.accept_btn.setObjectName("accept_btn")
         self.accept_btn.setEnabled(False)
         self.accept_btn.clicked.connect(self._on_accept)
@@ -187,64 +182,78 @@ class TermsOfServiceDialog(QDialog):
         self.decline_btn.setObjectName("decline_btn")
         self.decline_btn.clicked.connect(self._on_decline)
         btn_layout.addWidget(self.accept_btn)
+        self.full_license_btn = QPushButton("View Full License")
+        self.full_license_btn.setObjectName("decline_btn")
+        self.full_license_btn.clicked.connect(self._open_full_license)
+        btn_layout.addWidget(self.full_license_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self.decline_btn)
         layout.addLayout(btn_layout)
 
-    def _validate_signature(self):
-        self.accept_btn.setEnabled(len(self.sig_input.text().strip()) >= 3 and self.sig_checkbox.isChecked())
+    def _validate_acknowledgement(self):
+        self.accept_btn.setEnabled(self.acknowledgement_checkbox.isChecked())
+
+    def _open_full_license(self):
+        license_path = Path(__file__).resolve().parents[1] / "LICENSE.md"
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(license_path)))
 
     def _on_accept(self):
         settings = load_settings()
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-        signature_name = self.sig_input.text().strip()
         record = {
-            "event": "TOS_ACCEPTED",
+            "event": "LOCAL_LICENSE_NOTICE_ACKNOWLEDGED",
             "agreement_version": TERMS_VERSION,
             "accepted_at": timestamp,
-            "legal_signature": signature_name,
-            "account_email": str(settings.get("tech_connector_account_email") or ""),
-            "license_id_present": bool(settings.get("tech_connector_license_token")),
-            "machine_name": socket.gethostname(),
+            "acceptance_scope": "local_notice",
             "terms_summary": {
-                "free_use_threshold": "$500,000 USD attributable revenue",
-                "commercial_license": "Required above threshold unless a separate agreement says otherwise",
+                "community_project_threshold": "$500,000 USD Adjusted Project Profit",
+                "measurement_period": "Registered project lifetime",
+                "eligible_costs": "Actual documented, reasonable, necessary, directly attributable project costs",
+                "commercial_terms": "Only profit above the threshold may be subject to accepted versioned project terms",
                 "enterprise_redistribution_hosted_use": "Separate written agreement required",
                 "telemetry": "Opt-in/configured only",
             },
         }
+        acceptance_receipt_store().record_local_notice(
+            agreement_version=TERMS_VERSION,
+            accepted_at=timestamp,
+        )
         settings["tos_accepted"] = True
         settings["tos_version"] = TERMS_VERSION
         settings["tos_acceptance_record"] = record
         save_settings(settings)
 
-        endpoint = str(settings.get("activation_log_endpoint") or "").strip()
-        if endpoint:
-            threading.Thread(target=self._post_acceptance, args=(endpoint, record), daemon=True).start()
         self.accept()
-
-    def _post_acceptance(self, endpoint: str, record: dict):
-        try:
-            payload = json.dumps(record).encode("utf-8")
-            req = urllib.request.Request(
-                endpoint,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception as exc:
-            print(f"[TOS_LOG] Acceptance notification could not be sent: {exc}", flush=True)
 
     def _on_decline(self):
         self.reject()
-        sys.exit(0)
 
 
 def ensure_tos_accepted(parent=None) -> bool:
-    """Show signed Terms acceptance when no current acceptance record exists."""
+    """Show the local notice and remove PII from legacy local records."""
     settings = load_settings()
     if settings.get("tos_accepted", False) and settings.get("tos_version") == TERMS_VERSION:
+        record = settings.get("tos_acceptance_record")
+        accepted_at = ""
+        if isinstance(record, dict):
+            accepted_at = str(record.get("accepted_at") or "")
+        if not accepted_at:
+            accepted_at = datetime.datetime.now(datetime.timezone.utc).isoformat(
+                timespec="seconds"
+            )
+        sanitized_record = {
+            "event": "LOCAL_LICENSE_NOTICE_ACKNOWLEDGED",
+            "agreement_version": TERMS_VERSION,
+            "accepted_at": accepted_at,
+            "acceptance_scope": "local_notice",
+        }
+        acceptance_receipt_store().record_local_notice(
+            agreement_version=TERMS_VERSION,
+            accepted_at=accepted_at,
+        )
+        if record != sanitized_record:
+            settings["tos_acceptance_record"] = sanitized_record
+            save_settings(settings)
         return True
     dialog = TermsOfServiceDialog(parent)
     return dialog.exec() == QDialog.Accepted

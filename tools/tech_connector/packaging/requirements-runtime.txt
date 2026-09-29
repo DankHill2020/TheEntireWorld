@@ -5,6 +5,7 @@ imageio>=2.37,<3
 imageio-ffmpeg>=0.6,<1
 requests>=2.32,<3
 certifi>=2025.8,<2027
+cryptography>=50,<51
 numpy>=2.3,<3
 Pillow>=12,<13
 PyYAML>=6,<7

@@ -27,40 +27,97 @@ Tech Connector is free for:
 
 You own the work you create with Tech Connector.
 
-If you never make money from use of the tools, you never owe royalties.
+If a registered project never exceeds the profit threshold, it never owes a residual.
 
-## Commercial Success Threshold
+## Community Project Registration and Success Threshold
 
-Commercial use of the public version is free until Attributable Revenue reaches
-USD $500,000 in a rolling 12-month period.
+Community commercial use requires a verified account, acceptance of the current
+license, and registration of each commercial project under a Community license.
 
-After that threshold, continued public-version commercial use carries a rolling
-commercial-success residual unless a separate written agreement says otherwise.
+No residual is owed on the first USD $500,000 of Adjusted Project Profit for a
+registered project. Only profit above that threshold may be subject to a
+success-based residual.
 
-The default residual model is a marginal bracket calculation on Attributable
-Profit above the USD $500,000 threshold. Of this success share residual, The Entire World
-takes half (50%) and the other half (50%) is put directly towards supporting other independent
-creators, community projects, and industry initiatives.
+The threshold is measured cumulatively over the registered project's lifetime.
+Adjusted Project Profit is project receipts minus true Eligible Project Costs.
+Eligible costs must be actually paid or incurred, documented, ordinary,
+necessary, reasonable, and directly attributable to the project. Examples can
+include genuine project labor, contractors, project-specific software and
+services, production assets, render/cloud usage, distribution fees, and direct
+project marketing.
 
-The marginal brackets are:
+Reasonably allocated shared costs can count when the allocation is documented,
+consistent, and proportionate. Owner or affiliate charges count only for real
+goods or services and only up to an arm's-length fair-market amount.
 
-- 0% below the USD $500,000 threshold;
-- 1.0% on the portion above USD $500,000 up to USD $1,000,000;
-- 2.0% on the portion above USD $1,000,000 up to USD $2,000,000;
-- 3.0% on the portion above USD $2,000,000 up to USD $5,000,000;
-- 5.0% on the portion above USD $5,000,000.
+Actual reasonable compensation for genuine owner or founder work can count.
+Unpaid founder time counts only if the accepted project terms establish a
+pre-agreed capped labor allowance and the time is recorded as the work occurs.
+It cannot be invented or repriced retroactively after a project succeeds.
 
-Example: if Attributable Profit is USD $3,000,000 in the rolling 12-month
-period, the residual is USD $55,000 (of which $27,500 goes to The Entire World and $27,500 is allocated to industry initiatives):
+The following do not reduce Adjusted Project Profit:
 
-- 0% on USD $500,000 = USD $0;
-- 1.0% on USD $500,000 = USD $5,000;
-- 2.0% on USD $1,000,000 = USD $20,000;
-- 3.0% on USD $1,000,000 = USD $30,000.
+- owner draws, dividends, and profit distributions;
+- personal, unrelated, or excessive general expenses;
+- artificial management fees or unsupported corporate allocations;
+- inflated owner, affiliate, or related-party charges;
+- entity-level income taxes, unrelated financing costs, fines, and penalties;
+- reimbursed or double-counted costs;
+- costs already attributed to another registered project; or
+- transactions or project splits primarily designed to avoid the threshold.
 
-These numbers are intended to be predictable and founder-friendly. A separate
-written agreement may define different thresholds, caps, reporting terms, or
-enterprise terms.
+This is intended to recognize real production economics, not punish legitimate
+costs. Financial reporting should request reasonable accounting records only;
+it must not require project assets, scenes, source files, animation, or other
+creative content.
+
+The applicable marginal schedule is selected from versioned terms based on
+studio size and any custom conditions agreed for the project. Smaller creators
+and studios can therefore receive lower rates than larger firms. Each rate
+applies only to profit inside its bracket, so reaching a new bracket never
+reprices earlier profit. The signed entitlement records the exact calculation
+basis, lifetime measurement period, threshold, brackets, reporting schedule,
+and terms version accepted for the project.
+
+Economic terms are not hardcoded into the application. An accepted terms
+version remains identifiable and auditable; later terms should not silently or
+retroactively replace the terms attached to an existing project entitlement.
+
+## Indie Licenses
+
+Indie is a customer classification, not a single hardcoded price. A qualifying
+individual or small studio can receive a Community success-based grant, a paid
+perpetual grant, or negotiated custom terms. The signed entitlement records the
+studio-size band, classification-rules version, offer ID, exact project terms,
+seat/device limits, version rights, and support level.
+
+This allows a lower success-based rate or a different paid offer for smaller
+teams without embedding employee thresholds, prices, or percentages in the
+public application. Reclassification affects a future offer or negotiated
+renewal; it must not silently rewrite immutable terms already accepted for a
+registered project.
+
+Paid Indie licenses are assigned per named human user, not shared per studio.
+Each user signs in with a verified account and receives their own seat
+assignment and reasonable device allowance. Enterprise licenses follow the same
+named-user rule, with organization administrators managing the purchased pool.
+See [PRICING_MODEL_DRAFT.md](PRICING_MODEL_DRAFT.md) for the nonbinding launch
+price recommendation and market references.
+
+## Core and the Official Tools Bundle
+
+Tech Connector Core and the complete Official Tools Bundle are composable
+products. Core can use user-owned project directories and independently
+obtained tools. The optional Official Tools Bundle contains the complete
+approved first-party DCC and pipeline collection; individual hosts and tools are
+not sold as separate packs.
+
+An offer can provide Core alone, Core plus the full bundle, or negotiated
+enterprise capabilities. The bundle can be downloaded independently and added
+through the same local project/tool directory configuration that Core already
+uses. The signed `official_tools_bundle` capability controls access to the
+first-party bundle. Prices and offer composition remain versioned backend
+configuration rather than client constants.
 
 ## Enterprise and IP Use
 

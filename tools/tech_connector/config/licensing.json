@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "product": "tech_connector",
+  "issuer": "https://license.theentireworld.com",
+  "audience": "tech-connector",
+  "clock_skew_seconds": 60,
+  "maximum_offline_days": 90,
+  "endpoints": {
+    "login_start": "",
+    "login_poll": "",
+    "session_refresh": "",
+    "logout": "",
+    "entitlement": "",
+    "activation": "",
+    "deactivation": "",
+    "project_registration": ""
+  },
+  "public_keys": {}
+}

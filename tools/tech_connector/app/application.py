@@ -1,5 +1,11 @@
 """Application entry point."""
 
+from __future__ import annotations
+
+from __future__ import annotations
+
+from __future__ import annotations
+
 import sys
 import os
 from pathlib import Path
@@ -11,7 +17,7 @@ from tech_connector.services.environment_service import (
 normalize_current_process_environment()
 
 from PySide6.QtCore import QTimer, QUrl, Qt, Signal
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget, QVBoxLayout
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from tech_connector.models.constants import TOOLS_ROOT, APP_ROOT
@@ -159,6 +165,12 @@ def run_application():
 
     def _on_app_exit():
         try:
+            from tech_connector.bridges.session_authorization import clear_bridge_session
+
+            clear_bridge_session()
+        except Exception:
+            pass
+        try:
             from tech_connector.services.ollama_service import unload_all_ollama_models
             unload_all_ollama_models()
         except Exception:
@@ -166,12 +178,32 @@ def run_application():
 
     app.aboutToQuit.connect(_on_app_exit)
 
+    # Complete all interactive licensing work before constructing MainWindow.
+    # Its constructor schedules indexers, host bridges, watchers, and other
+    # background services that must not run before entitlement is established.
+    from tech_connector.app.licensing_gate import ensure_desktop_preflight
+    from tech_connector.services.application_service import ApplicationService
+
+    service = ApplicationService()
+    try:
+        licensed, licensing_reason, _warnings = ensure_desktop_preflight(service)
+    except Exception as exc:
+        licensed = False
+        licensing_reason = str(exc) or "Tech Connector licensing could not be initialized."
+    if not licensed:
+        QMessageBox.critical(None, "Activation required", licensing_reason)
+        app.quit()
+        return
+
     from tech_connector.services.settings_service import load_settings
     settings = load_settings()
     skip_video = settings.get("skip_splash_video", False) or bool(os.environ.get("AI_STUDIO_SKIP_SPLASH"))
 
     if skip_video:
-        win = MainWindow()
+        win = MainWindow(
+            application_service=service,
+            license_preflight_complete=True,
+        )
         show_main_window(win)
     else:
         # 1. Initialize and show video splash screen
@@ -196,7 +228,11 @@ def run_application():
         app.processEvents()
 
         # 2. Build and warm the main window while the splash video is visible.
-        win = MainWindow(preload_for_splash=True)
+        win = MainWindow(
+            preload_for_splash=True,
+            application_service=service,
+            license_preflight_complete=True,
+        )
         QTimer.singleShot(0, lambda: realize_main_window_behind_splash(app, win, splash))
         preloader = SplashPreloadWorker()
         win._splash_preloader = preloader

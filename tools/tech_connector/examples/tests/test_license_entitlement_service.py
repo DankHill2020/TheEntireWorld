@@ -1,11 +1,13 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+from unittest.mock import patch
 
 from tech_connector.services.license_entitlement_service import (
     clear_license_login,
     entitlement_status_row,
     make_license_token,
-    requires_commercial_license,
+    requires_community_residual,
     update_license_login,
     verify_entitlement,
     verify_license_token,
@@ -13,6 +15,26 @@ from tech_connector.services.license_entitlement_service import (
 
 
 class LicenseEntitlementServiceTests(unittest.TestCase):
+    def setUp(self):
+        self.legacy_environment = patch.dict(
+            "os.environ",
+            {"TECH_CONNECTOR_ALLOW_LEGACY_ENTITLEMENT": "1"},
+        )
+        self.legacy_environment.start()
+
+    def tearDown(self):
+        self.legacy_environment.stop()
+
+    def setUp(self):
+        self.legacy_environment = patch.dict(
+            "os.environ",
+            {"TECH_CONNECTOR_ALLOW_LEGACY_ENTITLEMENT": "1"},
+        )
+        self.legacy_environment.start()
+
+    def tearDown(self):
+        self.legacy_environment.stop()
+
     def test_login_required_locks_without_token(self):
         entitlement = verify_entitlement({"tech_connector_require_login": True})
 
@@ -91,21 +113,21 @@ class LicenseEntitlementServiceTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("signature", reason.lower())
 
-    def test_commercial_threshold_requires_upgrade_for_personal(self):
+    def test_community_residual_starts_only_above_project_profit_threshold(self):
         secret = "dev-secret"
         token = make_license_token({"email": "creator@example.com", "tier": "personal"}, secret)
         settings = {"tech_connector_license_token": token}
 
-        self.assertFalse(requires_commercial_license(settings, annual_attributable_revenue_usd=100_000, secret=secret))
-        self.assertFalse(requires_commercial_license(settings, annual_attributable_revenue_usd=250_000, secret=secret))
-        self.assertTrue(requires_commercial_license(settings, annual_attributable_revenue_usd=500_000, secret=secret))
+        self.assertFalse(requires_community_residual(settings, adjusted_project_profit_usd=100_000, secret=secret))
+        self.assertFalse(requires_community_residual(settings, adjusted_project_profit_usd=500_000, secret=secret))
+        self.assertTrue(requires_community_residual(settings, adjusted_project_profit_usd=500_001, secret=secret))
 
     def test_commercial_tier_covers_commercial_threshold(self):
         secret = "dev-secret"
         token = make_license_token({"email": "biz@example.com", "tier": "commercial"}, secret)
         settings = {"tech_connector_license_token": token}
 
-        self.assertFalse(requires_commercial_license(settings, annual_attributable_revenue_usd=900_000, secret=secret))
+        self.assertFalse(requires_community_residual(settings, adjusted_project_profit_usd=900_000, secret=secret))
 
     def test_update_and_clear_license_login(self):
         secret = "dev-secret"
