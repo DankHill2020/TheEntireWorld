@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Iterable
 
@@ -96,16 +97,43 @@ def render_user_setup(existing: str) -> str:
     return source.rstrip() + "\n\n" + block
 
 
-def find_maya_script_dirs() -> list[Path]:
-    """Return standard existing user script directories for installed Maya versions."""
+def installed_maya_versions(autodesk_root: str | Path | None = None) -> dict[int, Path]:
+    """Return real Maya installations, ignoring stale preference/plugin folders."""
 
-    maya_root = Path.home() / "Documents" / "maya"
-    if not maya_root.exists():
-        maya_root = Path.home() / "maya"
-    if not maya_root.exists():
+    root = Path(autodesk_root) if autodesk_root is not None else Path(
+        os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    ) / "Autodesk"
+    installed: dict[int, Path] = {}
+    if not root.is_dir():
+        return installed
+    for candidate in root.glob("Maya20*"):
+        match = re.fullmatch(r"Maya(20\d{2})", candidate.name, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        version = int(match.group(1))
+        if version < 2023:
+            continue
+        if any((candidate / "bin" / executable).is_file() for executable in ("maya.exe", "mayapy.exe")):
+            installed[version] = candidate.resolve()
+    return dict(sorted(installed.items()))
+
+
+def find_maya_script_dirs(
+    *, autodesk_root: str | Path | None = None,
+    maya_root: str | Path | None = None,
+) -> list[Path]:
+    """Return the shared script folder plus folders for real Maya 2023+ installs."""
+
+    user_root = Path(maya_root).expanduser() if maya_root is not None else Path.home() / "Documents" / "maya"
+    if not user_root.exists() and maya_root is None:
+        user_root = Path.home() / "maya"
+    if not user_root.exists():
         return []
-    candidates = [maya_root / "scripts"]
-    candidates.extend(subdir / "scripts" for subdir in maya_root.glob("20*") if subdir.is_dir())
+    candidates = [user_root / "scripts"]
+    candidates.extend(
+        user_root / str(version) / "scripts"
+        for version in installed_maya_versions(autodesk_root)
+    )
     return sorted(dict.fromkeys(path.resolve() for path in candidates), key=str)
 
 
@@ -219,6 +247,7 @@ __all__ = [
     "BOOTSTRAP_VERSION",
     "MAYA_USER_SETUP_CODE",
     "find_maya_script_dirs",
+    "installed_maya_versions",
     "install_maya_livelink_plugin",
     "managed_bootstrap_block",
     "render_user_setup",

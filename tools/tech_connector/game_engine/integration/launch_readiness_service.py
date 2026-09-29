@@ -28,6 +28,9 @@ from tech_connector.game_engine.integration.capability_qualification_service imp
 from tech_connector.game_engine.integration.release_regression_qualification_service import (
     load_release_regression_qualification, validate_release_regression_qualification,
 )
+from tech_connector.game_engine.integration.maya_version_qualification_service import (
+    load_maya_version_qualification, validate_maya_version_qualification,
+)
 from tech_connector.packaging.release_gate import (
     publication_candidates, sensitive_artifacts, validate_github_root_surface, validate_legal_surface,
     validate_production_configuration, validate_production_legal_approval, validate_production_source_access,
@@ -47,6 +50,10 @@ LAUNCH_GATE_REMEDIATION: dict[str, tuple[str, ...]] = {
     "asset_production_readiness": ("Qualify each reported asset in a production vertical slice or promote it only after executable evidence passes.",),
     "capability_evidence_qualification": ("Regenerate capability evidence on this exact source revision and fix every failing evidence test.",),
     "release_regression_qualification": ("Run the complete release regression qualification with the supported Python runtime and resolve every failure.",),
+    "maya_version_compatibility": (
+        "Run Maya Version Qualification on every installed Maya 2023+ version and resolve syntax, import, or scene-authoring failures.",
+        "Keep uninstalled versions labeled as source-contract coverage until they have genuine mayapy runtime evidence.",
+    ),
     "capability_maturity": ("Replace contract/reference implementations with tested production behavior for every reported command.",),
     "dcc_qualification": (
         "Open each required DCC, activate its authenticated Tech Connector bridge, and select the exact live session.",
@@ -193,6 +200,18 @@ def audit_launch_readiness(
          "passed_tests": regression_receipt.get("passed_tests"),
          "skipped_tests": regression_receipt.get("skipped_tests"),
          "interpreter": dict(regression_receipt.get("interpreter") or {})},
+    ))
+    maya_receipt_path = project_root / ".tech_connector" / "qualification" / "maya_versions" / "maya_version_qualification.json"
+    maya_receipt = load_maya_version_qualification(maya_receipt_path)
+    maya_validation = validate_maya_version_qualification(root, maya_receipt)
+    maya_blockers = [f"maya_versions.{gate}" for gate in maya_validation["gates"]]
+    gates.append(LaunchGate(
+        "maya_version_compatibility", "passed" if not maya_blockers else "blocked",
+        tuple(maya_blockers),
+        {"receipt": str(maya_receipt_path), "validation": maya_validation,
+         "declared_versions": list(maya_receipt.get("declared_versions") or ()),
+         "installed_versions": list(maya_receipt.get("installed_versions") or ()),
+         "matrix": list(maya_receipt.get("matrix") or ())},
     ))
     capabilities = audit_capability_maturity(ADAPTIVE_SCENE_COMMANDS.values())
     capability_blockers = [f"{row['capability']}: {row['verified_maturity']}" for row in capabilities["capabilities"]

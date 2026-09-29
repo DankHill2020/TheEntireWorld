@@ -8,7 +8,9 @@ from tech_connector.bridges.maya.maya_livelink_plugin import (
     BLOCK_END,
     LEGACY_MAYA_USER_SETUP_CODE,
     MAYA_USER_SETUP_CODE,
+    find_maya_script_dirs,
     install_maya_livelink_plugin,
+    installed_maya_versions,
     managed_bootstrap_block,
     render_user_setup,
     verify_maya_livelink_installation,
@@ -124,3 +126,21 @@ def test_generated_bootstrap_uses_authenticated_json_bridge_module(monkeypatch) 
 def test_current_bootstrap_never_opens_a_raw_maya_command_port() -> None:
     assert "cmds.commandPort" not in MAYA_USER_SETUP_CODE
     assert "sourceType=" not in MAYA_USER_SETUP_CODE
+
+
+def test_install_discovery_ignores_stale_preference_folders(tmp_path) -> None:
+    autodesk = tmp_path / "Autodesk"
+    maya_root = tmp_path / "maya"
+    for version in ("2022", "2023", "2025"):
+        (maya_root / version / "scripts").mkdir(parents=True)
+    (maya_root / "scripts").mkdir()
+    installed = autodesk / "Maya2023" / "bin"
+    installed.mkdir(parents=True)
+    (installed / "mayapy.exe").touch()
+    (autodesk / "Maya2025" / "plug-ins").mkdir(parents=True)
+
+    assert installed_maya_versions(autodesk) == {2023: (autodesk / "Maya2023").resolve()}
+    assert find_maya_script_dirs(autodesk_root=autodesk, maya_root=maya_root) == [
+        (maya_root / "2023" / "scripts").resolve(),
+        (maya_root / "scripts").resolve(),
+    ]

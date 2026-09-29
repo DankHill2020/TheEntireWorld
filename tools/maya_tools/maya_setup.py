@@ -110,29 +110,39 @@ def setup_maya_livelink():
         print(f"Failed to append Live Link setup: {e}")
 
 
-tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-if tools_dir not in sys.path:
-    sys.path.append(tools_dir)
+def install_current_maya_tools():
+    """Install the current checkout into Maya; never runs merely on import."""
+    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    if tools_dir not in sys.path:
+        sys.path.append(tools_dir)
 
-try:
-    import requests
-except Exception:
     try:
-        maya_version = cmds.about(version=True)
-        mayapy_path = os.path.join("C:\\Program Files", "Autodesk", f"Maya{maya_version}", "bin", "mayapy.exe")
-        if os.path.exists(mayapy_path):
-            subprocess.check_call([mayapy_path, "-m", "ensurepip", "--upgrade"])
-            subprocess.check_call([mayapy_path, "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.check_call([mayapy_path, "-m", "pip", "install", "requests"])
-    except Exception as exc:
-        print(f"Maya requests setup note: {exc}")
+        import requests  # noqa: F401
+    except Exception:
+        try:
+            maya_version = cmds.about(version=True)
+            mayapy_path = os.path.join(
+                "C:\\Program Files", "Autodesk", "Maya{}".format(maya_version),
+                "bin", "mayapy.exe",
+            )
+            if os.path.exists(mayapy_path):
+                subprocess.check_call([mayapy_path, "-m", "ensurepip", "--upgrade"])
+                subprocess.check_call([mayapy_path, "-m", "pip", "install", "--upgrade", "pip"])
+                subprocess.check_call([mayapy_path, "-m", "pip", "install", "requests"])
+        except Exception as exc:
+            print("Maya requests setup note: {}".format(exc))
 
-update_maya_script_path(tools_dir)
-add_tools_to_user_setup(tools_dir)
-setup_maya_livelink()
-try:
-    from maya_tools import maya_menu
+    update_maya_script_path(tools_dir)
+    add_tools_to_user_setup(tools_dir)
+    setup_maya_livelink()
+    try:
+        from maya_tools import maya_menu
 
-    maya_menu.create_menu_once()
-except Exception:
-    pass
+        maya_menu.create_menu_once()
+    except Exception:
+        pass
+    return tools_dir
+
+
+if __name__ == "__main__":
+    install_current_maya_tools()

@@ -794,6 +794,8 @@ def test_signed_community_entitlement_rejects_unregistered_project(tmp_path, sig
 
 def test_release_validation_rejects_private_signing_keys(tmp_path):
     required = (
+        "README.md",
+        "LICENSE",
         "tech_connector/LICENSE.md",
         "tech_connector/PRIVACY.md",
         "tech_connector/README.md",

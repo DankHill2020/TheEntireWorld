@@ -39,7 +39,8 @@ def test_launch_audit_exposes_api_asset_capability_and_dcc_gates(tmp_path) -> No
     assert set(audit["blocking_gates"]) == {
         "playable_project_qualification", "asset_production_readiness",
         "realtime_fx_qualification", "world_production_qualification", "content_production_qualification",
-        "capability_evidence_qualification", "release_regression_qualification", "dcc_qualification",
+        "capability_evidence_qualification", "release_regression_qualification",
+        "maya_version_compatibility", "dcc_qualification",
     }
 
 
@@ -59,7 +60,7 @@ def test_launch_readiness_panel_exposes_fail_closed_gates(tmp_path) -> None:
     tools_root = Path(__file__).resolve().parents[2]
     panel = LaunchReadinessPanel(tools_root, AssetDatabase(tmp_path / "panel-assets.sqlite3"))
 
-    assert panel.gates.rowCount() == 12
+    assert panel.gates.rowCount() == 13
     assert panel.gates.columnCount() == 5
     assert panel.gates.horizontalHeaderItem(3).text() == "Next action"
     assert "BLOCKED" in panel.summary.text()
@@ -69,6 +70,6 @@ def test_launch_readiness_panel_exposes_fail_closed_gates(tmp_path) -> None:
     assert "capability_maturity" not in panel.last_audit["blocking_gates"]
     panel.production.setChecked(True)
     audit = panel.refresh()
-    assert panel.gates.rowCount() == 13
+    assert panel.gates.rowCount() == 14
     assert "production_controls" in audit["blocking_gates"]
     panel.close()
