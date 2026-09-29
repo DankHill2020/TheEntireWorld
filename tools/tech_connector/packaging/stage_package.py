@@ -63,6 +63,41 @@ def copy_tree_entry(src_root: Path, rel: str, out_root: Path, excludes: list[str
         make_writable(dest)
 
 
+def copy_repository_files(
+    src_root: Path,
+    out_root: Path,
+    entries: list[dict],
+    excludes: list[str],
+) -> None:
+    """Copy explicit source files to repository-root destinations."""
+    resolved_root = src_root.resolve()
+    resolved_output = out_root.resolve()
+    for entry in entries:
+        source_relative = Path(str(entry.get("source") or "").replace("\\", "/"))
+        target_relative = Path(str(entry.get("target") or "").replace("\\", "/"))
+        for field, value in (("source", source_relative), ("target", target_relative)):
+            if not str(value) or value.is_absolute() or ".." in value.parts:
+                raise RuntimeError(f"repository file {field} must be a safe relative path")
+        if matches_any(source_relative.as_posix(), excludes):
+            raise RuntimeError(
+                f"repository file source is excluded: {source_relative.as_posix()}"
+            )
+        source = (resolved_root / source_relative).resolve()
+        destination = (resolved_output / target_relative).resolve()
+        try:
+            source.relative_to(resolved_root)
+            destination.relative_to(resolved_output)
+        except ValueError as exc:
+            raise RuntimeError("repository file mapping escapes its package boundary") from exc
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError(
+                f"repository file source is missing or unsafe: {source_relative.as_posix()}"
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        make_writable(destination)
+
+
 def make_writable(path: Path) -> None:
     try:
         path.chmod(path.stat().st_mode | stat.S_IWRITE | stat.S_IREAD)
@@ -140,6 +175,8 @@ def validate_staged_package(
     :return: None
     """
     required = tuple(required_files or (
+        "README.md",
+        "LICENSE",
         "tech_connector/LICENSE.md",
         "tech_connector/PRIVACY.md",
         "tech_connector/README.md",
@@ -174,7 +211,15 @@ def validate_staged_package(
         if not path.is_file():
             continue
         relative = path.relative_to(package_root)
-        if "__pycache__" in relative.parts or path.suffix.lower() in {".pyc", ".pyo"}:
+        normalized = relative.as_posix()
+        is_runtime_port = path.name.casefold().endswith("_port.txt")
+        approved_port = normalized.startswith("tech_connector/bridges/ports/")
+        if (
+            "__pycache__" in relative.parts
+            or path.suffix.lower() in {".pyc", ".pyo", ".orig", ".rej"}
+            or path.name.endswith("~")
+            or (is_runtime_port and not approved_port)
+        ):
             forbidden.append(relative.as_posix())
         lowered_name = path.name.casefold()
         if path.suffix.casefold() in sensitive_suffixes or lowered_name in sensitive_names:
@@ -189,7 +234,7 @@ def validate_staged_package(
             continue
     if forbidden:
         raise RuntimeError(
-            "Staged package contains generated Python caches: "
+            "Staged package contains generated or runtime-state artifacts: "
             + ", ".join(forbidden[:20])
         )
     if sensitive:
@@ -217,6 +262,7 @@ def stage_package(tier: str, output_dir: Path, clean: bool = True) -> Path:
     excludes = list(cfg.get("exclude") or [])
     for rel in cfg.get("include") or []:
         copy_tree_entry(root, rel, out, excludes)
+    copy_repository_files(root, out, list(cfg.get("repository_files") or []), excludes)
 
     (out / "PACKAGE_TIER.txt").write_text(
         f"{cfg.get('display_name', tier)}\n\n{cfg.get('description', '')}\n",
