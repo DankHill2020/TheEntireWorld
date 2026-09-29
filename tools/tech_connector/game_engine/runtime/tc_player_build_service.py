@@ -26,6 +26,9 @@ SUPPORTED_RUNTIME_GRAPH_OPERATIONS = frozenset({
     "component.set_position",
     "component.get_position",
     "input.move",
+    "character.move",
+    "character.jump",
+    "camera.follow",
     "input.read_axis",
     "movement.calculate_velocity",
     "actor.set_velocity",
@@ -34,6 +37,7 @@ SUPPORTED_RUNTIME_GRAPH_OPERATIONS = frozenset({
     "audio.play",
     "save.write",
     "animation.play",
+    "animation.locomotion",
     "animation.stop",
     "animation.set_speed",
 })
@@ -336,7 +340,9 @@ def _rig_rows(rig_graph: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 
 def _materialize_rig_blobs(rig_graph: dict[str, Any], blobs: dict[str, bytes], destination: Path) -> None:
-    asset_directory = destination.with_suffix(".assets")
+    # Sidecars use a manifest-relative, content-addressed name. Absolute output
+    # paths made identical scene compiles produce different asset IDs and bytes.
+    asset_directory = destination.parent / "RuntimeAssets"
     for skin in _rig_rows(rig_graph, "skins"):
         source_skin = next((item for item in rig_graph.get("skins", ()) if isinstance(item, dict) and str(item.get("id")) == str(skin.get("id"))), None) if not isinstance(rig_graph.get("skins"), dict) else rig_graph["skins"].get(str(skin.get("id")))
         if not isinstance(source_skin, dict):
@@ -349,7 +355,9 @@ def _materialize_rig_blobs(rig_graph: dict[str, Any], blobs: dict[str, bytes], d
             asset_directory.mkdir(parents=True, exist_ok=True)
             target = asset_directory / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]}_{Path(key).name}"
             target.write_bytes(payload)
-            source_skin[field_name] = str(target)
+            logical_source = f"RuntimeAssets/{target.name}"
+            blobs[logical_source] = payload
+            source_skin[field_name] = logical_source
 
 
 def _skin_binding_records(rig_graph: dict[str, Any], assets: list[dict[str, str]], warnings: list[str]) -> list[str]:
@@ -864,12 +872,20 @@ def _graph_arguments(operation: str, instruction: dict[str, Any]) -> list[Any]:
         "branch.greater": ("name", "threshold", "event"), "event.emit": ("event",),
         "entity.spawn": ("name", "x", "y", "z"), "component.set_position": ("target", "x", "y", "z"),
         "component.get_position": ("target", "variable"), "input.move": ("target", "speed"),
+        "character.move": ("target", "speed", "acceleration", "deceleration", "air_control", "movement_mode"),
+        "character.jump": ("target", "impulse", "coyote_time", "jump_buffer"),
+        "camera.follow": ("camera", "target", "offset_x", "offset_y", "offset_z", "look_height", "look_distance", "smoothing"),
         "input.read_axis": ("axis",),
         "movement.calculate_velocity": ("direction", "speed", "acceleration", "target"),
         "actor.set_velocity": ("target", "velocity"),
         "time.accumulate": ("name",),
         "ui.set_text": ("text",), "audio.play": ("asset",), "save.write": (),
         "animation.play": ("clip", "restart"), "animation.stop": (), "animation.set_speed": ("speed",),
+        "animation.locomotion": (
+            "target", "idle", "walk_forward", "walk_forward_right", "walk_right", "walk_backward_right",
+            "walk_backward", "walk_backward_left", "walk_left", "walk_forward_left", "run", "jump", "land",
+            "walk_threshold", "run_threshold", "blend_seconds",
+        ),
     }[operation]
     values = [binding_value(key) for key in keys]
     if operation == "audio.play" and values:
@@ -886,6 +902,8 @@ def _collect_player_assets(manifest: Path, output: Path) -> None:
         if len(row) < 5 or row[0] != "ASSET":
             continue
         source = Path(_decode(row[3])).expanduser()
+        if not source.is_absolute():
+            source = manifest.parent / source
         if not source.is_file():
             continue
         assets_directory.mkdir(parents=True, exist_ok=True)

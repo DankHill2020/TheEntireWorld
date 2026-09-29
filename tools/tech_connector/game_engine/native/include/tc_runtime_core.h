@@ -393,6 +393,7 @@ public:
     bool load_manifest(const std::filesystem::path& path, std::string& error);
     void begin_play();
     void set_input_axis(float x, float y) noexcept;
+    void set_jump_pressed(bool pressed) noexcept;
     void tick(float delta_seconds);
     bool save(const std::filesystem::path& path, std::string& error) const;
     bool load_save(const std::filesystem::path& path, std::string& error);
@@ -403,6 +404,12 @@ public:
     [[nodiscard]] const std::vector<std::string>& debug_trace() const noexcept;
     [[nodiscard]] const std::vector<PhysicsContact>& physics_contacts() const noexcept;
     [[nodiscard]] const std::vector<PhysicsJointDiagnostic>& physics_joint_diagnostics() const noexcept;
+    [[nodiscard]] const std::string& active_animation_id() const noexcept { return active_animation_id_; }
+    [[nodiscard]] const std::string& previous_animation_id() const noexcept { return previous_animation_id_; }
+    [[nodiscard]] double animation_blend_alpha() const noexcept {
+        return animation_blend_duration_seconds_ <= 0.0 ? 1.0 :
+            std::clamp(animation_blend_elapsed_seconds_ / animation_blend_duration_seconds_, 0.0, 1.0);
+    }
     [[nodiscard]] bool raycast(const WorldVector3& origin, const WorldVector3& direction,
                                double maximum_distance, PhysicsRayHit& hit,
                                std::uint32_t layer_mask = 0xFFFFFFFFU) const;
@@ -423,6 +430,12 @@ private:
     RuntimeProfile profile_;
     std::vector<std::string> debug_trace_;
     TcGraphVector2 input_axis_{};
+    bool jump_pressed_{false};
+    bool jump_was_pressed_{false};
+    std::unordered_map<EntityId, double> character_ground_grace_seconds_;
+    std::unordered_map<EntityId, double> character_jump_buffer_seconds_;
+    std::unordered_map<EntityId, bool> character_was_grounded_;
+    std::unordered_map<EntityId, double> character_land_seconds_;
     std::size_t broadphase_pairs_{0};
     std::size_t collision_contacts_{0};
     std::size_t solver_islands_{0};
@@ -430,7 +443,11 @@ private:
     std::vector<PhysicsJointDiagnostic> physics_joint_diagnostics_;
     std::uint64_t simulation_step_index_{0};
     std::string active_animation_id_;
+    std::string previous_animation_id_;
     double animation_time_seconds_{0.0};
+    double previous_animation_time_seconds_{0.0};
+    double animation_blend_duration_seconds_{0.0};
+    double animation_blend_elapsed_seconds_{0.0};
     double animation_playback_speed_{1.0};
     bool animation_playing_{true};
 };

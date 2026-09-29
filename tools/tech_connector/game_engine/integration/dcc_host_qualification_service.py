@@ -102,7 +102,7 @@ HOST_ROLE_PROFILES: dict[str, DccHostRoleProfile] = {
             "rig.edit_control_shape", "rig.create_reverse_foot", "rig.create_ribbon",
             "rig.create_twist", "rig.create_motion_path", "rig.create_mesh_attachment",
             "rig.create_pose_reader", "rig.create_face_module", "rig.create_spline_chain",
-            "rig.create_quadruped_ik", "rig.skin_bind",
+            "rig.create_quadruped_ik", "rig.skin_bind", "skin.surface_spatial_smooth_brush",
         ),
         qualification_scope=(
             "characterization", "retargeting", "take_management", "animation_cleanup",

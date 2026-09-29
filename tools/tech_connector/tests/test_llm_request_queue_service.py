@@ -626,7 +626,7 @@ def test_router_preserves_failed_provider_metrics_for_diagnosis(
     reset_global_llm_request_queue()
 
 
-def test_public_api_reports_and_cancels_queued_work() -> None:
+def test_public_api_reports_and_cancels_queued_work(monkeypatch: pytest.MonkeyPatch) -> None:
     """Expose safe queue operations through the supported headless API."""
 
     from tech_connector.api import (
@@ -665,6 +665,7 @@ def test_public_api_reports_and_cancels_queued_work() -> None:
     )
     _wait_until(lambda: llm_queue_status()["pending"] == 1)
 
+    monkeypatch.setenv("TECH_CONNECTOR_DEV_LICENSE_BYPASS", "1")
     api = TechConnectorHeadlessAPI(settings={}, require_entitlement=False)
     feature = api.features.get("llm.queue")
     assert feature["operations"] == ("status", "cancel")

@@ -96,9 +96,13 @@ def set_keyframe(
         "value": float(value),
         "interpolation": str(interpolation or "auto"),
     }
-    keys = [row for row in curve.get("keys") or [] if int(row.get("frame", 0)) != int(frame)]
-    keys.append(key)
-    curve["keys"] = sorted(keys, key=lambda row: int(row["frame"]))
+    keys = curve.setdefault("keys", [])
+    frame_number = int(frame)
+    index = _key_index(keys, frame_number)
+    if index < len(keys) and int(keys[index].get("frame", 0)) == frame_number:
+        keys[index] = key
+    else:
+        keys.insert(index, key)
     return key
 
 
@@ -127,19 +131,33 @@ def evaluate_curve(graph: Any, take_id: str, node_id: str, attribute: str, frame
 def _sample_keys(keys: list[dict[str, Any]], frame: float) -> float | None:
     if not keys:
         return None
-    ordered = sorted(keys, key=lambda row: float(row.get("frame", 0.0)))
-    if frame <= float(ordered[0]["frame"]):
-        return float(ordered[0]["value"])
-    if frame >= float(ordered[-1]["frame"]):
-        return float(ordered[-1]["value"])
-    for first, second in zip(ordered, ordered[1:]):
-        first_frame, second_frame = float(first["frame"]), float(second["frame"])
-        if first_frame <= frame <= second_frame:
-            if str(first.get("interpolation") or "auto").lower() in {"constant", "stepped"}:
-                return float(first["value"])
-            alpha = (frame - first_frame) / max(1.0e-12, second_frame - first_frame)
-            return float(first["value"]) * (1.0 - alpha) + float(second["value"]) * alpha
-    return None
+    sample_frame = float(frame)
+    index = _key_index(keys, sample_frame)
+    if index <= 0:
+        return float(keys[0]["value"])
+    if index >= len(keys):
+        return float(keys[-1]["value"])
+    second_frame = float(keys[index].get("frame", 0.0))
+    if second_frame == sample_frame:
+        return float(keys[index]["value"])
+    first, second = keys[index - 1], keys[index]
+    first_frame = float(first.get("frame", 0.0))
+    if str(first.get("interpolation") or "auto").lower() in {"constant", "stepped"}:
+        return float(first["value"])
+    alpha = (sample_frame - first_frame) / max(1.0e-12, second_frame - first_frame)
+    return float(first["value"]) * (1.0 - alpha) + float(second["value"]) * alpha
+
+
+def _key_index(keys: list[dict[str, Any]], frame: float) -> int:
+    """Return the first key index at or after ``frame`` without allocating a frame list."""
+    low, high = 0, len(keys)
+    while low < high:
+        middle = (low + high) // 2
+        if float(keys[middle].get("frame", 0.0)) < frame:
+            low = middle + 1
+        else:
+            high = middle
+    return low
 
 
 def _take(graph: Any, take_id: str) -> dict[str, Any]:

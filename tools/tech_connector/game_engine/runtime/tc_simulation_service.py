@@ -85,7 +85,21 @@ class SimulationParticle:
     angular_velocity: float = 0.0
     emitter_id: str = ""
     particle_id: int = -1
+    mass: float = 0.0
+    charge: float = 0.0
+    species: str = "neutral"
+    polarizability: float = 0.0
+    collision_group: int = 1
+    collision_mask: int = -1
+    collision_priority: float = 0.0
     effect_attributes: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def inertial_mass(self) -> float:
+        """Return explicit mass, or the legacy inverse-mass equivalent."""
+        if self.mass > 0.0:
+            return float(self.mass)
+        return 1.0 / max(1.0e-30, float(self.inverse_mass)) if self.inverse_mass > 0.0 else float("inf")
 
 
 @dataclass
@@ -104,6 +118,7 @@ class DistanceConstraint:
     heal_distance: float = 0.0
     reformable: bool = False
     material_axis: str = "isotropic"
+    strain_limit: float = 0.0
 
 
 @dataclass
@@ -187,6 +202,7 @@ class AttachmentConstraint:
     compliance: float = 0.0
     break_threshold: float = 0.0
     enabled: bool = True
+    tag: str = ""
 
 
 @dataclass
@@ -207,6 +223,19 @@ class AreaConstraint:
     third: int
     rest_area: float
     compliance: float = 1.0e-7
+    break_threshold: float = 0.0
+    enabled: bool = True
+    lagrange: float = 0.0
+
+
+@dataclass
+class DihedralBendingConstraint:
+    edge_first: int
+    edge_second: int
+    opposite_first: int
+    opposite_second: int
+    rest_angle: float
+    compliance: float = 2.0e-5
     break_threshold: float = 0.0
     enabled: bool = True
     lagrange: float = 0.0
@@ -261,6 +290,98 @@ class ForceField:
     strength: float = 1.0
     radius: float = 0.0
     seed: int = 1
+    enabled: bool = True
+    inner_radius: float = 0.0
+    falloff_power: float = 1.0
+    max_acceleration: float = 0.0
+    drag: float = 0.0
+    gust_strength: float = 0.0
+    frequency: float = 1.0
+    noise_scale: float = 1.0
+    ambient_density: float = 1.225
+
+
+@dataclass
+class SimulationScaleSettings:
+    """Numerical/authoring scale contract shared by terrestrial, space, and atomic worlds."""
+
+    distance_unit_meters: float = 1.0
+    time_unit_seconds: float = 1.0
+    mass_unit_kilograms: float = 1.0
+    charge_unit_coulombs: float = 1.0
+    accuracy_mode: str = "grounded"
+    integrator: str = "symplectic_euler"
+    adaptive_substeps: bool = False
+    maximum_displacement_fraction: float = 0.35
+
+    def validate(self) -> None:
+        for name in ("distance_unit_meters", "time_unit_seconds", "mass_unit_kilograms", "charge_unit_coulombs"):
+            if not math.isfinite(float(getattr(self, name))) or float(getattr(self, name)) <= 0.0:
+                raise ValueError(f"{name} must be finite and greater than zero.")
+        if self.accuracy_mode not in {"grounded", "approximation", "cinematic"}:
+            raise ValueError(f"Unknown simulation accuracy mode: {self.accuracy_mode}")
+        if self.integrator not in {"symplectic_euler"}:
+            raise ValueError(f"Unsupported simulation integrator: {self.integrator}")
+
+
+@dataclass
+class ParticleInteractionSettings:
+    """Composable long- and short-range particle interactions in authored units."""
+
+    gravity_constant: float = 0.0
+    gravity_source_mass_threshold: float = 0.0
+    coulomb_constant: float = 0.0
+    softening: float = 1.0e-3
+    cutoff: float = 0.0
+    lennard_jones_epsilon: float = 0.0
+    lennard_jones_sigma: float = 0.1
+    yukawa_strength: float = 0.0
+    yukawa_screening: float = 1.0
+    maximum_acceleration: float = 0.0
+    long_range_method: str = "auto"
+    direct_sum_limit: int = 256
+    opening_angle: float = 0.65
+    tree_leaf_capacity: int = 8
+    maximum_tree_depth: int = 24
+    short_range_method: str = "auto"
+    collision_mode: str = "none"
+    merge_distance_scale: float = 1.0
+    merge_speed_limit: float = 0.0
+    maximum_merges_per_step: int = 256
+
+    @property
+    def enabled(self) -> bool:
+        return any(abs(value) > 0.0 for value in (
+            self.gravity_constant, self.coulomb_constant,
+            self.lennard_jones_epsilon, self.yukawa_strength,
+        ))
+
+    def resolved_long_range_method(self, particle_count: int) -> str:
+        method = str(self.long_range_method or "auto").lower()
+        if method not in {"auto", "exact", "barnes_hut"}:
+            raise ValueError(f"Unknown long-range interaction method: {self.long_range_method}")
+        if method == "auto":
+            return "barnes_hut" if int(particle_count) > max(2, int(self.direct_sum_limit)) else "exact"
+        return method
+
+    def resolved_short_range_method(self, particle_count: int) -> str:
+        method = str(self.short_range_method or "auto").lower()
+        if method not in {"auto", "exact", "spatial_hash"}:
+            raise ValueError(f"Unknown short-range interaction method: {self.short_range_method}")
+        if method == "auto":
+            return "spatial_hash" if self.cutoff > 0.0 and int(particle_count) > max(2, int(self.direct_sum_limit)) else "exact"
+        return method
+
+
+def _force_falloff(force: ForceField, distance: float) -> float:
+    radius = max(0.0, float(force.radius))
+    if radius <= 0.0:
+        return 1.0
+    inner = min(radius, max(0.0, float(force.inner_radius)))
+    if distance <= inner:
+        return 1.0
+    amount = max(0.0, 1.0 - (distance - inner) / max(1.0e-12, radius - inner))
+    return amount ** max(0.01, float(force.falloff_power))
 
 
 @dataclass
@@ -280,6 +401,8 @@ class SparseVolume:
     dissipation: float = 0.08
     cooling: float = 0.25
     buoyancy: float = 1.0
+    pressure_iterations: int = 0
+    projection_strength: float = 1.0
 
     def step(self, dt: float) -> None:
         retained: dict[tuple[int, int, int], SparseVolumeCell] = {}
@@ -292,6 +415,46 @@ class SparseVolume:
             if cell.density > 1.0e-4 or cell.flame > 1.0e-4 or cell.emission > 1.0e-4:
                 retained[key] = cell
         self.cells = retained
+        if self.pressure_iterations > 0 and self.cells:
+            self._project_velocity()
+
+    def _project_velocity(self) -> None:
+        keys = tuple(sorted(self.cells))
+        lookup = {key: index for index, key in enumerate(keys)}
+        velocity = [list(self.cells[key].velocity) for key in keys]
+        divergence = [0.0] * len(keys)
+        spacing = max(1.0e-6, float(self.voxel_size))
+        for index, key in enumerate(keys):
+            for axis in range(3):
+                negative = list(key); negative[axis] -= 1
+                positive = list(key); positive[axis] += 1
+                negative_velocity = velocity[lookup[tuple(negative)]][axis] if tuple(negative) in lookup else velocity[index][axis]
+                positive_velocity = velocity[lookup[tuple(positive)]][axis] if tuple(positive) in lookup else velocity[index][axis]
+                divergence[index] += (positive_velocity - negative_velocity) / (2.0 * spacing)
+        pressure = [0.0] * len(keys)
+        for _ in range(max(1, int(self.pressure_iterations))):
+            next_pressure = [0.0] * len(keys)
+            for index, key in enumerate(keys):
+                neighbors = []
+                for axis in range(3):
+                    for offset in (-1, 1):
+                        neighbor = list(key); neighbor[axis] += offset
+                        if tuple(neighbor) in lookup:
+                            neighbors.append(lookup[tuple(neighbor)])
+                if neighbors:
+                    next_pressure[index] = (
+                        sum(pressure[item] for item in neighbors) - divergence[index] * spacing * spacing
+                    ) / len(neighbors)
+            pressure = next_pressure
+        strength = max(0.0, min(1.0, float(self.projection_strength)))
+        for index, key in enumerate(keys):
+            for axis in range(3):
+                negative = list(key); negative[axis] -= 1
+                positive = list(key); positive[axis] += 1
+                negative_pressure = pressure[lookup[tuple(negative)]] if tuple(negative) in lookup else pressure[index]
+                positive_pressure = pressure[lookup[tuple(positive)]] if tuple(positive) in lookup else pressure[index]
+                velocity[index][axis] -= strength * (positive_pressure - negative_pressure) / (2.0 * spacing)
+            self.cells[key].velocity = tuple(velocity[index])
 
 
 @dataclass
@@ -353,10 +516,15 @@ class SimulationWorld:
     mesh_colliders: list[TriangleMeshCollider] = field(default_factory=list)
     attachments: list[AttachmentConstraint] = field(default_factory=list)
     area_constraints: list[AreaConstraint] = field(default_factory=list)
+    bending_constraints: list[DihedralBendingConstraint] = field(default_factory=list)
     volume_constraints: list[VolumeConstraint] = field(default_factory=list)
     emitters: list[GeometryEmitter] = field(default_factory=list)
     curve_fields: list[CurveFlowField] = field(default_factory=list)
     fields: list[ForceField] = field(default_factory=lambda: [ForceField()])
+    scale: SimulationScaleSettings = field(default_factory=SimulationScaleSettings)
+    interactions: ParticleInteractionSettings = field(default_factory=ParticleInteractionSettings)
+    pic_grids: list[Any] = field(default_factory=list)
+    magnetic_grids: list[Any] = field(default_factory=list)
     volumes: dict[str, SparseVolume] = field(default_factory=dict)
     materials: dict[str, SimulationMaterial] = field(default_factory=lambda: {key: SimulationMaterial(**asdict(value)) for key, value in MATERIAL_PRESETS.items()})
     substeps: int = 5
@@ -365,21 +533,25 @@ class SimulationWorld:
     time_seconds: float = 0.0
     surface_faces: list[tuple[int, ...]] = field(default_factory=list)
     reformable_settings: dict[str, dict[str, float]] = field(default_factory=dict)
+    cloth_settings: dict[str, Any] = field(default_factory=dict)
     effect_system: Any = None
     deformable_surfaces: list[Any] = field(default_factory=list)
     debug_contacts: list[dict[str, Any]] = field(default_factory=list, repr=False)
     debug_physics_joints: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def step(self, dt: float) -> None:
+        self.scale.validate()
         self.debug_contacts.clear()
         if self.effect_system is not None:
             from tech_connector.game_engine.runtime.tc_effect_system_service import prepare_effect_step
             prepare_effect_step(self.effect_system, self, float(dt))
         self._emit_geometry(float(dt))
         self._update_reformable_bonds()
-        substeps = max(1, int(self.substeps))
+        substeps = self.resolved_substeps(float(dt))
+        self._frame_dt = float(dt)
         sub_dt = float(dt) / substeps
         for _substep in range(substeps):
+            self._field_time_seconds = self.time_seconds + _substep * sub_dt
             previous = [particle.position for particle in self.particles]
             collision_responses: dict[int, tuple[Vec3, float, float, Vec3]] = {}
             self._integrate(sub_dt)
@@ -387,12 +559,19 @@ class SimulationWorld:
                 constraint.lagrange = 0.0
             for constraint in self.area_constraints:
                 constraint.lagrange = 0.0
+            for constraint in self.bending_constraints:
+                constraint.lagrange = 0.0
             for constraint in self.volume_constraints:
                 constraint.lagrange = 0.0
+            bending_iterations = max(0, int(self.cloth_settings.get(
+                "dihedral_iterations_per_substep", self.constraint_iterations,
+            )))
             for _iteration in range(max(1, int(self.constraint_iterations))):
                 self._solve_distance_constraints(sub_dt)
                 self._solve_attachments(sub_dt)
                 self._solve_area_constraints(sub_dt)
+                if _iteration < bending_iterations:
+                    self._solve_bending_constraints(sub_dt)
                 self._solve_volume_constraints(sub_dt)
                 if self.self_collision:
                     self._solve_particle_contacts()
@@ -414,6 +593,9 @@ class SimulationWorld:
                     )
                     self._apply_material_adhesion(particle, sub_dt)
             self._update_thermal_state(sub_dt)
+        self._resolve_interaction_collisions()
+        self.__dict__.pop("_field_time_seconds", None)
+        self.__dict__.pop("_frame_dt", None)
         for volume in self.volumes.values():
             volume.step(float(dt))
         for surface in self.deformable_surfaces:
@@ -422,6 +604,22 @@ class SimulationWorld:
         if self.effect_system is not None:
             from tech_connector.game_engine.runtime.tc_effect_system_service import finish_effect_step
             finish_effect_step(self.effect_system, self, float(dt))
+
+    def resolved_substeps(self, dt: float) -> int:
+        base = max(1, int(self.substeps))
+        if not self.scale.adaptive_substeps or dt <= 0.0:
+            return base
+        dynamic = [
+            particle for particle in self.particles
+            if particle.alive and not particle.pinned and not particle.frozen and particle.inverse_mass > 0.0
+        ]
+        if not dynamic:
+            return base
+        minimum_radius = min(max(1.0e-9, float(particle.radius)) for particle in dynamic)
+        maximum_speed = max(_length(particle.velocity) for particle in dynamic)
+        allowed = minimum_radius * max(0.01, float(self.scale.maximum_displacement_fraction))
+        required = math.ceil(maximum_speed * float(dt) / max(1.0e-12, allowed))
+        return min(256, max(base, required))
 
     def capture_frame(self, frame: int) -> SimulationFrame:
         volume_cells = {
@@ -436,39 +634,340 @@ class SimulationWorld:
         )
 
     def _integrate(self, dt: float) -> None:
+        for grid in self.pic_grids:
+            solve_tick = float(self.time_seconds)
+            if getattr(grid, "_last_solve_tick", None) != solve_tick:
+                grid.solve(self.particles)
+                grid._last_solve_tick = solve_tick
+        for grid in self.magnetic_grids:
+            solve_tick = float(self.time_seconds)
+            if getattr(grid, "_last_solve_tick", None) != solve_tick:
+                grid.solve(self.particles, float(getattr(self, "_frame_dt", dt)))
+                grid._last_solve_tick = solve_tick
+        accelerations: list[Vec3] = []
         for index, particle in enumerate(self.particles):
             if not particle.alive or particle.pinned or particle.frozen or particle.inverse_mass <= 0.0:
+                accelerations.append((0.0, 0.0, 0.0))
                 continue
             acceleration = (0.0, 0.0, 0.0)
             for force in self.fields:
                 acceleration = _add(acceleration, self._field_acceleration(force, particle, index))
             for curve in self.curve_fields:
                 acceleration = _add(acceleration, self._curve_acceleration(curve, particle.position))
+            mass = particle.inertial_mass
+            if particle.charge and math.isfinite(mass):
+                for grid in self.pic_grids:
+                    acceleration = _add(
+                        acceleration,
+                        _scale(grid.sample(particle.position), particle.charge / max(1.0e-30, mass)),
+                    )
+                for grid in self.magnetic_grids:
+                    acceleration = _add(
+                        acceleration,
+                        _scale(
+                            _cross(particle.velocity, grid.sample(particle.position)),
+                            particle.charge / max(1.0e-30, mass),
+                        ),
+                    )
+            accelerations.append(acceleration)
+        self._accumulate_particle_interactions(accelerations)
+        for particle, acceleration in zip(self.particles, accelerations):
+            if not particle.alive or particle.pinned or particle.frozen or particle.inverse_mass <= 0.0:
+                continue
             particle.velocity = _add(particle.velocity, _scale(acceleration, dt))
             particle.position = _add(particle.position, _scale(particle.velocity, dt))
 
+    def _accumulate_particle_interactions(self, accelerations: list[Vec3]) -> None:
+        settings = self.interactions
+        if not settings.enabled:
+            return
+        softening_sq = max(1.0e-30, float(settings.softening) ** 2)
+        cutoff = max(0.0, float(settings.cutoff))
+        maximum = max(0.0, float(settings.maximum_acceleration))
+        source_threshold = max(0.0, float(settings.gravity_source_mass_threshold))
+        long_range_only = bool(settings.gravity_constant or settings.coulomb_constant) and not any(
+            (settings.lennard_jones_epsilon, settings.yukawa_strength)
+        )
+        if (
+            source_threshold <= 0.0 and long_range_only
+            and settings.resolved_long_range_method(len(self.particles)) == "barnes_hut"
+        ):
+            from tech_connector.game_engine.runtime.tc_nbody_acceleration_service import barnes_hut_accelerations
+
+            tree_acceleration, receipt = barnes_hut_accelerations(
+                [particle.position for particle in self.particles],
+                [particle.inertial_mass for particle in self.particles],
+                [particle.charge for particle in self.particles],
+                [particle.alive for particle in self.particles],
+                settings,
+            )
+            for index, value in enumerate(tree_acceleration):
+                accelerations[index] = _add(accelerations[index], value)
+            self._interaction_diagnostics = receipt
+            if maximum > 0.0:
+                for index, value in enumerate(accelerations):
+                    magnitude = _length(value)
+                    if magnitude > maximum:
+                        accelerations[index] = _scale(value, maximum / magnitude)
+            return
+        short_range_only = bool(settings.lennard_jones_epsilon or settings.yukawa_strength) and not any(
+            (settings.gravity_constant, settings.coulomb_constant)
+        )
+        if (
+            short_range_only and settings.cutoff > 0.0
+            and settings.resolved_short_range_method(len(self.particles)) == "spatial_hash"
+        ):
+            from tech_connector.game_engine.runtime.tc_short_range_interaction_service import spatial_hash_accelerations
+
+            hashed, receipt = spatial_hash_accelerations(
+                [particle.position for particle in self.particles],
+                [particle.inertial_mass for particle in self.particles],
+                [particle.alive for particle in self.particles], settings,
+            )
+            for index, value in enumerate(hashed):
+                accelerations[index] = _add(accelerations[index], value)
+            self._interaction_diagnostics = receipt
+            return
+        if (
+            settings.gravity_constant and source_threshold > 0.0
+            and not any((settings.coulomb_constant, settings.lennard_jones_epsilon, settings.yukawa_strength))
+        ):
+            sources = [
+                (index, particle) for index, particle in enumerate(self.particles)
+                if particle.alive and particle.inertial_mass >= source_threshold
+            ]
+            interaction_count = 0
+            for target_index, target in enumerate(self.particles):
+                if not target.alive:
+                    continue
+                for source_index, source in sources:
+                    if source_index == target_index:
+                        continue
+                    interaction_count += 1
+                    delta = _subtract(source.position, target.position)
+                    distance_sq = _dot(delta, delta) + softening_sq
+                    distance = math.sqrt(distance_sq)
+                    if cutoff > 0.0 and distance > cutoff:
+                        continue
+                    value = float(settings.gravity_constant) * source.inertial_mass / distance_sq
+                    accelerations[target_index] = _add(
+                        accelerations[target_index], _scale(delta, value / max(1.0e-30, distance))
+                    )
+            if maximum > 0.0:
+                for index, value in enumerate(accelerations):
+                    magnitude = _length(value)
+                    if magnitude > maximum:
+                        accelerations[index] = _scale(value, maximum / magnitude)
+            self._interaction_diagnostics = {
+                "method": "dominant_source", "particles": len(self.particles),
+                "sources": len(sources), "direct_interactions": interaction_count,
+            }
+            return
+        self._interaction_diagnostics = {
+            "method": "exact", "particles": sum(1 for particle in self.particles if particle.alive),
+            "direct_interactions": 0,
+        }
+        for first_index, first in enumerate(self.particles):
+            if not first.alive:
+                continue
+            first_mass = first.inertial_mass
+            for second_index in range(first_index + 1, len(self.particles)):
+                second = self.particles[second_index]
+                if not second.alive:
+                    continue
+                self._interaction_diagnostics["direct_interactions"] += 1
+                delta = _subtract(second.position, first.position)
+                distance_sq = _dot(delta, delta) + softening_sq
+                distance = math.sqrt(distance_sq)
+                if cutoff > 0.0 and distance > cutoff:
+                    continue
+                direction = _scale(delta, 1.0 / max(1.0e-30, distance))
+                second_mass = second.inertial_mass
+                first_scalar = second_scalar = 0.0
+                if settings.gravity_constant and math.isfinite(first_mass) and math.isfinite(second_mass):
+                    if second_mass >= source_threshold:
+                        first_scalar += float(settings.gravity_constant) * second_mass / distance_sq
+                    if first_mass >= source_threshold:
+                        second_scalar -= float(settings.gravity_constant) * first_mass / distance_sq
+                if settings.coulomb_constant and math.isfinite(first_mass) and math.isfinite(second_mass):
+                    force = -float(settings.coulomb_constant) * first.charge * second.charge / distance_sq
+                    first_scalar += force / max(1.0e-30, first_mass)
+                    second_scalar -= force / max(1.0e-30, second_mass)
+                if settings.lennard_jones_epsilon and distance > 1.0e-15:
+                    ratio = min(10.0, float(settings.lennard_jones_sigma) / distance)
+                    ratio6 = ratio ** 6
+                    force = 24.0 * float(settings.lennard_jones_epsilon) * (2.0 * ratio6 * ratio6 - ratio6) / distance
+                    first_scalar -= force / max(1.0e-30, first_mass)
+                    second_scalar += force / max(1.0e-30, second_mass)
+                if settings.yukawa_strength and distance > 1.0e-15:
+                    screening = max(0.0, float(settings.yukawa_screening))
+                    force = float(settings.yukawa_strength) * math.exp(-screening * distance) * (
+                        1.0 / distance_sq + screening / distance
+                    )
+                    first_scalar -= force / max(1.0e-30, first_mass)
+                    second_scalar += force / max(1.0e-30, second_mass)
+                accelerations[first_index] = _add(accelerations[first_index], _scale(direction, first_scalar))
+                accelerations[second_index] = _add(accelerations[second_index], _scale(direction, second_scalar))
+        if maximum > 0.0:
+            for index, value in enumerate(accelerations):
+                magnitude = _length(value)
+                if magnitude > maximum:
+                    accelerations[index] = _scale(value, maximum / magnitude)
+
+    def _resolve_interaction_collisions(self) -> None:
+        mode = str(self.interactions.collision_mode or "none").lower()
+        if mode == "none":
+            return
+        if mode != "merge":
+            raise ValueError(f"Unknown particle interaction collision mode: {self.interactions.collision_mode}")
+        alive = [index for index, particle in enumerate(self.particles) if particle.alive]
+        if len(alive) < 2:
+            return
+        scale = max(0.01, float(self.interactions.merge_distance_scale))
+        cell_size = max(1.0e-9, max(self.particles[index].radius for index in alive) * 2.0 * scale)
+        grid: dict[tuple[int, int, int], list[int]] = {}
+        for index in alive:
+            key = tuple(math.floor(value / cell_size) for value in self.particles[index].position)
+            grid.setdefault(key, []).append(index)
+        maximum_merges = max(1, int(self.interactions.maximum_merges_per_step))
+        speed_limit = max(0.0, float(self.interactions.merge_speed_limit))
+        merged = 0
+        visited: set[tuple[int, int]] = set()
+        for key in sorted(grid):
+            candidates: list[int] = []
+            for x in range(key[0] - 1, key[0] + 2):
+                for y in range(key[1] - 1, key[1] + 2):
+                    for z in range(key[2] - 1, key[2] + 2):
+                        candidates.extend(grid.get((x, y, z), ()))
+            for first_index in grid[key]:
+                first = self.particles[first_index]
+                if not first.alive:
+                    continue
+                for second_index in candidates:
+                    pair = tuple(sorted((first_index, second_index)))
+                    if first_index == second_index or pair in visited:
+                        continue
+                    visited.add(pair)
+                    second = self.particles[second_index]
+                    if not second.alive:
+                        continue
+                    distance = _length(_subtract(second.position, first.position))
+                    if distance > (first.radius + second.radius) * scale:
+                        continue
+                    relative_speed = _length(_subtract(second.velocity, first.velocity))
+                    if speed_limit > 0.0 and relative_speed > speed_limit:
+                        continue
+                    first_mass, second_mass = first.inertial_mass, second.inertial_mass
+                    if not math.isfinite(first_mass) or not math.isfinite(second_mass):
+                        continue
+                    total_mass = first_mass + second_mass
+                    first.position = tuple(
+                        (first.position[axis] * first_mass + second.position[axis] * second_mass) / total_mass
+                        for axis in range(3)
+                    )
+                    first.velocity = tuple(
+                        (first.velocity[axis] * first_mass + second.velocity[axis] * second_mass) / total_mass
+                        for axis in range(3)
+                    )
+                    first.mass = total_mass
+                    first.inverse_mass = 0.0 if first.pinned else 1.0 / max(1.0e-30, total_mass)
+                    first.charge += second.charge
+                    first.radius = (first.radius ** 3 + second.radius ** 3) ** (1.0 / 3.0)
+                    second.alive = False
+                    second.velocity = (0.0, 0.0, 0.0)
+                    self.debug_contacts.append({
+                        "point": first.position, "normal": (0.0, 1.0, 0.0),
+                        "penetration": 0.0, "kind": "merge",
+                    })
+                    merged += 1
+                    if merged >= maximum_merges:
+                        self._interaction_diagnostics = {
+                            **dict(getattr(self, "_interaction_diagnostics", {}) or {}), "merges": merged,
+                        }
+                        return
+        self._interaction_diagnostics = {
+            **dict(getattr(self, "_interaction_diagnostics", {}) or {}), "merges": merged,
+        }
+
     def _field_acceleration(self, force: ForceField, particle: SimulationParticle, particle_index: int) -> Vec3:
+        if not force.enabled:
+            return (0.0, 0.0, 0.0)
         kind = str(force.field_type or "gravity").lower()
         delta = _subtract(particle.position, force.center)
         distance = _length(delta)
-        falloff = 1.0 if force.radius <= 0.0 else max(0.0, 1.0 - distance / force.radius)
+        falloff = _force_falloff(force, distance)
+        result = (0.0, 0.0, 0.0)
         if kind in {"gravity", "wind", "uniform"}:
-            return _scale(force.vector, force.strength * falloff)
-        if kind in {"gravity_source", "point_gravity"}:
+            gust = 1.0 + float(force.gust_strength) * math.sin(
+                float(force.frequency) * float(getattr(self, "_field_time_seconds", self.time_seconds))
+                * math.tau + float(force.seed)
+            )
+            result = _scale(force.vector, force.strength * falloff * gust)
+            if kind == "wind" and force.drag > 0.0:
+                target = _scale(force.vector, force.strength * gust)
+                result = _scale(_subtract(target, particle.velocity), float(force.drag) * falloff)
+        elif kind in {"gravity_source", "point_gravity"}:
             direction = _scale(_normalize(delta, (0.0, -1.0, 0.0)), -1.0)
             softening = max(1.0e-4, float(force.vector[0]) if force.vector else 0.05)
             acceleration = force.strength / max(softening * softening, distance * distance + softening * softening)
-            return _scale(direction, acceleration * falloff)
-        if kind == "radial":
-            return _scale(_normalize(delta, (0.0, 1.0, 0.0)), force.strength * falloff)
-        if kind == "vortex":
+            result = _scale(direction, acceleration * falloff)
+        elif kind in {"radial", "repulsor", "attractor"}:
+            sign = -1.0 if kind == "attractor" else 1.0
+            result = _scale(_normalize(delta, (0.0, 1.0, 0.0)), sign * force.strength * falloff)
+        elif kind == "vortex":
             axis = _normalize(force.vector, (0.0, 1.0, 0.0))
             tangent = _normalize(_cross(axis, delta), (1.0, 0.0, 0.0))
-            return _scale(tangent, force.strength * falloff)
-        if kind == "turbulence":
-            rng = random.Random(force.seed * 1000003 + particle_index * 9176 + int(self.time_seconds * 120.0))
-            return _scale((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1)), force.strength * falloff)
-        return (0.0, 0.0, 0.0)
+            result = _scale(tangent, force.strength * falloff)
+        elif kind == "turbulence":
+            phase = float(force.seed) * 17.17 + particle_index * 0.754877666
+            field_time = float(getattr(self, "_field_time_seconds", self.time_seconds))
+            time_phase = field_time * max(0.0, float(force.frequency))
+            scale = max(1.0e-6, float(force.noise_scale))
+            sample = _add(_scale(particle.position, scale), (phase, phase * 1.37, phase * 2.11))
+            noise = (
+                math.sin(sample[1] * 1.73 + sample[2] * 0.63 + time_phase * 2.03),
+                math.sin(sample[2] * 1.31 + sample[0] * 0.79 + time_phase * 1.71),
+                math.sin(sample[0] * 1.57 + sample[1] * 0.91 + time_phase * 2.29),
+            )
+            result = _scale(noise, force.strength * falloff)
+        elif kind in {"drag", "linear_drag"}:
+            result = _scale(_subtract(force.vector, particle.velocity), force.strength * falloff)
+        elif kind == "quadratic_drag":
+            relative = _subtract(particle.velocity, force.vector)
+            result = _scale(relative, -force.strength * _length(relative) * falloff)
+        elif kind == "buoyancy":
+            material = self.materials.get(particle.material)
+            density = max(1.0e-6, float(material.density if material is not None else 1000.0))
+            density_ratio = max(0.0, float(force.ambient_density)) / density
+            result = _scale(_normalize(force.vector, (0.0, 1.0, 0.0)), force.strength * density_ratio * falloff)
+        elif kind in {"electric", "electric_field"}:
+            mass = particle.inertial_mass
+            if math.isfinite(mass):
+                result = _scale(force.vector, force.strength * particle.charge / max(1.0e-30, mass) * falloff)
+        elif kind in {"magnetic", "magnetic_field"}:
+            mass = particle.inertial_mass
+            if math.isfinite(mass):
+                result = _scale(
+                    _cross(particle.velocity, force.vector),
+                    force.strength * particle.charge / max(1.0e-30, mass) * falloff,
+                )
+        elif kind in {"radiation", "radiation_pressure"}:
+            mass = particle.inertial_mass
+            area = math.pi * max(0.0, particle.radius) ** 2
+            if math.isfinite(mass):
+                result = _scale(
+                    _normalize(force.vector, (0.0, 1.0, 0.0)),
+                    force.strength * area / max(1.0e-30, mass) * falloff,
+                )
+        elif kind in {"coriolis", "rotating_frame"}:
+            omega = _scale(force.vector, force.strength)
+            relative = _subtract(particle.position, force.center)
+            coriolis = _scale(_cross(omega, particle.velocity), -2.0)
+            centrifugal = _scale(_cross(omega, _cross(omega, relative)), -1.0)
+            result = _scale(_add(coriolis, centrifugal), falloff)
+        maximum = max(0.0, float(force.max_acceleration))
+        length = _length(result)
+        return _scale(result, maximum / length) if maximum > 0.0 and length > maximum else result
 
     def _curve_acceleration(self, field: CurveFlowField, position: Vec3) -> Vec3:
         points = list(field.points)
@@ -526,6 +1025,18 @@ class SimulationWorld:
             if weight_sum <= 0.0:
                 continue
             normal = _scale(delta, 1.0 / length)
+            if constraint.strain_limit > 1.0 and strain > constraint.strain_limit:
+                excess = length - constraint.rest_length * constraint.strain_limit
+                hard_correction = _scale(normal, excess / weight_sum)
+                if first_weight > 0.0:
+                    first.position = _add(first.position, _scale(hard_correction, first_weight))
+                if second_weight > 0.0:
+                    second.position = _subtract(second.position, _scale(hard_correction, second_weight))
+                delta = _subtract(second.position, first.position)
+                length = _length(delta)
+                if length <= 1.0e-12:
+                    continue
+                normal = _scale(delta, 1.0 / length)
             alpha = max(0.0, constraint.compliance) / max(1.0e-12, dt * dt)
             delta_lambda = (-(length - constraint.rest_length) - alpha * constraint.lagrange) / (weight_sum + alpha)
             constraint.lagrange += delta_lambda
@@ -685,6 +1196,53 @@ class SimulationWorld:
             for particle, weight, gradient in zip(particles, weights, gradients):
                 particle.position = _add(particle.position, _scale(gradient, weight * delta_lambda))
 
+    def _solve_bending_constraints(self, dt: float) -> None:
+        """Preserve the authored angle between adjacent cloth triangles."""
+        for constraint in self.bending_constraints:
+            if not constraint.enabled:
+                continue
+            indices = (
+                constraint.edge_first, constraint.edge_second,
+                constraint.opposite_first, constraint.opposite_second,
+            )
+            if min(indices) < 0 or max(indices) >= len(self.particles):
+                constraint.enabled = False
+                continue
+            edge_first, edge_second, opposite_first, opposite_second = (
+                self.particles[index] for index in indices
+            )
+            axis = _subtract(edge_second.position, edge_first.position)
+            axis_length = _length(axis)
+            if axis_length <= 1.0e-12:
+                continue
+            direction = _scale(axis, 1.0 / axis_length)
+            current = _signed_dihedral_angle(
+                edge_first.position, edge_second.position,
+                opposite_first.position, opposite_second.position,
+            )
+            error = _wrapped_angle(current - constraint.rest_angle)
+            if constraint.break_threshold > 0.0 and abs(error) > constraint.break_threshold:
+                constraint.enabled = False
+                continue
+            first_weight = 0.0 if opposite_first.pinned or opposite_first.frozen else opposite_first.inverse_mass
+            second_weight = 0.0 if opposite_second.pinned or opposite_second.frozen else opposite_second.inverse_mass
+            weight_sum = first_weight + second_weight
+            if weight_sum <= 0.0 or abs(error) <= 1.0e-10:
+                continue
+            alpha = max(0.0, constraint.compliance) / max(1.0e-12, dt * dt)
+            correction = (error - alpha * constraint.lagrange) / (weight_sum + alpha)
+            constraint.lagrange += correction
+            if first_weight > 0.0:
+                opposite_first.position = _rotate_about_axis(
+                    opposite_first.position, edge_first.position, direction,
+                    first_weight * correction,
+                )
+            if second_weight > 0.0:
+                opposite_second.position = _rotate_about_axis(
+                    opposite_second.position, edge_first.position, direction,
+                    -second_weight * correction,
+                )
+
     def _solve_particle_contacts(self) -> None:
         cell_size = max((particle.radius for particle in self.particles), default=0.05) * 2.0
         grid: dict[tuple[int, int, int], list[int]] = {}
@@ -694,6 +1252,13 @@ class SimulationWorld:
             key = tuple(math.floor(value / max(1.0e-6, cell_size)) for value in particle.position)
             grid.setdefault(key, []).append(index)
         visited: set[tuple[int, int]] = set()
+        excluded_pairs = set()
+        if bool(self.cloth_settings.get("exclude_topological_neighbors", False)):
+            excluded_pairs = {
+                tuple(sorted((item.first, item.second)))
+                for item in self.constraints
+                if item.enabled and item.constraint_type in {"stretch", "shear", "bend", "seam"}
+            }
         for key, indices in grid.items():
             neighbors = []
             for x in range(key[0] - 1, key[0] + 2):
@@ -703,21 +1268,26 @@ class SimulationWorld:
             for first_index in indices:
                 for second_index in neighbors:
                     pair = tuple(sorted((first_index, second_index)))
-                    if first_index == second_index or pair in visited:
+                    if first_index == second_index or pair in visited or pair in excluded_pairs:
                         continue
                     visited.add(pair)
                     self._separate_particles(first_index, second_index)
 
     def _separate_particles(self, first_index: int, second_index: int) -> None:
         first, second = self.particles[first_index], self.particles[second_index]
+        if not (
+            int(first.collision_mask) & int(second.collision_group)
+            and int(second.collision_mask) & int(first.collision_group)
+        ):
+            return
         delta = _subtract(second.position, first.position)
         distance = _length(delta)
         minimum = first.radius + second.radius
         if distance >= minimum:
             return
         normal = _normalize(delta, (1.0, 0.0, 0.0))
-        first_weight = 0.0 if first.pinned or first.frozen else first.inverse_mass
-        second_weight = 0.0 if second.pinned or second.frozen else second.inverse_mass
+        first_weight = 0.0 if first.pinned or first.frozen else first.inverse_mass / (1.0 + max(0.0, first.collision_priority))
+        second_weight = 0.0 if second.pinned or second.frozen else second.inverse_mass / (1.0 + max(0.0, second.collision_priority))
         total = first_weight + second_weight
         if total <= 0.0:
             return
@@ -1011,6 +1581,8 @@ def create_cloth_grid(
             if row + 2 < rows:
                 add(index, index + columns * 2, preset.bend_compliance, "bend", "weft")
     _add_surface_area_constraints(world, compliance=max(1.0e-8, preset.stretch_compliance))
+    from tech_connector.game_engine.runtime.tc_cloth_authoring_service import configure_cloth_quality
+    configure_cloth_quality(world, "realtime")
     return world
 
 
@@ -1092,6 +1664,8 @@ def create_cloth_from_geometry(
         compliance=max(1.0e-8, preset.stretch_compliance),
         break_threshold=float(tear_threshold) ** 2 if tear_threshold > 0.0 else 0.0,
     )
+    from tech_connector.game_engine.runtime.tc_cloth_authoring_service import configure_cloth_quality
+    configure_cloth_quality(world, "realtime")
     return world
 
 
@@ -1116,6 +1690,10 @@ def create_soft_body_from_geometry(
         raise ValueError("Jello conversion requires a closed, consistently oriented volume mesh.")
     for particle in world.particles:
         particle.phase = "softbody"
+    # Cloth conversion supplies the shared surface topology, but soft bodies use
+    # their own volume quality budget rather than cloth's thin-shell adaptation.
+    world.scale.adaptive_substeps = False
+    world.cloth_settings = {}
     world.volume_constraints.append(VolumeConstraint(
         list(range(len(world.particles))), triangles, rest_volume,
         compliance=float(volume_compliance), pressure=1.0,
@@ -1357,6 +1935,34 @@ def _length(value: Vec3) -> float:
 def _normalize(value: Vec3, fallback: Vec3 = (0.0, 0.0, 0.0)) -> Vec3:
     length = _length(value)
     return _scale(value, 1.0 / length) if length > 1.0e-12 else fallback
+
+
+def _signed_dihedral_angle(edge_first: Vec3, edge_second: Vec3,
+                           opposite_first: Vec3, opposite_second: Vec3) -> float:
+    direction = _normalize(_subtract(edge_second, edge_first), (1.0, 0.0, 0.0))
+    first_normal = _normalize(
+        _cross(_subtract(edge_second, edge_first), _subtract(opposite_first, edge_first)),
+        (0.0, 1.0, 0.0),
+    )
+    second_normal = _normalize(
+        _cross(_subtract(opposite_second, edge_first), _subtract(edge_second, edge_first)),
+        first_normal,
+    )
+    return math.atan2(_dot(_cross(first_normal, second_normal), direction), _dot(first_normal, second_normal))
+
+
+def _wrapped_angle(value: float) -> float:
+    return (float(value) + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _rotate_about_axis(point: Vec3, origin: Vec3, axis: Vec3, angle: float) -> Vec3:
+    relative = _subtract(point, origin)
+    cosine, sine = math.cos(float(angle)), math.sin(float(angle))
+    rotated = _add(
+        _add(_scale(relative, cosine), _scale(_cross(axis, relative), sine)),
+        _scale(axis, _dot(axis, relative) * (1.0 - cosine)),
+    )
+    return _add(origin, rotated)
 
 
 def _friction_velocity(velocity: Vec3, normal: Vec3, friction: float, restitution: float) -> Vec3:

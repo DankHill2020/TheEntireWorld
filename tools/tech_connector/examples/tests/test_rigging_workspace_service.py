@@ -55,7 +55,7 @@ def test_capability_contract_covers_create_rig_and_retarget_workflows() -> None:
         "definition.auto_map", "definition.assign_slot", "definition.set_reference_pose",
         "rig.build_full", "rig.build_module", "rig.remove_module", "rig.rebuild_module",
         "rig.create_ik_fk_limb", "rig.create_reverse_foot", "rig.create_ribbon",
-        "rig.create_twist", "rig.create_space_switch", "rig.create_mesh_attachment",
+        "rig.create_twist", "rig.create_curve_joints", "rig.create_space_switch", "rig.create_mesh_attachment",
         "rig.create_face_module", "rig.store_connections", "rig.restore_connections",
         "retarget.create_definition", "retarget.solve_pose", "retarget.preview",
         "retarget.bake", "retarget.transfer_take",
@@ -153,6 +153,65 @@ def test_public_rigging_cmds_uses_the_same_host_neutral_controller() -> None:
     assert result["ok"]
     assert result["host"] == "tech_connector"
     assert rigging_cmds.capabilities("tc", graph=graph)["rig.build_full"] == "native"
+
+
+def test_tc_curve_joints_are_arc_length_spaced_and_attachment_is_optional() -> None:
+    graph = EditableRigGraph()
+    curve = graph.add_node(
+        "Guide Curve",
+        "dag.curve",
+        node_id="guide_curve",
+        attributes={"control_points": [[0, 0, 0], [2, 0, 0], [2, 6, 0]], "closed": False},
+    )
+    controller = RiggingWorkspaceController(create_rigging_adapter("tc", graph=graph))
+
+    attached = controller.run(
+        "rig.create_curve_joints", curve=curve, joint_count=5, keep_attached=True, name_prefix="attached"
+    )
+    assert attached.ok, attached.message
+    assert len(attached.data["joints"]) == 5
+    assert len(attached.data["motion_paths"]) == 5
+    expected = ([0, 0, 0], [2, 0, 0], [2, 2, 0], [2, 4, 0], [2, 6, 0])
+    for joint, position in zip(attached.data["joints"], expected):
+        assert graph.joints[joint]["local_matrix"][12:15] == pytest.approx(position)
+
+    detached = controller.run(
+        "rig.create_curve_joints", curve=curve, joint_count=3, keep_attached=False, name_prefix="baked"
+    )
+    assert detached.ok, detached.message
+    assert len(detached.data["joints"]) == 3
+    assert detached.data["motion_paths"] == []
+    assert all(
+        constraint.get("target_id") not in detached.data["joints"]
+        for constraint in graph.constraints.values()
+    )
+
+
+def test_blender_uses_the_shared_controller_and_native_rigging_backend() -> None:
+    from tech_connector import rigging_cmds
+
+    controller = rigging_cmds.session("blender")
+
+    assert controller.adapter.host_id == "blender"
+    assert controller.adapter._backend_module == "blender_tools.Rigging.rigging_host_adapter"
+    assert controller.capability_status()["rig.build_full"] == "translated"
+    assert controller.capability_status()["rig.create_ik_fk_limb"] == "translated"
+    assert controller.capability_status()["rig.create_ribbon"] == "translated"
+    assert controller.capability_status()["rig.create_curve_joints"] == "translated"
+
+
+def test_3dsmax_uses_the_shared_controller_and_native_rigging_backend() -> None:
+    from tech_connector import rigging_cmds
+
+    controller = rigging_cmds.session("3dsmax")
+
+    assert controller.adapter.host_id == "3dsmax"
+    assert controller.adapter._backend_module == "max_tools.Rigging.rigging_host_adapter"
+    assert controller.capability_status()["rig.build_full"] == "translated"
+    assert controller.capability_status()["rig.create_ik_fk_limb"] == "translated"
+    assert controller.capability_status()["rig.create_ribbon"] == "translated"
+    assert controller.capability_status()["rig.create_twist"] == "translated"
+    assert controller.capability_status()["rig.create_curve_joints"] == "translated"
 
 
 def test_tc_point_constraint_respects_selected_axes() -> None:

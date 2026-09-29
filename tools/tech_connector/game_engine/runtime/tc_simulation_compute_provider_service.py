@@ -58,12 +58,12 @@ class ArrayComputeProvider:
 
     def download(self, buffer: PersistentComputeBuffer) -> np.ndarray:
         self._require_owned(buffer)
-        if self.status.device_type == "gpu":
+        if self.status.device_type == "gpu" and hasattr(self.array_module, "asnumpy"):
             return np.asarray(self.array_module.asnumpy(buffer.handle))
         return np.asarray(buffer.handle).copy()
 
     def synchronize(self) -> None:
-        if self.status.device_type == "gpu":
+        if self.status.device_type == "gpu" and hasattr(self.array_module, "cuda"):
             self.array_module.cuda.get_current_stream().synchronize()
 
     def _require_owned(self, buffer: PersistentComputeBuffer) -> None:

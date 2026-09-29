@@ -16,6 +16,8 @@ bl_info = {
 
 import base64
 import contextlib
+import datetime
+import hmac
 import io
 import json
 import os
@@ -24,6 +26,7 @@ import socket
 import threading
 import time
 import traceback
+import sys
 from pathlib import Path
 
 import bpy
@@ -33,6 +36,49 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("BLENDER_COMMAND_PORT", "7021"))
 _BRIDGE_KEY = "the_entire_world_ai_blender_bridge_started"
 _STATUS_KEY = "the_entire_world_ai_blender_bridge_status"
+
+
+def _bridge_session_path():
+    override = os.environ.get("TECH_CONNECTOR_BRIDGE_SESSION_FILE", "").strip()
+    if override:
+        return Path(override).expanduser()
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip()
+        return Path(base) / "TechConnector" / "licensing" / "bridge_session.json" if base else None
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "TechConnector" / "licensing" / "bridge_session.json"
+    base = Path(os.environ.get("XDG_STATE_HOME", "").strip() or (Path.home() / ".local" / "state"))
+    return base / "tech_connector" / "licensing" / "bridge_session.json"
+
+
+def _bridge_authorized(payload):
+    path = _bridge_session_path()
+    supplied = str((payload or {}).get("bridge_session") or "")
+    if path is None or not supplied:
+        return False
+    try:
+        session = json.loads(path.read_text(encoding="utf-8"))
+        issued = datetime.datetime.fromisoformat(
+            str(session.get("issued_at") or "").replace("Z", "+00:00")
+        )
+        expires = datetime.datetime.fromisoformat(
+            str(session.get("expires_at") or "").replace("Z", "+00:00")
+        )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expected = str(session.get("session_token") or "")
+        return bool(
+            session.get("schema") == "tech_connector.bridge_session.v1"
+            and "blender" in [str(item).casefold() for item in session.get("hosts") or []]
+            and issued.tzinfo is not None
+            and expires.tzinfo is not None
+            and issued.astimezone(datetime.timezone.utc) < expires.astimezone(datetime.timezone.utc)
+            and issued.astimezone(datetime.timezone.utc) <= now
+            and now < expires.astimezone(datetime.timezone.utc)
+            and len(expected) >= 32
+            and hmac.compare_digest(expected, supplied)
+        )
+    except Exception:
+        return False
 
 
 def _bounded_env_int(name, default, minimum, maximum):
@@ -159,6 +205,14 @@ def _handle_client(conn):
                 if b"\n" not in raw:
                     raise ValueError("Blender bridge request ended before its newline terminator.")
                 payload = json.loads(raw.decode("utf-8", errors="replace").strip())
+                if not _bridge_authorized(payload):
+                    response = {
+                        "ok": False,
+                        "error": "Tech Connector activation is required for this DCC bridge.",
+                        "code": "bridge_authorization_required",
+                    }
+                    conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
+                    return
                 encoded = str(payload["code_b64"])
                 if len(encoded) > _MAX_REQUEST_BYTES:
                     raise ValueError("Encoded Blender command exceeded the configured size limit.")

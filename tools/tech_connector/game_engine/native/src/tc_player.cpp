@@ -159,6 +159,7 @@ int run_headless(const Options& options) {
     const int frame_count = options.frames > 0 ? options.frames : 120;
     for (int frame = 0; frame < frame_count; ++frame) {
         runtime.set_input_axis(frame < frame_count / 2 ? 1.0F : 0.0F, 0.0F);
+        runtime.set_jump_pressed(false);
         runtime.tick(1.0F / 60.0F);
         append_profile(options, runtime, frame);
         append_traces(options, runtime, consumed_traces);
@@ -441,6 +442,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         const float x = (GetAsyncKeyState('D') < 0 ? 1.0F : 0.0F) - (GetAsyncKeyState('A') < 0 ? 1.0F : 0.0F);
         const float y = (GetAsyncKeyState('W') < 0 ? 1.0F : 0.0F) - (GetAsyncKeyState('S') < 0 ? 1.0F : 0.0F);
         state->runtime.set_input_axis(x, y);
+        state->runtime.set_jump_pressed(GetAsyncKeyState(VK_SPACE) < 0);
         state->runtime.tick(delta);
         state->audio.update();
         ++state->frame;

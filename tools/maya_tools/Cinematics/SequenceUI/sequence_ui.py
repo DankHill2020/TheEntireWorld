@@ -1,14 +1,58 @@
-try:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    from shiboken6 import wrapInstance
-    PYQT_VERSION = 6
-except:
+import re
+import sys
+
+
+def _maya_qt_major_version():
+    """Return the Qt binding Maya was built with, or ``None`` outside Maya."""
+    try:
+        import maya.cmds as maya_cmds
+    except ImportError:
+        return None
+
+    version = ""
+    try:
+        version = str(maya_cmds.about(version=True))
+    except (AttributeError, RuntimeError):
+        try:
+            from maya.api import OpenMaya
+            version = str(OpenMaya.MGlobal.mayaVersion())
+        except (ImportError, AttributeError, RuntimeError):
+            version = sys.executable
+
+    match = re.search(r"\d{4}", version)
+    maya_version = int(match.group(0)) if match else 0
+    return 6 if maya_version >= 2025 else 2
+
+
+# Loading PySide6 into a PySide2-based Maya process can crash in native Qt code.
+# Prefer Maya's own binding, then an already-loaded host binding, before falling
+# back to whichever standalone binding is installed.
+_host_qt_version = _maya_qt_major_version()
+if _host_qt_version is None:
+    if "PySide2" in sys.modules:
+        _host_qt_version = 2
+    elif "PySide6" in sys.modules:
+        _host_qt_version = 6
+
+if _host_qt_version == 2:
     from PySide2 import QtWidgets, QtCore, QtGui
     from shiboken2 import wrapInstance
     PYQT_VERSION = 2
+elif _host_qt_version == 6:
+    from PySide6 import QtWidgets, QtCore, QtGui
+    from shiboken6 import wrapInstance
+    PYQT_VERSION = 6
+else:
+    try:
+        from PySide6 import QtWidgets, QtCore, QtGui
+        from shiboken6 import wrapInstance
+        PYQT_VERSION = 6
+    except ImportError:
+        from PySide2 import QtWidgets, QtCore, QtGui
+        from shiboken2 import wrapInstance
+        PYQT_VERSION = 2
 import threading
 import os
-import re
 from custom_qt import custom_widgets
 from utilities import json_data
 from unreal_tools import unreal_subprocess as usp
@@ -1290,6 +1334,9 @@ class AnimationManagerUI(QtWidgets.QDialog):
         return None
 
 
+anim_manager = None
+
+
 def show_animation_manager():
     """
     Launches the Animation Manager UI in Maya.
@@ -1297,9 +1344,11 @@ def show_animation_manager():
     """
     global anim_manager
     try:
-        anim_manager.close()
-    except:
-        pass
+        if anim_manager is not None:
+            anim_manager.close()
+    except (RuntimeError, AttributeError):
+        # The wrapped C++ object may already have been deleted by Maya.
+        anim_manager = None
 
     anim_manager = AnimationManagerUI()
     anim_manager.show()

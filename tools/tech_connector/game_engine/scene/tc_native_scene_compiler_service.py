@@ -131,6 +131,8 @@ def compile_graph_to_tc_native(graph: EditableRigGraph, provider: str) -> dict[s
             item["secondary_motion_presets"] = _remap_nested_ids(
                 item["secondary_motion_presets"], deformation_ids
             )
+        if isinstance(item.get("muscles"), list):
+            item["muscles"] = _remap_nested_ids(item["muscles"], deformation_ids)
         remapped_skins[new_id] = item
 
     remapped_constraints: dict[str, dict[str, Any]] = {}

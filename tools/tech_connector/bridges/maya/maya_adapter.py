@@ -19,7 +19,7 @@ from tech_connector.bridges.host_bridge import DCCAdapter, DCCNotAvailableError
 
 
 class MayaAdapter(DCCAdapter):
-    """Full DCCAdapter for Autodesk Maya via commandPort (TCP 8192)."""
+    """Full DCCAdapter for Autodesk Maya via the authenticated JSON bridge."""
 
     DEFAULT_PORT = 8192
 

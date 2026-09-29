@@ -19,8 +19,12 @@ from tech_connector.services.dcc.skinning_tool_service import (
     prune_skin_weights,
     remove_skin_influence,
     skin_cluster_summary,
+    spatial_smooth_skin_weights,
     smooth_skin_weights,
     transfer_skin_weights,
+)
+from tech_connector.game_engine.deformation.spatial_skin_smoothing_service import (
+    spatial_smooth_weight_rows,
 )
 
 
@@ -154,6 +158,65 @@ def test_paint_smooth_mirror_and_copy_weights() -> None:
     assert copied.vertex_count == 2
     assert transferred.cluster.mesh_id == "TransferMesh"
     assert transferred.warnings
+
+
+def test_spatial_smooth_bridges_disconnected_nearby_surface_vertices() -> None:
+    cluster = bind_skin_from_distance(
+        mesh_id="BrokenTopology",
+        vertices=[(0.0, 0.0, 0.0), (0.05, 0.0, 0.0), (4.0, 0.0, 0.0)],
+        influences=[SkinInfluence("A", (0.0, 0.0, 0.0)), SkinInfluence("B", (4.0, 0.0, 0.0))],
+        max_influences=2,
+    )
+    cluster = cluster.with_vertex_weights((
+        cluster.vertex_weights[0],
+        type(cluster.vertex_weights[1])(1, {"B": 1.0}),
+        cluster.vertex_weights[2],
+    ))
+    result = spatial_smooth_skin_weights(
+        cluster,
+        positions=[(0.0, 0.0, 0.0), (0.05, 0.0, 0.0), (4.0, 0.0, 0.0)],
+        center=(0.025, 0.0, 0.0),
+        radius=0.2,
+        strength=1.0,
+        iterations=1,
+    )
+
+    assert result.changed_vertices == (0, 1)
+    assert result.cluster.vertex_weights[0].weights["B"] > 0.0
+    assert result.cluster.vertex_weights[1].weights["A"] > 0.0
+
+
+def test_spatial_smooth_area_weights_prevent_dense_patch_from_crowding_out_surface() -> None:
+    positions = [(0.0, 0.0, 0.0)] + [
+        (distance, 0.0, 0.0) for distance in (0.01, 0.02, 0.03, 0.04, 0.05)
+    ] + [(0.1, 0.0, 0.0)]
+    rows = [{"A": 1.0} for _ in positions]
+    rows[-1] = {"B": 1.0}
+
+    unweighted, _ = spatial_smooth_weight_rows(
+        positions,
+        rows,
+        radius=1.0,
+        strength=1.0,
+        iterations=1,
+        target_indices=[0],
+        max_neighbors=3,
+        max_influences=2,
+    )
+    area_weighted, _ = spatial_smooth_weight_rows(
+        positions,
+        rows,
+        radius=1.0,
+        strength=1.0,
+        iterations=1,
+        target_indices=[0],
+        max_neighbors=3,
+        max_influences=2,
+        sample_weights=[1.0] * (len(positions) - 1) + [100.0],
+    )
+
+    assert unweighted[0]["B"] > 0.0
+    assert area_weighted[0]["B"] > unweighted[0]["B"]
 
 
 def test_add_and_remove_influence_preserve_valid_normalized_rows() -> None:

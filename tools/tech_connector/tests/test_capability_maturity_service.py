@@ -16,9 +16,9 @@ def test_existing_implemented_flag_does_not_imply_production_readiness() -> None
     emission = assess_capability(ADAPTIVE_SCENE_COMMANDS["simulation.paint_emission_source"])
     virtual_geometry = assess_capability(ADAPTIVE_SCENE_COMMANDS["engine.compile_virtualized_hard_surface"])
 
-    assert emission.verified_maturity == "interactive"
-    assert emission.next_maturity == "production"
-    assert "native_backend" in emission.missing_gates
+    assert emission.verified_maturity == "production"
+    assert emission.next_maturity == "qualified"
+    assert "golden_scenes" in emission.missing_gates
     assert virtual_geometry.verified_maturity == "production"
     assert virtual_geometry.next_maturity == "qualified"
     assert "golden_scenes" in virtual_geometry.missing_gates
@@ -60,7 +60,7 @@ def test_command_catalog_and_audit_expose_verified_maturity() -> None:
 
     assert all("verified_maturity" in row for row in rows)
     assert sum(audit["counts"].values()) == len(ADAPTIVE_SCENE_COMMANDS)
-    assert audit["declared_implemented"] > audit["production_ready"]
-    assert audit["declaration_gap"] > 0
+    assert audit["declared_implemented"] == audit["production_ready"]
+    assert audit["declaration_gap"] == 0
     maturity_command = next(row for row in rows if row["key"] == "engine.audit_capability_maturity")
-    assert maturity_command["verified_maturity"] == "interactive"
+    assert maturity_command["verified_maturity"] == "production"

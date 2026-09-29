@@ -91,6 +91,91 @@ def test_literal_hik_ui_builds_tc_modules_and_automatic_spaces() -> None:
     app.processEvents()
 
 
+def test_tc_limb_stretch_is_zero_to_one_and_zero_preserves_legacy_solution() -> None:
+    graph = _humanoid_graph()
+    bind_tc_hik_host(graph)
+    create_rig.rig_arm_module("l", _body_map(graph))
+
+    switch_attrs = graph.nodes["left_arm_switch_ctrl"]["attributes"]
+    assert switch_attrs["stretch"] == 0.0
+    assert switch_attrs["stretch_min"] == 0.0
+    assert switch_attrs["stretch_max"] == 1.0
+    assert graph.nodes["left_arm_switch_ctrl"]["attribute_specs"]["stretch"]["type"] == "float"
+
+    solver = graph.constraints["left_arm_ik_solver"]
+    assert solver["settings"]["measurement"] == "per_segment_distance"
+    assert len(solver["settings"]["distance_segments"]) == 2
+    baseline = evaluate_rig_graph(graph)
+    stretch_settings = {
+        key: solver["settings"].pop(key)
+        for key in ("stretch_control_id", "stretch_attribute", "rest_upper_length", "rest_lower_length")
+    }
+    legacy = evaluate_rig_graph(graph)
+    solver["settings"].update(stretch_settings)
+    assert baseline.world_matrices["l_hand"] == legacy.world_matrices["l_hand"]
+
+    target_matrix = list(graph.nodes["left_arm_ik_ctrl"]["attributes"]["matrix"])
+    target_matrix[12:15] = [30.0, 14.0, 0.0]
+    graph.nodes["left_arm_ik_ctrl"]["attributes"]["matrix"] = target_matrix
+    switch_attrs["stretch"] = 0.0
+    rigid = evaluate_rig_graph(graph)
+    switch_attrs["stretch"] = 1.0
+    stretched = evaluate_rig_graph(graph)
+
+    target = target_matrix[12:15]
+    rigid_end = rigid.world_matrices["l_hand"][12:15]
+    stretched_end = stretched.world_matrices["l_hand"][12:15]
+    rigid_error = sum((rigid_end[index] - target[index]) ** 2 for index in range(3))
+    stretched_error = sum((stretched_end[index] - target[index]) ** 2 for index in range(3))
+    assert stretched_error < rigid_error
+
+
+def test_tc_spine_stretch_requires_three_contiguous_joints_and_is_zero_safe() -> None:
+    graph = EditableRigGraph()
+    root = graph.add_joint("root", joint_id="root", local_matrix=_matrix(0, 0, 0))
+    hips = graph.add_joint("pelvis", parent_id=root, joint_id="pelvis", local_matrix=_matrix(0, 10, 0))
+    first = graph.add_joint("spine_01", parent_id=hips, joint_id="spine_01", local_matrix=_matrix(0, 4, 0))
+    second = graph.add_joint("spine_02", parent_id=first, joint_id="spine_02", local_matrix=_matrix(0, 4, 0))
+    third = graph.add_joint("spine_03", parent_id=second, joint_id="spine_03", local_matrix=_matrix(0, 4, 0))
+    body = {
+        "Hips": {"joint": hips},
+        "Spine": {"joint": first},
+        "Spine1": {"joint": second},
+        "Spine2": {"joint": third},
+    }
+    bind_tc_hik_host(graph)
+    create_rig.rig_pelvis_module(body)
+    create_rig.rig_spine_module(body)
+
+    pelvis_attrs = graph.nodes["pelvis_Hips_ctrl"]["attributes"]
+    assert pelvis_attrs["stretch"] == 0.0
+    assert pelvis_attrs["stretch_min"] == 0.0
+    assert pelvis_attrs["stretch_max"] == 1.0
+    assert graph.nodes["pelvis_Hips_ctrl"]["attribute_specs"]["stretch"]["type"] == "float"
+    solver = graph.constraints.pop("spine_stretch_solver")
+    assert solver["settings"]["measurement"] == "per_segment_distance"
+    assert len(solver["settings"]["rest_lengths"]) == 2
+    legacy = evaluate_rig_graph(graph)
+    graph.constraints["spine_stretch_solver"] = solver
+    zero_stretch = evaluate_rig_graph(graph)
+    assert zero_stretch.errors == []
+    assert zero_stretch.world_matrices[third] == legacy.world_matrices[third]
+    top_control = "spine_Spine2_ctrl"
+    top_matrix = list(graph.nodes[top_control]["attributes"]["matrix"])
+    top_matrix[13] += 6.0
+    graph.nodes[top_control]["attributes"]["matrix"] = top_matrix
+    pelvis_attrs["stretch"] = 1.0
+    stretched = evaluate_rig_graph(graph)
+    assert stretched.errors == []
+    for joint_id, control_id in zip(
+        (first, second, third),
+        ("spine_Spine_ctrl", "spine_Spine1_ctrl", top_control),
+    ):
+        assert stretched.world_matrices[joint_id][12:15] == stretched.world_matrices[control_id][12:15]
+    create_rig.remove_spine_module(body)
+    assert "spine_stretch_solver" not in graph.constraints
+
+
 def test_side_specific_face_modules_remove_independently() -> None:
     graph = _humanoid_graph()
     bind_tc_hik_host(graph)
@@ -106,6 +191,40 @@ def test_side_specific_face_modules_remove_independently() -> None:
     create_rig.remove_brows_module("l", face)
     assert not any((node.get("attributes") or {}).get("rig_module") == "l_brows" for node in graph.nodes.values())
     assert any((node.get("attributes") or {}).get("rig_module") == "r_brows" for node in graph.nodes.values())
+
+
+def test_portable_mouth_module_survives_cleanup_and_removes_cleanly() -> None:
+    graph = _humanoid_graph()
+    lip_joints = []
+    for name, position in (
+        ("c_upper_lip", (0, 13, 1)),
+        ("r_lip_corner1", (-2, 12, 1)),
+        ("c_lower_lip", (0, 11, 1)),
+        ("l_lip_corner1", (2, 12, 1)),
+    ):
+        lip_joints.append(graph.add_joint(name, parent_id="head", joint_id=name, local_matrix=_matrix(*position)))
+    jaw = graph.add_joint("jaw", parent_id="head", joint_id="jaw", local_matrix=_matrix(0, 11, 0))
+    face = {
+        "LipChain": {"joints": lip_joints},
+        "UpperLipCenter": {"joint": "c_upper_lip"},
+        "LowerLipCenter": {"joint": "c_lower_lip"},
+        "LeftLipCorner": {"joint": "l_lip_corner1"},
+        "RightLipCorner": {"joint": "r_lip_corner1"},
+        "Jaw": {"joint": jaw},
+    }
+    bind_tc_hik_host(graph)
+
+    result = create_rig.rig_mouth_module(face)
+    created = set(result["created_ids"])
+    assert created
+    assert all(node in graph.nodes for node in created)
+
+    assert create_rig.delete_unused_scaffold_nodes() == 0
+    assert all(node in graph.nodes for node in created)
+
+    # Removal also counts the control constraints owned by the mouth module.
+    assert create_rig.remove_mouth_module(face) >= len(created)
+    assert not created.intersection(graph.nodes)
 
 
 def test_surface_rig_accepts_the_literal_ui_signature() -> None:
@@ -133,6 +252,7 @@ def test_tc_ribbon_uses_lengthwise_uvs_and_continuous_transport_frames() -> None
     result = create_rig.setup_surface_rig_with_drivers(
         joint_list=[first, second, third], loft_name="stable_surface", offset=1.5,
     )
+    assert [graph.constraints[item]["target_id"] for item in result["created_ids"]] == [first, second, third]
     settings = [graph.constraints[item]["settings"] for item in result["created_ids"]]
     assert [row["u"] for row in settings] == [0.5, 0.5, 0.5]
     assert [row["v"] for row in settings] == [0.0, 0.5, 1.0]

@@ -9,7 +9,6 @@ import math
 import os
 import copy
 from pathlib import Path
-import tempfile
 from typing import Any
 import uuid
 import zipfile
@@ -21,13 +20,13 @@ FEDERATED_SCENE_SCHEMA = "tech_connector.federated_scene.v1"
 DCC_SESSION_STATE_SCHEMA = "tech_connector.dcc_session_state.v1"
 RIG_GRAPH_SCHEMA = "tech_connector.editable_rig_graph.v1"
 SUPPORTED_CONSTRAINTS = {
-    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "pole_vector",
+    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "spine_stretch", "pole_vector",
     "geometry", "normal", "tangent", "motion_path", "ribbon", "opaque",
 }
 SUPPORTED_DEFORMERS = {
     "linear_blend_skinning", "dual_quaternion_skinning", "blend_shape", "cluster",
     "lattice", "wrap", "curve", "delta_mush", "nonlinear", "source_proxy",
-    "jiggle", "flesh",
+    "muscle", "jiggle", "flesh",
 }
 IDENTITY_MATRIX = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
@@ -801,7 +800,7 @@ class EditableRigGraph:
             "edit_policy": edit_policy,
             "evaluation_mode": (
                 "gpu_local" if ownership == "native" and kind == "linear_blend_skinning"
-                else "runtime_local" if ownership == "native" and kind in {"jiggle", "flesh"}
+                else "runtime_local" if ownership == "native" and kind in {"blend_shape", "muscle", "jiggle", "flesh"}
                 else "source_proxy"
             ),
         }
@@ -1091,10 +1090,16 @@ def save_federated_scene(
     """Atomically save a versioned `.tcscene` archive."""
     destination = Path(path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary_name = tempfile.mkstemp(prefix=destination.name + ".", suffix=".tmp", dir=destination.parent)
-    os.close(handle)
+    # Avoid tempfile's unbounded random-name retry loop here.  Sandboxed or
+    # policy-controlled recovery directories can report denied creations as
+    # collisions, which previously hung editor shutdown.  A UUID path gives us
+    # a single bounded create attempt and lets the caller surface/fallback on a
+    # real filesystem error.
+    temporary_name = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
     try:
-        with zipfile.ZipFile(temporary_name, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
+        with zipfile.ZipFile(temporary_name, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
             archive.writestr("manifest.json", json.dumps(document.to_dict(), indent=2, sort_keys=True))
             for name, payload in (blobs or {}).items():
                 entry = _safe_blob_name(name)

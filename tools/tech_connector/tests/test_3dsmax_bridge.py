@@ -11,6 +11,7 @@ from max_tools import operations
 from tech_connector.bridges.max.max_bridge import MaxBridge, PLUGIN_SOURCE_CODE
 from tech_connector.game_engine.integration.dcc_capability_audit_service import audit_dcc_host
 from tech_connector.game_engine.integration.dcc_operation_service import dcc_operation_registry
+from tech_connector.game_engine.integration.rigging_host_adapter_service import MAX_CAPABILITY_STATUS
 from tech_connector.game_engine.integration.scene_snapshot_provider import max_scene_snapshot_code
 from tech_connector.game_engine.integration.dcc_bridge_setup import install_3dsmax_startup_bridge
 
@@ -83,7 +84,8 @@ def test_3dsmax_registry_is_concrete_and_audited_as_translated() -> None:
     assert len(registry) >= 12
     assert all(item.function.startswith("max_tools.operations.") for item in registry.values())
     assert report.status == "translated"
-    assert report.declared_operation_count == report.executable_operation_count == len(registry)
+    translated_rigging = sum(status == "translated" for status in MAX_CAPABILITY_STATUS.values())
+    assert report.declared_operation_count == report.executable_operation_count == len(registry) + translated_rigging
 
 
 def test_pymxs_scene_operations_are_testable_without_importing_max(monkeypatch) -> None:

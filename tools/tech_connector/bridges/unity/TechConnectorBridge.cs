@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -26,12 +27,14 @@ namespace TechConnector
         private static TcpListener listener;
         private static Thread listenerThread;
         private static int activePort;
+        private static string bridgeSessionPath;
 
         [Serializable]
         private sealed class Request
         {
             public string command;
             public string code;
+            public string bridge_session;
             public string filepath;
             public string destination_folder;
             public string gameobject_name;
@@ -55,6 +58,17 @@ namespace TechConnector
             public bool ok;
             public string result;
             public string error;
+            public string code;
+        }
+
+        [Serializable]
+        private sealed class BridgeSessionFile
+        {
+            public string schema;
+            public string session_token;
+            public string issued_at;
+            public string expires_at;
+            public string[] hosts;
         }
 
         [Serializable]
@@ -174,6 +188,7 @@ namespace TechConnector
         {
             if (listener != null)
                 return;
+            bridgeSessionPath = ResolveBridgeSessionPath();
             for (int port = FirstPort; port < FirstPort + PortCount; port++)
             {
                 try
@@ -246,6 +261,13 @@ namespace TechConnector
                         writer.Flush();
                         return;
                     }
+                    Request request = JsonUtility.FromJson<Request>(json) ?? new Request();
+                    if (!BridgeAuthorized(request.bridge_session))
+                    {
+                        writer.WriteLine(AuthorizationError());
+                        writer.Flush();
+                        return;
+                    }
                     WorkItem item = new WorkItem { Json = json };
                     Pending.Enqueue(item);
                     if (!item.Completed.Wait(TimeSpan.FromSeconds(120)))
@@ -284,6 +306,86 @@ namespace TechConnector
             catch (Exception)
             {
             }
+        }
+
+        private static string ResolveBridgeSessionPath()
+        {
+            string configured = (Environment.GetEnvironmentVariable("TECH_CONNECTOR_BRIDGE_SESSION_FILE") ?? "").Trim();
+            if (!string.IsNullOrEmpty(configured))
+                return configured;
+            if (Application.platform == RuntimePlatform.WindowsEditor)
+            {
+                string basePath = (Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "").Trim();
+                if (string.IsNullOrEmpty(basePath))
+                    basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                return Path.Combine(basePath, "TechConnector", "licensing", "bridge_session.json");
+            }
+            if (Application.platform == RuntimePlatform.OSXEditor)
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+                return Path.Combine(home, "Library", "Application Support", "TechConnector", "licensing", "bridge_session.json");
+            }
+            string stateHome = (Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? "").Trim();
+            if (string.IsNullOrEmpty(stateHome))
+                stateHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "state");
+            return Path.Combine(stateHome, "tech_connector", "licensing", "bridge_session.json");
+        }
+
+        private static bool BridgeAuthorized(string suppliedToken)
+        {
+            if (string.IsNullOrEmpty(suppliedToken) || string.IsNullOrEmpty(bridgeSessionPath))
+                return false;
+            try
+            {
+                BridgeSessionFile session = JsonUtility.FromJson<BridgeSessionFile>(File.ReadAllText(bridgeSessionPath));
+                DateTimeOffset issuedAt;
+                DateTimeOffset expiresAt;
+                if (session == null
+                    || session.schema != "tech_connector.bridge_session.v1"
+                    || string.IsNullOrEmpty(session.session_token)
+                    || session.session_token.Length < 32
+                    || !DateTimeOffset.TryParse(session.issued_at, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out issuedAt)
+                    || !DateTimeOffset.TryParse(session.expires_at, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out expiresAt))
+                    return false;
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                if (issuedAt >= expiresAt || issuedAt > now || now >= expiresAt)
+                    return false;
+                bool hostAllowed = false;
+                foreach (string host in session.hosts ?? new string[0])
+                {
+                    if (string.Equals((host ?? "").Trim(), "unity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hostAllowed = true;
+                        break;
+                    }
+                }
+                return hostAllowed && ConstantTimeEquals(session.session_token, suppliedToken);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static bool ConstantTimeEquals(string expected, string supplied)
+        {
+            byte[] left = Encoding.UTF8.GetBytes(expected ?? "");
+            byte[] right = Encoding.UTF8.GetBytes(supplied ?? "");
+            int difference = left.Length ^ right.Length;
+            int length = Math.Min(left.Length, right.Length);
+            for (int index = 0; index < length; index++)
+                difference |= left[index] ^ right[index];
+            return difference == 0;
+        }
+
+        private static string AuthorizationError()
+        {
+            return JsonUtility.ToJson(new Response
+            {
+                ok = false,
+                error = "Tech Connector activation is required for this DCC bridge.",
+                code = "bridge_authorization_required",
+            });
         }
 
         private static void ProcessPending()
@@ -341,6 +443,8 @@ namespace TechConnector
                     return Success(AddPrefab(request));
                 case "workflow.inspect_prefab_asset":
                     return Success(InspectPrefabWorkflow(request));
+                case "animation.export_controller":
+                    return Success(TechConnectorAnimationExporter.ExportController(RequireText(request.filepath, "filepath")));
                 default:
                     if (!string.IsNullOrEmpty(request.code))
                         return Error("Arbitrary C# evaluation is disabled. Use a typed Unity command.");

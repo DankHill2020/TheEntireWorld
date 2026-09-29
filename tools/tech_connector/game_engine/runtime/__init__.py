@@ -15,8 +15,56 @@ from tech_connector.game_engine.runtime.tc_live_game_sync_service import (
 )
 from tech_connector.game_engine.runtime.tc_simulation_runtime_service import (
     RuntimeFramePacket,
+    RuntimeHealthSnapshot,
     SimulationRuntimeInstance,
 )
+from tech_connector.game_engine.runtime.tc_engine_readiness_service import (
+    EngineReadinessGate,
+    EngineReadinessReport,
+    audit_engine_readiness,
+    qualify_runtime_determinism,
+)
+from tech_connector.game_engine.runtime.tc_exotic_simulation_service import (
+    EXOTIC_SIMULATION_PRESETS,
+    ExoticSimulationPreset,
+    create_exotic_simulation,
+    exotic_authoring_schema,
+    exotic_simulation_preset_names,
+    simulation_diagnostics,
+)
+from tech_connector.game_engine.runtime.tc_plasma_pic_service import ElectrostaticPicGrid
+from tech_connector.game_engine.runtime.tc_magnetic_grid_service import MagnetodynamicGrid
+from tech_connector.game_engine.runtime.tc_cloth_authoring_service import (
+    CLOTH_QUALITY_PROFILES,
+    ClothPropertyMaps,
+    ClothQualityProfile,
+    apply_cloth_property_maps,
+    cloth_authoring_schema,
+    cloth_diagnostics,
+    cloth_export_contract,
+    configure_cloth_quality,
+    configure_cloth_collision_layers,
+    create_cloth_seams,
+    enable_dihedral_bending,
+)
+from tech_connector.game_engine.runtime.tc_procedural_animation_service import (
+    GroundContact,
+    GroundIKSettings,
+    LimbIKResult,
+    ProceduralAnimationFrame,
+    ProceduralAnimationRuntime,
+    solve_two_bone_ik,
+)
+from tech_connector.game_engine.runtime.tc_vehicle_dynamics_service import (
+    VehicleControlInput,
+    VehicleDynamicsFrame,
+    VehicleDynamicsRuntime,
+    VehicleRigSettings,
+    WheelDynamicsResult,
+    WheelRigSettings,
+)
+from tech_connector.game_engine.runtime.tc_simulation_gpu_pic_service import GpuPicGridState
+from tech_connector.game_engine.runtime.tc_simulation_gpu_magnetic_service import GpuMagneticGridState
 from tech_connector.game_engine.runtime.tc_simulation_compute_provider_service import (
     ArrayComputeProvider,
     ComputeProviderStatus,
@@ -31,6 +79,33 @@ from tech_connector.game_engine.runtime.tc_simulation_native_backend_service imp
     native_backend_support,
     native_particle_view,
     synchronize_native_particles,
+)
+from tech_connector.game_engine.runtime.tc_simulation_native_constraints_service import NativeConstraintBuffers
+from tech_connector.game_engine.runtime.tc_simulation_gpu_backend_service import (
+    GpuParticleBuffers,
+    execute_gpu_compute,
+    gpu_backend_support,
+    gpu_particle_view,
+)
+from tech_connector.game_engine.runtime.tc_simulation_render_bridge_service import (
+    RenderBufferView,
+    SimulationRenderStream,
+    build_simulation_render_stream,
+    qualify_simulation_render_stream,
+)
+from tech_connector.game_engine.runtime.tc_multiphysics_coupling_service import (
+    MultiphysicsCouplingPlan,
+    MultiphysicsCouplingStage,
+    compile_multiphysics_coupling,
+)
+from tech_connector.game_engine.runtime.tc_simulation_gpu_constraints_service import GpuConstraintBuffers
+from tech_connector.game_engine.runtime.tc_simulation_native_volume_service import (
+    NativeSparseVolumeBuffers,
+    synchronize_native_sparse_volumes,
+)
+from tech_connector.game_engine.runtime.tc_simulation_gpu_volume_service import (
+    GpuSparseVolumeBuffers,
+    synchronize_gpu_sparse_volumes,
 )
 from tech_connector.game_engine.runtime.tc_fx_data_channel_service import (
     FxChannelField,
@@ -100,8 +175,29 @@ from tech_connector.game_engine.runtime.graph_instance_service import (
     GraphRuntimeInstance,
     GraphTickReceipt,
 )
+from tech_connector.game_engine.runtime.graph_debugger_service import (
+    GraphDebugSession,
+    GraphDebugSessionManager,
+    GraphDebugSnapshot,
+    default_graph_debug_session_manager,
+)
+from tech_connector.game_engine.runtime.tc_ocean_surface_service import (
+    OceanSample, OceanSurface, OceanWake, OceanWave, create_ocean_surface,
+)
+
+from .world_streaming_runtime_service import (
+    StreamingCellState, StreamingFrameReceipt, StreamingSource, WorldStreamingRuntime,
+)
 
 __all__ = [
+    "OceanSample",
+    "OceanSurface",
+    "OceanWake",
+    "OceanWave",
+    "StreamingCellState",
+    "StreamingFrameReceipt",
+    "StreamingSource",
+    "WorldStreamingRuntime",
     "CharacterAction",
     "CharacterDecisionReceipt",
     "CharacterLODDecision",
@@ -114,12 +210,42 @@ __all__ = [
     "GraphOperationRegistry",
     "GraphRuntimeInstance",
     "GraphTickReceipt",
+    "GraphDebugSession",
+    "GraphDebugSessionManager",
+    "GraphDebugSnapshot",
+    "default_graph_debug_session_manager",
     "RuntimeFramePacket",
+    "RuntimeHealthSnapshot",
+    "EngineReadinessGate",
+    "EngineReadinessReport",
+    "EXOTIC_SIMULATION_PRESETS",
+    "ExoticSimulationPreset",
+    "ElectrostaticPicGrid",
+    "GpuPicGridState",
+    "GpuMagneticGridState",
+    "GroundContact",
+    "GroundIKSettings",
+    "MagnetodynamicGrid",
+    "CLOTH_QUALITY_PROFILES",
+    "ClothPropertyMaps",
+    "ClothQualityProfile",
     "SimulationRuntimeInstance",
     "ArrayComputeProvider",
     "ComputeProviderStatus",
     "PersistentComputeBuffer",
     "NativeParticleBuffers",
+    "NativeConstraintBuffers",
+    "GpuParticleBuffers",
+    "RenderBufferView",
+    "SimulationRenderStream",
+    "MultiphysicsCouplingPlan",
+    "MultiphysicsCouplingStage",
+    "LimbIKResult",
+    "ProceduralAnimationFrame",
+    "ProceduralAnimationRuntime",
+    "GpuConstraintBuffers",
+    "GpuSparseVolumeBuffers",
+    "NativeSparseVolumeBuffers",
     "FxChannelField",
     "FxDataChannel",
     "FxDataChannelBinding",
@@ -143,9 +269,17 @@ __all__ = [
     "SmartObjectReservation",
     "SmartObjectReservationManager",
     "WorldIntelligenceRuntimeState",
+    "VehicleControlInput",
+    "VehicleDynamicsFrame",
+    "VehicleDynamicsRuntime",
+    "VehicleRigSettings",
+    "WheelDynamicsResult",
+    "WheelRigSettings",
     "TCEngineAPI",
     "build_engine_runtime_experience_plan",
+    "audit_engine_readiness",
     "apply_narrative_beat",
+    "apply_cloth_property_maps",
     "apply_perception_receipt",
     "authorize_world_mutation",
     "build_playtest_iteration_plan",
@@ -154,15 +288,32 @@ __all__ = [
     "choose_character_lod",
     "choose_dialogue_act",
     "compute_provider",
+    "cloth_authoring_schema",
+    "cloth_diagnostics",
+    "cloth_export_contract",
+    "configure_cloth_quality",
+    "configure_cloth_collision_layers",
+    "create_cloth_seams",
+    "enable_dihedral_bending",
+    "create_exotic_simulation",
+    "create_ocean_surface",
     "compute_provider_statuses",
     "create_default_graph_operation_registry",
     "evaluate_behavior_graph",
+    "exotic_authoring_schema",
+    "exotic_simulation_preset_names",
     "discover_compute_providers",
     "execute_character_action",
     "execute_gameplay_experience_command",
+    "execute_gpu_compute",
     "execute_graph_manifest",
     "execute_world_intelligence_command",
     "find_navigation_path",
+    "gpu_backend_support",
+    "gpu_particle_view",
+    "build_simulation_render_stream",
+    "qualify_simulation_render_stream",
+    "compile_multiphysics_coupling",
     "impact_data_channel",
     "live_game_sessions",
     "publish_tcscene_save",
@@ -175,10 +326,14 @@ __all__ = [
     "runtime_target_options",
     "sense_stimuli",
     "select_narrative_beat",
+    "simulation_diagnostics",
+    "qualify_runtime_determinism",
     "simulate_group_tick",
     "solve_crowd_steering",
+    "solve_two_bone_ik",
     "schedule_procedural_runtime",
     "synchronize_native_particles",
+    "synchronize_native_sparse_volumes",
+    "synchronize_gpu_sparse_volumes",
     "unregister_live_game_session",
 ]
-

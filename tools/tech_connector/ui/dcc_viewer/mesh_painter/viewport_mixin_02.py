@@ -510,6 +510,100 @@ class ThreeDMeshPainterViewportMixin02:
         return response
 
     def _execute_tc_deformation_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if command == "deformation.add_blend_shape":
+            from tech_connector.game_engine.deformation import (
+                attach_blend_shape_deformer,
+                blend_shape_target_from_dict,
+            )
+
+            mesh_id = str(payload.get("mesh_id") or getattr(self.mesh, "name", "mesh"))
+            vertex_count = int(payload.get("vertex_count", len(getattr(self.mesh, "vertices", ()))))
+            targets = [blend_shape_target_from_dict(item) for item in payload.get("targets", ())]
+            if not targets:
+                raise ValueError("At least one blend-shape target is required.")
+            self.push_rig_undo_state(f"Add blend shapes to {mesh_id}")
+            deformer_id = attach_blend_shape_deformer(
+                self.editable_rig_graph, mesh_id, vertex_count, targets,
+                deformer_id=str(payload.get("deformer_id") or "") or None,
+            )
+            self.refresh_scene_outliner()
+            return {"deformer_id": deformer_id, "target_ids": [item.target_id for item in targets],
+                    "message": f"Added {len(targets)} portable blend-shape target(s) to {mesh_id}."}
+        if command == "deformation.set_blend_shape_weights":
+            from tech_connector.game_engine.deformation import set_blend_shape_weights
+
+            deformer_id = str(payload.get("deformer_id") or "")
+            if not deformer_id:
+                deformer_id, source_kind, _mesh_id = self._selected_skin_or_deformer()
+                if source_kind != "deformer":
+                    raise ValueError("Select a blend-shape deformer or provide deformer_id.")
+            self.push_rig_undo_state(f"Set blend-shape weights on {deformer_id}")
+            response = set_blend_shape_weights(
+                self.editable_rig_graph, deformer_id, dict(payload.get("weights") or {}),
+                driver_values=dict(payload.get("driver_values") or {}) or None,
+                frame=float(payload["frame"]) if payload.get("frame") is not None else None,
+            )
+            response["message"] = f"Updated {len(response['weights'])} blend-shape channel(s)."
+            return response
+        if command == "deformation.add_muscle":
+            from tech_connector.game_engine.deformation import (
+                DeformationWeightMap,
+                MuscleDeformerSettings,
+                PoseSpaceTissueDriver,
+                attach_muscle_deformer,
+            )
+
+            source_id = str(payload.get("skin_id") or payload.get("source_id") or "")
+            mesh_id = str(payload.get("mesh_id") or "")
+            if not source_id:
+                source_id, source_kind, selected_mesh_id = self._selected_skin_or_deformer()
+                if source_kind != "skin":
+                    raise ValueError("Muscle tissue must start from a skin cluster so canonical weights remain portable.")
+                mesh_id = mesh_id or selected_mesh_id
+            key = str(payload.get("map_key") or f"muscle:{source_id}")
+            activation_map = self.deformation_weight_map(key)
+            settings = MuscleDeformerSettings(
+                stiffness=float(payload.get("stiffness", 180.0)),
+                activation_stiffness=float(payload.get("activation_stiffness", 1.4)),
+                damping=float(payload.get("damping", 24.0)), mass=float(payload.get("mass", 1.0)),
+                contraction=float(payload.get("contraction", 0.08)), bulge=float(payload.get("bulge", 0.035)),
+                max_offset=float(payload.get("max_offset", 0.12)),
+                fiber_direction=tuple(float(value) for value in payload.get("fiber_direction", (0.0, 1.0, 0.0))),
+                inertial_follow=float(payload.get("inertial_follow", 0.85)),
+                teleport_distance=float(payload.get("teleport_distance", 0.75)),
+                substeps=int(payload.get("substeps", 4)), quality=str(payload.get("quality") or "realtime"),
+            )
+            drivers = [PoseSpaceTissueDriver(**dict(item)) for item in payload.get("pose_drivers", ())]
+            pose_maps = {
+                str(driver_id): DeformationWeightMap.from_dict(dict(value))
+                for driver_id, value in dict(payload.get("pose_maps") or {}).items()
+            }
+            self.push_rig_undo_state(f"Add muscle tissue to {source_id}")
+            muscle_id = attach_muscle_deformer(
+                self.editable_rig_graph, source_id,
+                mesh_id or str(getattr(self.mesh, "name", "mesh")), activation_map,
+                settings=settings, pose_drivers=drivers, pose_maps=pose_maps,
+                deformer_id=str(payload.get("deformer_id") or "") or None,
+            )
+            self._select_deformation_paint_target(key, f"{source_id.split('::')[-1]} Muscle")
+            self.refresh_scene_outliner()
+            return {"deformer_id": muscle_id, "map_key": key,
+                    "message": f"Added paintable muscle tissue to {source_id}."}
+        if command == "deformation.set_muscle_activation":
+            from tech_connector.game_engine.deformation import set_muscle_activation
+
+            deformer_id = str(payload.get("deformer_id") or "")
+            if not deformer_id:
+                deformer_id, source_kind, _mesh_id = self._selected_skin_or_deformer()
+                if source_kind != "deformer":
+                    raise ValueError("Select a muscle deformer or provide deformer_id.")
+            self.push_rig_undo_state(f"Set muscle activation on {deformer_id}")
+            response = set_muscle_activation(
+                self.editable_rig_graph, deformer_id, float(payload.get("activation", 1.0)),
+                pose_values=dict(payload.get("pose_values") or {}) or None,
+            )
+            response["message"] = f"Muscle activation is {response['activation']:.3f}."
+            return response
         if command == "deformation.add_jiggle":
             from tech_connector.game_engine.deformation import (
                 JiggleDeformerSettings,
@@ -925,6 +1019,24 @@ class ThreeDMeshPainterViewportMixin02:
         runtime_packet = runtime.advance(frame_dt)
         self.simulation_world = runtime.world
         world = self.simulation_world
+        exotic_view = dict(getattr(self, "_exotic_simulation_view", {}) or {})
+        if exotic_view.get("trails"):
+            trails = getattr(self, "_exotic_particle_trails", None)
+            if not isinstance(trails, dict):
+                trails = {}
+                self._exotic_particle_trails = trails
+            active_keys: set[int] = set()
+            for index, particle in enumerate(world.particles[:4096]):
+                if not particle.alive:
+                    continue
+                key = int(particle.particle_id) if int(particle.particle_id) >= 0 else -(index + 1)
+                active_keys.add(key)
+                history = trails.setdefault(key, [])
+                history.append(tuple(particle.position))
+                del history[:-96]
+            for key in list(trails):
+                if key not in active_keys:
+                    trails.pop(key, None)
         self.simulation_frame += 1
         if self.simulation_cache is not None:
             self.simulation_cache.store(world.capture_frame(self.simulation_frame))
@@ -940,6 +1052,27 @@ class ThreeDMeshPainterViewportMixin02:
             f"Simulation frame {self.simulation_frame}: {len(world.particles)} particles, "
             f"{sum(len(volume.cells) for volume in world.volumes.values())} active voxels{gpu_summary}"
         )
+        if exotic_view.get("conservation"):
+            from tech_connector.game_engine.runtime.tc_exotic_simulation_service import simulation_diagnostics
+            diagnostics = simulation_diagnostics(world)
+            momentum = math.sqrt(sum(value * value for value in diagnostics["linear_momentum"]))
+            self._resolved_shaded_status += (
+                f" · mass {diagnostics['total_mass']:.4g} · charge {diagnostics['total_charge']:.4g}"
+                f" · |p| {momentum:.3g} · KE {diagnostics['kinetic_energy']:.4g}"
+            )
+            if diagnostics["pic_grids"]:
+                pic = diagnostics["pic_grids"][0]
+                self._resolved_shaded_status += (
+                    f" · |E|max {float(pic.get('maximum_field', 0.0)):.3g}"
+                    f" · Gauss residual {float(pic.get('gauss_residual_l2', 0.0)):.3g}"
+                )
+            if diagnostics["magnetic_grids"]:
+                magnetic = diagnostics["magnetic_grids"][0]
+                self._resolved_shaded_status += (
+                    f" · |B|max {float(magnetic.get('maximum_field', 0.0)):.3g}"
+                    f" · current {float(magnetic.get('current_rms', 0.0)):.3g}"
+                    f" · reconnect {float(magnetic.get('reconnection_energy', 0.0)):.3g}"
+                )
         self.update_viewport_status()
         if getattr(self, "canvas", None) is not None:
             self.canvas.update()
@@ -956,6 +1089,7 @@ class ThreeDMeshPainterViewportMixin02:
             return
         self.set_simulation_playing(False)
         self.simulation_world = copy.deepcopy(self.simulation_initial_world)
+        self._exotic_particle_trails = {}
         from tech_connector.game_engine.runtime.tc_simulation_runtime_service import SimulationRuntimeInstance
         self.simulation_runtime = SimulationRuntimeInstance(
             self.simulation_world, tick_rate=max(1.0, float(self.simulation_frame_rate))
@@ -1289,6 +1423,7 @@ class ThreeDMeshPainterViewportMixin02:
             from tech_connector.game_engine.integration.dcc_production_workflow_service import (
                 PRODUCTION_WORKFLOWS,
                 validate_workflow_catalog,
+                workflow_receipt_ledger,
             )
             from tech_connector.game_engine.integration.dcc_release_readiness_service import (
                 audit_dcc_release_readiness,
@@ -1306,9 +1441,12 @@ class ThreeDMeshPainterViewportMixin02:
             ]
             ledger = qualification_ledger(payload.get("ledger_path") or None)
             parity_ledger = source_parity_ledger(payload.get("source_parity_ledger_path") or None)
+            workflow_ledger = workflow_receipt_ledger(payload.get("workflow_ledger_path") or None)
+            workflow_receipts = dict(getattr(self, "_dcc_workflow_receipts", {}) or {})
+            workflow_receipts.update(workflow_ledger["receipts"])
             readiness = audit_dcc_release_readiness(
                 qualification_receipts=ledger["receipts"],
-                workflow_receipts=getattr(self, "_dcc_workflow_receipts", {}) or {},
+                workflow_receipts=workflow_receipts,
                 source_parity_receipts=parity_ledger["receipts"],
             )
             if host:
@@ -1321,6 +1459,7 @@ class ThreeDMeshPainterViewportMixin02:
                     **audit,
                     "workflows": workflows,
                     "filtered_count": len(workflows),
+                    "workflow_receipt_summary": workflow_ledger["summary"],
                     "release_readiness": readiness,
                 },
                 "message": (
@@ -1334,6 +1473,7 @@ class ThreeDMeshPainterViewportMixin02:
                 PRODUCTION_WORKFLOWS,
                 execute_dcc_workflow,
                 resolve_workflow_session_port,
+                store_workflow_receipt,
             )
 
             workflow_key = str(payload.get("workflow") or "").strip()
@@ -1374,6 +1514,8 @@ class ThreeDMeshPainterViewportMixin02:
                 "session_key": str(payload.get("session_key") or (f"{workflow.host}:{session_port}" if session_port else "")),
                 "executable_hint": str(payload.get("executable_hint") or ""),
             }
+            if receipt.status == "verified":
+                store_workflow_receipt(receipt, payload.get("ledger_path") or None)
             return {
                 "dcc_workflow_receipt": receipt.to_dict(),
                 "message": (
@@ -2290,6 +2432,14 @@ class ThreeDMeshPainterViewportMixin02:
             return {"ok": True, "command": command, "audit": audit_physics_stress_scene(world), "applied": bool(payload.get("apply", False))}
 
         if command == "simulation.create_cloth":
+            from tech_connector.game_engine.runtime.tc_cloth_authoring_service import (
+                apply_cloth_property_maps,
+                cloth_diagnostics,
+                configure_cloth_collision_layers,
+                configure_cloth_quality,
+                create_cloth_seams,
+            )
+
             material = str(payload.get("material") or "cotton")
             if payload.get("use_current_mesh"):
                 topology, _colors, _proxies = self._canonical_mesh_topology()
@@ -2312,8 +2462,32 @@ class ThreeDMeshPainterViewportMixin02:
                     int(payload.get("columns", 12)), int(payload.get("rows", 12)),
                     spacing=float(payload.get("spacing", 0.08)), material=material,
                 )
+            configure_cloth_quality(
+                world, str(payload.get("quality_profile") or "realtime"),
+                collision_thickness_scale=float(payload.get("collision_thickness_scale", 1.0)),
+                strain_warning=float(payload.get("strain_warning", 1.15)),
+            )
+            if isinstance(payload.get("property_maps"), dict):
+                apply_cloth_property_maps(world, payload["property_maps"])
+            if payload.get("seam_pairs"):
+                create_cloth_seams(
+                    world, payload["seam_pairs"],
+                    compliance=float(payload.get("seam_compliance", 1.0e-8)),
+                    break_threshold=float(payload.get("seam_break_threshold", 0.0)),
+                )
+            if payload.get("collision_layers") is not None:
+                configure_cloth_collision_layers(
+                    world, payload["collision_layers"],
+                    priorities=payload.get("collision_priorities", ()),
+                    mode=str(payload.get("collision_layer_mode") or "all"),
+                )
             self._install_simulation_world(world, material)
-            return {"message": f"Created {material} cloth with {len(world.particles)} particles and {len(world.constraints)} constraints."}
+            return {
+                "message": f"Created {material} cloth with {len(world.particles)} particles and {len(world.constraints)} constraints.",
+                "cloth": cloth_diagnostics(world),
+                "quality_profile": world.cloth_settings.get("quality_profile", "realtime"),
+                "painted_controls": list(world.cloth_settings.get("painted_controls", [])),
+            }
         if command == "simulation.add_effect_jiggle":
             if self.simulation_world is None or self.simulation_world.effect_system is None:
                 raise ValueError("Create an effect before adding effect jiggle.")
@@ -2595,6 +2769,38 @@ class ThreeDMeshPainterViewportMixin02:
                 radius=float(payload.get("radius", 0.0)),
             ))
             return {"message": "Added inverse-square gravity source."}
+        if command == "simulation.add_force_field":
+            if self.simulation_world is None:
+                raise ValueError("Create a simulation before adding a physics field.")
+            field_type = str(payload.get("field_type") or "wind").lower()
+            supported = {
+                "gravity", "wind", "uniform", "gravity_source", "point_gravity", "radial",
+                "repulsor", "attractor", "vortex", "turbulence", "drag", "linear_drag",
+                "quadratic_drag", "buoyancy",
+            }
+            if field_type not in supported:
+                raise ValueError(f"Unsupported physics field type: {field_type}")
+            physics_field = ForceField(
+                field_type=field_type,
+                vector=tuple(float(value) for value in payload.get("vector", (0.0, 1.0, 0.0))[:3]),
+                center=tuple(float(value) for value in payload.get("center", (0.0, 0.0, 0.0))[:3]),
+                strength=float(payload.get("strength", 1.0)), radius=float(payload.get("radius", 0.0)),
+                seed=int(payload.get("seed", 1)), enabled=bool(payload.get("enabled", True)),
+                inner_radius=float(payload.get("inner_radius", 0.0)),
+                falloff_power=float(payload.get("falloff_power", 1.0)),
+                max_acceleration=float(payload.get("max_acceleration", 0.0)),
+                drag=float(payload.get("drag", 0.0)),
+                gust_strength=float(payload.get("gust_strength", 0.0)),
+                frequency=float(payload.get("frequency", 1.0)),
+                noise_scale=float(payload.get("noise_scale", 1.0)),
+                ambient_density=float(payload.get("ambient_density", 1.225)),
+            )
+            self.simulation_world.fields.append(physics_field)
+            self.simulation_initial_world = copy.deepcopy(self.simulation_world)
+            return {
+                "message": f"Added {field_type.replace('_', ' ')} physics field.",
+                "field": asdict(physics_field),
+            }
         if command == "simulation.add_curve_flow":
             if self.simulation_world is None:
                 raise ValueError("Create a simulation before adding curve flow.")

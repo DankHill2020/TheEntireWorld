@@ -159,7 +159,7 @@ FX_SOLVER_PROFILES: dict[str, FxSolverProfile] = {
         supports_meshing=True,
     ),
     "granular": FxSolverProfile(
-        "granular", "Granular Matter", "particle",
+        "granular", "Granular Matter", "granular",
         "Sand, snow, soil, grains, and packed particle materials.",
         ("source", "simulate", "surface", "cache", "export"),
         (
@@ -223,6 +223,7 @@ PRESET_SOLVER_PROFILES = {
     "heat_haze": "sparse_pyro", "mudslide": "viscous_goop",
     "refractive_bubbles": "flip_liquid", "avalanche": "granular",
     "snow": "granular", "earthquake": "destruction",
+    "jello": "softbody", "ocean": "ocean_surface", "storm_ocean": "ocean_surface",
 }
 
 
@@ -263,6 +264,8 @@ def build_fx_workflow_plan(
 def audit_fx_world(world: Any) -> FxAuditReport:
     """Audit solver readiness and budgets without changing the simulation."""
     from tech_connector.game_engine.runtime.tc_simulation_ir_service import (
+        EXECUTION_PROFILES,
+        compile_simulation_world,
         effect_system_is_stateless,
         simulation_backend_status,
     )
@@ -280,14 +283,21 @@ def audit_fx_world(world: Any) -> FxAuditReport:
     requested = str(getattr(system, "backend_preference", "auto") or "auto")
     backend_id = "gpu_compute" if requested == "auto" else requested
     backend = simulation_backend_status(backend_id)
+    profile = str(getattr(system, "quality", "realtime") or "realtime")
+    profile = profile if profile in EXECUTION_PROFILES else "realtime"
+    compiled = compile_simulation_world(world, profile=profile, backend=backend_id)
+    effective_backend = str(compiled.metadata.get("execution_backend") or "reference_cpu")
+    fallback_active = effective_backend != backend_id
     diagnostics: list[dict[str, Any]] = []
     recommendations: list[str] = []
-    if not backend["available"]:
+    if fallback_active:
+        reasons = "; ".join(str(item.get("message") or "") for item in compiled.diagnostics)
         diagnostics.append({
             "severity": "warning", "code": "backend_fallback",
-            "message": f"{backend_id} is unavailable; deterministic CPU preview will be used.",
+            "message": f"{backend_id} cannot execute this complete FX domain; {effective_backend} preview will be used."
+                       + (f" {reasons}" if reasons else ""),
         })
-        recommendations.append("Install a compatible native/GPU executor to remove the preview fallback.")
+        recommendations.append("Install or qualify a backend that covers every compiled FX domain, or approve the explicit fallback.")
     if particles > contract.maximum_particles:
         diagnostics.append({
             "severity": "error", "code": "particle_budget_exceeded",
@@ -314,7 +324,10 @@ def audit_fx_world(world: Any) -> FxAuditReport:
         "emitters": len(getattr(system, "emitters", ()) or ()),
         "stateless_compatible": stateless,
         "requested_backend": requested,
-        "effective_preview_backend": backend_id if backend["available"] else "reference_cpu",
+        "effective_preview_backend": effective_backend,
+        "backend_available": backend["available"],
+        "backend_domains": list(backend["domains"]),
+        "compiled_domains": list(compiled.domains),
     }, diagnostics, recommendations)
 
 

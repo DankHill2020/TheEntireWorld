@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from tech_connector.game_engine.authoring.tc_physics_joint_editor_service import PhysicsJointEditorModel
 from tech_connector.game_engine.authoring.tc_physics_joint_service import PHYSICS_JOINT_PRESETS, PHYSICS_JOINT_TYPES
+from tech_connector.ui.ux_polish import ContextRecipeCard, WorkflowRecipe, apply_property_guidance, apply_widget_discoverability
 
 
 class PhysicsJointEditorWidget(QWidget):
@@ -24,6 +25,17 @@ class PhysicsJointEditorWidget(QWidget):
         self._refreshing = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        self.workflow_guide = ContextRecipeCard(WorkflowRecipe(
+            "How to connect physics bodies",
+            ("Choose body A and body B", "Add a joint preset", "Select the joint", "Pick anchors in the viewport",
+             "Enable limits or a motor, then simulate"),
+            requires="The two bodies must already exist in the runtime world.",
+            preview="Tune one property family at a time: limits first, damping second, motor last.",
+            output="Joint type, anchors, limits, motors, and break thresholds remain explicit for engine export.",
+            tip="Start with a preset. Keep connected collision off unless the two attached bodies should strike each other.",
+        ), self)
+        layout.addWidget(self.workflow_guide)
 
         create_row = QHBoxLayout()
         self.joint_id = QLineEdit()
@@ -126,7 +138,33 @@ class PhysicsJointEditorWidget(QWidget):
             (self.collision_enabled, "collision_enabled"),
         ):
             widget.toggled.connect(lambda value, name=key: self._edit({name: value}))
+        self._apply_guidance()
         self.refresh()
+        apply_widget_discoverability(self)
+
+    def _apply_guidance(self) -> None:
+        self.first_body.setToolTip("Body A: the first existing physics entity connected by this joint.")
+        self.second_body.setToolTip("Body B: the second existing physics entity connected by this joint.")
+        self.preset.setToolTip("Choose a safe starting configuration; every generated property remains editable.")
+        self.tree.setToolTip("Select one joint to edit it, or select several to apply the same property to all of them.")
+        apply_property_guidance(self.stiffness, "How strongly the joint corrects displacement.",
+                                safe_start="Increase gradually after limits are correct.",
+                                consequence="Very high stiffness can jitter unless damping and substeps are sufficient.")
+        apply_property_guidance(self.damping, "Removes oscillation and excess joint motion.",
+                                safe_start="Raise until bouncing settles without feeling sluggish.",
+                                consequence="Too much damping makes the connection feel heavy or locked.")
+        apply_property_guidance(self.motor_force, "Maximum force the motor may apply to reach its target speed.",
+                                safe_start="Use the smallest force that moves the expected load.",
+                                consequence="Large forces can destabilize light bodies or fight other constraints.")
+        apply_property_guidance(self.break_force, "Linear force required to break the joint; zero means unbreakable.",
+                                safe_start="Leave at zero until the stable motion is approved.",
+                                consequence="Thresholds depend on scene scale and mass.")
+        apply_property_guidance(self.break_torque, "Twisting force required to break the joint; zero means unbreakable.",
+                                safe_start="Leave at zero until the stable motion is approved.",
+                                consequence="Test breakage at final simulation rate and mass values.")
+        apply_property_guidance(self.collision_enabled, "Allows the two connected bodies to collide with each other.",
+                                safe_start="Off for hinges and limbs.",
+                                consequence="Enabling it can cause jitter when the bodies begin overlapped.")
 
     @staticmethod
     def _number(minimum: float, maximum: float, step: float = 0.1) -> QDoubleSpinBox:
@@ -166,7 +204,16 @@ class PhysicsJointEditorWidget(QWidget):
                     self.limits_enabled, self.motor_enabled, self.collision_enabled)
         for control in controls:
             control.setEnabled(enabled)
+            if not enabled:
+                base = control.property("uxEnabledTooltip") or control.toolTip()
+                control.setProperty("uxEnabledTooltip", base)
+                control.setToolTip((str(base) + "\n\n" if base else "") +
+                                   "Unavailable: Select one or more joints in the list to edit properties.")
+            elif control.property("uxEnabledTooltip") is not None:
+                control.setToolTip(str(control.property("uxEnabledTooltip")))
         self.dof_tree.setEnabled(enabled and any(str(item.get("type")) == "six_dof" for item in selected))
+        if enabled and not self.dof_tree.isEnabled():
+            self.dof_tree.setToolTip("Six-DOF axis controls become available when a Six DOF joint is selected.")
         if not selected:
             return
         source = selected[0]

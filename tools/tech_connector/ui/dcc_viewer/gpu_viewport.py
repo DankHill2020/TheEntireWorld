@@ -19,6 +19,18 @@ from tech_connector.game_engine.deformation.gpu_skinning_contract import (
     build_skin_matrix_palette,
     sparse_render_influence_texels,
 )
+from tech_connector.game_engine.rendering.render_graph_service import (
+    build_fx_render_graph,
+    qualify_render_graph,
+)
+from tech_connector.game_engine.rendering.media_texture_service import (
+    normalize_media_texture_source,
+    plan_media_texture_residency,
+)
+from tech_connector.game_engine.rendering.procedural_shader_service import (
+    lower_qt_quick3d_shader,
+    render_procedural_preview,
+)
 from tech_connector.services.project_directory_service import resolve_project_asset_path
 
 try:
@@ -292,6 +304,7 @@ class DynamicEffectGeometry(QQuick3DGeometry):
         self.particle_count = 0
         self.source_count = 0
         self.dropped_count = 0
+        self.last_stream_receipt: dict[str, Any] = {}
         self.last_upload_ms = 0.0
 
     def upload_world(
@@ -308,6 +321,13 @@ class DynamicEffectGeometry(QQuick3DGeometry):
         if np is None:
             return
         system = getattr(world, "effect_system", None)
+        from tech_connector.game_engine.runtime.tc_simulation_render_bridge_service import build_simulation_render_stream
+        stream = build_simulation_render_stream(
+            world, consumer="qt_quick3d", allow_synchronization=True,
+        )
+        self.last_stream_receipt = stream.receipt()
+        position_buffer = stream.buffers.get("positions")
+        stream_positions = position_buffer.handle if position_buffer is not None else None
         renderers = {
             emitter.emitter_id: dict(emitter.renderer)
             for emitter in list(getattr(system, "emitters", []) or [])
@@ -323,7 +343,7 @@ class DynamicEffectGeometry(QQuick3DGeometry):
             return "additive" if str(renderer.get("blend") or "additive").lower() == "additive" else "alpha"
 
         matched_particles = [
-            particle for particle in list(getattr(world, "particles", []) or [])
+            (index, particle) for index, particle in enumerate(list(getattr(world, "particles", []) or []))
             if bool(getattr(particle, "alive", True))
             and bool(getattr(particle, "emitter_id", ""))
             and particle_group(particle) == render_group
@@ -332,8 +352,9 @@ class DynamicEffectGeometry(QQuick3DGeometry):
         maximum_distance_squared = max(0.0, float(maximum_distance)) ** 2
         if maximum_distance_squared > 0.0:
             matched_particles = [
-                particle for particle in matched_particles
-                if sum((float(particle.position[axis]) - float(camera_eye[axis])) ** 2 for axis in range(3))
+                item for item in matched_particles
+                if sum((float(stream_positions[item[0]][axis] if stream_positions is not None else item[1].position[axis])
+                        - float(camera_eye[axis])) ** 2 for axis in range(3))
                 <= maximum_distance_squared
             ]
         limit = max(0, int(maximum_particles))
@@ -341,8 +362,9 @@ class DynamicEffectGeometry(QQuick3DGeometry):
             particles = heapq.nsmallest(
                 limit,
                 matched_particles,
-                key=lambda particle: sum(
-                    (float(particle.position[axis]) - float(camera_eye[axis])) ** 2 for axis in range(3)
+                key=lambda item: sum(
+                    (float(stream_positions[item[0]][axis] if stream_positions is not None else item[1].position[axis])
+                     - float(camera_eye[axis])) ** 2 for axis in range(3)
                 ),
             )
         else:
@@ -369,8 +391,11 @@ class DynamicEffectGeometry(QQuick3DGeometry):
         indices_per_particle = radial_segments * 3 if radial_segments else 6
         vertices = np.empty((len(particles) * vertices_per_particle, 12), dtype=np.float32)
         indices = np.empty((len(particles) * indices_per_particle,), dtype=np.uint32)
-        for particle_index, particle in enumerate(particles):
-            center = np.asarray(particle.position, dtype=np.float32)
+        for particle_index, (source_index, particle) in enumerate(particles):
+            center = np.asarray(
+                stream_positions[source_index] if stream_positions is not None else particle.position,
+                dtype=np.float32,
+            )
             initial_size = max(1.0e-6, float(particle.effect_attributes.get("initial_size", 1.0)))
             half_size = max(0.003, float(particle.radius) * float(particle.size) / initial_size)
             base = particle_index * vertices_per_particle
@@ -496,6 +521,7 @@ class DynamicEffectInstancing(QQuick3DInstancing):
         self.last_upload_ms = 0.0
         self.source_count = 0
         self.dropped_count = 0
+        self.last_stream_receipt: dict[str, Any] = {}
         self.setHasTransparency(True)
         self.setDepthSortingEnabled(False)
 
@@ -512,16 +538,22 @@ class DynamicEffectInstancing(QQuick3DInstancing):
         maximum_distance: float = 250.0,
     ) -> None:
         started = time.perf_counter()
+        from tech_connector.game_engine.runtime.tc_simulation_render_bridge_service import build_simulation_render_stream
+        stream = build_simulation_render_stream(world, consumer="qt_quick3d", allow_synchronization=True)
+        self.last_stream_receipt = stream.receipt()
+        position_buffer = stream.buffers.get("positions")
+        stream_positions = position_buffer.handle if position_buffer is not None else None
         matched_particles = [
-            particle for particle in list(getattr(world, "particles", []) or [])
+            (index, particle) for index, particle in enumerate(list(getattr(world, "particles", []) or []))
             if particle.alive and str(particle.emitter_id) == str(emitter_id)
         ]
         self.source_count = len(matched_particles)
         maximum_distance_squared = max(0.0, float(maximum_distance)) ** 2
         if maximum_distance_squared > 0.0:
             matched_particles = [
-                particle for particle in matched_particles
-                if sum((float(particle.position[axis]) - float(camera_eye[axis])) ** 2 for axis in range(3))
+                item for item in matched_particles
+                if sum((float(stream_positions[item[0]][axis] if stream_positions is not None else item[1].position[axis])
+                        - float(camera_eye[axis])) ** 2 for axis in range(3))
                 <= maximum_distance_squared
             ]
         limit = max(0, int(maximum_instances))
@@ -529,8 +561,9 @@ class DynamicEffectInstancing(QQuick3DInstancing):
             heapq.nsmallest(
                 limit,
                 matched_particles,
-                key=lambda particle: sum(
-                    (float(particle.position[axis]) - float(camera_eye[axis])) ** 2 for axis in range(3)
+                key=lambda item: sum(
+                    (float(stream_positions[item[0]][axis] if stream_positions is not None else item[1].position[axis])
+                     - float(camera_eye[axis])) ** 2 for axis in range(3)
                 ),
             )
             if len(matched_particles) > limit else matched_particles
@@ -538,7 +571,12 @@ class DynamicEffectInstancing(QQuick3DInstancing):
         self.dropped_count = max(0, self.source_count - len(particles))
         payload = bytearray(len(particles) * 80)
         offset = 0
-        for particle in particles:
+        rendered_positions = []
+        for source_index, particle in particles:
+            particle_position = (
+                stream_positions[source_index] if stream_positions is not None else particle.position
+            )
+            rendered_positions.append(particle_position)
             scale = max(0.004, float(particle.radius), float(particle.size) * 0.03)
             color_values = tuple(max(0.0, min(1.0, float(value))) for value in particle.color)
             color = QColor.fromRgbF(*color_values[:4])
@@ -550,7 +588,7 @@ class DynamicEffectInstancing(QQuick3DInstancing):
                 float(particle.size),
             )
             entry = self.calculateTableEntry(
-                QVector3D(*map(float, particle.position)),
+                QVector3D(*map(float, particle_position)),
                 QVector3D(scale, scale, scale),
                 QVector3D(0.0, math.degrees(float(particle.rotation)), 0.0),
                 color,
@@ -567,9 +605,9 @@ class DynamicEffectInstancing(QQuick3DInstancing):
         self.instance_count = len(particles)
         self.setInstanceCountOverride(self.instance_count)
         if particles:
-            positions = np.asarray([particle.position for particle in particles], dtype=np.float32)
+            positions = np.asarray(rendered_positions, dtype=np.float32)
             maximum_scale = max(
-                max(0.004, float(particle.radius), float(particle.size) * 0.03) for particle in particles
+                max(0.004, float(particle.radius), float(particle.size) * 0.03) for _index, particle in particles
             )
             minimum = positions.min(axis=0) - maximum_scale
             maximum = positions.max(axis=0) + maximum_scale
@@ -620,6 +658,34 @@ class DynamicRgba32TextureData(QQuick3DTextureData):
         self.width = width
         self.height = height
         self.update()
+
+
+class DynamicProceduralTextureData(QQuick3DTextureData):
+    """Bounded procedural-material preview used until native shader lowering is installed."""
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self.graph: dict[str, Any] = {}
+        self.receipt: dict[str, Any] = {}
+        self.resolution = 256
+        self.animated = False
+
+    def upload_graph(self, graph: dict[str, Any] | None, *, time_seconds: float = 0.0) -> bool:
+        self.graph = dict(graph or {})
+        if not self.graph:
+            self.receipt = {}
+            self.animated = False
+            return False
+        pixels, receipt = render_procedural_preview(
+            self.graph, width=self.resolution, height=self.resolution, time_seconds=time_seconds,
+        )
+        self.setSize(QSize(self.resolution, self.resolution))
+        self.setFormat(QQuick3DTextureData.Format.RGBA8)
+        self.setTextureData(QByteArray(pixels.tobytes(order="C")))
+        self.receipt = receipt
+        self.animated = any(str(node.get("type")) in {"time", "panner"} for node in self.graph.get("nodes", ()))
+        self.update()
+        return True
 
 
 class DynamicSkinnedSceneGeometry(QQuick3DGeometry):
@@ -906,7 +972,7 @@ def _proxy_material_descriptor(proxy: Any) -> dict[str, Any]:
     attenuation_color = "#ffffff"
     attenuation_distance = 1000.0
     emission = QColor(0, 0, 0)
-    texture_urls: dict[str, str] = {}
+    texture_sources: dict[str, dict[str, Any]] = {}
     name = "Viewer Material"
     if material is not None:
         name = str(getattr(material, "name", "") or name)
@@ -925,11 +991,13 @@ def _proxy_material_descriptor(proxy: Any) -> dict[str, Any]:
         attenuation_distance = max(0.001, float(getattr(material, "attenuation_distance", 1000.0)))
         emission_values = getattr(material, "emission_color", (0.0, 0.0, 0.0)) or (0.0, 0.0, 0.0)
         emission = QColor.fromRgbF(*[max(0.0, min(1.0, float(value))) for value in emission_values[:3]])
-        paths = getattr(material, "texture_paths", {}) or {}
+        paths = dict(getattr(material, "texture_paths", {}) or {})
+        paths.update(dict(getattr(material, "texture_sources", {}) or {}))
         for slot in ("base_color", "normal", "roughness", "metalness", "emission", "opacity"):
-            candidate = str(paths.get(slot) or "")
-            if candidate and Path(candidate).expanduser().is_file():
-                texture_urls[slot] = QUrl.fromLocalFile(str(Path(candidate).expanduser())).toString()
+            descriptor = _viewport_media_descriptor(paths.get(slot))
+            if descriptor:
+                texture_sources[slot] = descriptor
+    texture_urls = {slot: source["path"] for slot, source in texture_sources.items()}
     return {
         "name": name,
         "color": color.name(QColor.NameFormat.HexArgb),
@@ -945,17 +1013,59 @@ def _proxy_material_descriptor(proxy: Any) -> dict[str, Any]:
         "emission": emission.name(QColor.NameFormat.HexRgb),
         "baseColorTexture": texture_urls.get("base_color", ""),
         "useBaseColorTexture": "base_color" in texture_urls,
+        "baseColorTextureSource": texture_sources.get("base_color", {}),
         "normalTexture": texture_urls.get("normal", ""),
         "useNormalTexture": "normal" in texture_urls,
+        "normalTextureSource": texture_sources.get("normal", {}),
         "roughnessTexture": texture_urls.get("roughness", ""),
         "useRoughnessTexture": "roughness" in texture_urls,
+        "roughnessTextureSource": texture_sources.get("roughness", {}),
         "metalnessTexture": texture_urls.get("metalness", ""),
         "useMetalnessTexture": "metalness" in texture_urls,
+        "metalnessTextureSource": texture_sources.get("metalness", {}),
         "emissionTexture": texture_urls.get("emission", ""),
         "useEmissionTexture": "emission" in texture_urls,
+        "emissionTextureSource": texture_sources.get("emission", {}),
         "opacityTexture": texture_urls.get("opacity", ""),
         "useOpacityTexture": "opacity" in texture_urls,
+        "opacityTextureSource": texture_sources.get("opacity", {}),
+        "proceduralShader": dict(getattr(material, "procedural_shader", {}) or {}) if material is not None else {},
     }
+
+
+def _viewport_media_descriptor(payload: Any) -> dict[str, Any]:
+    if not payload:
+        return {}
+    try:
+        source = normalize_media_texture_source(payload)
+    except (TypeError, ValueError):
+        return {}
+    path = source.path
+    if "://" not in path:
+        if source.source_type == "image_sequence" and Path(path).is_absolute():
+            resolved = Path(path)
+        else:
+            resolved = resolve_project_asset_path(path)
+            if not resolved or not Path(resolved).is_file():
+                return {}
+        path = QUrl.fromLocalFile(str(resolved)).toString()
+    result = source.to_dict()
+    result["path"] = path
+    result["playback"] = {
+        "autoplay": source.autoplay,
+        "loop": source.loop,
+        "playback_rate": source.playback_rate,
+        "start_time_seconds": source.start_time_seconds,
+        "end_time_seconds": source.end_time_seconds,
+        "frame_rate": source.frame_rate,
+        "muted": source.muted,
+        "synchronization": source.synchronization,
+        "fallback_frame": source.fallback_frame,
+        "sequence_start": source.sequence_start,
+        "sequence_end": source.sequence_end,
+        "sequence_padding": source.sequence_padding,
+    }
+    return result
 
 
 qmlRegisterType(DynamicSceneGeometry, "TechConnector", 1, 0, "DynamicSceneGeometry")
@@ -965,6 +1075,7 @@ qmlRegisterType(DynamicEffectInstancing, "TechConnector", 1, 0, "DynamicEffectIn
 qmlRegisterType(RadialEffectTextureData, "TechConnector", 1, 0, "RadialEffectTextureData")
 qmlRegisterType(DynamicSkinnedSceneGeometry, "TechConnector", 1, 0, "DynamicSkinnedSceneGeometry")
 qmlRegisterType(DynamicRgba32TextureData, "TechConnector", 1, 0, "DynamicRgba32TextureData")
+qmlRegisterType(DynamicProceduralTextureData, "TechConnector", 1, 0, "DynamicProceduralTextureData")
 
 
 class ThreeDGpuViewport(QQuickWidget):
@@ -978,12 +1089,14 @@ class ThreeDGpuViewport(QQuickWidget):
         self.skin_geometry: DynamicSkinnedSceneGeometry | None = None
         self.skin_influence_texture: DynamicRgba32TextureData | None = None
         self.skin_matrix_texture: DynamicRgba32TextureData | None = None
+        self.procedural_texture: DynamicProceduralTextureData | None = None
         self.effect_geometry: DynamicEffectGeometry | None = None
         self.effect_alpha_geometry: DynamicEffectGeometry | None = None
         self.effect_refractive_geometry: DynamicEffectGeometry | None = None
         self.effect_mesh_geometry: DynamicEffectMeshGeometry | None = None
         self.effect_mesh_instancing: DynamicEffectInstancing | None = None
         self.effect_stats: dict[str, Any] = {}
+        self.media_texture_stats: dict[str, Any] = {}
         self.effect_adaptive_budget_enabled = True
         self.effect_target_upload_ms = 4.0
         self.effect_particle_budget = 20000
@@ -1005,6 +1118,7 @@ class ThreeDGpuViewport(QQuickWidget):
             self.skin_geometry = root.findChild(DynamicSkinnedSceneGeometry, "skinGeometry")
             self.skin_influence_texture = root.findChild(DynamicRgba32TextureData, "skinInfluenceTexture")
             self.skin_matrix_texture = root.findChild(DynamicRgba32TextureData, "skinMatrixTexture")
+            self.procedural_texture = root.findChild(DynamicProceduralTextureData, "proceduralTexture")
             self.effect_geometry = root.findChild(DynamicEffectGeometry, "effectGeometry")
             self.effect_alpha_geometry = root.findChild(DynamicEffectGeometry, "effectAlphaGeometry")
             self.effect_refractive_geometry = root.findChild(DynamicEffectGeometry, "effectRefractiveGeometry")
@@ -1194,6 +1308,7 @@ class ThreeDGpuViewport(QQuickWidget):
                 "source": int(getattr(geometry, "source_count", 0)),
                 "dropped": int(getattr(geometry, "dropped_count", 0)),
                 "upload_ms": float(getattr(geometry, "last_upload_ms", 0.0)),
+                "buffer_handoff": dict(getattr(geometry, "last_stream_receipt", {}) or {}),
             }
             for name, geometry in streams.items() if geometry is not None
         }
@@ -1211,6 +1326,10 @@ class ThreeDGpuViewport(QQuickWidget):
             elif self._effect_upload_ema_ms < self.effect_target_upload_ms * 0.55:
                 self.effect_particle_budget = min(100000, max(self.effect_particle_budget + 1, int(self.effect_particle_budget * 1.08)))
                 self.effect_mesh_instance_budget = min(250000, max(self.effect_mesh_instance_budget + 1, int(self.effect_mesh_instance_budget * 1.08)))
+        primary_handoff = dict(getattr(self.effect_geometry, "last_stream_receipt", {}) or {})
+        render_graph = build_fx_render_graph(primary_handoff)
+        render_graph_receipt = render_graph.to_dict()
+        render_graph_receipt["qualification"] = qualify_render_graph(render_graph)
         self.effect_stats = {
             "streams": stream_stats,
             "mesh_instances": mesh_instances,
@@ -1218,6 +1337,7 @@ class ThreeDGpuViewport(QQuickWidget):
             "mesh_dropped": int(getattr(self.effect_mesh_instancing, "dropped_count", 0)),
             "mesh_instance_bytes": int(mesh_bytes),
             "mesh_upload_ms": float(getattr(self.effect_mesh_instancing, "last_upload_ms", 0.0)),
+            "mesh_buffer_handoff": dict(getattr(self.effect_mesh_instancing, "last_stream_receipt", {}) or {}),
             "draw_calls": sum(1 for item in stream_stats.values() if item["rendered"] > 0) + (1 if mesh_instances else 0),
             "total_rendered": sum(item["rendered"] for item in stream_stats.values()) + mesh_instances,
             "total_dropped": sum(item["dropped"] for item in stream_stats.values()) + int(getattr(self.effect_mesh_instancing, "dropped_count", 0)),
@@ -1228,6 +1348,8 @@ class ThreeDGpuViewport(QQuickWidget):
             "particle_budget_per_stream": self.effect_particle_budget,
             "mesh_instance_budget": self.effect_mesh_instance_budget,
             "cull_distance": self.effect_cull_distance,
+            "render_handoff": primary_handoff,
+            "render_graph": render_graph_receipt,
         }
         return True
 
@@ -1316,6 +1438,8 @@ class ThreeDGpuViewport(QQuickWidget):
         clearcoat: float = 0.0,
         attenuation_color: QColor | str = "#ffffff",
         attenuation_distance: float = 1000.0,
+        texture_sources: dict[str, Any] | None = None,
+        procedural_shader: dict[str, Any] | None = None,
     ) -> None:
         root = self.rootObject()
         if root is None:
@@ -1332,6 +1456,42 @@ class ThreeDGpuViewport(QQuickWidget):
         root.setProperty("materialAttenuationDistance", max(0.001, float(attenuation_distance)))
         root.setProperty("materialEmission", QColor(emission_color))
         root.setProperty("environmentExposure", max(0.0, min(16.0, float(exposure))))
+        legacy_sources = {
+            "base_color": base_color_texture,
+            "normal": normal_texture,
+            "specular_roughness": roughness_texture,
+            "metalness": metalness_texture,
+            "emission_color": emission_texture,
+            "opacity": opacity_texture,
+        }
+        authored_sources = dict(texture_sources or {})
+        media_descriptors: dict[str, dict[str, Any]] = {}
+        for channel, fallback in legacy_sources.items():
+            descriptor = _viewport_media_descriptor(authored_sources.get(channel) or fallback)
+            if descriptor:
+                media_descriptors[channel] = descriptor
+        self.media_texture_stats = plan_media_texture_residency(media_descriptors)
+        for deferred_slot in self.media_texture_stats["deferred_slots"]:
+            media_descriptors[deferred_slot]["deferred"] = True
+        root.setProperty("mediaTextureDescriptors", media_descriptors)
+        native_shader = lower_qt_quick3d_shader(procedural_shader) if procedural_shader else {}
+        native_ready = bool(native_shader.get("native_executable"))
+        preview_ready = False
+        if self.procedural_texture is not None:
+            preview_ready = bool(procedural_shader) and not native_ready and self.procedural_texture.upload_graph(procedural_shader)
+            if native_ready:
+                self.procedural_texture.graph = {}
+                self.procedural_texture.animated = False
+        root.setProperty("proceduralNativeReady", native_ready)
+        root.setProperty(
+            "proceduralFragmentShader",
+            QUrl.fromLocalFile(str(native_shader["shader_path"])) if native_ready else QUrl(),
+        )
+        root.setProperty("proceduralTextureReady", preview_ready)
+        self.media_texture_stats["procedural_shader"] = dict(native_shader)
+        if preview_ready:
+            self.media_texture_stats["procedural_shader"]["preview"] = dict(self.procedural_texture.receipt)
+        self.media_texture_stats.update({"timeline_frame": 0, "timeline_seconds": 0.0, "playing": False})
         for property_name, authored_path in (
             ("baseColorTexture", base_color_texture),
             ("normalTexture", normal_texture),
@@ -1341,11 +1501,48 @@ class ThreeDGpuViewport(QQuickWidget):
             ("opacityTexture", opacity_texture),
             ("environmentTexture", environment_texture),
         ):
+            channel = {
+                "baseColorTexture": "base_color", "normalTexture": "normal",
+                "roughnessTexture": "specular_roughness", "metalnessTexture": "metalness",
+                "emissionTexture": "emission_color", "opacityTexture": "opacity",
+            }.get(property_name)
+            if channel and channel in media_descriptors:
+                root.setProperty(property_name, QUrl(media_descriptors[channel]["path"]))
+                continue
             texture_path = resolve_project_asset_path(authored_path)
             root.setProperty(
                 property_name,
                 QUrl.fromLocalFile(str(texture_path)) if texture_path else QUrl(),
             )
+
+    def set_media_timeline(
+        self,
+        frame: int,
+        fps: float,
+        *,
+        frame_start: int = 0,
+        playing: bool = False,
+    ) -> dict[str, Any]:
+        """Seek timeline-synchronized media without advancing decoder clocks independently."""
+        relative_frame = max(0, int(frame) - int(frame_start))
+        safe_fps = max(1.0, float(fps))
+        seconds = relative_frame / safe_fps
+        root = self.rootObject()
+        if root is not None:
+            root.setProperty("mediaTimelineSeconds", float(seconds))
+            root.setProperty("mediaTimelinePlaying", bool(playing))
+        self.media_texture_stats.update({
+            "timeline_frame": int(frame), "relative_frame": relative_frame,
+            "timeline_fps": safe_fps, "timeline_seconds": seconds, "playing": bool(playing),
+        })
+        procedural_receipt = self.media_texture_stats.get("procedural_shader")
+        if isinstance(procedural_receipt, dict) and procedural_receipt.get("gpu_execution"):
+            procedural_receipt["uniform_time_seconds"] = seconds
+            procedural_receipt["cpu_rebake"] = False
+        if self.procedural_texture is not None and self.procedural_texture.animated:
+            self.procedural_texture.upload_graph(self.procedural_texture.graph, time_seconds=seconds)
+            self.media_texture_stats["procedural_shader"] = dict(self.procedural_texture.receipt)
+        return dict(self.media_texture_stats)
 
     def frame_duration_ms(self, fps: float) -> int:
         return max(1, int(math.ceil(1000.0 / max(1.0, float(fps)))))

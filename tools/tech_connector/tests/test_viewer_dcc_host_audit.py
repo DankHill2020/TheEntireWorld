@@ -42,13 +42,15 @@ def test_viewer_dcc_host_audit_filters_by_host_and_department() -> None:
     assert "rig.create_ribbon" in rigging["out_of_scope_operations"]
 
 
-def test_dcc_host_audit_command_has_interactive_evidence() -> None:
+def test_dcc_host_audit_command_has_production_evidence() -> None:
     assert "engine.audit_dcc_hosts" in ADAPTIVE_SCENE_COMMANDS
     audit = audit_capability_maturity([ADAPTIVE_SCENE_COMMANDS["engine.audit_dcc_hosts"]])
     capability = audit["capabilities"][0]
-    assert capability["verified_maturity"] == "interactive"
-    assert audit["declaration_gap"] == 1
-    assert "native_backend" in capability["missing_gates"]
+    assert capability["verified_maturity"] == "production"
+    assert audit["declaration_gap"] == 0
+    assert capability["missing_gates"] == (
+        "golden_scenes", "stress_tests", "multi_platform_qualification",
+    )
 
 
 def test_viewer_live_qualification_persists_the_host_receipt(monkeypatch, tmp_path) -> None:

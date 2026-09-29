@@ -90,6 +90,39 @@ def _stable_ribbon_grid(
     ]
 
 
+def _sample_polyline_by_length(points: list[list[float]], count: int, *, closed: bool = False) -> tuple[list[list[float]], list[float]]:
+    """Sample a portable curve polyline at equal arc-length intervals."""
+    values = [[float(component) for component in point[:3]] for point in points]
+    if len(values) < 2:
+        raise ValueError("A curve requires at least two control points.")
+    if closed and values[-1] != values[0]:
+        values.append(list(values[0]))
+    cumulative = [0.0]
+    for first, second in zip(values[:-1], values[1:]):
+        cumulative.append(cumulative[-1] + math.sqrt(sum(
+            (second[axis] - first[axis]) ** 2 for axis in range(3)
+        )))
+    total = cumulative[-1]
+    if total <= 1.0e-8:
+        raise ValueError("Curve points are coincident.")
+    denominator = count if closed else max(1, count - 1)
+    parameters = [index / float(denominator) for index in range(count)]
+    samples = []
+    for parameter in parameters:
+        distance = parameter * total
+        segment = next(
+            (index for index in range(len(cumulative) - 1) if cumulative[index + 1] >= distance),
+            len(cumulative) - 2,
+        )
+        span = max(cumulative[segment + 1] - cumulative[segment], 1.0e-8)
+        blend = (distance - cumulative[segment]) / span
+        samples.append([
+            values[segment][axis] + (values[segment + 1][axis] - values[segment][axis]) * blend
+            for axis in range(3)
+        ])
+    return samples, parameters
+
+
 TC_NATIVE_CAPABILITY_STATUS = {
     key: "native" for key in RIGGING_CAPABILITIES
 }
@@ -349,14 +382,50 @@ class TCRiggingHostAdapter:
                 attributes={"matrix": pole_matrix, "control_shape": "diamond", "rig_module": module},
             )
             created.append(pole)
+        switch = str(payload.get("switch") or f"{module}_switch_ctrl")
+        if switch not in self.graph.nodes:
+            self.graph.add_node(
+                switch, "dag.control", node_id=switch,
+                attributes={
+                    "matrix": self._joint_world_matrix(end),
+                    "control_shape": "diamond",
+                    "rig_module": module,
+                    "ikFkBlend": float(payload.get("blend", 1.0)),
+                    "stretch": 0.0,
+                    "stretch_min": 0.0,
+                    "stretch_max": 1.0,
+                },
+            )
+            self.graph.nodes[switch].setdefault("attribute_specs", {})["stretch"] = {
+                "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "keyable": True,
+            }
+            created.append(switch)
+        start_position = self._joint_world_matrix(start)[12:15]
+        mid_position = self._joint_world_matrix(mid)[12:15]
+        end_position = self._joint_world_matrix(end)[12:15]
+        upper_length = math.sqrt(sum((mid_position[index] - start_position[index]) ** 2 for index in range(3)))
+        lower_length = math.sqrt(sum((end_position[index] - mid_position[index]) ** 2 for index in range(3)))
         solver = self.graph.add_ik_solver(start, mid, end, ik_target, pole_node_id=pole, solver_id=f"{module}_ik_solver",
-                                          settings={"rig_module": module, "ik_fk_blend": float(payload.get("blend", 1.0))})
+                                          settings={
+                                              "rig_module": module,
+                                              "ik_fk_blend": float(payload.get("blend", 1.0)),
+                                              "stretch_control_id": switch,
+                                              "stretch_attribute": "stretch",
+                                              "rest_upper_length": upper_length,
+                                              "rest_lower_length": lower_length,
+                                              "measurement": "per_segment_distance",
+                                              "distance_segments": [
+                                                  {"start": start, "end": mid, "rest_length": upper_length},
+                                                  {"start": mid, "end": end, "rest_length": lower_length},
+                                              ],
+                                          })
         created.append(solver)
         for control, joint in zip(fk_controls, (start, mid, end)):
             created.append(self.graph.add_constraint("orient", [control], joint,
                                                      settings={"rig_module": module, "ik_fk_role": "fk"}))
         return self._ok("rig.create_ik_fk_limb", f"Created IK/FK limb {module}.", created_ids=created,
-                        data={"module": module, "fk_controls": fk_controls, "ik_control": ik_target, "pole_control": pole})
+                        data={"module": module, "fk_controls": fk_controls, "ik_control": ik_target,
+                              "pole_control": pole, "switch_control": switch, "stretch_attribute": "stretch"})
 
     def _op_rig_set_ik_fk_blend(self, payload: dict[str, Any]) -> RiggingOperationResult:
         module, blend = str(payload["limb"]), max(0.0, min(1.0, float(payload["blend"])))
@@ -411,6 +480,54 @@ class TCRiggingHostAdapter:
         )
         return self._ok("rig.create_motion_path", "Created motion path rig.", created_ids=[solver])
 
+    def _op_rig_create_curve_joints(self, payload: dict[str, Any]) -> RiggingOperationResult:
+        curve_value = payload["curve"]
+        closed = bool(payload.get("closed", False))
+        curve_name = "curve"
+        if isinstance(curve_value, str):
+            curve_name = curve_value
+            curve_node = self.graph.nodes.get(curve_value, {})
+            attributes = curve_node.get("attributes") or {}
+            points = attributes.get("control_points") or []
+            closed = bool(attributes.get("closed", closed))
+        else:
+            points = curve_value
+        count = int(payload.get("joint_count", 5) or 5)
+        if count < 1:
+            raise ValueError("Joint count must be at least 1.")
+        samples, parameters = _sample_polyline_by_length(points, count, closed=closed)
+        prefix = str(payload.get("name_prefix") or curve_name).split(":")[-1].removesuffix("_crv")
+        keep_attached = bool(payload.get("keep_attached", True))
+        joints = []
+        solvers = []
+        for index, (position, parameter) in enumerate(zip(samples, parameters), start=1):
+            base_id = f"{prefix}_path_{index:02d}_jnt"
+            joint_id = base_id
+            suffix = 1
+            while joint_id in self.graph.nodes or joint_id in self.graph.joints:
+                suffix += 1
+                joint_id = f"{base_id}_{suffix}"
+            matrix = list(IDENTITY_MATRIX)
+            matrix[12:15] = position
+            self.graph.add_joint(joint_id, joint_id=joint_id, local_matrix=matrix)
+            joints.append(joint_id)
+            if keep_attached:
+                solvers.append(self.graph.add_motion_path(
+                    joint_id,
+                    points,
+                    parameter=parameter,
+                    follow=True,
+                    closed=closed,
+                    solver_id=f"{joint_id}_motion_path",
+                ))
+        return self._ok(
+            "rig.create_curve_joints",
+            f"Created {len(joints)} joints along the curve.",
+            created_ids=joints + solvers,
+            data={"joints": joints, "motion_paths": solvers, "parameters": parameters,
+                  "keep_attached": keep_attached, "closed": closed},
+        )
+
     def _op_rig_create_ribbon(self, payload: dict[str, Any]) -> RiggingOperationResult:
         chain = [str(value) for value in payload["joint_chain"]]
         if len(chain) < 2:
@@ -436,18 +553,73 @@ class TCRiggingHostAdapter:
             "rig.create_ribbon",
             "Created stable parallel-transport ribbon attachments.",
             created_ids=created,
-            data={"frame_method": "parallel_transport", "width": width},
+            data={
+                "frame_method": "parallel_transport",
+                "width": width,
+                "region": str(payload.get("region") or "surface"),
+                "side": str(payload.get("side") or "c"),
+            },
         )
 
     def _op_rig_create_twist(self, payload: dict[str, Any]) -> RiggingOperationResult:
         start, end = str(payload["start"]), str(payload["end"])
         twists = [str(value) for value in payload.get("twist_joints") or []]
-        created = []
+        module = str(payload.get("module") or f"{start}_twist")
+        driver_id = (
+            start[:-7] + "_twist_driver" if start.endswith("_driver")
+            else start + "_twist_driver"
+        )
+        end_matrix = (
+            self._node_world_matrix(end) if end in self.graph.nodes
+            else self._joint_world_matrix(end)
+        )
+        driver_parent = start if start in self.graph.nodes else ""
+        driver_attributes = {
+                "matrix": end_matrix,
+                "control_shape": "twist",
+                "rig_module": module,
+                "twist_driver": True,
+                "driver_parent": start,
+        }
+        if driver_id in self.graph.nodes:
+            driver_node = self.graph.nodes[driver_id]
+            if str(driver_node.get("dag_parent_id") or "") != driver_parent:
+                driver_node["dag_parent_id"] = driver_parent
+            driver_node.setdefault("attributes", {}).update(driver_attributes)
+        else:
+            self.graph.add_node(
+                driver_id, "dag.control", parent_id=driver_parent,
+                node_id=driver_id, attributes=driver_attributes,
+            )
+        created = [driver_id]
         for index, joint in enumerate(twists, 1):
             weight = index / (len(twists) + 1.0)
             created.append(self.graph.add_constraint("orient", [start, end], joint,
-                                                     settings={"weights": [1.0 - weight, weight], "twist": True}))
-        return self._ok("rig.create_twist", "Created twist distribution.", created_ids=created)
+                                                     settings={"weights": [1.0 - weight, weight], "twist": True,
+                                                               "rig_module": module}))
+        return self._ok(
+            "rig.create_twist", "Created twist distribution.", created_ids=created,
+            data={"twist_driver": driver_id, "parent": start},
+        )
+
+    def _op_skin_surface_spatial_smooth_brush(self, payload: dict[str, Any]) -> RiggingOperationResult:
+        settings = {
+            "radius": float(payload.get("radius", 1.0)),
+            "strength": float(payload.get("strength", 0.5)),
+            "iterations": int(payload.get("iterations", 1)),
+            "max_influences": int(payload.get("max_influences", 8)),
+            "normal_angle": float(payload.get("normal_angle", 120.0)),
+            "max_neighbors": int(payload.get("max_neighbors", 96)),
+        }
+        self.graph.metadata["active_skin_brush"] = {
+            "type": "surface_spatial_smooth",
+            **settings,
+        }
+        return self._ok(
+            "skin.surface_spatial_smooth_brush",
+            "Activated the TC surface-spatial skin smoothing paint target.",
+            data=settings,
+        )
 
     def _op_rig_create_reverse_foot(self, payload: dict[str, Any]) -> RiggingOperationResult:
         ankle, ball, toe = (str(payload[key]) for key in ("ankle", "ball", "toe"))
@@ -602,8 +774,34 @@ class TCRiggingHostAdapter:
         }
         if module_key in limb_slots:
             start, mid, end = (definition.slots[slot] for slot in limb_slots[module_key])
-            return self._op_rig_create_ik_fk_limb({"start": start, "mid": mid, "end": end, "module": module_key, **options})
-        if module_key in {"face", "brows", "eyes", "eyelids", "mouth", "tongue", "teeth"}:
+            limb = self._op_rig_create_ik_fk_limb(
+                {"start": start, "mid": mid, "end": end, "module": module_key, **options}
+            )
+            if not limb.ok:
+                return limb
+            created = list(limb.created_ids)
+            twist_routes = {
+                "left_arm": ((start, mid, "LeftArmRoll"), (mid, end, "LeftForeArmRoll")),
+                "right_arm": ((start, mid, "RightArmRoll"), (mid, end, "RightForeArmRoll")),
+                "left_leg": ((start, mid, "LeftUpLegRoll"), (mid, end, "LeftLegRoll")),
+                "right_leg": ((start, mid, "RightUpLegRoll"), (mid, end, "RightLegRoll")),
+            }
+            for twist_start, twist_end, slot in twist_routes[module_key]:
+                twist_joint = definition.slots.get(slot)
+                if not twist_joint:
+                    continue
+                twist = self._op_rig_create_twist({
+                    "start": twist_start, "end": twist_end,
+                    "twist_joints": [twist_joint], "module": module_key,
+                })
+                if not twist.ok:
+                    return twist
+                created.extend(twist.created_ids)
+            return self._ok(
+                "rig.build_module", f"Built {module_key} module.", created_ids=created,
+                data={"module": module_key},
+            )
+        if module_key in {"face", "brows", "eyes", "eyelids", "mouth", "tongue", "teeth", "nose"}:
             return self._build_face_module(module_key, definition)
         slots = {
             "root": ("Reference",), "pelvis": ("Hips",),
@@ -614,34 +812,157 @@ class TCRiggingHostAdapter:
         if slots is None:
             raise ValueError(f"Unknown rig module: {module}")
         created = []
+        module_joints = []
+        module_controls = []
         parent = ""
         for slot in slots:
             joint = definition.slots.get(slot)
             if not joint:
                 continue
             control = f"{module_key}_{slot}_ctrl"
+            module_joints.append(joint)
+            module_controls.append(control)
             if control in self.graph.nodes:
+                parent = control
                 continue
             result = self._op_rig_create_control({"target": joint, "control_id": control, "name": control,
                                                   "parent": parent, "shape": "circle", "module": module_key})
             created.extend(result.created_ids)
             parent = control
+        if module_key == "spine" and len(module_joints) >= 3:
+            contiguous = all(
+                str(self.graph.joints.get(child, {}).get("parent_id") or "") == str(parent_joint)
+                for parent_joint, child in zip(module_joints[:-1], module_joints[1:])
+            )
+            pelvis_controls = [
+                node_id for node_id, node in self.graph.nodes.items()
+                if str((node.get("attributes") or {}).get("rig_module") or "") == "pelvis"
+                and str(node.get("node_type") or node.get("type") or "") == "dag.control"
+            ]
+            if contiguous and pelvis_controls:
+                pelvis_control = pelvis_controls[0]
+                pelvis_attrs = self.graph.nodes[pelvis_control].setdefault("attributes", {})
+                pelvis_attrs.setdefault("stretch", 0.0)
+                pelvis_attrs.update({"stretch_min": 0.0, "stretch_max": 1.0})
+                self.graph.nodes[pelvis_control].setdefault("attribute_specs", {})["stretch"] = {
+                    "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "keyable": True,
+                }
+                rest_length = 0.0
+                rest_lengths = []
+                for first, second in zip(module_joints[:-1], module_joints[1:]):
+                    first_position = self._joint_world_matrix(first)[12:15]
+                    second_position = self._joint_world_matrix(second)[12:15]
+                    segment_length = math.sqrt(sum(
+                        (second_position[index] - first_position[index]) ** 2 for index in range(3)
+                    ))
+                    rest_lengths.append(segment_length)
+                    rest_length += segment_length
+                stretch_solver = self.graph.add_constraint(
+                    "spine_stretch",
+                    module_controls,
+                    module_joints[-1],
+                    constraint_id=f"{module_key}_stretch_solver",
+                    settings={
+                        "rig_module": module_key,
+                        "joint_ids": module_joints,
+                        "control_ids": module_controls,
+                        "stretch_control_id": pelvis_control,
+                        "stretch_attribute": "stretch",
+                        "rest_length": rest_length,
+                        "rest_lengths": rest_lengths,
+                        "measurement": "per_segment_distance",
+                    },
+                )
+                created.append(stretch_solver)
         return self._ok("rig.build_module", f"Built {module_key} module.", created_ids=created, data={"module": module_key})
 
+    def _build_nose_module(self, definition: CharacterDefinition) -> RiggingOperationResult:
+        root_joint = definition.slots.get("NoseRoot")
+        if not root_joint or root_joint not in self.graph.joints:
+            raise ValueError("Character definition has no Tech Connector NoseRoot joint")
+        root_name = str(self.graph.joints[root_joint].get("name") or root_joint)
+        root_base = root_name[:-4] if root_name.endswith("_jnt") else root_name
+        root_control = root_base + "_ctrl"
+        created = []
+        if root_control not in self.graph.nodes:
+            result = self._op_rig_create_control({
+                "target": root_joint, "control_id": root_control, "name": root_control,
+                "shape": "circle", "size": 0.5, "module": "nose",
+            })
+            created.extend(result.created_ids)
+
+        wanted = {"nose_upper", "nose_base", "nose_tip", "l_nostril", "r_nostril"}
+        descendants = []
+        pending = [root_joint]
+        while pending:
+            parent_joint = pending.pop(0)
+            children = [
+                joint_id for joint_id, joint in self.graph.joints.items()
+                if str(joint.get("parent_id") or "") == parent_joint
+            ]
+            descendants.extend(children)
+            pending.extend(children)
+        for joint_id in descendants:
+            joint_name = str(self.graph.joints[joint_id].get("name") or joint_id)
+            base = joint_name[:-4] if joint_name.endswith("_jnt") else joint_name
+            if base not in wanted:
+                continue
+            control = base + "_ctrl"
+            if control in self.graph.nodes:
+                node = self.graph.nodes[control]
+                if str(node.get("dag_parent_id") or "") != root_control:
+                    node["dag_parent_id"] = root_control
+                continue
+            result = self._op_rig_create_control({
+                "target": joint_id, "control_id": control, "name": control,
+                "parent": root_control, "shape": "circle", "size": 0.25, "module": "nose",
+            })
+            created.extend(result.created_ids)
+        return self._ok(
+            "rig.create_face_module", "Built nose facial module.", created_ids=created,
+            data={"module": "nose", "parent": root_control},
+        )
+
     def _build_face_module(self, module: str, definition: CharacterDefinition) -> RiggingOperationResult:
+        if module == "nose":
+            return self._build_nose_module(definition)
         tokens = {
             "brows": ("Brow",), "eyes": ("Eye",), "eyelids": ("Lid",),
             "mouth": ("Lip", "Jaw"), "tongue": ("Tongue",), "teeth": ("Teeth",),
             "face": ("Brow", "Eye", "Lid", "Lip", "Jaw", "Tongue", "Teeth", "Nose"),
         }[module]
         created = []
+        if module == "face" and definition.slots.get("NoseRoot"):
+            created.extend(self._build_nose_module(definition).created_ids)
+        lip_parent = ""
+        if module == "mouth":
+            lip_slots = ("UpperLipCenter", "LowerLipCenter", "LeftLipCorner", "RightLipCorner")
+            anchor = next((definition.slots.get(slot) for slot in lip_slots if definition.slots.get(slot)), "")
+            if anchor and "lip_main_ctrl" not in self.graph.nodes:
+                lip_parent = self.graph.add_node(
+                    "lip_main_ctrl", "dag.control", node_id="lip_main_ctrl",
+                    attributes={
+                        "matrix": self._joint_world_matrix(anchor), "control_shape": "circle",
+                        "control_size": 0.5, "rig_module": module, "lip_main": True,
+                    },
+                )
+                created.append(lip_parent)
+            elif "lip_main_ctrl" in self.graph.nodes:
+                lip_parent = "lip_main_ctrl"
+        lip_names = {
+            "UpperLipCenter": "c_upper_lip_main_ctrl", "LowerLipCenter": "c_lower_lip_main_ctrl",
+            "LeftLipCorner": "l_lip_corner_main_ctrl", "RightLipCorner": "r_lip_corner_main_ctrl",
+        }
         for slot, joint in definition.slots.items():
             if not any(token in slot for token in tokens):
                 continue
-            control = f"{module}_{slot}_ctrl"
+            if slot == "NoseRoot":
+                continue
+            control = lip_names.get(slot, f"{module}_{slot}_ctrl")
             if control in self.graph.nodes:
                 continue
             result = self._op_rig_create_control({"target": joint, "control_id": control, "name": control,
+                                                  "parent": lip_parent if slot in lip_names else "",
                                                   "shape": "circle", "size": 0.25, "module": module})
             created.extend(result.created_ids)
         return self._ok("rig.create_face_module", f"Built {module} facial module.", created_ids=created, data={"module": module})

@@ -3,11 +3,13 @@ from __future__ import annotations
 """Deterministic, attribute-first procedural content graphs for TC scenes."""
 
 from copy import deepcopy
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
 import time
+from threading import RLock
 from typing import Any, Iterable
 
 
@@ -118,6 +120,8 @@ class ProceduralNode:
     parameters: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     label: str = ""
+    x: float = 0.0
+    y: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -209,8 +213,10 @@ class ProceduralGraph:
                 operation=str(row.get("operation") or "").lower(),
                 inputs=[str(item) for item in row.get("inputs") or []],
                 parameters=deepcopy(row.get("parameters") or {}),
-                enabled=bool(row.get("enabled", True)),
-                label=str(row.get("label") or ""),
+            enabled=bool(row.get("enabled", True)),
+            label=str(row.get("label") or ""),
+            x=float(row.get("x", 0.0)),
+            y=float(row.get("y", 0.0)),
             )
             graph.nodes[node.node_id] = node
         return graph
@@ -614,6 +620,12 @@ def _procedural_mesh(node: ProceduralNode, inputs: list[ProceduralPayload], _see
     return evaluate_mesh_node(node.operation, node.node_id, node.parameters, inputs)
 
 
+def _advanced_geometry(node: ProceduralNode, inputs: list[ProceduralPayload], _seed: int) -> ProceduralPayload:
+    from tech_connector.game_engine.authoring.procedural_geometry_advanced_service import evaluate_advanced_geometry_node
+
+    return evaluate_advanced_geometry_node(node.operation, node.node_id, node.parameters, inputs)
+
+
 def _merge(_node: ProceduralNode, inputs: list[ProceduralPayload], _seed: int) -> ProceduralPayload:
     meshes: dict[str, dict[str, Any]] = {}
     for payload in inputs:
@@ -651,9 +663,30 @@ PROCEDURAL_OPERATIONS = {
     "shape_grammar_spline": _shape_grammar_spline,
     "mesh_cube": _procedural_mesh,
     "mesh_grid": _procedural_mesh,
+    "mesh_cylinder": _procedural_mesh,
+    "mesh_uv_sphere": _procedural_mesh,
+    "mesh_join": _procedural_mesh,
     "mesh_transform": _procedural_mesh,
     "mesh_extrude_faces": _procedural_mesh,
     "mesh_triangulate": _procedural_mesh,
+    "mesh_subdivide": _procedural_mesh,
+    "mesh_bevel_edges": _procedural_mesh,
+    "mesh_delete_faces": _procedural_mesh,
+    "mesh_weld": _procedural_mesh,
+    "curve_line": _advanced_geometry,
+    "curve_circle": _advanced_geometry,
+    "curve_to_mesh": _advanced_geometry,
+    "field_set": _advanced_geometry,
+    "field_math": _advanced_geometry,
+    "field_map_domain": _advanced_geometry,
+    "mesh_compute_normals": _advanced_geometry,
+    "mesh_generate_uv": _advanced_geometry,
+    "mesh_boolean": _advanced_geometry,
+    "mesh_smooth": _advanced_geometry,
+    "mesh_displace": _advanced_geometry,
+    "mesh_voxel_remesh": _advanced_geometry,
+    "mesh_to_volume": _advanced_geometry,
+    "volume_to_mesh": _advanced_geometry,
     "merge": _merge,
     "output": _passthrough,
 }
@@ -664,13 +697,33 @@ class ProceduralGraphCooker:
 
     def __init__(self) -> None:
         self._cache: dict[tuple[str, str], tuple[str, ProceduralPayload]] = {}
+        self._cache_lock = RLock()
 
     def clear(self, graph_id: str = "") -> None:
-        if not graph_id:
-            self._cache.clear()
-            return
-        for key in [key for key in self._cache if key[0] == graph_id]:
-            self._cache.pop(key, None)
+        with self._cache_lock:
+            if not graph_id:
+                self._cache.clear()
+                return
+            for key in [key for key in self._cache if key[0] == graph_id]:
+                self._cache.pop(key, None)
+
+    def invalidate_nodes(
+        self, graph: ProceduralGraph, node_ids: Iterable[str], *, include_downstream: bool = True,
+    ) -> tuple[str, ...]:
+        """Invalidate edited nodes and, by default, only their dependent downstream branch."""
+        invalidated = {str(node_id) for node_id in node_ids if str(node_id) in graph.nodes}
+        if include_downstream and invalidated:
+            changed = True
+            while changed:
+                changed = False
+                for node in graph.nodes.values():
+                    if node.node_id not in invalidated and any(source in invalidated for source in node.inputs):
+                        invalidated.add(node.node_id)
+                        changed = True
+        with self._cache_lock:
+            for node_id in invalidated:
+                self._cache.pop((graph.graph_id, node_id), None)
+        return tuple(node_id for node_id in _topological_order(graph) if node_id in invalidated)
 
     def cook(self, graph: ProceduralGraph, *, output_node: str = "") -> ProceduralCookResult:
         errors = graph.validate()
@@ -692,7 +745,8 @@ class ProceduralGraphCooker:
                 }
             )
             started = time.perf_counter()
-            cached = self._cache.get((graph.graph_id, node_id))
+            with self._cache_lock:
+                cached = self._cache.get((graph.graph_id, node_id))
             cache_hit = bool(cached and cached[0] == signature)
             if cache_hit:
                 payload = deepcopy(cached[1])
@@ -700,7 +754,8 @@ class ProceduralGraphCooker:
                 payload = _passthrough(node, inputs, graph.seed)
             else:
                 payload = PROCEDURAL_OPERATIONS[node.operation](node, inputs, graph.seed)
-                self._cache[(graph.graph_id, node_id)] = (signature, deepcopy(payload))
+                with self._cache_lock:
+                    self._cache[(graph.graph_id, node_id)] = (signature, deepcopy(payload))
             warnings = tuple(
                 str(value) for key, value in payload.metadata.items() if "warning" in str(key).lower()
             )
@@ -724,6 +779,37 @@ class ProceduralGraphCooker:
             diagnostics=diagnostics,
             graph_fingerprint=_digest(graph.to_dict()),
         )
+
+
+class ProceduralBuildQueue:
+    """Bounded background cook queue that coalesces identical graph requests."""
+
+    def __init__(self, cooker: ProceduralGraphCooker | None = None, *, workers: int = 2) -> None:
+        self.cooker = cooker or ProceduralGraphCooker()
+        self._executor = ThreadPoolExecutor(max_workers=max(1, int(workers)), thread_name_prefix="tc-procedural")
+        self._pending: dict[str, Future[ProceduralCookResult]] = {}
+        self._lock = RLock()
+
+    def submit(self, graph: ProceduralGraph, *, output_node: str = "") -> Future[ProceduralCookResult]:
+        snapshot = ProceduralGraph.from_dict(graph.to_dict())
+        request_key = _digest({"graph": snapshot.to_dict(), "output_node": str(output_node)})
+        with self._lock:
+            pending = self._pending.get(request_key)
+            if pending is not None and not pending.done():
+                return pending
+            future = self._executor.submit(self.cooker.cook, snapshot, output_node=str(output_node))
+            self._pending[request_key] = future
+
+        def discard(done: Future[ProceduralCookResult]) -> None:
+            with self._lock:
+                if self._pending.get(request_key) is done:
+                    self._pending.pop(request_key, None)
+
+        future.add_done_callback(discard)
+        return future
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        self._executor.shutdown(wait=wait, cancel_futures=not wait)
 
 
 def create_scatter_graph(

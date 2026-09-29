@@ -82,14 +82,12 @@ def add_tools_to_user_setup(tools_dir):
 
 
 def setup_maya_livelink():
-    """Setup Maya Live Link commandPort and official MayaLiveLinkPlugin."""
+    """Setup the entitlement-aware Maya bridge and official Live Link plugin."""
     livelink_code = (
-        "import os\n"
-        "import maya.cmds as cmds\n"
+        "# TECH_CONNECTOR_SECURE_MAYA_PORT\n"
         "try:\n"
-        "    port = int(os.environ.get('MAYA_COMMAND_PORT', '7001'))\n"
-        "    if not cmds.commandPort(f':{port}', q=True):\n"
-        "        cmds.commandPort(name=f':{port}', sourceType='python', echoOutput=True, noreturn=False)\n"
+        "    from maya_tools import maya_menu\n"
+        "    maya_menu.initialize_command_port()\n"
         "except Exception:\n"
         "    pass\n"
         "try:\n"
@@ -104,10 +102,10 @@ def setup_maya_livelink():
     try:
         with open(user_setup_path, "r", encoding="utf-8") as f:
             contents = f.read()
-        if "MAYA_COMMAND_PORT" not in contents and "MayaLiveLinkPlugin" not in contents:
+        if "TECH_CONNECTOR_SECURE_MAYA_PORT" not in contents:
             with open(user_setup_path, "a", encoding="utf-8") as f:
-                f.write("\n# Live Link CommandPort & Plugin Initialization\n" + livelink_code)
-            print(f"Added Live Link setup to {user_setup_path}")
+                f.write("\n# Entitlement-aware Live Link & Plugin Initialization\n" + livelink_code)
+            print(f"Added entitlement-aware Live Link setup to {user_setup_path}")
     except Exception as e:
         print(f"Failed to append Live Link setup: {e}")
 

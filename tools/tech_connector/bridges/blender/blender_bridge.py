@@ -15,6 +15,10 @@ from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
 from tech_connector.bridges.session_preferences import preferred_session_port
+from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
+    embedded_bridge_authorization_source,
+)
 from tech_connector.models.constants import APP_ROOT, TOOLS_ROOT
 from tech_connector.game_engine.scene.scene_delta_contract import normalize_frame_delta
 
@@ -278,6 +282,14 @@ def _handle_client(conn):
                 if b"\\n" not in raw:
                     raise ValueError("Blender bridge request ended before its newline terminator.")
                 payload = json.loads(raw.decode("utf-8", errors="replace").strip())
+                if not _tech_connector_bridge_authorized(payload):
+                    response = {
+                        "ok": False,
+                        "error": "Tech Connector activation is required for this DCC bridge.",
+                        "code": "bridge_authorization_required",
+                    }
+                    conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
+                    return
                 encoded = str(payload["code_b64"])
                 if len(encoded) > _MAX_REQUEST_BYTES:
                     raise ValueError("Encoded Blender command exceeded the configured size limit.")
@@ -453,6 +465,9 @@ def unregister():
 if __name__ == "__main__":
     register()
 """
+
+
+ADDON_SOURCE_CODE = embedded_bridge_authorization_source("blender") + "\n" + ADDON_SOURCE_CODE
 
 
 def start_plugin_immediately():
@@ -692,6 +707,7 @@ print(json.dumps({
             payload = json.dumps(
                 {
                     "code_b64": encoded,
+                    "bridge_session": bridge_session_token("blender"),
                     "timeout_seconds": max(0.1, timeout * 0.95),
                 }
             ).encode("utf-8") + b"\n"

@@ -37,7 +37,9 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -365,6 +367,8 @@ class ThreeDMeshPainterViewportMixin04:
         proxies = getattr(self.mesh, "scene_proxy_objects", []) or []
         proxies_by_provider: dict[str, list[dict[str, Any]]] = {}
         for proxy in proxies:
+            if bool(proxy.get("deleted", False)):
+                continue
             provider = str(proxy.get("provider_id") or "provider")
             proxies_by_provider.setdefault(provider, []).append(proxy)
 
@@ -391,6 +395,7 @@ class ThreeDMeshPainterViewportMixin04:
 
             objects_parent = QTreeWidgetItem(["Scene Elements", "group", str(object_count)])
             provider_item.addChild(objects_parent)
+            proxy_items: list[tuple[SceneProxyInstance | dict[str, Any], QTreeWidgetItem]] = []
             for proxy in proxies_by_provider.get(provider, []):
                 name = str(proxy.get("name") or proxy.get("native_id") or "object")
                 representation = str(proxy.get("representation") or "")
@@ -399,10 +404,24 @@ class ThreeDMeshPainterViewportMixin04:
                 if not is_visible:
                     state = "hidden"
                 item = QTreeWidgetItem([name, str(proxy.get("type") or "object"), state])
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(0, Qt.Checked if is_visible else Qt.Unchecked)
                 item.setData(0, Qt.UserRole, {"kind": "object", "provider": provider, "native_id": proxy.get("native_id"), "proxy": proxy})
                 item.setForeground(0, proxy.get("wire_color") or provider_view_colors(provider)[1])
                 item.setToolTip(0, str(proxy.get("native_id") or name))
-                objects_parent.addChild(item)
+                proxy_items.append((proxy, item))
+            if provider == "tech_connector":
+                entity_by_id = {str(entity.get("entity_id") or ""): entity for entity in getattr(self, "_runtime_world_state", {}).get("entities") or () if isinstance(entity, dict)}
+                item_by_id = {str(proxy.get("entity_id") or proxy.get("native_id") or ""): item for proxy, item in proxy_items}
+                folder_items: dict[str, QTreeWidgetItem] = {}
+                for folder in sorted(set(getattr(self, "_runtime_world_state", {}).get("editor_folders") or ()) | {str(entity.get("editor_folder") or "") for entity in entity_by_id.values()} - {""}):
+                    folder_item = QTreeWidgetItem([folder, "folder", ""]); folder_item.setData(0, Qt.UserRole, {"kind": "actor_folder", "folder": folder}); objects_parent.addChild(folder_item); folder_items[folder] = folder_item
+                for proxy, item in proxy_items:
+                    entity_id = str(proxy.get("entity_id") or proxy.get("native_id") or ""); entity = entity_by_id.get(entity_id, {}); parent_id = str(entity.get("parent_entity_id") or ""); folder = str(entity.get("editor_folder") or "")
+                    parent_item = item_by_id.get(parent_id) or folder_items.get(folder) or objects_parent; parent_item.addChild(item)
+                for folder_item in folder_items.values(): folder_item.setExpanded(True)
+            else:
+                for _proxy, item in proxy_items: objects_parent.addChild(item)
 
             cameras_parent = QTreeWidgetItem(["Cameras", "group", str(camera_count)])
             provider_item.addChild(cameras_parent)
@@ -671,6 +690,9 @@ class ThreeDMeshPainterViewportMixin04:
             return
         visible = item.checkState(0) == Qt.Checked
         proxy["visible"] = visible
+        if str(proxy.get("provider_id") or "") == "tech_connector":
+            entity = getattr(self, "_runtime_entity_for_proxy", lambda _proxy: None)(proxy)
+            if isinstance(entity, dict): entity["visible"] = visible; self._scene_lifecycle.mark_dirty()
         name = str(proxy.get("name") or proxy.get("native_id") or "object")
         provider = str(proxy.get("provider_id") or data.get("provider") or "")
         state = str(proxy.get("sync_state") or proxy.get("representation") or "clean") if visible else "hidden"
@@ -940,6 +962,27 @@ class ThreeDMeshPainterViewportMixin04:
         data = item.data(0, Qt.UserRole) if item is not None else {"kind": "rig_root"}
         data = data if isinstance(data, dict) else {}
         kind = str(data.get("kind") or "")
+        if kind == "object":
+            proxy = data.get("proxy")
+            if not isinstance(proxy, (dict, SceneProxyInstance)): return
+            self._selected_scene_proxy = proxy
+            menu = QMenu(tree)
+            menu.addAction("Focus Selected", self.focus_selected_scene_element)
+            menu.addAction("Hide" if bool(proxy.get("visible", True)) else "Show", self.toggle_selected_proxy_visibility)
+            menu.addAction("Show Only Selected", self.show_only_selected_proxy)
+            if str(proxy.get("provider_id") or "") == "tech_connector" and proxy.get("entity_id"):
+                menu.addSeparator()
+                menu.addAction("Duplicate", self.duplicate_selected_level_actor)
+                def rename_actor() -> None:
+                    value, accepted = QInputDialog.getText(tree, "Rename Actor", "Name", text=str(proxy.get("name") or "Actor"))
+                    if accepted: self.rename_selected_level_actor(value)
+                menu.addAction("Rename…", rename_actor)
+                menu.addAction("Delete", self.delete_selected_level_actor)
+            else:
+                menu.addSeparator(); source_action = menu.addAction("Select in Source DCC", self.select_selected_proxy_in_source)
+                source_action.setEnabled(dcc_provider_base_key(str(proxy.get("provider_id") or "")) in {"maya", "blender", "unreal"})
+            menu.exec(tree.viewport().mapToGlobal(position))
+            return
         if kind not in {"rig_root", "rig_joint", "rig_node", "rig_constraint"}:
             return
         if kind == "rig_constraint":
@@ -1287,7 +1330,12 @@ class ThreeDMeshPainterViewportMixin04:
             material.setText(f"Material: base color  |  {color_name}")
             texture_bindings = dict(proxy.get("texture_bindings") or {})
         if texture_bindings:
-            parts = [f"{slot}:{Path(path).name}" for slot, path in sorted(texture_bindings.items()) if path]
+            media_sources = dict(binding.texture_sources or {}) if materials and isinstance(materials[0], SceneProxyMaterialBinding) else {}
+            parts = [
+                f"{slot}:{Path(path).name}"
+                + (f" [{str(media_sources.get(slot, {}).get('source_type')).replace('_', ' ')}]" if media_sources.get(slot, {}).get("source_type") not in {None, "", "image"} else "")
+                for slot, path in sorted(texture_bindings.items()) if path
+            ]
             textures.setText("Textures: " + (", ".join(parts) if parts else "none"))
         else:
             textures.setText("Textures: none")
@@ -1313,6 +1361,9 @@ class ThreeDMeshPainterViewportMixin04:
         if not isinstance(proxy, (dict, SceneProxyInstance)):
             return
         proxy["visible"] = bool(visible)
+        if str(proxy.get("provider_id") or "") == "tech_connector":
+            entity = getattr(self, "_runtime_entity_for_proxy", lambda _proxy: None)(proxy)
+            if isinstance(entity, dict): entity["visible"] = bool(visible); self._scene_lifecycle.mark_dirty()
         name = str(proxy.get("name") or proxy.get("native_id") or "object")
         self._resolved_shaded_status = f"{'Show' if visible else 'Hide'} {proxy.get('provider_id')}:{name}"
         self.refresh_scene_outliner()
@@ -1362,6 +1413,10 @@ class ThreeDMeshPainterViewportMixin04:
         for proxy in getattr(self.mesh, "scene_proxy_objects", []) or []:
             if isinstance(proxy, (dict, SceneProxyInstance)):
                 proxy["visible"] = proxy is selected
+                if str(proxy.get("provider_id") or "") == "tech_connector":
+                    entity = getattr(self, "_runtime_entity_for_proxy", lambda _proxy: None)(proxy)
+                    if isinstance(entity, dict): entity["visible"] = proxy is selected
+        self._scene_lifecycle.mark_dirty()
         self._resolved_shaded_status = f"Solo {selected.get('provider_id')}:{selected.get('name') or selected.get('native_id')}"
         self.refresh_scene_outliner()
         if hasattr(self, "canvas") and self.canvas:
@@ -1372,7 +1427,11 @@ class ThreeDMeshPainterViewportMixin04:
         for proxy in getattr(self.mesh, "scene_proxy_objects", []) or []:
             if isinstance(proxy, (dict, SceneProxyInstance)) and not bool(proxy.get("visible", True)):
                 proxy["visible"] = True
+                if str(proxy.get("provider_id") or "") == "tech_connector":
+                    entity = getattr(self, "_runtime_entity_for_proxy", lambda _proxy: None)(proxy)
+                    if isinstance(entity, dict): entity["visible"] = True
                 changed += 1
+        if changed: self._scene_lifecycle.mark_dirty()
         self._resolved_shaded_status = f"Show all scene elements ({changed} restored)"
         self.refresh_scene_outliner()
         if hasattr(self, "canvas") and self.canvas:
@@ -1483,19 +1542,136 @@ class ThreeDMeshPainterViewportMixin04:
             self,
             f"Bind {slot.replace('_', ' ').title()} Texture",
             "",
-            "Texture Images (*.png *.jpg *.jpeg *.tga *.tif *.tiff *.exr *.bmp *.webp);;All Files (*)",
+            "All Texture Sources (*.png *.jpg *.jpeg *.tga *.tif *.tiff *.exr *.bmp *.webp *.gif *.apng *.mp4 *.mov *.m4v *.webm *.mkv *.avi *.ogv);;Animated Images (*.gif *.apng);;Video Textures (*.mp4 *.mov *.m4v *.webm *.mkv *.avi *.ogv);;Still Images (*.png *.jpg *.jpeg *.tga *.tif *.tiff *.exr *.bmp *.webp);;All Files (*)",
             options=QFileDialog.DontUseNativeDialog,
         )
         if not path:
             return
         proxy.bind_texture_file(slot, path)
-        self._resolved_shaded_status = f"Bound {slot} texture to {proxy.provider_id}:{proxy.name}"
+        source_type = proxy.materials[0].texture_sources.get(slot, {}).get("source_type", "image") if proxy.materials else "image"
+        self._resolved_shaded_status = f"Bound {source_type.replace('_', ' ')} {slot} texture to {proxy.provider_id}:{proxy.name}"
         self.update_instance_details_panel()
         self.update_viewport_status()
         if getattr(self, "scene_outliner", None) is not None:
             self.refresh_scene_outliner()
         if hasattr(self, "canvas") and self.canvas:
             self.canvas.update()
+
+    def edit_selected_proxy_media_playback(self) -> None:
+        proxy = getattr(self, "_selected_scene_proxy", None)
+        if not isinstance(proxy, SceneProxyInstance) or not proxy.materials:
+            if self.isVisible():
+                QMessageBox.information(self, "No Media Texture", "Select a proxy with an animated image, sequence, or video texture first.")
+            return
+        sources = dict(proxy.materials[0].texture_sources or {})
+        animated_slots = [
+            slot for slot, source in sources.items()
+            if str(source.get("source_type") or "image") != "image"
+        ]
+        if not animated_slots:
+            if self.isVisible():
+                QMessageBox.information(self, "No Media Texture", "This material only has still-image textures. Bind a GIF, APNG, sequence, or video first.")
+            return
+        slot, accepted = QInputDialog.getItem(
+            self, "Media Texture Playback", "Texture slot", animated_slots, 0, False,
+        )
+        if not accepted:
+            return
+        source = sources[str(slot)]
+        playback = dict(source.get("playback") or source)
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{str(slot).replace('_', ' ').title()} Playback")
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        autoplay = QCheckBox("Start automatically")
+        autoplay.setChecked(bool(playback.get("autoplay", True)))
+        loop = QCheckBox("Loop")
+        loop.setChecked(bool(playback.get("loop", True)))
+        rate = QDoubleSpinBox()
+        rate.setRange(0.05, 8.0)
+        rate.setDecimals(2)
+        rate.setSingleStep(0.05)
+        rate.setValue(float(playback.get("playback_rate", 1.0)))
+        start = QDoubleSpinBox()
+        start.setRange(0.0, 86400.0)
+        start.setDecimals(3)
+        start.setValue(float(playback.get("start_time_seconds", 0.0)))
+        end = QDoubleSpinBox()
+        end.setRange(0.0, 86400.0)
+        end.setDecimals(3)
+        end.setSpecialValueText("Media end")
+        end.setValue(float(playback.get("end_time_seconds") or 0.0))
+        synchronization = QComboBox()
+        synchronization.addItem("Timeline locked (deterministic)", "timeline")
+        synchronization.addItem("Real time", "realtime")
+        synchronization.addItem("Manual", "manual")
+        selected_sync = synchronization.findData(str(playback.get("synchronization") or "timeline"))
+        synchronization.setCurrentIndex(max(0, selected_sync))
+        form.addRow("Playback", autoplay)
+        form.addRow("Repeat", loop)
+        form.addRow("Speed", rate)
+        form.addRow("Start (seconds)", start)
+        form.addRow("End (seconds)", end)
+        form.addRow("Clock", synchronization)
+        layout.addLayout(form)
+        hint = QLabel("Timeline locked is recommended for scrubbing, rendering, and export. Real time is useful for live screens and signage.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        controls = {
+            "autoplay": autoplay.isChecked(), "loop": loop.isChecked(),
+            "playback_rate": rate.value(), "start_time_seconds": start.value(),
+            "synchronization": synchronization.currentData(),
+        }
+        if end.value() > start.value():
+            controls["end_time_seconds"] = end.value()
+        else:
+            controls["end_time_seconds"] = None
+        proxy.configure_texture_playback(str(slot), **controls)
+        self.sync_gpu_viewport()
+        self.update_instance_details_panel()
+        self._resolved_shaded_status = f"Updated {slot} media playback for {proxy.name}"
+        self.update_viewport_status()
+
+    def apply_selected_proxy_procedural_shader_preset(self) -> None:
+        from tech_connector.game_engine.rendering.procedural_shader_service import (
+            procedural_shader_presets,
+            validate_procedural_shader_graph,
+        )
+
+        proxy = getattr(self, "_selected_scene_proxy", None)
+        if not isinstance(proxy, SceneProxyInstance) or not proxy.materials:
+            if self.isVisible():
+                QMessageBox.information(self, "No Material Selected", "Select a scene proxy with a material first.")
+            return
+        presets = procedural_shader_presets()
+        labels = {str(graph["name"]): key for key, graph in presets.items()}
+        selected, accepted = QInputDialog.getItem(
+            self, "Procedural Shader", "Start from a preset", list(labels), 0, False,
+        )
+        if not accepted:
+            return
+        graph = copy.deepcopy(presets[labels[str(selected)]])
+        validation = validate_procedural_shader_graph(graph)
+        if not validation["valid"]:
+            QMessageBox.warning(self, "Shader Validation Failed", "\n".join(validation["errors"]))
+            return
+        material = proxy.materials[0]
+        material.procedural_shader = graph
+        material.approximation = "procedural_shader_gpu"
+        proxy.sync_state = "dirty"
+        self.sync_gpu_viewport()
+        self.update_instance_details_panel()
+        detail = f"cost {validation['estimated_cost']}"
+        if validation["warnings"]:
+            detail += f" | {validation['warnings'][0]}"
+        self._resolved_shaded_status = f"Applied {selected} to {proxy.name} ({detail})"
+        self.update_viewport_status()
 
     def update_viewport_status(self) -> None:
         label = getattr(self, "viewport_status_label", None)
@@ -1902,6 +2078,17 @@ class ThreeDMeshPainterViewportMixin04:
     def on_timeline_frame_changed(self, frame_index: int):
         self._frame_render_request_started_s = time.perf_counter()
         self._current_dcc_frame = int(getattr(self, "_dcc_timeline_frame_start", 1) or 1) + int(frame_index or 0)
+        timeline = getattr(self, "anim_timeline", None)
+        gpu = getattr(self, "gpu_viewport", None)
+        if gpu is not None:
+            fps_widget = getattr(timeline, "fps_spin", None)
+            fps = float(fps_widget.value()) if fps_widget is not None else 24.0
+            gpu.set_media_timeline(
+                self._current_dcc_frame,
+                fps,
+                frame_start=int(getattr(self, "_dcc_timeline_frame_start", 1) or 1),
+                playing=bool(getattr(timeline, "is_playing", False)),
+            )
         self.apply_cached_simulation_frame(self._current_dcc_frame)
         native_changed, native_message = self._apply_native_fbx_animation_frame(self._current_dcc_frame)
         if not getattr(self, "_loaded_scene_providers", None):
@@ -1915,6 +2102,20 @@ class ThreeDMeshPainterViewportMixin04:
         self.timeline_refresh_timer.start()
         if not getattr(self, "live_dcc_refresh_btn", None) or not self.live_dcc_refresh_btn.isChecked():
             self.schedule_resolved_shaded_refresh("timeline scrub")
+
+    def on_media_playback_toggled(self, playing: bool) -> None:
+        timeline = getattr(self, "anim_timeline", None)
+        gpu = getattr(self, "gpu_viewport", None)
+        if gpu is None:
+            return
+        fps_widget = getattr(timeline, "fps_spin", None)
+        fps = float(fps_widget.value()) if fps_widget is not None else 24.0
+        gpu.set_media_timeline(
+            int(getattr(self, "_current_dcc_frame", 1) or 1),
+            fps,
+            frame_start=int(getattr(self, "_dcc_timeline_frame_start", 1) or 1),
+            playing=bool(playing),
+        )
 
     def apply_cached_simulation_frame(self, frame: int) -> bool:
         cache = getattr(self, "simulation_cache", None)

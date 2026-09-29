@@ -5,6 +5,9 @@
     ensuring honest and accurate execution state reporting.
 """
 
+from __future__ import annotations
+
+
 class UnrealEditorStatusService:
     """
         Inspects live status of Unreal Engine editor process and HTTP bridge port.

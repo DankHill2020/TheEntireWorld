@@ -504,6 +504,59 @@ class ThreeDMeshPainterViewportMixin06:
             symmetry_x = bool(getattr(self, "sym_btn", None) is not None and self.sym_btn.isChecked())
             paint_target = str(getattr(self, "paint_target_combo", None).currentData() or "color") if getattr(self, "paint_target_combo", None) is not None else "color"
 
+            if paint_target == "skin_spatial_smooth":
+                try:
+                    from tech_connector.game_engine.deformation.skinning_tool_service import (
+                        apply_skin_cluster_to_rig_graph,
+                        skin_cluster_from_rig_graph,
+                        spatial_smooth_skin_weights,
+                    )
+                    skin_id, source_kind, _mesh_id = self._selected_skin_or_deformer()
+                    if source_kind != "skin":
+                        raise ValueError("Select a skin in the Scene Outliner before painting spatial smoothing.")
+                    cluster = skin_cluster_from_rig_graph(self.editable_rig_graph, skin_id)
+                    vertices = [(vertex.x, vertex.y, vertex.z) for vertex in self.mesh.vertices]
+                    result = spatial_smooth_skin_weights(
+                        cluster,
+                        positions=vertices,
+                        center=(hx, hy, hz),
+                        radius=world_r * profile.radius_scale,
+                        strength=max(0.02, float(profile.opacity)),
+                        iterations=1,
+                        normal_angle=120.0,
+                        max_neighbors=96,
+                        hardness=max(0.01, float(profile.hardness)),
+                    )
+                    if symmetry_x:
+                        result = spatial_smooth_skin_weights(
+                            result.cluster,
+                            positions=vertices,
+                            center=(-hx, hy, hz),
+                            radius=world_r * profile.radius_scale,
+                            strength=max(0.02, float(profile.opacity)),
+                            iterations=1,
+                            normal_angle=120.0,
+                            max_neighbors=96,
+                            hardness=max(0.01, float(profile.hardness)),
+                        )
+                    apply_skin_cluster_to_rig_graph(
+                        self.editable_rig_graph,
+                        result.cluster,
+                        skin_id=skin_id,
+                        replace_existing=True,
+                    )
+                    changed = set(result.changed_vertices)
+                    self._last_paint_screen_pos = (px, py)
+                    self._last_paint_hit = (hx, hy, hz, hit_u, hit_v)
+                    self._resolved_shaded_status = "Spatially smoothed skin weights on {} vertices.".format(len(changed))
+                    self.update_viewport_status()
+                    self.mark_scene_dirty()
+                    self.schedule_paint_canvas_update()
+                except Exception as exc:
+                    self._resolved_shaded_status = "Skin spatial smooth failed: {}".format(exc)
+                    self.update_viewport_status()
+                return
+
             if paint_target != "color":
                 weight_map = self.deformation_weight_map(paint_target)
                 vertices = [(vertex.x, vertex.y, vertex.z) for vertex in self.mesh.vertices]

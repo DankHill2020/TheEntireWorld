@@ -3,6 +3,7 @@ import json
 import traceback
 import re
 import importlib
+import sys
 
 try:
     import maya.cmds as cmds
@@ -11,7 +12,12 @@ try:
 except ImportError:
     MAYA_HOST = False
 
-if MAYA_HOST and int(cmds.about(version=True)) < 2025:
+def _maya_major_version():
+    match = re.search(r"\d{4}", str(cmds.about(version=True))) if MAYA_HOST else None
+    return int(match.group(0)) if match else 0
+
+
+if MAYA_HOST and _maya_major_version() < 2025:
     from PySide2 import QtWidgets, QtCore, QtGui
     from shiboken2 import wrapInstance
 else:
@@ -20,6 +26,9 @@ else:
 
 if MAYA_HOST:
     from maya_tools.Rigging.mocap import setup_hik
+    from maya_tools.Rigging import enum_attrs
+    from maya_tools.Rigging import create_rig_core
+    from maya_tools.Rigging import create_rig_modules
     from maya_tools.Rigging import create_rig
     from maya_tools.Rigging import rig_template
     from maya_tools.Rigging import skinning_utils
@@ -29,16 +38,57 @@ else:
         cmds, create_rig, dag, joints, omui, rig_template, setup_hik, skinning_utils,
     )
 from unreal_tools import unreal_subprocess as usp
+from utilities import p4_utils
+importlib.reload(p4_utils)
 from unreal_tools import unreal_project_data as upd
 from maya_tools.Rigging.mocap.hik_ui_specialized_tabs import HIKSpecializedTabsMixin
 
 importlib.reload(usp)
 importlib.reload(upd)
-if MAYA_HOST:
-    importlib.reload(skinning_utils)
+
+
+def reload_rig_function_stack():
+    """Reload the complete Maya rig builder stack in dependency order."""
+    if not MAYA_HOST:
+        return "non-maya-host"
+
+    importlib.invalidate_caches()
+
+    # Reload leaf dependencies before the modules that import their functions.
+    # create_rig must be last: its import binds the refreshed core helpers into
+    # create_rig_modules and republishes the complete legacy function surface.
+    for module in (
+            enum_attrs,
+            skinning_utils,
+            joints,
+            dag,
+            rig_template,
+            setup_hik,
+            create_rig_core,
+    ):
+        importlib.reload(module)
+
+    # Older bind_runtime implementations copied create_rig's __name__/__spec__
+    # into this bridge module. Repair an already-running Maya session by
+    # replacing that poisoned cache entry before reloading the public facade.
+    global create_rig_modules
+    modules_name = "maya_tools.Rigging.create_rig_modules"
+    if (
+            sys.modules.get(modules_name) is not create_rig_modules
+            or getattr(create_rig_modules, "__name__", None) != modules_name
+    ):
+        sys.modules.pop(modules_name, None)
+        create_rig_modules = importlib.import_module(modules_name)
+    else:
+        importlib.reload(create_rig_modules)
+
     importlib.reload(create_rig)
-    importlib.reload(rig_template)
-    importlib.reload(setup_hik)
+
+    return getattr(create_rig_core, "RIG_BUILD_REVISION", "unknown")
+
+
+if MAYA_HOST:
+    reload_rig_function_stack()
 
 script_dir = os.path.dirname(__file__).replace('\\', '/')
 
@@ -140,8 +190,11 @@ class ControlRigPopup(QtWidgets.QDialog):
     def create_control_rig(self):
         selected_mesh = self.mesh_input.currentText()
         rig_name = self.cr_name_input.text().strip()
-        usp.run_create_modular_control_rig(selected_mesh, rig_name, self.joint_map, self.uproject, self.log_path,
-                                           self.cmd_path)
+        try:
+            usp.run_create_modular_control_rig(selected_mesh, rig_name, self.joint_map, self.uproject, self.log_path,
+                                             self.cmd_path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Control Rig creation failed", str(exc))
 
 
 class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
@@ -154,14 +207,6 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.setWindowTitle("HIK & Rig Builder")
         self.setMinimumSize(900, 600)
         self.setLayout(QtWidgets.QVBoxLayout())
-
-        # Open a Python command port on port 7002 if not already open
-        if MAYA_HOST:
-            try:
-                if not cmds.commandPort(":7002", q=True):
-                    cmds.commandPort(name=":7002", sourceType="python")
-            except Exception as e:
-                print(f"[HIK UI] Failed to open commandPort 7002: {e}")
 
         self.char_name = QtWidgets.QLineEdit("Character1")
         self.char_name.setToolTip("The name of the HumanIK character definition in Maya.")
@@ -465,6 +510,37 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.rig_layout.addWidget(ctrl_group)
 
         # ------------------------------------------------------------
+        # Joints Along Curve Section
+        # ------------------------------------------------------------
+        curve_joint_group = QtWidgets.QGroupBox("Create Joints Along Curve")
+        curve_joint_layout = QtWidgets.QVBoxLayout(curve_joint_group)
+
+        curve_joint_row = QtWidgets.QHBoxLayout()
+        curve_joint_row.addWidget(QtWidgets.QLabel("Joint Count:"))
+        self.curve_joint_count_spin = QtWidgets.QSpinBox()
+        self.curve_joint_count_spin.setRange(1, 500)
+        self.curve_joint_count_spin.setValue(5)
+        self.curve_joint_count_spin.setToolTip("Number of equally spaced joints to create on the selected curve.")
+        curve_joint_row.addWidget(self.curve_joint_count_spin)
+
+        self.curve_joint_keep_attached = QtWidgets.QCheckBox("Keep Attached to Curve")
+        self.curve_joint_keep_attached.setChecked(True)
+        self.curve_joint_keep_attached.setToolTip(
+            "Keep live motion-path attachments. Turn this off to bake the joint layout and remove helpers."
+        )
+        curve_joint_row.addWidget(self.curve_joint_keep_attached)
+        curve_joint_row.addStretch()
+        curve_joint_layout.addLayout(curve_joint_row)
+
+        create_curve_joints_btn = QtWidgets.QPushButton("Create Joints From Selected Curve")
+        create_curve_joints_btn.setToolTip(
+            "Select one curve, then create evenly spaced joints along its full arc length."
+        )
+        create_curve_joints_btn.clicked.connect(self.create_joints_from_selected_curve)
+        curve_joint_layout.addWidget(create_curve_joints_btn)
+        self.rig_layout.addWidget(curve_joint_group)
+
+        # ------------------------------------------------------------
         # Surface Rig Section
         # ------------------------------------------------------------
         surf_group = QtWidgets.QGroupBox("Create Surface Rig With Drivers")
@@ -490,12 +566,14 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         surf_layout.addLayout(name_row)
 
         self.surf_region_combo = QtWidgets.QComboBox()
-        self.surf_region_combo.addItems(["eyelid", "mouth", "brow", "other"])
+        self.surf_region_combo.addItems(["eyelid", "center_eyelid", "mouth", "brow", "other"])
         self.surf_region_combo.setToolTip("Choose the facial anatomical region this surface rig is built for.")
 
         self.surf_side_combo = QtWidgets.QComboBox()
-        self.surf_side_combo.addItems(["r", "l"])
-        self.surf_side_combo.setToolTip("Select the character side (l for Left, r for Right) the surface resides on.")
+        self.surf_side_combo.addItems(["r", "l", "c"])
+        self.surf_side_combo.setToolTip(
+            "Select l/r for a sided surface or c for a centered eyelid surface."
+        )
 
         region_side_row = QtWidgets.QHBoxLayout()
         region_side_row.addWidget(QtWidgets.QLabel("Region:"))
@@ -586,9 +664,90 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         import_skin_btn.clicked.connect(self.import_skin_weights)
         transfer_skin_btn.clicked.connect(self.transfer_skin_weights_from_selection)
 
+        spatial_settings = QtWidgets.QGridLayout()
+        self.spatial_smooth_radius = QtWidgets.QDoubleSpinBox()
+        self.spatial_smooth_radius.setDecimals(3)
+        self.spatial_smooth_radius.setRange(0.001, 1000000.0)
+        self.spatial_smooth_radius.setValue(1.0)
+        self.spatial_smooth_radius.setToolTip(
+            "World-space search radius. Increase it to spread weights farther across the visible surface."
+        )
+        self.spatial_smooth_iterations = QtWidgets.QSpinBox()
+        self.spatial_smooth_iterations.setRange(1, 50)
+        self.spatial_smooth_iterations.setValue(8)
+        self.spatial_smooth_strength = QtWidgets.QDoubleSpinBox()
+        self.spatial_smooth_strength.setRange(0.01, 1.0)
+        self.spatial_smooth_strength.setSingleStep(0.05)
+        self.spatial_smooth_strength.setValue(0.65)
+        self.spatial_smooth_max_influences = QtWidgets.QSpinBox()
+        self.spatial_smooth_max_influences.setRange(1, 32)
+        self.spatial_smooth_max_influences.setValue(8)
+        self.spatial_smooth_normal_angle = QtWidgets.QDoubleSpinBox()
+        self.spatial_smooth_normal_angle.setRange(0.0, 180.0)
+        self.spatial_smooth_normal_angle.setValue(120.0)
+        self.spatial_smooth_normal_angle.setSuffix("°")
+        self.spatial_smooth_normal_angle.setToolTip(
+            "Maximum normal difference for sharing weights; lower values prevent bleeding across folded surfaces."
+        )
+        self.spatial_smooth_max_neighbors = QtWidgets.QSpinBox()
+        self.spatial_smooth_max_neighbors.setRange(2, 256)
+        self.spatial_smooth_max_neighbors.setValue(96)
+        self.spatial_smooth_max_neighbors.setToolTip(
+            "Maximum nearby surface samples per vertex. This keeps very dense meshes responsive."
+        )
+        self.spatial_smooth_cross_region = QtWidgets.QDoubleSpinBox()
+        self.spatial_smooth_cross_region.setRange(0.05, 0.49)
+        self.spatial_smooth_cross_region.setSingleStep(0.05)
+        self.spatial_smooth_cross_region.setValue(0.45)
+        self.spatial_smooth_cross_region.setToolTip(
+            "Minimum share reserved for nearby different weight regions. Increase for a stronger visible blend."
+        )
+        spatial_settings.addWidget(QtWidgets.QLabel("Surface Radius:"), 0, 0)
+        spatial_settings.addWidget(self.spatial_smooth_radius, 0, 1)
+        spatial_settings.addWidget(QtWidgets.QLabel("Iterations:"), 0, 2)
+        spatial_settings.addWidget(self.spatial_smooth_iterations, 0, 3)
+        spatial_settings.addWidget(QtWidgets.QLabel("Strength:"), 1, 0)
+        spatial_settings.addWidget(self.spatial_smooth_strength, 1, 1)
+        spatial_settings.addWidget(QtWidgets.QLabel("Max Influences:"), 1, 2)
+        spatial_settings.addWidget(self.spatial_smooth_max_influences, 1, 3)
+        spatial_settings.addWidget(QtWidgets.QLabel("Normal Gate:"), 2, 0)
+        spatial_settings.addWidget(self.spatial_smooth_normal_angle, 2, 1)
+        spatial_settings.addWidget(QtWidgets.QLabel("Neighbor Limit:"), 2, 2)
+        spatial_settings.addWidget(self.spatial_smooth_max_neighbors, 2, 3)
+        spatial_settings.addWidget(QtWidgets.QLabel("Cross-Region Mix:"), 3, 0)
+        spatial_settings.addWidget(self.spatial_smooth_cross_region, 3, 1)
+
+        spatial_smooth_btn = QtWidgets.QPushButton("Surface-Spatial Smooth Skin Weights")
+        spatial_smooth_btn.setToolTip(
+            "Smooth a selected skinned mesh or selected vertices by 3D surface proximity, ignoring edge topology."
+        )
+        spatial_smooth_btn.clicked.connect(self.smooth_skin_weights_spatially)
+        brush_row = QtWidgets.QHBoxLayout()
+        spatial_brush_btn = QtWidgets.QPushButton("Activate Surface Smooth Brush")
+        spatial_brush_btn.setToolTip(
+            "Paint topology-independent skin smoothing on the visible surface. Hold B and drag to resize."
+        )
+        spatial_brush_btn.clicked.connect(self.activate_spatial_skin_smooth_brush)
+        spatial_brush_exit_btn = QtWidgets.QPushButton("Exit Brush")
+        spatial_brush_exit_btn.clicked.connect(self.deactivate_spatial_skin_smooth_brush)
+        brush_row.addWidget(spatial_brush_btn)
+        brush_row.addWidget(spatial_brush_exit_btn)
+
         skin_layout.addWidget(export_skin_btn)
         skin_layout.addWidget(import_skin_btn)
         skin_layout.addWidget(transfer_skin_btn)
+        skin_layout.addSpacing(8)
+        skin_layout.addLayout(spatial_settings)
+        skin_layout.addWidget(spatial_smooth_btn)
+        skin_layout.addLayout(brush_row)
+
+        if self.host_mode != "maya":
+            spatial_smooth_btn.setEnabled(False)
+            spatial_brush_btn.setEnabled(False)
+            spatial_brush_exit_btn.setEnabled(False)
+            spatial_smooth_btn.setToolTip(
+                "Surface-spatial smoothing currently requires live Maya mesh vertex and skinCluster data."
+            )
 
         self.rig_layout.addWidget(skin_group)
 
@@ -975,6 +1134,55 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 constraint_type="parent"
             )
 
+    def create_joints_from_selected_curve(self):
+        selection = cmds.ls(selection=True, long=True) or []
+        if not selection:
+            cmds.warning("Select a curve before creating joints.")
+            return
+
+        curve = None
+        if self.host_mode == "maya":
+            for node in selection:
+                if cmds.nodeType(node) == "nurbsCurve":
+                    curve = node
+                    break
+                shapes = cmds.listRelatives(
+                    node,
+                    shapes=True,
+                    noIntermediate=True,
+                    type="nurbsCurve",
+                    fullPath=True,
+                ) or []
+                if shapes:
+                    curve = node
+                    break
+        else:
+            curve = selection[0]
+
+        if not curve:
+            cmds.warning("The selection does not contain a curve.")
+            return
+
+        try:
+            result = create_rig.create_joints_along_curve(
+                curve,
+                joint_count=self.curve_joint_count_spin.value(),
+                keep_attached=self.curve_joint_keep_attached.isChecked(),
+            )
+            created = result.get("joints", []) if isinstance(result, dict) else []
+            cmds.confirmDialog(
+                title="Joints Along Curve",
+                message=f"Created {len(created)} evenly spaced joints.",
+                button=["OK"],
+            )
+        except Exception as exc:
+            cmds.confirmDialog(
+                title="Error",
+                message=f"Failed to create joints along the curve:\n{exc}",
+                button=["OK"],
+                icon="critical",
+            )
+
     def populate_default_face_map_from_scene(self):
         """Fill default_face_map with scene joints under HIK head reference."""
         self.default_face_map = setup_hik.populate_default_face_map_from_scene(self.default_face_map)
@@ -1096,6 +1304,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         return True
 
     def build_full_rig(self):
+        reload_rig_function_stack()
         self.create_rig_mapping()
 
         # Reset session overrides.
@@ -1170,6 +1379,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         cmds.undoInfo(openChunk=True, chunkName="Build Full Rig")
         built_modules = []
         skipped_modules = []
+        build_error = None
+        build_traceback = ""
 
         try:
             # 1. Run T-pose alignment on mapped arm joints
@@ -1245,15 +1456,39 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             )
 
         except Exception as e:
-            cmds.confirmDialog(
-                title="Error",
-                message=f"Failed to create full rig:\n{e}",
-                button=["OK"]
-            )
-            cmds.warning(f"Failed to create full rig: {e}")
+            build_error = e
+            build_traceback = traceback.format_exc()
+            print(build_traceback)
 
         finally:
             cmds.undoInfo(closeChunk=True)
+
+            if build_error is not None:
+                try:
+                    # Silent module builds deliberately avoid nested chunks, so
+                    # one undo restores the exact pre-build scene.
+                    cmds.undo()
+                except Exception as undo_error:
+                    cmds.warning(f"Failed to roll back the incomplete full rig: {undo_error}")
+
+                cmds.confirmDialog(
+                    title="Error",
+                    message=(
+                        f"Full Rig build failed and was rolled back:\n{build_error}\n\n"
+                        + "\n".join(build_traceback.strip().splitlines()[-4:])
+                    ),
+                    button=["OK"]
+                )
+                cmds.warning(f"Failed to create full rig: {build_error}")
+
+            # Failed/partial Maya operations can leave evaluation or the global
+            # IK solver disabled. Always restore both before returning control
+            # to the animator.
+            dag.enable_evaluation()
+            try:
+                cmds.ikSystem(edit=True, solve=True)
+            except Exception:
+                pass
 
             # Keep warning deferral enabled for the final metadata refresh so it
             # cannot reopen the same discrepancy dialog after the summary.
@@ -1264,6 +1499,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             self._pending_module_discrepancies.clear()
 
     def remove_full_rig(self):
+        reload_rig_function_stack()
         dag.disable_evaluation()
 
         # Synchronize default_map with fields
@@ -1385,6 +1621,89 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         if import_dir:
             return skinning_utils.import_skin_weights(meshes, import_dir)
 
+    def smooth_skin_weights_spatially(self):
+        """Run topology-independent weight diffusion on the active mesh/vertices."""
+        reload_rig_function_stack()
+        try:
+            result = skinning_utils.smooth_skin_weights_spatial_from_selection(
+                radius=self.spatial_smooth_radius.value(),
+                iterations=self.spatial_smooth_iterations.value(),
+                strength=self.spatial_smooth_strength.value(),
+                max_influences=self.spatial_smooth_max_influences.value(),
+                normal_angle=self.spatial_smooth_normal_angle.value(),
+                max_neighbors=self.spatial_smooth_max_neighbors.value(),
+                cross_region_share=self.spatial_smooth_cross_region.value(),
+            )
+        except Exception as exc:
+            traceback.print_exc()
+            cmds.confirmDialog(
+                title="Surface-Spatial Skin Smoothing",
+                message="Failed to smooth skin weights:\n{}".format(exc),
+                button=["OK"],
+                icon="critical",
+            )
+            return
+
+        if result.get("cancelled") and not result.get("iterations"):
+            cmds.warning("Surface-spatial skin smoothing was cancelled before weights were changed.")
+            return
+        if not result.get("changedVertices") or result.get("maxDelta", 0.0) <= 1.0e-6:
+            cmds.confirmDialog(
+                title="Surface-Spatial Skin Smoothing",
+                message=(
+                    "No skin weights changed.\n\n"
+                    "The selected skin has {weightRegions} dominant weight region(s), and the "
+                    "effective search radius was {radius:g}. If this is unexpected, verify that "
+                    "the displayed skinCluster is the active deformer for this mesh."
+                ).format(**result),
+                button=["OK"],
+                icon="warning",
+            )
+            return
+        cmds.confirmDialog(
+            title="Surface-Spatial Skin Smoothing",
+            message=(
+                "Changed {changedVertices} of {vertices} vertices on {mesh}.\n"
+                "Completed {iterations} iteration(s) with radius {radius:g}.\n"
+                "Largest weight change: {maxDelta:.4f}."
+                "{radius_note}"
+            ).format(
+                radius_note=(
+                    "\nRadius auto-expanded from {requestedRadius:g} to {radius:g} with a blending margin.".format(**result)
+                    if result.get("autoExpandedRadius") else ""
+                ),
+                **result
+            ),
+            button=["OK"],
+        )
+
+    def activate_spatial_skin_smooth_brush(self):
+        reload_rig_function_stack()
+        try:
+            result = skinning_utils.activate_surface_spatial_smooth_brush(
+                radius=self.spatial_smooth_radius.value(),
+                iterations=max(1, min(4, self.spatial_smooth_iterations.value())),
+                strength=self.spatial_smooth_strength.value(),
+                max_influences=self.spatial_smooth_max_influences.value(),
+                normal_angle=self.spatial_smooth_normal_angle.value(),
+                max_neighbors=self.spatial_smooth_max_neighbors.value(),
+                cross_region_share=self.spatial_smooth_cross_region.value(),
+            )
+            cmds.warning("Surface Spatial Smooth Brush active on {}. Press Q or Exit Brush when done.".format(
+                result.get("mesh")))
+        except Exception as exc:
+            traceback.print_exc()
+            cmds.confirmDialog(
+                title="Surface Smooth Brush",
+                message="Could not activate the brush:\n{}".format(exc),
+                button=["OK"],
+                icon="critical",
+            )
+
+    def deactivate_spatial_skin_smooth_brush(self):
+        if MAYA_HOST:
+            skinning_utils.deactivate_surface_spatial_smooth_brush()
+
     def transfer_skin_weights_from_selection(self):
         selection = cmds.ls(selection=True) or []
         if len(selection) < 2:
@@ -1416,6 +1735,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         )
 
     def create_surface_rig_with_drivers(self):
+        reload_rig_function_stack()
         sel = cmds.ls(sl=True, type="joint")
         if not sel:
             cmds.warning("Please select a joint chain to create a surface rig.")
@@ -1424,7 +1744,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         parent = self.surface_parent_field.text().strip() or None
         loft_name = self.surf_name_field.text().strip() or "eyelid"
         region = self.surf_region_combo.currentText()
-        side = self.surf_side_combo.currentText()
+        side = "c" if region == "center_eyelid" else self.surf_side_combo.currentText()
         offset = self.surf_offset_spin.value()
 
         indices_text = self.surf_indices_field.text().strip()
@@ -1447,6 +1767,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             )
             cmds.confirmDialog(title="Success", message="Surface Rig created successfully!", button=["OK"])
         except Exception as e:
+            traceback.print_exc()
             cmds.confirmDialog(title="Error", message=f"Failed to create surface rig:\n{e}", button=["OK"])
             cmds.warning(f"Failed to create surface rig: {e}")
 
@@ -1487,6 +1808,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         if not sel:
             if region == "eyelid":
                 self.surf_indices_field.setText("0, 9, 6, 3, 12, 15, 18, 20")
+            elif region == "center_eyelid":
+                self.surf_indices_field.setText("0, 2, 5, 8, 10, 12, 15, 18")
             elif region == "mouth":
                 self.surf_indices_field.setText("0, 2, 5, 8, 10, 12, 15, 18")
             elif region == "brow":
@@ -1515,6 +1838,11 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             target_count = 8
             if N == 21:
                 self.surf_indices_field.setText("0, 9, 6, 3, 12, 15, 18, 20")
+                return
+        elif region == "center_eyelid":
+            target_count = 8
+            if N == 20:
+                self.surf_indices_field.setText("0, 2, 5, 8, 10, 12, 15, 18")
                 return
         elif region == "mouth":
             target_count = 8
@@ -1697,9 +2025,17 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 log_path = upd.get_latest_unreal_log(uproject)
                 cmd_path = upd.get_unreal_cmd_exe(uproject)
 
-                skel_meshes = usp.run_get_skeletons(
-                    uproject, log_path, cmd_path, "SkeletalMesh"
-                )
+                try:
+                    skel_meshes = usp.run_get_skeletons(
+                        uproject, log_path, cmd_path, "SkeletalMesh"
+                    )
+                except Exception as exc:
+                    QtWidgets.QMessageBox.warning(self, "Unreal asset discovery failed", str(exc))
+                    return
+                if not skel_meshes:
+                    QtWidgets.QMessageBox.information(
+                        self, "No skeletal meshes", "No SkeletalMesh assets were found under /Game in Unreal.")
+                    return
 
                 self.popup = ControlRigPopup(skel_meshes, joint_map, uproject)
                 self.popup.exec_()
@@ -1780,6 +2116,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         return []
 
     def create_body_module_setup(self, module, silent=False):
+        if not silent:
+            reload_rig_function_stack()
         edit_info = self._module_detail_widgets.get(module)
         parent = None
         if edit_info and edit_info.get("parent_edit"):
@@ -1825,7 +2163,9 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         return
 
         self.create_rig_mapping()
-        cmds.undoInfo(openChunk=True, chunkName=f"Build Body Module: {module}")
+        owns_undo_chunk = not silent
+        if owns_undo_chunk:
+            cmds.undoInfo(openChunk=True, chunkName=f"Build Body Module: {module}")
         try:
             module_func = None
             module_args = []
@@ -1903,13 +2243,17 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         except Exception as e:
             print(f"[ERROR] create_body_module_setup failed for module={module} parent={parent}: {e}")
             traceback.print_exc()
+            if silent:
+                raise
             cmds.confirmDialog(title="Error", message=f"Failed to create body module setup:\n{e}", button=["OK"])
         finally:
-            cmds.undoInfo(closeChunk=True)
+            if owns_undo_chunk:
+                cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
 
     def remove_body_module_setup(self, module):
+        reload_rig_function_stack()
         dag.disable_evaluation()
         self.create_rig_mapping()
         create_rig.store_all_control_cv_positions()
@@ -1954,6 +2298,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             dag.enable_evaluation()
 
     def create_face_module_setup(self, module, silent=False):
+        if not silent:
+            reload_rig_function_stack()
         edit_info = self._module_detail_widgets.get(module)
         parent = None
         if edit_info and edit_info.get("parent_edit"):
@@ -2031,7 +2377,11 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 )
             return
 
-        cmds.undoInfo(openChunk=True, chunkName=f"Build Face Module: {module}")
+        build_error = None
+        build_traceback = ""
+        owns_undo_chunk = not silent
+        if owns_undo_chunk:
+            cmds.undoInfo(openChunk=True, chunkName=f"Build Face Module: {module}")
         try:
             if module == "Brows (Left)":
                 create_rig.rig_brows_module("l", self.default_face_map, parent)
@@ -2073,13 +2423,56 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 cmds.confirmDialog(title="Success", message=msg, button=["OK"])
             create_rig.restore_all_control_cv_positions()
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to create face module setup:\n{e}", button=["OK"])
+            build_traceback = traceback.format_exc()
+            print(build_traceback)
+            if silent:
+                raise
+            build_error = e
         finally:
-            cmds.undoInfo(closeChunk=True)
+            if owns_undo_chunk:
+                cmds.undoInfo(closeChunk=True)
+
+        if build_error is not None:
+            try:
+                # The entire module build is one undo chunk. Roll it back so a
+                # retry cannot collide with a half-built mouth surface/control
+                # hierarchy left behind by the failed attempt.
+                chunk_name = f"Build Face Module: {module}"
+                undo_name = cmds.undoInfo(query=True, undoName=True)
+                if undo_name == chunk_name:
+                    cmds.undo()
+                else:
+                    cmds.warning(
+                        "Partial face module rollback was skipped because the current undo item is {!r}.".format(
+                            undo_name
+                        )
+                    )
+            except Exception as undo_error:
+                cmds.warning(
+                    "Failed to roll back partial face module '{}': {}".format(
+                        module,
+                        undo_error,
+                    )
+                )
+            cmds.confirmDialog(
+                title="Error",
+                message=(
+                    f"Failed to create face module setup:\n{build_error}\n\n"
+                    f"Rig source: {getattr(create_rig_core, '__file__', 'unknown')}\n"
+                    f"Revision: {getattr(create_rig_core, 'RIG_BUILD_REVISION', 'unknown')}\n\n"
+                    + "\n".join(build_traceback.strip().splitlines()[-4:])
+                ),
+                button=["OK"],
+            )
+
+        try:
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
+        except Exception as refresh_error:
+            cmds.warning("Failed to refresh face module details: {}".format(refresh_error))
 
     def remove_face_module_setup(self, module):
+        reload_rig_function_stack()
         dag.disable_evaluation()
         self.create_rig_mapping()
         create_rig.store_all_control_cv_positions()
@@ -3466,6 +3859,7 @@ def launch_hik_ui(
     undo_callback=None,
     refresh_callback=None,
 ):
+    global hik_ui_instance
     host_mode = "maya"
     if graph is not None:
         if MAYA_HOST:
@@ -3478,6 +3872,13 @@ def launch_hik_ui(
             refresh_callback=refresh_callback,
         )
         host_mode = "tech_connector"
+    previous_instance = globals().get("hik_ui_instance")
+    if previous_instance is not None:
+        try:
+            previous_instance.close()
+        except (RuntimeError, AttributeError):
+            pass
+
     hik_ui_instance = HIKDefinitionUI(parent, host_mode=host_mode)
     hik_ui_instance.show()
     return hik_ui_instance

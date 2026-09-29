@@ -1,4 +1,4 @@
-"""Explicit, idempotent Maya commandPort/Live Link bootstrap installer."""
+"""Explicit, idempotent Maya authenticated JSON/Live Link bootstrap installer."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from pathlib import Path
 import tempfile
 from typing import Iterable
 
-
-BOOTSTRAP_VERSION = "2"
+BOOTSTRAP_VERSION = "3"
 BLOCK_BEGIN = "# BEGIN Tech Connector Maya Bridge (managed)"
 BLOCK_END = "# END Tech Connector Maya Bridge (managed)"
 
@@ -41,73 +40,21 @@ def _init_tech_connector_livelink():
 cmds.evalDeferred(_init_tech_connector_livelink)
 """
 
-MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Bridge Startup Script v2
-import base64
-import os
-import sys
-import traceback
-
+MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Authenticated JSON Bridge Startup Script v3
 import maya.cmds as cmds
 
-TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "2"
+TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "3"
 TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = str(globals().get("__file__", ""))
 
 
-def maya_execute_and_capture(encoded_payload):
-    code = base64.b64decode(encoded_payload.encode("utf-8")).decode("utf-8")
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-
-    class _TechConnectorCapture:
-        def __init__(self):
-            self.parts = []
-
-        def write(self, value):
-            self.parts.append(str(value))
-
-        def flush(self):
-            pass
-
-    capture = _TechConnectorCapture()
-    sys.stdout = capture
-    sys.stderr = capture
-    try:
-        exec(code, globals(), globals())
-    except Exception:
-        traceback.print_exc()
-    finally:
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
-    return "".join(capture.parts)
-
-
 def _init_tech_connector_maya_bridge():
-    preferred = int(os.environ.get("MAYA_COMMAND_PORT", "7001"))
-    scan_count = max(1, int(os.environ.get("MAYA_COMMAND_PORT_SCAN_COUNT", "10")))
-    opened_port = None
-    for port in range(preferred, preferred + scan_count):
-        port_name = ":%s" % port
-        try:
-            if cmds.commandPort(port_name, q=True):
-                opened_port = port
-                break
-            cmds.commandPort(
-                name=port_name,
-                sourceType="python",
-                echoOutput=True,
-                noreturn=False,
-            )
-            opened_port = port
-            break
-        except Exception:
-            continue
-    if opened_port is None:
-        cmds.warning("[Tech Connector] No free Maya commandPort was available.")
-    else:
-        print("[Tech Connector] Maya bridge v%s ready on port %s" % (
-            TECH_CONNECTOR_MAYA_BRIDGE_VERSION,
-            opened_port,
-        ))
+    try:
+        from maya_tools import maya_menu
+        opened_port = maya_menu.initialize_command_port()
+        if not opened_port:
+            cmds.warning("[Tech Connector] Activate Tech Connector before starting the authenticated Maya bridge.")
+    except Exception:
+        cmds.warning("[Tech Connector] Authenticated Maya bridge could not be started.")
 
     try:
         if not cmds.pluginInfo("MayaLiveLinkPlugin", q=True, loaded=True):

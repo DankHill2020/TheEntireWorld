@@ -6,6 +6,8 @@ from tech_connector.game_engine.integration.dcc_capability_audit_service import 
     audit_dcc_host,
 )
 from tech_connector.game_engine.integration.rigging_host_adapter_service import (
+    BLENDER_CAPABILITY_STATUS,
+    MAX_CAPABILITY_STATUS,
     MOTIONBUILDER_CAPABILITY_STATUS,
 )
 from tech_connector.services.unreal.unreal_operation_service import UNREAL_OPERATIONS
@@ -23,6 +25,13 @@ def test_3dsmax_audit_requires_a_concrete_operation_registry() -> None:
     assert report.status == "translated"
     assert report.executable_operation_count >= 12
     assert report.executable_operation_count == report.declared_operation_count
+    rigging = next(row for row in report.departments if row.department == "rigging")
+    assert "rig.create_ik_fk_limb" in rigging.executable_operations
+    assert "rig.create_ribbon" in rigging.executable_operations
+    assert "rig.create_twist" in rigging.executable_operations
+    assert set(rigging.out_of_scope_operations) == {
+        key for key, status in MAX_CAPABILITY_STATUS.items() if status == "unsupported"
+    }
 
 
 def test_maya_and_motionbuilder_are_audited_against_their_host_profiles() -> None:
@@ -38,6 +47,18 @@ def test_maya_and_motionbuilder_are_audited_against_their_host_profiles() -> Non
     assert "rig.create_ribbon" in mobu_rigging.out_of_scope_operations
     assert set(mobu_rigging.out_of_scope_operations) == {
         key for key, status in MOTIONBUILDER_CAPABILITY_STATUS.items() if status == "unsupported"
+    }
+
+
+def test_blender_rigging_is_audited_against_its_native_host_profile() -> None:
+    report = audit_dcc_host("blender")
+    rigging = next(row for row in report.departments if row.department == "rigging")
+    assert rigging.status == "translated"
+    assert not rigging.missing_operations
+    assert "rig.build_full" in rigging.executable_operations
+    assert "rig.create_ik_fk_limb" in rigging.executable_operations
+    assert set(rigging.out_of_scope_operations) == {
+        key for key, status in BLENDER_CAPABILITY_STATUS.items() if status == "unsupported"
     }
 
 

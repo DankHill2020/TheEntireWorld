@@ -8,6 +8,7 @@ from typing import Any
 
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo
+from tech_connector.bridges.session_authorization import bridge_session_token
 from tech_connector.bridges.session_discovery import candidate_session_ports, discover_open_ports
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
 
@@ -81,7 +82,9 @@ class UnityBridge(DCCBridgeDelegateMixin):
     @staticmethod
     def _send_payload(payload: dict[str, Any], *, port: int, timeout: float) -> tuple[bool, str]:
         try:
-            encoded = json.dumps(payload).encode("utf-8") + b"\n"
+            authorized_payload = dict(payload)
+            authorized_payload["bridge_session"] = bridge_session_token("unity")
+            encoded = json.dumps(authorized_payload).encode("utf-8") + b"\n"
             if len(encoded) > UnityBridge.MAX_PAYLOAD_BYTES:
                 return False, "Unity bridge request exceeded the 1 MiB limit."
 
@@ -138,6 +141,21 @@ class UnityBridge(DCCBridgeDelegateMixin):
         if not ok:
             result["error"] = str(raw)
         return result
+
+    def export_animation_controller(
+        self, asset_path: str, *, port: int | None = None, timeout: float = 30.0,
+    ) -> tuple[bool, dict[str, Any] | str]:
+        """Export a Unity AnimatorController as versioned, converter-ready reflection data."""
+        ok, raw = self.execute_command(
+            "animation.export_controller", {"filepath": str(asset_path)}, port=port, timeout=timeout,
+        )
+        if not ok:
+            return False, raw
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False, "Unity returned invalid animation export JSON."
+        return True, payload if isinstance(payload, dict) else "Unity animation export was not an object."
 
     def sessions(self, host="127.0.0.1") -> list[dict]:
         return [self.session_info(port=port) for port in self.find_ports(host=host)]

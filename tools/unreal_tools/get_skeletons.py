@@ -22,5 +22,9 @@ def get_all_assets_of_type(type='Skeleton', directory="/Game/"):
 
 
 if __name__ == "__main__":
-    assets = get_all_assets_of_type(type='Skeleton', directory="/Game/")
-    print(assets)
+    import json
+    import sys
+    asset_type = sys.argv[1] if len(sys.argv) > 1 else "Skeleton"
+    unreal.AssetRegistryHelpers.get_asset_registry().search_all_assets(True)
+    assets = get_all_assets_of_type(type=asset_type, directory="/Game/")
+    print("HIK_ASSETS_JSON=" + json.dumps(assets))

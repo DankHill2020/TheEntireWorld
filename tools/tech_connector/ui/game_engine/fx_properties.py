@@ -27,10 +27,17 @@ from PySide6.QtWidgets import (
 )
 
 from tech_connector.game_engine.runtime.tc_effect_system_service import QUALITY_PROFILES, effect_preset_names
+from tech_connector.game_engine.runtime.tc_exotic_simulation_service import EXOTIC_SIMULATION_PRESETS
 from tech_connector.game_engine.runtime.tc_fx_workflow_service import FX_SOLVER_PROFILES
 from tech_connector.game_engine.runtime.tc_simulation_ir_service import simulation_backend_statuses
 from tech_connector.ui.design_system import component_stylesheet, set_status_state, set_ui_role
 from tech_connector.ui.icons import configure_button
+from tech_connector.ui.ux_polish import (
+    ContextRecipeCard,
+    WorkflowRecipe,
+    apply_property_guidance,
+    apply_widget_discoverability,
+)
 
 
 def _display_name(value: str) -> str:
@@ -50,6 +57,8 @@ class FxPropertiesDialog(QDialog):
     preview_toggled = Signal(bool)
     bake_requested = Signal()
     reset_requested = Signal()
+    simulation_lab_create_requested = Signal(str, str, int, int, str, float)
+    simulation_lab_view_changed = Signal(object)
 
     def __init__(self, effect_system: Any = None, parent=None):
         super().__init__(parent)
@@ -78,6 +87,17 @@ class FxPropertiesDialog(QDialog):
         subtitle.setWordWrap(True)
         set_ui_role(subtitle, "muted")
         root.addWidget(subtitle)
+
+        self.workflow_guide = ContextRecipeCard(WorkflowRecipe(
+            "How to build an effect",
+            ("Choose a preset and Recreate", "Preview", "Drag the emitter in the viewport",
+             "Tune the Performance tab", "Bake the approved range"),
+            requires="No selection is required to create an effect. Select an emitter before editing or dragging it.",
+            preview="Manipulate in viewport activates the emitter and live preview; turn off ‘Move existing particles’ to paint trails.",
+            output="Bake makes the result deterministic for playback and export; the live setup remains editable.",
+            tip="Start with Realtime quality and Automatic execution. Increase quality only after motion and collisions feel right.",
+        ), self)
+        root.addWidget(self.workflow_guide)
 
         self.property_tabs = QTabWidget(self)
         root.addWidget(self.property_tabs, 1)
@@ -128,6 +148,71 @@ class FxPropertiesDialog(QDialog):
         create_btn.clicked.connect(self._emit_create)
         creation_form.addRow("", create_btn)
         self.property_tabs.addTab(creation_panel, "Create")
+
+        lab_panel = QFrame(self)
+        set_ui_role(lab_panel, "panel")
+        lab_form = QFormLayout(lab_panel)
+        lab_form.setContentsMargins(12, 12, 12, 12)
+        lab_form.setSpacing(8)
+        lab_intro = QLabel(
+            "Build scale-aware orbital, plasma, molecular, and exotic-matter simulations with explicit accuracy labels.",
+            lab_panel,
+        )
+        lab_intro.setWordWrap(True)
+        set_ui_role(lab_intro, "muted")
+        lab_form.addRow(lab_intro)
+        self.lab_preset_combo = QComboBox(lab_panel)
+        for preset in EXOTIC_SIMULATION_PRESETS.values():
+            self.lab_preset_combo.addItem(f"{preset.name} · {_display_name(preset.family)}", preset.preset_id)
+        lab_form.addRow("Simulation", self.lab_preset_combo)
+        self.lab_accuracy_combo = QComboBox(lab_panel)
+        for accuracy in ("grounded", "approximation", "cinematic"):
+            self.lab_accuracy_combo.addItem(_display_name(accuracy), accuracy)
+        lab_form.addRow("Accuracy", self.lab_accuracy_combo)
+        self.lab_particle_count = QSpinBox(lab_panel)
+        self.lab_particle_count.setRange(2, 2_000_000)
+        self.lab_particle_count.setValue(512)
+        self.lab_particle_count.setSingleStep(128)
+        lab_form.addRow("Particles", self.lab_particle_count)
+        self.lab_interaction_method = QComboBox(lab_panel)
+        self.lab_interaction_method.addItem("Automatic · exact nearby, tree at scale", "auto")
+        self.lab_interaction_method.addItem("Exact · highest small-system accuracy", "exact")
+        self.lab_interaction_method.addItem("Barnes–Hut · scalable approximation", "barnes_hut")
+        lab_form.addRow("Long-range solve", self.lab_interaction_method)
+        self.lab_opening_angle = QDoubleSpinBox(lab_panel)
+        self.lab_opening_angle.setRange(0.1, 1.5)
+        self.lab_opening_angle.setSingleStep(0.05)
+        self.lab_opening_angle.setDecimals(2)
+        self.lab_opening_angle.setValue(0.65)
+        self.lab_opening_angle.setToolTip("Lower values are more accurate; higher values visit fewer tree nodes.")
+        lab_form.addRow("Tree accuracy θ", self.lab_opening_angle)
+        self.lab_seed_spin = QSpinBox(lab_panel)
+        self.lab_seed_spin.setRange(0, 2_147_483_647)
+        self.lab_seed_spin.setValue(1)
+        lab_form.addRow("Deterministic seed", self.lab_seed_spin)
+        view_row = QWidget(lab_panel)
+        view_layout = QHBoxLayout(view_row)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+        self.lab_field_lines = QCheckBox("Field lines", view_row)
+        self.lab_field_lines.setChecked(True)
+        self.lab_trails = QCheckBox("Trails", view_row)
+        self.lab_trails.setChecked(True)
+        self.lab_diagnostics = QCheckBox("Conservation", view_row)
+        self.lab_diagnostics.setChecked(True)
+        for control in (self.lab_field_lines, self.lab_trails, self.lab_diagnostics):
+            control.toggled.connect(self._emit_simulation_lab_view)
+            view_layout.addWidget(control)
+        lab_form.addRow("Overlays", view_row)
+        lab_create = QPushButton("Create physics lab", lab_panel)
+        configure_button(
+            lab_create, "sparkles", text="Create and preview",
+            tooltip="Create the selected simulation, activate it, and begin live preview.", role="primary",
+        )
+        lab_create.clicked.connect(self._emit_simulation_lab_create)
+        lab_form.addRow("", lab_create)
+        self.property_tabs.addTab(lab_panel, "Physics Lab")
+        self.lab_preset_combo.currentIndexChanged.connect(self._simulation_lab_preset_changed)
+        self._simulation_lab_preset_changed()
 
         self.active_summary = QLabel("No active FX system")
         self.active_summary.setWordWrap(True)
@@ -408,6 +493,42 @@ class FxPropertiesDialog(QDialog):
         actions.addWidget(close_btn)
         root.addLayout(actions)
         self._update_quality_details()
+        self._apply_field_guidance()
+        apply_widget_discoverability(self)
+
+    def _apply_field_guidance(self) -> None:
+        apply_property_guidance(
+            self.spawn_rate, "How many particles this emitter creates each second.",
+            safe_start="Raise it slowly while previewing.", consequence="Large values increase simulation and rendering cost.",
+        )
+        apply_property_guidance(
+            self.burst_count, "Particles emitted instantly when the emitter starts.",
+            safe_start="Use 0 for continuous effects; small bursts for impacts.", consequence="A large burst can create a one-frame performance spike.",
+        )
+        apply_property_guidance(
+            self.update_rate_divisor, "Updates this emitter less often to save simulation time.",
+            safe_start="1 for hero motion; 2 for background effects.", consequence="Higher values can make fast motion look stepped.",
+        )
+        apply_property_guidance(
+            self.adaptive_budget, "Automatically scales particle work to protect the frame-time target.",
+            safe_start="Leave enabled during interactive work.", consequence="Counts may vary slightly as the scene load changes.",
+        )
+        apply_property_guidance(
+            self.upload_budget_ms, "Maximum frame time targeted for sending live FX data to the GPU.",
+            safe_start="4 ms for desktop; 2 ms for low-latency work.", consequence="A larger value permits denser effects but leaves less time for the rest of the frame.",
+        )
+        apply_property_guidance(
+            self.cull_distance, "Stops rendering this effect after the chosen camera distance.",
+            safe_start="Use the smallest distance that still covers the shot.", consequence="Zero disables distance culling and can waste GPU work.",
+        )
+        apply_property_guidance(
+            self.lab_opening_angle, "Balances long-range interaction accuracy against tree-solver speed.",
+            safe_start="0.65 for exploration; reduce toward 0.4 for validation.", consequence="Lower values are more accurate and more expensive.",
+        )
+        apply_property_guidance(
+            self.backend_combo, "Chooses where simulation work executes.",
+            safe_start="Automatic uses qualified GPU compute and falls back explicitly.", consequence="Forced backends can be unavailable on another machine.",
+        )
 
     def set_effect_system(self, effect_system: Any) -> None:
         self.effect_system = effect_system
@@ -618,6 +739,38 @@ class FxPropertiesDialog(QDialog):
             str(self.quality_combo.currentData()),
             int(self.seed_spin.value()),
         )
+
+    def _emit_simulation_lab_create(self) -> None:
+        self.simulation_lab_create_requested.emit(
+            str(self.lab_preset_combo.currentData()),
+            str(self.lab_accuracy_combo.currentData()),
+            int(self.lab_seed_spin.value()),
+            int(self.lab_particle_count.value()),
+            str(self.lab_interaction_method.currentData()),
+            float(self.lab_opening_angle.value()),
+        )
+
+    def _simulation_lab_preset_changed(self) -> None:
+        preset_id = str(self.lab_preset_combo.currentData() or "")
+        preset = EXOTIC_SIMULATION_PRESETS.get(preset_id)
+        if preset is not None:
+            accuracy_index = self.lab_accuracy_combo.findData(preset.accuracy)
+            if accuracy_index >= 0:
+                self.lab_accuracy_combo.setCurrentIndex(accuracy_index)
+        defaults = {
+            "binary_star": 2, "asteroid_ring": 512, "accretion_disk": 1500,
+            "roche_breakup": 64, "stellar_merger": 2, "magnetosphere": 384,
+            "pic_double_layer": 96, "aurora_curtain": 160, "plasma_jet": 192,
+            "molecular_gas": 125, "ferrofluid_lab": 256,
+        }
+        self.lab_particle_count.setValue(defaults.get(preset_id, 512))
+
+    def _emit_simulation_lab_view(self) -> None:
+        self.simulation_lab_view_changed.emit({
+            "field_lines": bool(self.lab_field_lines.isChecked()),
+            "trails": bool(self.lab_trails.isChecked()),
+            "conservation": bool(self.lab_diagnostics.isChecked()),
+        })
 
     def _quality_changed(self) -> None:
         self._update_quality_details()

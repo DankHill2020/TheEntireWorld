@@ -30,6 +30,7 @@ if str(_ROOT) not in sys.path:
 from tech_connector.bridges.unreal.index_worker import _connect, index_asset, reindex_all
 from tech_connector.bridges.unreal.unreal_api_docs import UnrealApiDocsCache
 from tech_connector.bridges.unreal.unreal_scanner import UnrealScanner
+from tech_connector.bridges.session_authorization import validate_bridge_session
 
 try:
     from tech_connector.bridges.unreal.unreal_intelligence import build_context as build_local_context
@@ -188,6 +189,16 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if not self._authorized():
+            self._send_json(
+                {
+                    "success": False,
+                    "error": "Tech Connector activation is required for this Unreal service.",
+                    "code": "bridge_authorization_required",
+                },
+                status=403,
+            )
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -341,6 +352,16 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if not self._authorized():
+            self._send_json(
+                {
+                    "success": False,
+                    "error": "Tech Connector activation is required for this Unreal service.",
+                    "code": "bridge_authorization_required",
+                },
+                status=403,
+            )
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -539,6 +560,12 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(payload, default=str).encode("utf-8"))
+
+    def _authorized(self) -> bool:
+        return validate_bridge_session(
+            self.headers.get("X-Tech-Connector-Bridge-Session", ""),
+            "unreal",
+        )
 
     def _send_context(
         self, request_text: str, mode: str = "quick", max_tokens: int = 8000

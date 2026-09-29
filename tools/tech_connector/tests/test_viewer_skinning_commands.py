@@ -135,3 +135,53 @@ def test_viewer_secondary_motion_preset_uses_one_paintable_map_and_portable_skin
     assert len(preset["deformer_ids"]) == 2
     assert viewer.editable_rig_graph.skins[skin_id]["weight_overrides"] == original_weights
     assert paint_targets[-1][0] == f"secondary:{skin_id}:muscle_follow"
+
+
+def test_viewer_muscle_commands_add_paintable_tissue_and_drive_it_live() -> None:
+    viewer = _ViewerHarness()
+    root = _add_joint(viewer.editable_rig_graph, "Root", 0.0)
+    skin_id = viewer.editable_rig_graph.add_skin("HeroMesh", [root], skin_id="hero_skin")
+    viewer.editable_rig_graph.skins[skin_id]["weight_overrides"] = {"0": {root: 1.0}}
+    viewer.deformation_weight_map = lambda _key: DeformationWeightMap("muscle", [1.0, 0.5, 0.0])
+    viewer._select_deformation_paint_target = lambda _key, _label: None
+
+    added = ThreeDMeshPainterViewport._execute_tc_deformation_command(
+        viewer, "deformation.add_muscle",
+        {"skin_id": skin_id, "mesh_id": "HeroMesh", "contraction": 0.12, "bulge": 0.06},
+    )
+    activated = ThreeDMeshPainterViewport._execute_tc_deformation_command(
+        viewer, "deformation.set_muscle_activation",
+        {"deformer_id": added["deformer_id"], "activation": 0.35, "pose_values": {"elbow": 0.8}},
+    )
+
+    muscle = viewer.editable_rig_graph.deformers[added["deformer_id"]]
+    assert muscle["type"] == "muscle"
+    assert muscle["settings"]["muscle"]["contraction"] == 0.12
+    assert muscle["settings"]["activation"] == 0.35
+    assert muscle["settings"]["pose_values"] == {"elbow": 0.8}
+    assert activated["activation"] == 0.35
+    assert viewer.editable_rig_graph.skins[skin_id]["muscles"][0]["canonical_skin_preserved"]
+
+
+def test_viewer_blend_shape_commands_create_targets_and_update_channels() -> None:
+    viewer = _ViewerHarness()
+    target = {
+        "target_id": "smile", "name": "Smile", "weight": 0.0,
+        "minimum": -1.0, "maximum": 1.0,
+        "frames": [{"weight": 1.0, "deltas": {"1": [0.0, 0.25, 0.0]}}],
+        "mask": None, "driver": None, "animation_keys": [[1.0, 0.0], [10.0, 1.0]],
+    }
+    added = ThreeDMeshPainterViewport._execute_tc_deformation_command(
+        viewer, "deformation.add_blend_shape",
+        {"mesh_id": "HeroMesh", "vertex_count": 3, "targets": [target]},
+    )
+    updated = ThreeDMeshPainterViewport._execute_tc_deformation_command(
+        viewer, "deformation.set_blend_shape_weights",
+        {"deformer_id": added["deformer_id"], "weights": {"smile": 0.75}, "frame": 6.0},
+    )
+
+    deformer = viewer.editable_rig_graph.deformers[added["deformer_id"]]
+    assert deformer["type"] == "blend_shape"
+    assert added["target_ids"] == ["smile"]
+    assert updated["weights"] == {"smile": 0.75}
+    assert deformer["settings"]["targets"][0]["frames"][0]["deltas"] == {"1": [0.0, 0.25, 0.0]}

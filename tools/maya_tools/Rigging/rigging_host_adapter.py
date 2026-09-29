@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
+import sys
 from typing import Any
 
 from maya import cmds
@@ -20,6 +22,36 @@ from tech_connector.services.dcc.rigging_workspace_service import (
 
 
 HOST = "maya"
+
+
+def reload_dependencies() -> str:
+    """Refresh the complete Maya rig stack for bridge-driven operations."""
+    global create_rig, setup_hik
+
+    from maya_tools.Rigging import create_rig_core
+    from maya_tools.Rigging import create_rig_modules
+    from maya_tools.Rigging import enum_attrs
+    from maya_tools.Rigging import rig_template
+    from maya_tools.Rigging import skinning_utils
+    from maya_tools.Utilities import dag, joints
+
+    importlib.invalidate_caches()
+    for module in (enum_attrs, skinning_utils, joints, dag, rig_template, setup_hik, create_rig_core):
+        importlib.reload(module)
+
+    modules_name = "maya_tools.Rigging.create_rig_modules"
+    if (
+            sys.modules.get(modules_name) is not create_rig_modules
+            or getattr(create_rig_modules, "__name__", None) != modules_name
+    ):
+        sys.modules.pop(modules_name, None)
+        importlib.import_module(modules_name)
+    else:
+        importlib.reload(create_rig_modules)
+
+    create_rig = importlib.reload(create_rig)
+    setup_hik = sys.modules["maya_tools.Rigging.mocap.setup_hik"]
+    return str(getattr(create_rig_core, "RIG_BUILD_REVISION", "unknown"))
 
 
 def _result(ok: bool, capability: str, message: str = "", **kwargs: Any) -> dict[str, Any]:
@@ -267,8 +299,31 @@ def _op_rig_create_space_switch(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _op_rig_create_ribbon(payload: dict[str, Any]) -> dict[str, Any]:
-    result = create_rig.setup_surface_rig_with_drivers(list(payload["joint_chain"]), region=str(payload.get("module") or "ribbon"))
+    result = create_rig.setup_surface_rig_with_drivers(
+        list(payload["joint_chain"]),
+        loft_name=str(payload.get("name") or payload.get("module") or "surface"),
+        offset=max(0.001, abs(float(payload.get("width", 0.5) or 0.5))),
+        driver_follicle_indices=payload.get("driver_follicle_indices"),
+        side=str(payload.get("side") or "c"),
+        region=str(payload.get("region") or payload.get("module") or "other"),
+        root_parent=str(payload.get("parent") or "") or None,
+    )
     return _result(True, "rig.create_ribbon", "Created Maya ribbon/surface rig.", data={"maya_result": result})
+
+
+def _op_skin_surface_spatial_smooth_brush(payload: dict[str, Any]) -> dict[str, Any]:
+    from maya_tools.Rigging import skinning_utils
+
+    result = skinning_utils.activate_surface_spatial_smooth_brush(
+        radius=float(payload.get("radius", 1.0)),
+        strength=float(payload.get("strength", 0.5)),
+        iterations=int(payload.get("iterations", 1)),
+        max_influences=int(payload.get("max_influences", 8)),
+        normal_angle=float(payload.get("normal_angle", 120.0)),
+        max_neighbors=int(payload.get("max_neighbors", 96)),
+    )
+    return _result(True, "skin.surface_spatial_smooth_brush",
+                   "Activated Maya surface-spatial skin smoothing brush.", data=result)
 
 
 def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
@@ -282,6 +337,22 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
 def _op_rig_create_motion_path(payload: dict[str, Any]) -> dict[str, Any]:
     node = cmds.pathAnimation(payload["target"], curve=payload["curve"], follow=bool(payload.get("follow", True)))
     return _result(True, "rig.create_motion_path", "Created Maya motion path.", created_ids=[node])
+
+
+def _op_rig_create_curve_joints(payload: dict[str, Any]) -> dict[str, Any]:
+    result = create_rig.create_joints_along_curve(
+        payload["curve"],
+        joint_count=int(payload.get("joint_count", 5) or 5),
+        keep_attached=bool(payload.get("keep_attached", True)),
+        name_prefix=payload.get("name_prefix"),
+    )
+    return _result(
+        True,
+        "rig.create_curve_joints",
+        f"Created {len(result['joints'])} Maya joints along the curve.",
+        created_ids=list(result["joints"]),
+        data=result,
+    )
 
 
 def _op_rig_create_reverse_foot(payload: dict[str, Any]) -> dict[str, Any]:

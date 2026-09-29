@@ -63,7 +63,7 @@ def test_commands_author_and_run_a_complete_character_world_slice() -> None:
     assert dialogue["dialogue"]["line"] == "The gate is closed."
     assert CharacterWorldAsset.from_dict(world.to_dict()).intelligence.behavior_graphs["guard_duty"]
     assert "world_ai.sense" in engine_access_contract()["world_intelligence"]["commands"]
-    assert assess_capability(ADAPTIVE_SCENE_COMMANDS["world_ai.sense"]).verified_maturity == "interactive"
+    assert assess_capability(ADAPTIVE_SCENE_COMMANDS["world_ai.sense"]).verified_maturity == "production"
 
 
 def test_gameplay_commands_compose_validate_and_budget_a_game_without_genre_branching() -> None:

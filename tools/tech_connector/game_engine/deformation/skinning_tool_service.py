@@ -11,6 +11,8 @@ from pathlib import Path
 import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
+from tech_connector.game_engine.deformation.spatial_skin_smoothing_service import spatial_smooth_weight_rows
+
 
 SKIN_BIND_METHODS: dict[str, dict[str, Any]] = {
     "distance": {
@@ -482,6 +484,46 @@ def smooth_skin_weights(
     return SkinningOperationResult(True, "smooth_skin_weights", cluster.with_vertex_weights(rows), changed)
 
 
+def spatial_smooth_skin_weights(
+    cluster: SkinClusterState,
+    *,
+    positions: Sequence[Sequence[float]],
+    normals: Sequence[Sequence[float]] | None = None,
+    center: Sequence[float] | None = None,
+    radius: float = 1.0,
+    strength: float = 0.5,
+    iterations: int = 1,
+    target_indices: Iterable[int] | None = None,
+    normal_angle: float = 120.0,
+    max_neighbors: int = 96,
+    hardness: float = 0.5,
+) -> SkinningOperationResult:
+    """Apply the shared topology-independent smoothing kernel to a skin."""
+    rows, changed = spatial_smooth_weight_rows(
+        positions,
+        [row.weights for row in cluster.vertex_weights],
+        radius=radius,
+        strength=strength,
+        iterations=iterations,
+        target_indices=target_indices,
+        center=center,
+        normals=normals,
+        normal_angle=normal_angle,
+        max_neighbors=max_neighbors,
+        max_influences=cluster.max_influences,
+        locked_influences=(item.name for item in cluster.influences if item.locked),
+        hardness=hardness,
+    )
+    output = tuple(SkinVertexWeights(index, row) for index, row in enumerate(rows))
+    return SkinningOperationResult(
+        True,
+        "spatial_smooth_skin_weights",
+        replace(cluster, vertex_weights=output),
+        changed_vertices=changed,
+        metadata={"surface_spatial": True, "radius": float(radius), "center": tuple(center) if center else None},
+    )
+
+
 def normalize_skin_cluster(cluster: SkinClusterState) -> SkinningOperationResult:
     rows = tuple(
         SkinVertexWeights(
@@ -642,12 +684,17 @@ def export_skin_weights_payload(
     if vertex_positions is not None:
         payload["topology"] = skin_topology_identity(vertex_positions, faces or ())
     flesh = dict(cluster.metadata.get("flesh") or {})
+    muscles = list(cluster.metadata.get("muscles") or [])
     secondary_motion = list(cluster.metadata.get("secondary_motion") or [])
     secondary_presets = list(cluster.metadata.get("secondary_motion_presets") or [])
-    if flesh or secondary_motion or secondary_presets:
+    if flesh or muscles or secondary_motion or secondary_presets:
         payload["extensions"] = {}
         if flesh:
             payload["extensions"]["tech_connector.flesh.v1"] = flesh
+        if muscles:
+            payload["extensions"]["tech_connector.muscle.v1"] = {
+                "deformers": muscles, "canonical_skin_preserved": True,
+            }
         if secondary_motion or secondary_presets:
             payload["extensions"]["tech_connector.secondary_motion.v1"] = {
                 "deformers": secondary_motion,
@@ -657,6 +704,7 @@ def export_skin_weights_payload(
         payload["interchange"] = {
             "canonical_skin_weights": "authoritative",
             "secondary_flesh": "optional_extension_or_bake" if flesh else "none",
+            "muscle_tissue": "optional_extension_or_bake" if muscles else "none",
             "secondary_motion": "optional_extension_or_bake" if secondary_motion or secondary_presets else "none",
             "safe_without_extension": True,
         }
@@ -888,6 +936,7 @@ def skin_cluster_from_rig_graph(rig_graph: Any, skin_id: str) -> SkinClusterStat
             **dict(skin.get("metadata") or {}),
             "rig_graph_skin_id": str(skin_id),
             **({"flesh": dict(skin.get("fleshy") or {})} if skin.get("fleshy") else {}),
+            **({"muscles": list(skin.get("muscles") or [])} if skin.get("muscles") else {}),
             **({"secondary_motion": list(skin.get("secondary_motion") or [])} if skin.get("secondary_motion") else {}),
             **({"secondary_motion_presets": list(skin.get("secondary_motion_presets") or [])}
                if skin.get("secondary_motion_presets") else {}),

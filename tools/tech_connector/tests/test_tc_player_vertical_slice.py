@@ -240,7 +240,15 @@ def test_sparse_skin_sidecars_become_bounded_runtime_assets(tmp_path: Path) -> N
     assert manifest.count("\nASSET\t") >= 5
     assert "\trig_blob\t" in manifest
     assert "SKIN\tnative_fbx::character_rig::character_mesh\tnative_fbx::character_mesh\ttc.skeleton.scene\tlinear_blend_skinning\t1\t1\t1\tnative_fbx::root" in manifest
-    assert len(list(receipt.runtime_manifest.with_suffix(".assets").glob("*"))) == 5
+    runtime_assets = receipt.runtime_manifest.parent / "RuntimeAssets"
+    assert len(list(runtime_assets.glob("*"))) == 5
+    rig_sources = [
+        line.split("\t")[3]
+        for line in manifest.splitlines()
+        if line.startswith("ASSET\t") and "\trig_blob\t" in line
+    ]
+    assert rig_sources and all(source.startswith("RuntimeAssets/") for source in rig_sources)
+    assert all(not Path(source).is_absolute() for source in rig_sources)
 
 
 def test_native_skinned_character_acceptance_scene_compiles_end_to_end(tmp_path: Path) -> None:

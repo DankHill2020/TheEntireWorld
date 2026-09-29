@@ -42,10 +42,10 @@ LOCAL_NODE_TYPES = {
     "animation.curve",
 }
 LOCAL_CONSTRAINT_TYPES = {
-    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "motion_path", "ribbon",
+    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "spine_stretch", "motion_path", "ribbon",
     "geometry", "normal", "tangent",
 }
-LOCAL_DEFORMER_TYPES = {"linear_blend_skinning", "jiggle", "flesh"}
+LOCAL_DEFORMER_TYPES = {"linear_blend_skinning", "blend_shape", "muscle", "jiggle", "flesh"}
 
 
 @dataclass
@@ -366,6 +366,12 @@ def _evaluate_constraints(constraints: dict[str, dict[str, Any]], nodes: dict[st
             except Exception as exc:
                 result.errors.append(f"{constraint_id}: {exc}")
             continue
+        if kind == "spine_stretch":
+            try:
+                _solve_spine_stretch(constraint, nodes, result)
+            except Exception as exc:
+                result.errors.append(f"{constraint_id}: {exc}")
+            continue
         if kind in {"motion_path", "ribbon"}:
             try:
                 _solve_surface_or_path_constraint(kind, constraint, nodes, result)
@@ -539,6 +545,63 @@ def _evaluate_pose_readers(nodes: dict[str, dict[str, Any]], result: RigEvaluati
         attributes["output"] = output
 
 
+def _solve_spine_stretch(constraint: dict[str, Any], nodes: dict[str, dict[str, Any]], result: RigEvaluationResult) -> None:
+    """Apply extension-only spine length while leaving the zero blend untouched."""
+    settings = dict(constraint.get("settings") or {})
+    control_id = str(settings.get("stretch_control_id") or "")
+    attribute = str(settings.get("stretch_attribute") or "stretch")
+    stretch = max(0.0, min(1.0, float(
+        (result.attributes.get(control_id) or {}).get(attribute, 0.0) or 0.0
+    )))
+    if stretch <= 0.0:
+        return
+
+    joint_ids = [str(value) for value in settings.get("joint_ids") or []]
+    control_ids = [str(value) for value in settings.get("control_ids") or []]
+    if len(joint_ids) < 3 or len(control_ids) != len(joint_ids):
+        raise ValueError("spine stretch requires matching chains of at least three joints and controls")
+    if any(node_id not in result.world_matrices for node_id in control_ids):
+        raise ValueError("spine stretch controls are unavailable")
+
+    control_world = [_matrix(result.world_matrices[node_id]) for node_id in control_ids]
+    positions = [matrix[3, :3] for matrix in control_world]
+    current_lengths = [
+        float(np.linalg.norm(second - first))
+        for first, second in zip(positions[:-1], positions[1:])
+    ]
+    rest_lengths = [float(value) for value in settings.get("rest_lengths") or []]
+    if len(rest_lengths) != len(current_lengths):
+        total_rest = max(1.0e-8, float(settings.get("rest_length", sum(current_lengths)) or sum(current_lengths)))
+        total_current = max(1.0e-8, sum(current_lengths))
+        rest_lengths = [total_rest * (length / total_current) for length in current_lengths]
+    ratios = [
+        1.0 + (max(1.0, current / max(1.0e-8, rest)) - 1.0) * stretch
+        for current, rest in zip(current_lengths, rest_lengths)
+    ]
+
+    solved_world: dict[str, Any] = {}
+    for index, joint_id in enumerate(joint_ids):
+        if joint_id not in result.local_matrices:
+            raise ValueError(f"spine stretch joint is unavailable: {joint_id}")
+        desired_world = control_world[index]
+        translation, rotation, scale = _decompose_matrix(desired_world)
+        if index < len(ratios):
+            child_local = _matrix(result.local_matrices[joint_ids[index + 1]])
+            axis = int(np.argmax(np.abs(child_local[3, :3])))
+            scale[axis] *= ratios[index]
+        desired_world = _compose_matrix(translation, rotation, scale)
+        parent_id = str(nodes.get(joint_id, {}).get("dag_parent_id") or "")
+        parent_world = solved_world.get(parent_id)
+        if parent_world is None and parent_id in result.world_matrices:
+            parent_world = _matrix(result.world_matrices[parent_id])
+        if parent_world is None:
+            parent_world = np.eye(4)
+        local_matrix = desired_world @ np.linalg.inv(parent_world)
+        result.local_matrices[joint_id] = local_matrix.reshape(-1).tolist()
+        solved_world[joint_id] = desired_world
+    _rebuild_world_matrices(nodes, result)
+
+
 def _solve_two_bone_ik(constraint: dict[str, Any], nodes: dict[str, dict[str, Any]], result: RigEvaluationResult) -> None:
     settings = dict(constraint.get("settings") or {})
     start_id = str(settings.get("start_joint_id") or "")
@@ -567,6 +630,21 @@ def _solve_two_bone_ik(constraint: dict[str, Any], nodes: dict[str, dict[str, An
         target_vector = mid - start
         target_distance = float(np.linalg.norm(target_vector))
     direction = target_vector / max(target_distance, 1.0e-12)
+    stretch_control = str(settings.get("stretch_control_id") or "")
+    stretch_attribute = str(settings.get("stretch_attribute") or "stretch")
+    stretch = max(0.0, min(1.0, float(
+        (result.attributes.get(stretch_control) or {}).get(stretch_attribute, 0.0) or 0.0
+    )))
+    if stretch > 0.0:
+        rest_upper = max(1.0e-8, float(settings.get("rest_upper_length", upper_length) or upper_length))
+        rest_lower = max(1.0e-8, float(settings.get("rest_lower_length", lower_length) or lower_length))
+        # Stretch is bidirectional: moving the target beyond the rest reach
+        # extends both segments, while moving it toward the limb root
+        # compresses both segments in their original length proportion.
+        full_ratio = max(1.0e-8, target_distance / (rest_upper + rest_lower))
+        stretch_ratio = 1.0 + (full_ratio - 1.0) * stretch
+        upper_length = rest_upper * stretch_ratio
+        lower_length = rest_lower * stretch_ratio
     minimum = abs(upper_length - lower_length) + 1.0e-7
     maximum = upper_length + lower_length - 1.0e-7
     solved_distance = max(minimum, min(maximum, target_distance))

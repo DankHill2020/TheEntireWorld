@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from tech_connector.bridges.session_discovery import candidate_session_ports, discover_open_ports
+from tech_connector.bridges.session_authorization import bridge_session_token
 from tech_connector.dcc_intelligence.runtime import TTLMemoryCache, elapsed_ms, iso_now
 from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
 from tech_connector.services.jsonl_retention_service import append_jsonl_record
@@ -207,6 +208,7 @@ class UnrealBridge(DCCBridgeDelegateMixin):
                 "kwargs": kwargs,
                 "request_id": request_id,
                 "operation": operation or label or function_path,
+                "bridge_session": bridge_session_token("unreal"),
             }
         ).encode("utf-8")
         payload_size = self._payload_size_bytes(payload)
@@ -677,6 +679,22 @@ print(json.dumps(result))
         }
         normalized["fallback_from"] = failures
         return normalized
+
+    def export_animation_assets(
+        self, asset_paths: list[str] | tuple[str, ...], *, timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """Reflect selected Unreal animation assets into converter-ready JSON."""
+        paths = [str(value) for value in asset_paths]
+        script = (
+            "import json\n"
+            "from unreal_tools.animation_interchange_exporter import export_animation_assets\n"
+            f"print(json.dumps(export_animation_assets({paths!r})))\n"
+        )
+        response = self.execute_python(script, timeout=timeout, reset_globals=True)
+        data = response.get("data")
+        if response.get("ok") and isinstance(data, dict):
+            return {"ok": True, "data": data, "warnings": list(response.get("warnings") or [])}
+        return {"ok": False, "error": str(response.get("error") or "Unreal returned invalid animation export data."), "raw": response}
 
     def get_scene_snapshot_code(
         self,

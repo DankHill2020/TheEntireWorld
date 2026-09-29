@@ -22,7 +22,18 @@ def bind_runtime(namespace):
     :param namespace: globals from the public ``create_rig`` facade.
     :return: None.
     """
-    globals().update(namespace)
+    # Only publish runtime helpers. Copying module identity fields such as
+    # ``__name__`` and ``__spec__`` makes this module impersonate create_rig,
+    # which prevents importlib.reload() from finding it in sys.modules.
+    protected_names = {
+        "bind_runtime",
+        "_EXPORT_START",
+    }
+    globals().update({
+        name: value
+        for name, value in namespace.items()
+        if not name.startswith("__") and name not in protected_names
+    })
 
 
 _EXPORT_START = set(globals())

@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover
     np = None
 
 from tech_connector.game_engine.deformation.weight_map import DeformationWeightMap, Vec3, blend_deformation
+from tech_connector.game_engine.deformation.collision_projection import project_character_point
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ def evaluate_jiggle(target_positions: Sequence[Sequence[float]], influence_map: 
     for _ in range(substeps):
         for index, target in enumerate(targets):
             position = state.positions[index]
+            previous_position = position
             velocity = state.velocities[index]
             spring = _multiply(_scale(_subtract(target, position), settings.stiffness), axes)
             drag = _multiply(_scale(_subtract(velocity, target_velocities[index]), -settings.damping), axes)
@@ -119,7 +121,9 @@ def evaluate_jiggle(target_positions: Sequence[Sequence[float]], influence_map: 
                 velocity = _add(target_velocities[index], _scale(
                     _subtract(velocity, target_velocities[index]), 0.45
                 ))
-            position, velocity, contacts = _solve_colliders(position, velocity, settings, colliders)
+            position, velocity, contacts = _solve_colliders(
+                position, velocity, settings, colliders, previous_position=previous_position,
+            )
             state.collision_count += contacts
             state.positions[index], state.velocities[index] = position, velocity
     for index, target in enumerate(targets):
@@ -219,32 +223,12 @@ def _evaluate_numpy(targets, influence_map, state, settings, frame_dt):
     return [tuple(row) for row in blended.tolist()]
 
 
-def _solve_colliders(position, velocity, settings, colliders):
-    contacts = 0
-    for collider in colliders:
-        kind = str(collider.get("type") or "sphere").lower()
-        friction = max(0.0, float(collider.get("friction", settings.friction)))
-        restitution = max(0.0, float(collider.get("restitution", settings.restitution)))
-        if kind == "plane":
-            normal = _normalize(_vec3(collider.get("normal", (0, 1, 0))), (0, 1, 0))
-            distance = _dot(position, normal) - float(collider.get("offset", 0.0))
-            if distance < settings.collision_radius:
-                position, velocity, contacts = _add(position, _scale(normal, settings.collision_radius - distance)), _collision_velocity(velocity, normal, friction, restitution), contacts + 1
-        elif kind == "sphere":
-            center = _vec3(collider.get("center", (0, 0, 0)))
-            radius, delta = max(0.0, float(collider.get("radius", 1.0))) + settings.collision_radius, _subtract(position, center)
-            distance = _length(delta)
-            if distance < radius:
-                normal = _normalize(delta, (0, 1, 0))
-                position, velocity, contacts = _add(center, _scale(normal, radius)), _collision_velocity(velocity, normal, friction, restitution), contacts + 1
-    return position, velocity, contacts
-
-
-def _collision_velocity(velocity, normal, friction, restitution):
-    speed = _dot(velocity, normal)
-    normal_velocity = _scale(normal, speed)
-    return _add(_scale(normal_velocity, -restitution if speed < 0 else 1),
-                _scale(_subtract(velocity, normal_velocity), max(0.0, 1.0 - friction)))
+def _solve_colliders(position, velocity, settings, colliders, *, previous_position=None):
+    return project_character_point(
+        position, velocity, radius=settings.collision_radius,
+        friction=settings.friction, restitution=settings.restitution,
+        colliders=colliders, previous_position=previous_position,
+    )
 
 
 def _vec3(value):

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from tech_connector.ui.image_viewer.editor import LayerStack, ImageLayer
 from tech_connector.ui.design_system import component_stylesheet, set_ui_role
 from tech_connector.ui.icons import configure_button, icon
+from tech_connector.ui.ux_polish import ContextRecipeCard, WorkflowRecipe, apply_property_guidance, apply_widget_discoverability
 
 
 def playback_frame_for_elapsed(
@@ -155,8 +156,18 @@ class AnimationTimelineBar(QFrame):
         self._build_ui()
 
     def _build_ui(self):
-        outer_layout = QHBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.workflow_guide = ContextRecipeCard(WorkflowRecipe(
+            "Animation quick guide",
+            ("Draw or pose the current frame", "Duplicate it", "Edit the change", "Scrub or Play", "Export"),
+            preview="Onion skin shows neighboring frames as transparent alignment guides.",
+            output="Spritesheet export preserves frame order; FPS controls playback timing rather than artwork.",
+            tip="Block the motion at 12 FPS, then add in-between frames only where the action needs more detail.",
+        ), self, expanded=False)
+        outer_layout.addWidget(self.workflow_guide)
 
         toolbar = QWidget(self)
         layout = QHBoxLayout(toolbar)
@@ -243,6 +254,14 @@ class AnimationTimelineBar(QFrame):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setMinimumWidth(0)
         outer_layout.addWidget(scroll)
+        apply_property_guidance(self.scrub_slider, "Drag to move through frames without changing artwork.",
+                                safe_start="Pause playback before making precise edits.")
+        apply_property_guidance(self.fps_combo, "Sets how quickly frames play and how exported timing is interpreted.",
+                                safe_start="12 FPS for blocking, 24 FPS for film-style finished motion.")
+        apply_property_guidance(self.fps_spin, "Custom playback frames per second.",
+                                safe_start="Use a preset unless the delivery format requires a specific rate.",
+                                consequence="Changing FPS changes timing, not the number of frames.")
+        apply_widget_discoverability(self)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(320, super().minimumSizeHint().height())

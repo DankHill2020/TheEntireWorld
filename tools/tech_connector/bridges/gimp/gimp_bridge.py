@@ -11,6 +11,10 @@ from typing import Any
 
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo
+from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
+    embedded_bridge_authorization_source,
+)
 from tech_connector.bridges.session_discovery import (
     candidate_session_ports,
     discover_open_ports,
@@ -20,7 +24,7 @@ from tech_connector.models.constants import APP_DIR, TOOLS_ROOT
 
 PLUGIN_FILENAME = "the_entire_world_gimp_bridge.py"
 
-PLUGIN_SOURCE_CODE = """# GIMP Python-Fu plugin for Tech Connector direct bridge.
+PLUGIN_SOURCE_CODE = embedded_bridge_authorization_source("gimp") + """# GIMP Python-Fu plugin for Tech Connector direct bridge.
 import json
 import os
 import socket
@@ -62,6 +66,14 @@ def _run_server():
                 conn.close()
                 continue
             request = json.loads(data.decode("utf-8", errors="replace"))
+            if not _tech_connector_bridge_authorized(request):
+                conn.sendall(json.dumps({
+                    "ok": False,
+                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "code": "bridge_authorization_required",
+                }).encode("utf-8"))
+                conn.close()
+                continue
             code = request.get("code", "")
             
             exec_scope = {}
@@ -124,7 +136,12 @@ class GimpBridge:
         target_port = port or self.find_port(host)
         if not target_port:
             return {"ok": False, "error": "No live GIMP Python-Fu bridge was found."}
-        payload = json.dumps({"code": script_code}).encode("utf-8")
+        payload = json.dumps(
+            {
+                "code": script_code,
+                "bridge_session": bridge_session_token("gimp"),
+            }
+        ).encode("utf-8")
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(5.0)

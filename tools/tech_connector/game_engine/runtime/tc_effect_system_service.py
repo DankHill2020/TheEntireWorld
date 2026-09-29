@@ -8,7 +8,10 @@ import math
 import random
 from typing import Any
 
-from tech_connector.game_engine.runtime.tc_simulation_service import PlaneCollider, SimulationParticle, SimulationWorld
+from tech_connector.game_engine.runtime.tc_simulation_service import (
+    PlaneCollider, SimulationParticle, SimulationWorld, create_soft_body_from_geometry,
+)
+from tech_connector.game_engine.runtime.tc_ocean_surface_service import create_ocean_surface
 from tech_connector.game_engine.runtime.tc_fx_workflow_service import (
     FxPerformanceContract,
     build_fx_workflow_plan,
@@ -150,8 +153,22 @@ def module(module_type: str, phase: str = "update", **parameters: Any) -> Effect
 def create_effect_world(preset: str, *, quality: str = "high", seed: int = 1) -> SimulationWorld:
     quality_key = str(quality or "high").strip().lower()
     profile = QUALITY_PROFILES.get(quality_key, QUALITY_PROFILES["high"])
-    world = SimulationWorld(fields=[], substeps=max(1, int(profile.solver_substeps)), constraint_iterations=1, self_collision=False)
-    world.plane_colliders.append(PlaneCollider())
+    key = str(preset or "sparks").strip().lower().replace(" ", "_")
+    if key == "jello":
+        vertices = ((-.5, .55, -.5), (.5, .55, -.5), (.5, 1.55, -.5), (-.5, 1.55, -.5),
+                    (-.5, .55, .5), (.5, .55, .5), (.5, 1.55, .5), (-.5, 1.55, .5))
+        faces = ((0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 4, 7), (0, 7, 3),
+                 (1, 2, 6), (1, 6, 5), (0, 1, 5), (0, 5, 4), (3, 7, 6), (3, 6, 2))
+        world = create_soft_body_from_geometry(vertices, faces, material="jello")
+        if quality_key in {"low", "medium", "mobile", "realtime", "retro", "stylized", "toony"}:
+            world.substeps = 3 if quality_key not in {"mobile", "retro"} else 2
+            world.constraint_iterations = 6 if quality_key not in {"mobile", "retro"} else 4
+        world.plane_colliders.append(PlaneCollider())
+    else:
+        world = SimulationWorld(fields=[], substeps=max(1, int(profile.solver_substeps)), constraint_iterations=1, self_collision=False)
+        if key not in {"ocean", "storm_ocean"}: world.plane_colliders.append(PlaneCollider())
+        if key in {"ocean", "storm_ocean"}:
+            world.deformable_surfaces.append(create_ocean_surface("storm" if key == "storm_ocean" else "open_ocean", seed=seed))
     world.effect_system = create_effect_preset(preset, quality=quality_key, seed=seed)
     return world
 
@@ -186,6 +203,9 @@ def create_effect_preset(preset: str, *, quality: str = "high", seed: int = 1) -
         "avalanche": _avalanche,
         "earthquake": _earthquake,
         "aurora": _aurora,
+        "jello": _jello,
+        "ocean": _ocean,
+        "storm_ocean": _storm_ocean,
     }
     if key not in builders:
         raise KeyError(f"Unknown TC effect preset: {preset}")
@@ -215,7 +235,7 @@ def effect_preset_names() -> list[str]:
         "refractive_bubbles", "heat_haze",
         "rain", "snow", "dust", "fog", "clouds", "sandstorm", "hurricane", "volcano",
         "mudslide", "avalanche", "earthquake", "aurora", "disintegration", "shield_impact",
-        "tornado", "plasma_arc",
+        "tornado", "plasma_arc", "jello", "ocean", "storm_ocean",
     ]
 
 
@@ -994,6 +1014,36 @@ def _earthquake() -> EffectSystem:
     dust = _emitter_template("quake_dust", "Ground Dust", burst_count=450, duration=4, spawn_shape={"type": "box", "center": (0, .08, 0), "extent": (3, .05, 3)}, modules=[module("initialize", "spawn", lifetime=(1.5, 5), size=(.8, 2.8), color=(.42, .34, .25, .55), radius=.03), module("add_velocity", "spawn", velocity=(0, .7, 0), random_speed=(0, 1.3)), module("gravity", vector=(0, -2, 0)), module("curl_noise", strength=1, frequency=1)], renderer={"type": "volume_sprite", "blend": "alpha"})
     rubble = _emitter_template("rubble", "Rubble", burst_count=110, duration=3, spawn_shape={"type": "box", "center": (0, .15, 0), "extent": (2.5, .1, 2.5)}, modules=[module("initialize", "spawn", lifetime=(2, 6), size=(.5, 1.8), color=(.3, .27, .22, 1), radius=.025), module("add_velocity", "spawn", velocity=(0, 1.4, 0), random_speed=(.2, 2)), module("gravity", vector=(0, -9.81, 0)), module("rotation", "spawn", rate=(-10, 10)), module("surface_interaction", "spawn", energy=4, radius=.05, thickness=.1)], renderer={"type": "mesh", "asset_id": "rubble"})
     return EffectSystem("tcfx.earthquake", "Earthquake", [dust, rubble], parameters={"disaster_type": "earthquake", "camera_shake": 1.0, "ground_wave": {"amplitude": .12, "frequency": 7.0, "duration": 4.0}})
+
+
+def _jello() -> EffectSystem:
+    surface = _emitter_template(
+        "jello_surface", "Jello Surface", enabled=False, duration=60, max_particles=8,
+        modules=[module("initialize", "spawn", lifetime=(60, 60), size=(1, 1), color=(.25, .75, 1, .72), radius=.08)],
+        renderer={"type": "mesh", "mesh": "runtime://softbody/surface", "blend": "alpha", "material_mode": "subsurface"},
+    )
+    return EffectSystem(
+        "tcfx.jello", "Soft Body Jello", [surface],
+        parameters={"solver_stiffness": .65, "solver_damping": .08, "solver_pressure": 1.0, "solver_plasticity": 0.0},
+    )
+
+
+def _ocean() -> EffectSystem:
+    surface = _emitter_template(
+        "ocean_surface", "Ocean Surface", enabled=False, duration=3600, max_particles=1,
+        modules=[module("initialize", "spawn", lifetime=(3600, 3600), size=(1, 1), color=(.035, .22, .36, .92), radius=.1)],
+        renderer={"type": "mesh", "mesh": "runtime://ocean/patch", "blend": "opaque", "material_mode": "water"},
+    )
+    return EffectSystem(
+        "tcfx.ocean", "Ocean Surface", [surface],
+        parameters={"solver_wind_speed": 12.0, "solver_choppiness": 1.0, "solver_fetch": 10000.0, "solver_foam_threshold": .55},
+    )
+
+
+def _storm_ocean() -> EffectSystem:
+    system = _ocean(); system.system_id = "tcfx.storm_ocean"; system.name = "Storm Ocean"
+    system.parameters.update({"solver_wind_speed": 28.0, "solver_choppiness": 1.8, "solver_fetch": 80000.0, "solver_foam_threshold": .35})
+    return system
 
 
 def _aurora() -> EffectSystem:

@@ -116,4 +116,68 @@ TC_GPU_COMPUTE_API int tc_gpu_session_readback_particles(
 
 TC_GPU_COMPUTE_API std::uint32_t tc_gpu_session_particle_count(tc_gpu_session_handle session);
 
+TC_GPU_COMPUTE_API int tc_gpu_session_upload_physics_fields(
+    tc_gpu_session_handle session,
+    const float* field_records,
+    std::uint32_t field_count,
+    float simulation_time,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API std::uint32_t tc_gpu_session_physics_field_count(
+    tc_gpu_session_handle session);
+
+TC_GPU_COMPUTE_API int tc_gpu_session_upload_mesh_bvh(
+    tc_gpu_session_handle session,
+    const float* node_bounds,
+    const std::uint32_t* node_metadata,
+    std::uint32_t node_count,
+    const float* triangle_vertices,
+    std::uint32_t triangle_count,
+    float friction,
+    float restitution,
+    float velocity_x,
+    float velocity_y,
+    float velocity_z,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API int tc_gpu_session_dispatch_mesh_bvh(
+    tc_gpu_session_handle session,
+    float delta_time,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API std::uint32_t tc_gpu_session_mesh_triangle_count(
+    tc_gpu_session_handle session);
+
+TC_GPU_COMPUTE_API int tc_gpu_session_dispatch_self_collision(
+    tc_gpu_session_handle session,
+    float cell_size,
+    float delta_time,
+    std::uint32_t iteration_count,
+    std::uint32_t maximum_bucket_visits,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API int tc_gpu_session_upload_distance_constraints(
+    tc_gpu_session_handle session,
+    const std::uint32_t* endpoint_pairs,
+    const float* rest_compliance_weights,
+    std::uint32_t constraint_count,
+    const std::uint32_t* color_offsets,
+    std::uint32_t color_count,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API int tc_gpu_session_dispatch_distance_constraints(
+    tc_gpu_session_handle session,
+    float delta_time,
+    std::uint32_t iteration_count,
+    char* message,
+    std::size_t message_size);
+
+TC_GPU_COMPUTE_API std::uint32_t tc_gpu_session_distance_constraint_count(
+    tc_gpu_session_handle session);
+
 }

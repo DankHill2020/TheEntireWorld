@@ -43,6 +43,16 @@ from tech_connector.game_engine.authoring.game_experience_service import (
     create_game_experience_profile,
     validate_game_experience,
 )
+from tech_connector.game_engine.authoring.game_template_service import (
+    GAME_TEMPLATE_RECEIPT_SCHEMA,
+    GAME_TEMPLATE_SCHEMA,
+    PLAY_READINESS_SCHEMA,
+    GameTemplateReceipt,
+    GameTemplateService,
+    GameTemplateVariant,
+    available_game_templates,
+    resolve_game_template,
+)
 from tech_connector.game_engine.authoring.presentation_profile_service import (
     CameraPresentationPolicy,
     PresentationProfile,
@@ -81,6 +91,7 @@ from tech_connector.game_engine.authoring.engine_graph_program_service import (
 from tech_connector.game_engine.authoring.procedural_generation_service import (
     ProceduralGraph,
     ProceduralGraphCooker,
+    ProceduralBuildQueue,
     create_scatter_graph,
 )
 from tech_connector.game_engine.authoring.procedural_spatial_service import (
@@ -115,6 +126,14 @@ from tech_connector.game_engine.authoring.procedural_mesh_service import (
     mesh_to_data,
     transform_mesh,
 )
+from tech_connector.game_engine.authoring.procedural_geometry_advanced_service import (
+    FIELD_TYPES, GEOMETRY_DOMAINS, GeometryField, domain_size, mesh_edges,
+)
+from tech_connector.game_engine.authoring.procedural_graph_tooling_service import (
+    GPU_CAPABLE_OPERATIONS, ProceduralExecutionPlan, ProceduralExecutionStage,
+    ProceduralNodeGroup, ProceduralSimulationSession, build_procedural_execution_plan,
+    instantiate_node_group,
+)
 
 __all__ = [
     "CharacterMemory",
@@ -142,6 +161,12 @@ __all__ = [
     "WorldIntelligenceAsset",
     "ExperienceAxes",
     "GameExperienceProfile",
+    "GameTemplateReceipt",
+    "GameTemplateService",
+    "GameTemplateVariant",
+    "GAME_TEMPLATE_RECEIPT_SCHEMA",
+    "GAME_TEMPLATE_SCHEMA",
+    "PLAY_READINESS_SCHEMA",
     "GameplayModule",
     "LearningObjective",
     "SimulationPolicy",
@@ -167,13 +192,27 @@ __all__ = [
     "SplinePath",
     "ProceduralGraph",
     "ProceduralGraphCooker",
+    "ProceduralBuildQueue",
     "ProceduralTaskCooker",
     "ProceduralTaskGraph",
+    "FIELD_TYPES",
+    "GEOMETRY_DOMAINS",
+    "GeometryField",
+    "domain_size",
+    "mesh_edges",
+    "GPU_CAPABLE_OPERATIONS",
+    "ProceduralExecutionPlan",
+    "ProceduralExecutionStage",
+    "ProceduralNodeGroup",
+    "ProceduralSimulationSession",
+    "build_procedural_execution_plan",
+    "instantiate_node_group",
     "create_take",
     "attach_character_world",
     "attach_engine_graph_program",
     "attach_game_experience",
     "available_game_types",
+    "available_game_templates",
     "available_visual_styles",
     "available_graph_operations",
     "build_gameplay_runtime_budget",
@@ -193,6 +232,7 @@ __all__ = [
     "presentation_summary",
     "update_presentation_control",
     "validate_game_experience",
+    "resolve_game_template",
     "validate_presentation_profile",
     "validate_engine_graph_program",
     "create_scatter_graph",

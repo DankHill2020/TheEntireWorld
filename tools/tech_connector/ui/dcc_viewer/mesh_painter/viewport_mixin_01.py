@@ -450,6 +450,8 @@ class ThreeDMeshPainterViewportMixin01:
 
         self._build_ui()
         self._apply_accessibility_metadata()
+        from tech_connector.ui.ux_polish import apply_3d_viewer_ux_polish
+        apply_3d_viewer_ux_polish(self)
         from tech_connector.game_engine.integration.active_viewer_command_service import register_active_viewer
         register_active_viewer(self)
         self.simulation_timer = QTimer(self)
@@ -1128,6 +1130,8 @@ class ThreeDMeshPainterViewportMixin01:
         if dialog is None:
             dialog = FxPropertiesDialog(parent=self)
             dialog.create_requested.connect(self._create_fx_from_properties)
+            dialog.simulation_lab_create_requested.connect(self._create_exotic_simulation_from_properties)
+            dialog.simulation_lab_view_changed.connect(self._set_exotic_simulation_view)
             dialog.parameter_changed.connect(self._set_fx_property_from_dialog)
             dialog.renderer_changed.connect(self._set_fx_renderer_from_dialog)
             dialog.solo_emitter_requested.connect(self._solo_fx_emitter_from_dialog)
@@ -1156,6 +1160,32 @@ class ThreeDMeshPainterViewportMixin01:
         if dialog is not None:
             dialog.set_effect_system(self.simulation_world.effect_system)
             dialog.set_previewing(True)
+
+    def _create_exotic_simulation_from_properties(
+        self, preset: str, accuracy: str, seed: int, particle_count: int,
+        interaction_method: str, opening_angle: float,
+    ) -> None:
+        from tech_connector.game_engine.runtime.tc_exotic_simulation_service import create_exotic_simulation
+
+        self.simulation_world = create_exotic_simulation(
+            str(preset), seed=int(seed), particle_count=int(particle_count)
+        )
+        self.simulation_world.scale.accuracy_mode = str(accuracy)
+        self.simulation_world.interactions.long_range_method = str(interaction_method)
+        self.simulation_world.interactions.opening_angle = float(opening_angle)
+        self.simulation_initial_world = copy.deepcopy(self.simulation_world)
+        self._exotic_simulation_view = {"field_lines": True, "trails": True, "conservation": True}
+        self.set_simulation_playing(True)
+        dialog = getattr(self, "_fx_properties_dialog", None)
+        if dialog is not None:
+            dialog.set_previewing(True)
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+
+    def _set_exotic_simulation_view(self, settings: dict[str, Any]) -> None:
+        self._exotic_simulation_view = dict(settings or {})
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
 
     def _set_fx_property_from_dialog(self, path: str, value: Any) -> None:
         self.create_simulation_preset_from_payload(
@@ -1575,7 +1605,12 @@ class ThreeDMeshPainterViewportMixin01:
         paint_hdr.addWidget(self.motion_btn)
 
         self.skinning_btn = QPushButton(HEPHAESTUS_SECTION_HAMMER)
-        self.skinning_btn.setToolTip("Hephaestus-style sculpting, deformation, and weight-painting tools for TC-native meshes and bridged DCC selections.")
+        self.skinning_btn.setToolTip(
+            "Skinning & deformation\n\n1. Select a skinned mesh or deformer in the Outliner.\n"
+            "2. Bind or verify portable skin weights.\n3. Add muscle, jiggle, or fleshy collision as non-destructive layers.\n"
+            "4. Preview and paint influence.\n5. Export canonical skin weights plus supported deformer data."
+        )
+        from tech_connector.ui.ux_polish import apply_action_guidance
         skinning_menu = QMenu(self.skinning_btn)
         bind_menu = skinning_menu.addMenu("Bind Skin")
         bind_menu.addAction("Heat Map Bind", lambda: self.run_skinning_command_from_ui("skinning.bind_skin", {"bind_method": "heat"}))
@@ -1591,9 +1626,30 @@ class ThreeDMeshPainterViewportMixin01:
         skinning_menu.addAction("Copy Weights", lambda: self.preview_skinning_route("skinning.copy_weights", "Copy Weights"))
         skinning_menu.addAction("Transfer Weights...", lambda: self.preview_skinning_route("skinning.transfer_weights", "Transfer Weights"))
         skinning_menu.addSeparator()
-        skinning_menu.addAction("Paint Selected Deformer Influence", self.paint_selected_deformer_influence)
-        skinning_menu.addAction("Add Jiggle To Selected Skin / Deformer", self.add_jiggle_to_selected_deformer)
-        skinning_menu.addAction("Enable Fleshy Collision On Selected Skin", self.enable_fleshy_selected_skin)
+        paint_deformer_action = skinning_menu.addAction("Paint Selected Deformer Influence", self.paint_selected_deformer_influence)
+        muscle_action = skinning_menu.addAction("Add Muscle Tissue To Selected Skin", self.add_muscle_to_selected_skin)
+        jiggle_action = skinning_menu.addAction("Add Jiggle To Selected Skin / Deformer", self.add_jiggle_to_selected_deformer)
+        flesh_action = skinning_menu.addAction("Enable Fleshy Collision On Selected Skin", self.enable_fleshy_selected_skin)
+        apply_action_guidance(
+            paint_deformer_action, "Paint where the selected secondary deformer affects the mesh.",
+            requires="Select a muscle, jiggle, or flesh deformer in the Outliner.",
+            result="Only the deformer influence map changes; base skin weights remain portable.",
+        )
+        apply_action_guidance(
+            muscle_action, "Layer pose-driven muscle tissue after the selected skin cluster.",
+            requires="Select a skin cluster with valid canonical weights.",
+            result="Creates a removable muscle layer without replacing the transferable skin cluster.",
+        )
+        apply_action_guidance(
+            jiggle_action, "Add damped secondary motion to selected skin or deformation output.",
+            requires="Select a skin cluster or deformer.",
+            result="Creates an editable jiggle layer; export can bake it when the destination lacks an equivalent.",
+        )
+        apply_action_guidance(
+            flesh_action, "Add collision-responsive soft tissue after the selected skin cluster.",
+            requires="Select a skin cluster; collider geometry should use the same scene scale.",
+            result="Canonical weights remain intact while flesh motion can stay procedural or bake for export.",
+        )
         secondary_menu = skinning_menu.addMenu("Add Secondary Motion Preset")
         for preset_id, label in (
             ("subtle_skin", "Subtle Skin"), ("soft_tissue", "Soft Tissue"),
@@ -1895,9 +1951,16 @@ class ThreeDMeshPainterViewportMixin01:
         paint_hdr.addWidget(self.look_btn)
 
         rigging_btn = QPushButton(HEPHAESTUS_SECTION_FORGE)
-        rigging_btn.setToolTip("Open Charon rigging tools or attach selected controls to the active mesh face.")
+        rigging_btn.setToolTip(
+            "Rigging\n\nSelect a skeleton, control, or mesh first. Build or constrain the rig, test the full motion range, "
+            "then export the skeleton, skin weights, animation, and any baked unsupported layers."
+        )
         rigging_menu = QMenu(rigging_btn)
-        rigging_menu.addAction("Open Rigging Workspace", self.open_rigging_workspace)
+        open_rigging_action = rigging_menu.addAction("Open Rigging Workspace", self.open_rigging_workspace)
+        apply_action_guidance(
+            open_rigging_action, "Open the guided skeleton, controls, constraints, skin, and export workspace.",
+            result="The existing editable rig graph is opened; scene data is not replaced.",
+        )
         rigging_menu.addSeparator()
         rigging_menu.addAction(
             "Constrain Selected Control To Face",
@@ -1963,7 +2026,10 @@ class ThreeDMeshPainterViewportMixin01:
         self.paint_target_combo.setToolTip("Choose what the brush edits. Deformation maps use blue for upstream and green for fully driven.")
         self.paint_target_combo.addItem("Color", "color")
         self.paint_target_combo.addItem("Skin Output", "skin_output")
-        self.paint_target_combo.addItem("Simulation Drive", "simulation_drive")
+        self.paint_target_combo.addItem("Skin Spatial Smooth", "skin_spatial_smooth")
+        self.paint_target_combo.addItem("Skin ↔ Simulation", "cloth_skin_simulation")
+        self.paint_target_combo.addItem("Cloth Animation Drive", "cloth_animation_drive")
+        self.paint_target_combo.addItem("Cloth Max Distance", "cloth_max_distance")
         self.paint_target_combo.addItem("Emission Source", "emission_source")
         self.paint_target_combo.addItem("Jiggle", "jiggle")
         self.paint_target_combo.currentIndexChanged.connect(self.change_paint_target)
@@ -2039,6 +2105,7 @@ class ThreeDMeshPainterViewportMixin01:
         self.scene_splitter.setStyleSheet("QSplitter::handle { background:#13202c; }")
 
         self.scene_outliner = QTreeWidget(self)
+        self.scene_outliner.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.scene_outliner.setHeaderLabels(["Scene Element", "Type", "State"])
         self.scene_outliner.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.scene_outliner.setMinimumWidth(220)
@@ -2117,18 +2184,26 @@ class ThreeDMeshPainterViewportMixin01:
         self.instance_visibility_section.setVisible(False)
         details_layout.addWidget(self.instance_visibility_section)
         texture_buttons = QHBoxLayout()
-        bind_base_btn = QPushButton("Bind Base")
-        bind_base_btn.setToolTip("Bind a baked/base-color texture file to the selected proxy instance.")
+        bind_base_btn = QPushButton("Bind Base / Media")
+        bind_base_btn.setToolTip("Apply a still image, animated GIF/APNG, or video as the selected proxy's base-color texture.")
         bind_base_btn.clicked.connect(lambda: self.bind_texture_to_selected_proxy("base_color"))
         texture_buttons.addWidget(bind_base_btn)
         bind_normal_btn = QPushButton("Bind Normal")
-        bind_normal_btn.setToolTip("Bind a normal texture file to the selected proxy instance.")
+        bind_normal_btn.setToolTip("Apply a still or animated source as the selected proxy's normal texture.")
         bind_normal_btn.clicked.connect(lambda: self.bind_texture_to_selected_proxy("normal"))
         texture_buttons.addWidget(bind_normal_btn)
         bind_roughness_btn = QPushButton("Bind Rough")
-        bind_roughness_btn.setToolTip("Bind a roughness texture file to the selected proxy instance.")
+        bind_roughness_btn.setToolTip("Apply a still or animated source as the selected proxy's roughness texture.")
         bind_roughness_btn.clicked.connect(lambda: self.bind_texture_to_selected_proxy("roughness"))
         texture_buttons.addWidget(bind_roughness_btn)
+        media_settings_btn = QPushButton("Playback")
+        media_settings_btn.setToolTip("Edit looping, autoplay, speed, trim, and timeline synchronization for animated texture sources.")
+        media_settings_btn.clicked.connect(self.edit_selected_proxy_media_playback)
+        texture_buttons.addWidget(media_settings_btn)
+        shader_preset_btn = QPushButton("Procedural")
+        shader_preset_btn.setToolTip("Apply an editable procedural shader preset such as a ramp, fractal marble, lava, Voronoi cells, or water ripples.")
+        shader_preset_btn.clicked.connect(self.apply_selected_proxy_procedural_shader_preset)
+        texture_buttons.addWidget(shader_preset_btn)
         details_layout.addLayout(texture_buttons)
         left_panel_layout.addWidget(self.instance_details_panel)
         self.scene_splitter.addWidget(left_panel)
@@ -2187,6 +2262,7 @@ class ThreeDMeshPainterViewportMixin01:
         self.anim_timeline = AnimationTimelineBar(AnimationFrameSequence(), parent=self)
         self.anim_timeline.setVisible(True)
         self.anim_timeline.frame_changed.connect(self.on_timeline_frame_changed)
+        self.anim_timeline.playback_toggled.connect(self.on_media_playback_toggled)
         root.addWidget(self.anim_timeline)
         self.undo_shortcut = QShortcut(QKeySequence.Undo, self)
         self.undo_shortcut.activated.connect(self.undo_viewer_action)

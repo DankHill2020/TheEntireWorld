@@ -19,6 +19,16 @@ from tech_connector.services.license_entitlement_service import make_license_tok
 
 
 class HeadlessAPITests(unittest.TestCase):
+    def setUp(self):
+        self.legacy_environment = patch.dict(
+            "os.environ",
+            {"TECH_CONNECTOR_ALLOW_LEGACY_ENTITLEMENT": "1"},
+        )
+        self.legacy_environment.start()
+
+    def tearDown(self):
+        self.legacy_environment.stop()
+
     def _settings(self, secret: str, tier: str = "personal") -> dict:
         return {
             "tech_connector_require_login": True,
@@ -750,7 +760,9 @@ class HeadlessAPITests(unittest.TestCase):
         for term in (
             "settings",
             "project_root",
-            "license_secret",
+            "licensing_context",
+            "commercial_use",
+            "app_major_version",
             "require_entitlement",
             "entry_point",
             "extra_roots",

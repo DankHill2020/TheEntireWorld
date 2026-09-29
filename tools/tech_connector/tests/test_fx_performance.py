@@ -148,6 +148,8 @@ def test_gpu_stream_culls_distant_particles_before_upload() -> None:
     assert geometry.source_count == 2
     assert geometry.particle_count == 1
     assert geometry.dropped_count == 1
+    assert geometry.last_stream_receipt["schema"] == "tech_connector.simulation_render_stream.v1"
+    assert geometry.last_stream_receipt["consumer_upload_required"]
 
 
 def test_interactive_burst_emitter_keeps_emitting_while_manipulated() -> None:

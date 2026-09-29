@@ -34,6 +34,12 @@ Rectangle {
     property url metalnessTexture: ""
     property url emissionTexture: ""
     property url opacityTexture: ""
+    property var mediaTextureDescriptors: ({})
+    property real mediaTimelineSeconds: 0.0
+    property bool mediaTimelinePlaying: false
+    property bool proceduralTextureReady: false
+    property bool proceduralNativeReady: false
+    property url proceduralFragmentShader: ""
     property color materialEmission: "#000000"
     property url environmentTexture: ""
     property real environmentExposure: 1.0
@@ -51,6 +57,27 @@ Rectangle {
     property real effectClearcoat: 0.45
     property color effectAttenuationColor: "#b8e8ff"
     property real effectAttenuationDistance: 2.0
+
+    function mediaDescriptor(channel, fallbackUrl) {
+        let descriptor = mediaTextureDescriptors && mediaTextureDescriptors[channel]
+            ? mediaTextureDescriptors[channel] : null
+        return descriptor || {
+            path: fallbackUrl,
+            source_type: "image",
+            playback: {}
+        }
+    }
+
+    MediaTextureSource { id: baseColorMedia; x: -10000; descriptor: root.mediaDescriptor("base_color", root.baseColorTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    MediaTextureSource { id: normalMedia; x: -10000; descriptor: root.mediaDescriptor("normal", root.normalTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    MediaTextureSource { id: roughnessMedia; x: -10000; descriptor: root.mediaDescriptor("specular_roughness", root.roughnessTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    MediaTextureSource { id: metalnessMedia; x: -10000; descriptor: root.mediaDescriptor("metalness", root.metalnessTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    MediaTextureSource { id: emissionMedia; x: -10000; descriptor: root.mediaDescriptor("emission_color", root.emissionTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    MediaTextureSource { id: opacityMedia; x: -10000; descriptor: root.mediaDescriptor("opacity", root.opacityTexture); timelineSeconds: root.mediaTimelineSeconds; timelinePlaying: root.mediaTimelinePlaying }
+    DynamicProceduralTextureData {
+        id: proceduralTextureData
+        objectName: "proceduralTexture"
+    }
 
     function rebuildSkinMaterials() {
         for (let index = 0; index < skinMaterialObjects.length; ++index)
@@ -79,16 +106,24 @@ Rectangle {
                 tcOpacity: descriptor.opacity,
                 tcEmission: descriptor.emission,
                 tcBaseColorTexture: descriptor.baseColorTexture,
+                tcBaseColorTextureSource: descriptor.baseColorTextureSource || {},
                 tcUseBaseColorTexture: descriptor.useBaseColorTexture,
                 tcNormalTexture: descriptor.normalTexture,
+                tcNormalTextureSource: descriptor.normalTextureSource || {},
                 tcUseNormalTexture: descriptor.useNormalTexture,
                 tcRoughnessTexture: descriptor.roughnessTexture,
+                tcRoughnessTextureSource: descriptor.roughnessTextureSource || {},
                 tcUseRoughnessTexture: descriptor.useRoughnessTexture,
                 tcMetalnessTexture: descriptor.metalnessTexture,
+                tcMetalnessTextureSource: descriptor.metalnessTextureSource || {},
                 tcUseMetalnessTexture: descriptor.useMetalnessTexture,
                 tcEmissionTexture: descriptor.emissionTexture,
+                tcEmissionTextureSource: descriptor.emissionTextureSource || {},
                 tcUseEmissionTexture: descriptor.useEmissionTexture,
                 tcOpacityTexture: descriptor.opacityTexture,
+                tcOpacityTextureSource: descriptor.opacityTextureSource || {},
+                tcMediaTimelineSeconds: root.mediaTimelineSeconds,
+                tcMediaTimelinePlaying: root.mediaTimelinePlaying,
                 tcUseOpacityTexture: descriptor.useOpacityTexture,
                 tcMatrixHeight: root.skinMatrixHeight,
                 tcInfluenceTextureWidth: root.skinInfluenceTextureWidth,
@@ -120,6 +155,14 @@ Rectangle {
     onSkinMaxInfluencePairsChanged: {
         for (let index = 0; index < skinMaterialObjects.length; ++index)
             skinMaterialObjects[index].tcMaxInfluencePairs = skinMaxInfluencePairs
+    }
+    onMediaTimelineSecondsChanged: {
+        for (let index = 0; index < skinMaterialObjects.length; ++index)
+            skinMaterialObjects[index].tcMediaTimelineSeconds = mediaTimelineSeconds
+    }
+    onMediaTimelinePlayingChanged: {
+        for (let index = 0; index < skinMaterialObjects.length; ++index)
+            skinMaterialObjects[index].tcMediaTimelinePlaying = mediaTimelinePlaying
     }
 
     View3D {
@@ -193,7 +236,9 @@ Rectangle {
                 geometry: DynamicSceneGeometry {
                     objectName: "sceneGeometry"
                 }
-                materials: [PrincipledMaterial {
+                materials: root.proceduralNativeReady ? [nativeProceduralMaterial] : [principledMaterial]
+                PrincipledMaterial {
+                    id: principledMaterial
                     baseColor: root.materialColor
                     roughness: root.materialRoughness
                     metalness: root.materialMetalness
@@ -207,43 +252,55 @@ Rectangle {
                     attenuationDistance: root.materialAttenuationDistance
                     cullMode: Material.BackFaceCulling
                     baseColorMap: Texture {
-                        source: root.baseColorTexture
+                        source: root.proceduralTextureReady || baseColorMedia.animated ? "" : root.baseColorTexture
+                        sourceItem: !root.proceduralTextureReady && baseColorMedia.animated ? baseColorMedia : null
+                        textureData: root.proceduralTextureReady ? proceduralTextureData : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
                     normalMap: Texture {
-                        source: root.normalTexture
+                        source: normalMedia.animated ? "" : root.normalTexture
+                        sourceItem: normalMedia.animated ? normalMedia : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
                     roughnessMap: Texture {
-                        source: root.roughnessTexture
+                        source: roughnessMedia.animated ? "" : root.roughnessTexture
+                        sourceItem: roughnessMedia.animated ? roughnessMedia : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
                     metalnessMap: Texture {
-                        source: root.metalnessTexture
+                        source: metalnessMedia.animated ? "" : root.metalnessTexture
+                        sourceItem: metalnessMedia.animated ? metalnessMedia : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
                     emissiveFactor: Qt.vector3d(root.materialEmission.r, root.materialEmission.g, root.materialEmission.b)
                     emissiveMap: Texture {
-                        source: root.emissionTexture
+                        source: emissionMedia.animated ? "" : root.emissionTexture
+                        sourceItem: emissionMedia.animated ? emissionMedia : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
                     opacityMap: Texture {
-                        source: root.opacityTexture
+                        source: opacityMedia.animated ? "" : root.opacityTexture
+                        sourceItem: opacityMedia.animated ? opacityMedia : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear
                     }
-                }]
+                }
+                ProceduralMaterial {
+                    id: nativeProceduralMaterial
+                    tcFragmentShader: root.proceduralFragmentShader
+                    tcTime: root.mediaTimelineSeconds
+                }
             }
 
             Model {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 import time
 from typing import Any
 
@@ -50,19 +51,19 @@ class SimulationBackendCapabilities:
 BACKENDS = {
     "reference_cpu": SimulationBackendCapabilities(
         "reference_cpu", True, "cpu",
-        ("cloth", "softbody", "fluid", "particle", "volume", "rigid", "effect", "surface"),
+        ("cloth", "softbody", "fluid", "particle", "granular", "volume", "rigid", "effect", "surface"),
         True, True, True, 100_000,
         "Deterministic Python reference backend for correctness tests and fallback playback.",
     ),
     "native_cpu": SimulationBackendCapabilities(
         "native_cpu", False, "cpu",
-        ("cloth", "softbody", "fluid", "particle", "volume", "rigid", "effect", "surface"),
+        ("cloth", "softbody", "fluid", "particle", "granular", "volume", "rigid", "effect", "surface"),
         True, True, True, 2_000_000,
         "Planned SIMD/task-graph backend.",
     ),
     "gpu_compute": SimulationBackendCapabilities(
         "gpu_compute", False, "gpu",
-        ("cloth", "softbody", "fluid", "particle", "volume", "rigid", "effect", "surface"),
+        ("cloth", "softbody", "fluid", "particle", "granular", "volume", "rigid", "effect", "surface"),
         True, True, True, 20_000_000,
         "Planned compute backend with graph-colored constraints, GPU broadphase, and sparse grids.",
     ),
@@ -192,6 +193,7 @@ def compile_simulation_world(
         len(getattr(world, "constraints", ()) or ())
         + len(getattr(world, "area_constraints", ()) or ())
         + len(getattr(world, "volume_constraints", ()) or ())
+        + len(getattr(world, "bending_constraints", ()) or ())
         + len(getattr(world, "attachments", ()) or ())
     )
     collider_count = (
@@ -199,13 +201,44 @@ def compile_simulation_world(
         + len(getattr(world, "sphere_colliders", ()) or ())
         + len(getattr(world, "mesh_colliders", ()) or ())
     )
+    fields = list(getattr(world, "fields", ()) or ())
+    curve_fields = list(getattr(world, "curve_fields", ()) or ())
+    field_types = sorted({str(getattr(item, "field_type", "field")) for item in fields})
+    collider_shapes = {
+        "plane": len(getattr(world, "plane_colliders", ()) or ()),
+        "sphere": len(getattr(world, "sphere_colliders", ()) or ()),
+        "triangle_mesh": len(getattr(world, "mesh_colliders", ()) or ()),
+    }
+    from tech_connector.game_engine.runtime.tc_multiphysics_coupling_service import compile_multiphysics_coupling
+    coupling_plan = compile_multiphysics_coupling(
+        world, domains, backend=selected_backend.backend_id,
+        maximum_pairs_per_particle=16 if execution_profile.name != "mobile" else 8,
+    )
     resources = [
-        SimulationResource("particles", "particle_soa", particle_count, format=execution_profile.solver_precision),
+        SimulationResource(
+            "particles", "particle_soa", particle_count, format=execution_profile.solver_precision,
+            metadata={"attributes": ["position", "velocity", "inverse_mass", "mass", "charge", "species", "radius"]},
+        ),
         SimulationResource("constraints", "constraint_soa", constraint_count),
-        SimulationResource("colliders", "collision_acceleration", collider_count, access="read"),
+        SimulationResource(
+            "colliders", "collision_acceleration", collider_count, access="read",
+            metadata={"shape_counts": collider_shapes, "broadphase": "spatial_hash",
+                      "mesh_acceleration": "bvh", "continuous_contact": True},
+        ),
+        SimulationResource(
+            "fields", "composable_force_fields", len(fields) + len(curve_fields), access="read",
+            metadata={"types": field_types, "curve_field_count": len(curve_fields), "time_varying": True},
+        ),
         SimulationResource("events", "event_stream", 0, format="append_buffer"),
-        SimulationResource("cache_frames", "versioned_frame_cache", 0, format="tc.sim_cache.v2"),
+        SimulationResource("cache_frames", "versioned_frame_cache", 0, format="tc.sim_cache.v1"),
     ]
+    if coupling_plan.stages:
+        resources.append(SimulationResource(
+            "coupling_contacts", "bounded_multiphysics_exchange", coupling_plan.maximum_contact_pairs,
+            metadata={"stage_count": len(coupling_plan.stages),
+                      "fallback_stage_count": coupling_plan.fallback_stage_count,
+                      "overflow_policy": "prioritize_nearest_high_impulse"},
+        ))
     effect_system = getattr(world, "effect_system", None)
     data_channels = dict(getattr(effect_system, "data_channels", {}) or {})
     subgraphs = dict(getattr(effect_system, "subgraphs", {}) or {})
@@ -227,25 +260,105 @@ def compile_simulation_world(
             "sparse_volume", "sparse_tiled_grid", cell_count,
             metadata={"resolution_scale": execution_profile.volume_resolution_scale},
         ))
+    if getattr(world, "pic_grids", None):
+        cell_count = sum(
+            int(grid.resolution[0]) * int(grid.resolution[1]) * int(grid.resolution[2])
+            for grid in world.pic_grids
+        )
+        resources.append(SimulationResource(
+            "electromagnetic_grid", "pic_scalar_vector_grid", cell_count,
+            metadata={"fields": ["charge_density", "potential", "electric_field"]},
+        ))
+    if getattr(world, "magnetic_grids", None):
+        cell_count = sum(math.prod(tuple(int(value) for value in grid.resolution)) for grid in world.magnetic_grids)
+        resources.append(SimulationResource(
+            "magnetic_grid", "magnetodynamic_vector_grid", cell_count,
+            metadata={"fields": ["velocity", "magnetic", "electric", "current_density"]},
+        ))
     if set(domains) & {"fluid", "effect", "volume", "rigid"}:
         resources.append(SimulationResource("secondary", "secondary_effect_stream", 0, format="append_buffer"))
     if "fluid" in domains or "surface" in domains:
         resources.append(SimulationResource("surface_mesh", "surface_mesh", 0, format="triangle_mesh"))
     stages = [
         SimulationStage("emit", "source_and_spawn", writes=["particles", "events"]),
-        SimulationStage("integrate", "integrate_forces", reads=["particles"], writes=["particles"]),
+        SimulationStage(
+            "integrate", "integrate_forces", reads=["particles", "fields"], writes=["particles"],
+            parameters={"field_types": field_types, "curve_fields": len(curve_fields), "composable": True},
+        ),
         SimulationStage("broadphase", "spatial_hash_or_bvh", reads=["particles", "colliders"], writes=["events"]),
         SimulationStage(
             "constraints", "xpbd_constraint_batches", reads=["constraints", "particles"], writes=["particles"],
             iterations=max(1, round(int(getattr(world, "constraint_iterations", 1)) * execution_profile.iteration_scale)),
-            parameters={"graph_coloring_required": selected_backend.execution_device == "gpu"},
+            parameters={
+                "graph_coloring_required": selected_backend.execution_device == "gpu",
+                "operations": ["distance", "area", "volume", "attachments"]
+                + (["dihedral_bending"] if getattr(world, "bending_constraints", None) else [])
+                + (["hard_strain_limit"] if any(
+                    float(getattr(item, "strain_limit", 0.0)) > 1.0
+                    for item in getattr(world, "constraints", ())
+                ) else []),
+            },
         ),
-        SimulationStage("collision", "continuous_contact", reads=["colliders", "particles"], writes=["particles", "events"]),
+        SimulationStage(
+            "collision", "continuous_contact", reads=["colliders", "particles"], writes=["particles", "events"],
+            parameters={"shape_counts": collider_shapes, "broadphase": "spatial_hash",
+                        "mesh_acceleration": "bvh", "continuous_contact": True,
+                        "self_collision": bool(getattr(world, "self_collision", False)),
+                        "debug_contacts": True},
+        ),
     ]
+    coupling_stages = [
+        SimulationStage(
+            f"couple.{item.stage_id}", "multiphysics_coupling",
+            reads=["particles", "fields"] + (["colliders"] if item.phase == "contact" else []),
+            writes=["particles", "events"] + (["coupling_contacts"] if item.maximum_pairs else []),
+            parameters=item.to_dict(),
+        )
+        for item in coupling_plan.stages
+    ]
+    pre_coupling = [item for item in coupling_stages if item.parameters["phase"] == "pre_solve"]
+    immediate_coupling = [item for item in coupling_stages if item.parameters["phase"] in {"contact", "exchange"}]
+    post_coupling = [item for item in coupling_stages if item.parameters["phase"] == "post_solve"]
+    stages[1:1] = pre_coupling
+    stages.extend(immediate_coupling)
+    for item in coupling_plan.stages:
+        if item.fallback_backend:
+            diagnostics.append({
+                "severity": "warning", "code": "coupling_backend_fallback",
+                "stage": item.stage_id, "message": item.fallback_reason,
+            })
+    interactions = getattr(world, "interactions", None)
+    if getattr(interactions, "enabled", False):
+        stages.insert(1, SimulationStage(
+            "particle_interactions", "long_and_short_range_interactions",
+            reads=["particles"], writes=["particles"],
+            parameters={
+                "gravity": bool(interactions.gravity_constant),
+                "electrostatic": bool(interactions.coulomb_constant),
+                "lennard_jones": bool(interactions.lennard_jones_epsilon),
+                "yukawa": bool(interactions.yukawa_strength),
+                "acceleration_structure": "exact_reference_or_backend_accelerated",
+                "long_range_method": interactions.resolved_long_range_method(particle_count),
+                "opening_angle": float(interactions.opening_angle),
+                "short_range_method": interactions.resolved_short_range_method(particle_count),
+            },
+        ))
     if getattr(world, "volumes", None):
         stages.append(SimulationStage(
             "volume", "sparse_volume_solve", reads=["sparse_volume", "particles"], writes=["sparse_volume"],
             parameters={"operations": ["advect", "project", "combust", "dissipate"]},
+        ))
+    if getattr(world, "pic_grids", None):
+        stages.insert(1, SimulationStage(
+            "pic_fields", "charge_deposit_poisson_field_sample",
+            reads=["particles"], writes=["electromagnetic_grid", "particles"],
+            parameters={"operations": ["cic_deposit", "poisson", "electric_gradient", "cic_sample"]},
+        ))
+    if getattr(world, "magnetic_grids", None):
+        stages.insert(1, SimulationStage(
+            "magnetic_induction", "induction_diffusion_divergence_clean",
+            reads=["particles", "magnetic_grid"], writes=["magnetic_grid", "particles"],
+            parameters={"operations": ["velocity_deposit", "induction", "resistive_diffusion", "divergence_clean", "lorentz_sample"]},
         ))
     if set(domains) & {"fluid", "effect", "volume", "rigid"}:
         stages.append(SimulationStage(
@@ -269,6 +382,7 @@ def compile_simulation_world(
             "data_channels", "typed_event_routing", reads=["events"], writes=channel_resources,
             parameters={"channels": sorted(data_channels), "bounded": True, "tick_deterministic": True},
         ))
+    stages.extend(post_coupling)
     stages.append(SimulationStage("render_prepare", "render_stream_compaction", reads=["particles"], writes=["events"]))
     stages.append(SimulationStage(
         "cache", "versioned_resumable_cache", reads=["particles", "events"], writes=["cache_frames"],
@@ -290,6 +404,7 @@ def compile_simulation_world(
             "particle_budget": min(selected_backend.max_particles, max(1, round(particle_count * execution_profile.particle_scale))),
             "reference_world_attached": True,
             "requested_backend": str(backend or "auto"),
+            "scale": asdict(getattr(world, "scale", {})) if hasattr(getattr(world, "scale", None), "__dataclass_fields__") else {},
             "execution_backend": (
                 selected_backend.backend_id
                 if simulation_backend_status(selected_backend.backend_id)["available"]
@@ -300,6 +415,7 @@ def compile_simulation_world(
                 and simulation_backend_status(selected_backend.backend_id)["available"]
             ),
             "workflow": dict(getattr(getattr(world, "effect_system", None), "workflow", {}) or {}),
+            "multiphysics_coupling": coupling_plan.to_dict(),
         },
     )
     errors = compiled.validate()
@@ -333,6 +449,15 @@ def execute_compiled_simulation(compiled: CompiledSimulationIR, world: Any, dt: 
     """Dispatch one compiled tick to the installed runtime backend."""
     executor = SIMULATION_EXECUTORS.get(compiled.backend.backend_id)
     execution_backend = compiled.backend.backend_id
+    forced_fallback_reasons: list[str] = []
+    coupling = dict(compiled.metadata.get("multiphysics_coupling") or {})
+    if int(coupling.get("fallback_stage_count", 0) or 0) > 0 and execution_backend != "reference_cpu":
+        executor = SIMULATION_EXECUTORS.get("reference_cpu")
+        execution_backend = "reference_cpu"
+        forced_fallback_reasons.append(
+            f"{coupling['fallback_stage_count']} multiphysics coupling stage(s) require reference execution; "
+            "hybrid per-stage device scheduling is not installed."
+        )
     if executor is None or not compiled.backend.available:
         executor = SIMULATION_EXECUTORS.get("reference_cpu")
         execution_backend = "reference_cpu"
@@ -342,6 +467,8 @@ def execute_compiled_simulation(compiled: CompiledSimulationIR, world: Any, dt: 
     result = executor(compiled, world, float(dt))
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     backend_receipt = dict(result or {}) if isinstance(result, dict) else {}
+    if forced_fallback_reasons:
+        backend_receipt.setdefault("fallback_reasons", []).extend(forced_fallback_reasons)
     execution_backend = str(backend_receipt.get("execution_backend") or execution_backend)
     actual_capabilities = BACKENDS.get(execution_backend, BACKENDS["reference_cpu"])
     compiled.metadata["execution_backend"] = execution_backend
@@ -364,6 +491,13 @@ def execute_compiled_simulation(compiled: CompiledSimulationIR, world: Any, dt: 
         "execution_backend": execution_backend,
         "execution_device": actual_capabilities.execution_device,
         "gpu_resident": bool(compiled.metadata["gpu_resident"]),
+        "resident_output": bool(backend_receipt.get("resident_output", False)),
+        "synchronization_points": int(backend_receipt.get("synchronization_points", 0) or 0),
+        "readback_free": bool(
+            actual_capabilities.execution_device == "gpu"
+            and backend_receipt.get("resident_output", False)
+            and int(backend_receipt.get("synchronization_points", 0) or 0) == 0
+        ),
         "elapsed_ms": elapsed_ms,
         "target_frame_ms": compiled.profile.target_frame_ms,
         "within_budget": elapsed_ms <= compiled.profile.target_frame_ms,
@@ -422,6 +556,17 @@ def _select_backend(
                     "message": "Using the deterministic reference CPU backend; native/GPU execution is not installed yet.",
                 })
             return candidate, diagnostics
+    native = BACKENDS["native_cpu"]
+    if requested not in {"auto", "native_cpu", "reference_cpu"} and (
+        simulation_backend_status("native_cpu")["available"]
+        and set(domains) <= set(native.domains)
+    ):
+        diagnostics.append({
+            "severity": "warning",
+            "code": "requested_backend_native_fallback",
+            "message": f"Requested backend {requested} cannot cover this domain; using the installed native CPU backend.",
+        })
+        return native, diagnostics
     if requested != "auto":
         diagnostics.append({
             "severity": "warning",
@@ -473,4 +618,10 @@ try:
     from tech_connector.game_engine.runtime.tc_simulation_native_backend_service import install_native_cpu_backend
     install_native_cpu_backend()
 except ImportError:  # pragma: no cover - NumPy-free embedded DCC interpreters retain the reference backend.
+    pass
+
+try:
+    from tech_connector.game_engine.runtime.tc_simulation_gpu_backend_service import install_gpu_compute_backend
+    install_gpu_compute_backend()
+except (ImportError, KeyError):  # pragma: no cover - optional compute providers remain explicitly unavailable.
     pass

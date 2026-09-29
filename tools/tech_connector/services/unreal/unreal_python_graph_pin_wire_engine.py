@@ -6,6 +6,8 @@
     directly inside BP_LesterPhoenix's EventGraph in open Unreal Editor memory.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

@@ -10,9 +10,13 @@ class _ViewportHarness:
     pass
 
 
-def test_viewer_audits_role_specific_workflows_for_all_ten_hosts() -> None:
+def test_viewer_audits_role_specific_workflows_for_all_ten_hosts(tmp_path) -> None:
     result = ThreeDMeshPainterViewport._execute_tc_engine_command(
-        _ViewportHarness(), "engine.audit_dcc_workflows", {},
+        _ViewportHarness(), "engine.audit_dcc_workflows", {
+            "ledger_path": str(tmp_path / "hosts.json"),
+            "workflow_ledger_path": str(tmp_path / "workflows.json"),
+            "source_parity_ledger_path": str(tmp_path / "parity.json"),
+        },
     )
 
     audit = result["dcc_workflow_audit"]
@@ -27,9 +31,14 @@ def test_viewer_audits_role_specific_workflows_for_all_ten_hosts() -> None:
     ]
 
 
-def test_viewer_workflow_audit_filters_release_readiness_by_host() -> None:
+def test_viewer_workflow_audit_filters_release_readiness_by_host(tmp_path) -> None:
     result = ThreeDMeshPainterViewport._execute_tc_engine_command(
-        _ViewportHarness(), "engine.audit_dcc_workflows", {"host": "unity"},
+        _ViewportHarness(), "engine.audit_dcc_workflows", {
+            "host": "unity",
+            "ledger_path": str(tmp_path / "hosts.json"),
+            "workflow_ledger_path": str(tmp_path / "workflows.json"),
+            "source_parity_ledger_path": str(tmp_path / "parity.json"),
+        },
     )
 
     readiness = result["dcc_workflow_audit"]["release_readiness"]
@@ -79,9 +88,34 @@ def test_viewer_parses_selected_session_and_returns_workflow_receipt(monkeypatch
             "workspace": str(tmp_path),
             "session_key": "motionbuilder:7014",
             "confirm_mutating": True,
+            "ledger_path": str(tmp_path / "workflows.json"),
         },
     )
 
     assert calls[0][1]["session_port"] == 7014
     assert calls[0][1]["confirm_mutating"] is True
     assert result["dcc_workflow_receipt"]["status"] == "verified"
+
+
+def test_viewer_workflow_audit_loads_persisted_workflow_receipts(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        workflows,
+        "workflow_receipt_ledger",
+        lambda _path=None: {
+            "receipts": {"unity.prefab_asset": {"status": "verified", "session_port": 7041}},
+            "summary": {"recorded_workflows": 1, "verified_workflows": 1},
+        },
+    )
+
+    result = ThreeDMeshPainterViewport._execute_tc_engine_command(
+        _ViewportHarness(), "engine.audit_dcc_workflows", {
+            "host": "unity",
+            "ledger_path": str(tmp_path / "hosts.json"),
+            "workflow_ledger_path": str(tmp_path / "workflows.json"),
+            "source_parity_ledger_path": str(tmp_path / "parity.json"),
+        },
+    )
+
+    audit = result["dcc_workflow_audit"]
+    assert audit["workflow_receipt_summary"]["verified_workflows"] == 1
+    assert audit["release_readiness"]["hosts"][0]["workflows"][0]["receipt_status"] == "invalid"

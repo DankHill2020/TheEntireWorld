@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -23,11 +26,14 @@ from tech_connector.game_engine.scene.federated_scene_service import (
     source_file_fingerprint,
     stable_scene_source_id,
 )
+from tech_connector.models.constants import APP_DIR
 
 
 WORKFLOW_SCHEMA = "tech_connector.dcc_production_workflows.v1"
 WORKFLOW_RECEIPT_SCHEMA = "tech_connector.dcc_workflow_receipt.v2"
+WORKFLOW_LEDGER_SCHEMA = "tech_connector.dcc_workflow_receipt_ledger.v1"
 DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS = 24.0 * 60.0 * 60.0
+DEFAULT_WORKFLOW_LEDGER_PATH = Path(APP_DIR) / "dcc_workflow_receipts.json"
 
 
 @dataclass(frozen=True)
@@ -723,6 +729,62 @@ def validate_workflow_receipt(
     }
 
 
+def workflow_receipt_ledger(path: str | Path | None = None) -> dict[str, Any]:
+    """Load the durable workflow receipt ledger without trusting malformed rows."""
+    ledger_path = Path(path) if path is not None else DEFAULT_WORKFLOW_LEDGER_PATH
+    try:
+        data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    receipts = {
+        str(key): dict(value)
+        for key, value in dict(data.get("receipts") or {}).items()
+        if str(key) in PRODUCTION_WORKFLOWS and isinstance(value, dict)
+    } if isinstance(data, dict) and data.get("schema") == WORKFLOW_LEDGER_SCHEMA else {}
+    return {
+        "schema": WORKFLOW_LEDGER_SCHEMA,
+        "path": str(ledger_path),
+        "receipts": receipts,
+        "summary": {
+            "workflow_count": len(PRODUCTION_WORKFLOWS),
+            "recorded_workflows": len(receipts),
+            "verified_workflows": sum(row.get("status") == "verified" for row in receipts.values()),
+        },
+    }
+
+
+def store_workflow_receipt(
+    receipt: DccWorkflowReceipt | dict[str, Any],
+    path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Atomically retain the latest receipt for a workflow for launch audits."""
+    row = receipt.to_dict() if isinstance(receipt, DccWorkflowReceipt) else dict(receipt)
+    workflow_key = str(row.get("workflow") or "")
+    if workflow_key not in PRODUCTION_WORKFLOWS:
+        raise ValueError("A workflow receipt must identify a registered production workflow.")
+    ledger_path = Path(path) if path is not None else DEFAULT_WORKFLOW_LEDGER_PATH
+    ledger = workflow_receipt_ledger(ledger_path)
+    receipts = dict(ledger["receipts"])
+    receipts[workflow_key] = row
+    payload = {"schema": WORKFLOW_LEDGER_SCHEMA, "receipts": receipts}
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temp_name = tempfile.mkstemp(
+        prefix=ledger_path.name + ".", suffix=".tmp", dir=str(ledger_path.parent),
+    )
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        Path(temp_name).replace(ledger_path)
+    except Exception:
+        try:
+            Path(temp_name).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    return workflow_receipt_ledger(ledger_path)
+
+
 def _workflow_json_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_workflow_json_value(item) for item in value]
@@ -831,8 +893,8 @@ def _normalize_execution_result(raw: Any) -> tuple[bool, dict[str, Any]]:
 
 
 __all__ = [
-    "DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS", "DccProductionWorkflow", "DccWorkflowReceipt", "DccWorkflowStep",
-    "PRODUCTION_WORKFLOWS", "WORKFLOW_RECEIPT_SCHEMA", "WORKFLOW_SCHEMA",
+    "DEFAULT_WORKFLOW_LEDGER_PATH", "DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS", "DccProductionWorkflow", "DccWorkflowReceipt", "DccWorkflowStep",
+    "PRODUCTION_WORKFLOWS", "WORKFLOW_LEDGER_SCHEMA", "WORKFLOW_RECEIPT_SCHEMA", "WORKFLOW_SCHEMA",
     "attach_workflow_receipt_to_scene", "execute_dcc_workflow", "plan_dcc_workflow",
-    "resolve_workflow_session_port", "validate_workflow_catalog", "validate_workflow_receipt",
+    "resolve_workflow_session_port", "store_workflow_receipt", "validate_workflow_catalog", "validate_workflow_receipt", "workflow_receipt_ledger",
 ]

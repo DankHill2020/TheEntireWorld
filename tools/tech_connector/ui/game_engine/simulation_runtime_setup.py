@@ -27,6 +27,7 @@ from tech_connector.game_engine.runtime.engine_runtime_experience_service import
 from tech_connector.game_engine.runtime.tc_simulation_ir_service import BACKENDS, EXECUTION_PROFILES
 from tech_connector.ui.design_system import set_ui_role
 from tech_connector.ui.icons import configure_button
+from tech_connector.ui.ux_polish import ContextRecipeCard, WorkflowRecipe, apply_property_guidance, apply_widget_discoverability
 
 
 class SimulationRuntimeSetupDialog(QDialog):
@@ -45,6 +46,15 @@ class SimulationRuntimeSetupDialog(QDialog):
         subtitle.setWordWrap(True)
         set_ui_role(subtitle, "muted")
         layout.addWidget(subtitle)
+
+        self.workflow_guide = ContextRecipeCard(WorkflowRecipe(
+            "How runtime setup works",
+            ("Choose the target device", "Choose the experience goal", "Review each feature path", "Apply runtime setup"),
+            preview="The table updates immediately; select a feature to see why that path was chosen.",
+            output="The setup records explicit GPU/CPU paths and fallbacks so the simulation remains portable.",
+            tip="Keep Automatic quality, Automatic backend, and adaptive quality until profiling shows a reason to override them.",
+        ), self)
+        layout.addWidget(self.workflow_guide)
 
         settings = QGridLayout()
         self.target_combo = QComboBox()
@@ -147,6 +157,19 @@ class SimulationRuntimeSetupDialog(QDialog):
         self.feature_tree.currentItemChanged.connect(self._show_feature_detail)
         self._update_technical_visibility()
         self._refresh()
+        self._apply_guidance()
+        apply_widget_discoverability(self)
+
+    def _apply_guidance(self) -> None:
+        self.target_combo.setToolTip("Where the experience must run. This sets a sensible simulation-rate and feature baseline.")
+        self.goal_combo.setToolTip("What to protect first when runtime cost rises: visual quality, responsiveness, or balance.")
+        apply_property_guidance(self.tick_rate, "How often physics and simulation advance each second.",
+                                safe_start="Use the target default; 60 Hz is a strong desktop baseline.",
+                                consequence="Higher rates improve fast collision accuracy but cost more CPU/GPU time.")
+        apply_property_guidance(self.adaptive_check, "Adjusts scalable features when measured runtime exceeds the budget.",
+                                safe_start="Enabled for interactive and shipped realtime experiences.",
+                                consequence="Visual density may change under sustained load, but behavior stays bounded.")
+        self.feature_tree.setToolTip("A live explanation of the chosen implementation. Select a row for its rationale and fallback.")
 
     def selection(self) -> dict[str, Any]:
         selection = dict(self.plan.get("selection") or {})

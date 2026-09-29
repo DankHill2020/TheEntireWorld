@@ -6,6 +6,8 @@ Mimics the deep exploration, blueprint loading, and stub searching
 behaviors of advanced Unreal Engine AI tools (like Ludus AI).
 """
 
+from __future__ import annotations
+
 from contextlib import closing
 from typing import Any, Callable
 

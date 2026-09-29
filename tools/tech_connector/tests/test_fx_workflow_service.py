@@ -98,14 +98,26 @@ def test_compiled_ir_contains_secondary_surface_cache_and_truthful_fallback() ->
     stage_ids = {stage.stage_id for stage in compiled.stages}
     assert {"secondary", "surface", "cache"} <= stage_ids
     assert compiled.metadata["requested_backend"] == "gpu_compute"
-    assert compiled.metadata["execution_backend"] == "reference_cpu"
+    assert compiled.metadata["execution_backend"] == "native_cpu"
     assert compiled.metadata["gpu_resident"] is False
-    assert not simulation_backend_status("gpu_compute")["available"]
-    assert any(item["code"] == "requested_backend_unavailable" for item in compiled.diagnostics)
+    assert "effect" in simulation_backend_status("gpu_compute")["domains"]
+    assert "fluid" not in simulation_backend_status("gpu_compute")["domains"]
+    assert any(item["code"] == "requested_backend_native_fallback" for item in compiled.diagnostics)
 
     portable = compile_simulation_world(world, backend="auto")
     execute_compiled_simulation(portable, world, 1.0 / 60.0)
-    assert any(item["code"] == "runtime_backend_fallback" for item in portable.diagnostics)
+    fallback_recorded = any(item["code"] == "runtime_backend_fallback" for item in portable.diagnostics)
+    assert fallback_recorded == (portable.metadata["execution_backend"] != portable.backend.backend_id)
+
+
+def test_granular_profile_selects_native_material_neighbor_backend_instead_of_particle_gpu() -> None:
+    world = create_effect_world("avalanche", quality="realtime")
+    compiled = compile_simulation_world(world, backend="gpu_compute")
+
+    assert "granular" in compiled.domains
+    assert compiled.backend.backend_id == "native_cpu"
+    assert compiled.metadata["execution_backend"] == "native_cpu"
+    assert any(item["code"] == "requested_backend_native_fallback" for item in compiled.diagnostics)
 
 
 def test_effect_bake_records_resumable_stage_checkpoint() -> None:
@@ -131,9 +143,11 @@ def test_simulation_enforces_particle_contract_and_reports_pressure() -> None:
 
 def test_audit_explains_backend_fallback_and_stateless_opportunity() -> None:
     report = audit_fx_world(create_effect_world("sparks", quality="realtime"))
+    gpu = simulation_backend_status("gpu_compute")
+    accelerated = gpu["available"] and {"particle", "effect"} <= set(gpu["domains"])
 
-    assert report.status == "warning"
-    assert report.metrics["effective_preview_backend"] == "reference_cpu"
+    assert report.status == ("ok" if accelerated else "warning")
+    assert report.metrics["effective_preview_backend"] == ("gpu_compute" if accelerated else "reference_cpu")
     assert report.metrics["stateless_compatible"]
-    assert any(item["code"] == "backend_fallback" for item in report.diagnostics)
+    assert any(item["code"] == "backend_fallback" for item in report.diagnostics) is (not accelerated)
     assert any("stateless" in recommendation for recommendation in report.recommendations)

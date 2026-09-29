@@ -5,6 +5,8 @@
     changes made, step-by-step testing instructions, and potential impact/regression lists.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

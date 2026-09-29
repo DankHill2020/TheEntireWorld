@@ -5,6 +5,8 @@
     and Python binding stubs so native C++ features are exposed directly to Unreal Python scripts.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

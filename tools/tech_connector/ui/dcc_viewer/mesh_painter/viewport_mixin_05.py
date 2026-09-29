@@ -19,6 +19,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+import uuid
 from typing import Any
 
 try:
@@ -217,6 +218,561 @@ from tech_connector.ui.dcc_viewer.mesh_painter.support import (
 
 
 class ThreeDMeshPainterViewportMixin05:
+    def _push_level_actor_undo(self, label: str) -> None:
+        handler = getattr(self, "push_viewer_undo_state", None)
+        if callable(handler): handler(label)
+
+    def configure_transform_snapping(
+        self, *, translation: float | None = None, rotation: float | None = None,
+        scale: float | None = None,
+    ) -> dict[str, float]:
+        """Configure editor transform snapping; zero disables an individual channel."""
+        settings = dict(getattr(self, "_transform_snap_settings", {}) or {})
+        settings.setdefault("translation", 0.0); settings.setdefault("rotation", 0.0); settings.setdefault("scale", 0.0)
+        for key, value in (("translation", translation), ("rotation", rotation), ("scale", scale)):
+            if value is not None: settings[key] = max(0.0, float(value))
+        self._transform_snap_settings = settings
+        return dict(settings)
+
+    def configure_asset_placement(
+        self, *, grid_snap: bool | None = None, grid_size: float | None = None,
+        surface_align: bool | None = None,
+    ) -> dict[str, Any]:
+        settings = dict(getattr(self, "_asset_placement_settings", {}) or {})
+        settings.setdefault("grid_snap", False)
+        settings.setdefault("grid_size", 0.5)
+        settings.setdefault("surface_align", True)
+        if grid_snap is not None:
+            settings["grid_snap"] = bool(grid_snap)
+        if grid_size is not None:
+            settings["grid_size"] = max(0.001, float(grid_size))
+        if surface_align is not None:
+            settings["surface_align"] = bool(surface_align)
+        self._asset_placement_settings = settings
+        return dict(settings)
+
+    def select_asset_for_authoring(self, path: str, type_id: str, asset_id: str = "") -> bool:
+        self._selected_authoring_asset = {
+            "path": str(path or ""), "type_id": str(type_id or ""), "asset_id": str(asset_id or ""),
+        }
+        self._resolved_shaded_status = (
+            f"Authoring asset: {Path(path).name}. Drag it from Assets into the viewport to place an instance."
+        )
+        self.update_viewport_status()
+        return True
+
+    def place_asset_from_browser(
+        self,
+        payload: dict[str, Any],
+        screen_position: QPointF | None = None,
+        view_width: float = 0.0,
+        view_height: float = 0.0,
+    ) -> dict[str, Any] | None:
+        path = str(payload.get("path") or "")
+        type_id = str(payload.get("type_id") or "")
+        asset_id = str(payload.get("asset_id") or "")
+        if not path or not type_id:
+            return None
+        selected = getattr(self, "_selected_scene_proxy", None)
+        if type_id in {"tc.texture", "tc.video", "tc.image_project"} and selected is not None:
+            if not selected.get("materials"):
+                selected.materials = [SceneProxyMaterialBinding(name="Dropped Texture")]
+            selected.bind_texture_file("base_color", path)
+            texture_asset_ids = dict(selected.get("texture_asset_ids") or {})
+            texture_asset_ids["base_color"] = asset_id
+            selected["texture_asset_ids"] = texture_asset_ids
+            self._scene_lifecycle.mark_dirty()
+            self.sync_gpu_viewport(full=False)
+            self.update_instance_details_panel()
+            self._resolved_shaded_status = f"Applied {Path(path).name} to the selected asset."
+            self.update_viewport_status()
+            return {"action": "assign_texture", "asset_id": asset_id, "path": path}
+        if type_id in {"tc.material", "tc.material_instance", "tc.shader_graph"} and selected is not None:
+            selected["material_asset_id"] = asset_id
+            selected["material_asset_path"] = path
+            selected.sync_state = "dirty"
+            self._scene_lifecycle.mark_dirty()
+            self.update_instance_details_panel()
+            self._resolved_shaded_status = f"Assigned {Path(path).name} to the selected asset."
+            self.update_viewport_status()
+            return {"action": "assign_material", "asset_id": asset_id, "path": path}
+
+        position = self._asset_drop_world_position(screen_position, view_width, view_height)
+        entities = self._runtime_world_state.setdefault("entities", [])
+        base_name = Path(path).name.split(".", 1)[0] or "Asset"
+        instance_name = base_name
+        existing_names = {str(item.get("name") or "") for item in entities if isinstance(item, dict)}
+        suffix = 2
+        while instance_name in existing_names:
+            instance_name = f"{base_name}_{suffix}"
+            suffix += 1
+        entity = {
+            "entity_id": uuid.uuid4().hex,
+            "name": instance_name,
+            "transform": {"position": [float(value) for value in position]},
+            "asset_instance": {"asset_id": asset_id, "type_id": type_id, "source": path},
+            "components": [{"component_id": uuid.uuid4().hex, "type": "transform", "enabled": True}],
+        }
+        if type_id in {"tc.static_mesh", "tc.skeletal_mesh", "tc.prefab"}:
+            entity["render"] = {"mesh": path, "material": "builtin:default_pbr"}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": type_id.removeprefix("tc."), "enabled": True, "asset_id": asset_id})
+            if type_id == "tc.prefab":
+                entity["prefab_instance"] = {
+                    "source_asset_id": asset_id, "overrides": {}, "override_state": "inherited",
+                }
+                try:
+                    prefab_payload = json.loads(Path(path).read_text(encoding="utf-8"))
+                    prefab_properties = dict(prefab_payload.get("properties") or {})
+                    entity["prefab_instance"]["entities"] = copy.deepcopy(
+                        list(prefab_properties.get("entities") or ())
+                    )
+                    entity["prefab_instance"]["exposed_properties"] = copy.deepcopy(
+                        dict(prefab_properties.get("exposed_properties") or {})
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                    entity["prefab_instance"]["load_state"] = "fallback"
+        elif type_id in {"tc.effect_system", "tc.simulation_profile"}:
+            entity["effect"] = {"asset": path, "active": True}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "effect", "enabled": True, "asset_id": asset_id})
+        elif type_id == "tc.audio_clip":
+            entity["audio_source"] = {"asset": path, "autoplay": False, "spatial": True}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "audio_source", "enabled": True, "asset_id": asset_id})
+        elif type_id in {"tc.behavior", "tc.gameplay_graph", "tc.game_ruleset", "tc.input_map"}:
+            entity["behavior"] = {"asset": path, "enabled": True}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "behavior", "enabled": True, "asset_id": asset_id})
+        else:
+            entity["data_asset"] = {"asset": path}
+        self._push_level_actor_undo(f"Place {instance_name}")
+        entities.append(entity)
+        proxy = self._append_asset_placeholder_proxy(entity, position)
+        self._selected_scene_proxy = proxy
+        self._scene_lifecycle.mark_dirty()
+        self.refresh_scene_outliner()
+        self.update_instance_details_panel()
+        self.sync_gpu_viewport(full=True)
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+        self._resolved_shaded_status = f"Placed {instance_name} from Assets. Save & Sync to update Kingdom."
+        self.update_viewport_status()
+        return entity
+
+    def create_level_actor(self, actor_type: str, name: str = "") -> dict[str, Any]:
+        """Create a native level actor with engine-ready default components."""
+        kind = str(actor_type or "empty").strip().casefold().replace(" ", "_")
+        labels = {"empty": "EmptyActor", "point_light": "PointLight", "directional_light": "DirectionalLight", "camera": "CameraActor", "player_start": "PlayerStart", "trigger": "TriggerVolume"}
+        entity_id = uuid.uuid4().hex
+        entities = self._runtime_world_state.setdefault("entities", [])
+        base_name = str(name or labels.get(kind) or kind.title().replace("_", ""))
+        existing = {str(item.get("name") or "") for item in entities if isinstance(item, dict)}
+        unique_name = base_name; suffix = 2
+        while unique_name in existing: unique_name = f"{base_name}_{suffix}"; suffix += 1
+        position = tuple(float(value) for value in self.viewport_camera.target)
+        entity: dict[str, Any] = {
+            "entity_id": entity_id, "name": unique_name,
+            "transform": {"position": list(position), "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+            "asset_instance": {"asset_id": "", "type_id": f"tc.{kind}", "source": f"builtin:{kind}"},
+            "components": [{"component_id": uuid.uuid4().hex, "type": "transform", "enabled": True}],
+        }
+        if kind in {"point_light", "directional_light"}:
+            entity["light"] = {"type": kind.removesuffix("_light"), "color": [1.0, 1.0, 1.0], "intensity": 1000.0 if kind == "point_light" else 10.0, "cast_shadows": True}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "light", "enabled": True})
+        elif kind == "camera":
+            entity["camera"] = {"fov_degrees": 60.0, "near_clip": 10.0, "far_clip": 100000.0}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "camera", "enabled": True})
+        elif kind == "player_start":
+            entity["spawn_point"] = {"player_index": 0, "enabled": True}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "player_start", "enabled": True})
+        elif kind == "trigger":
+            entity["collision"] = {"shape": "box", "is_trigger": True, "size": [100.0, 100.0, 100.0]}
+            entity["components"].append({"component_id": uuid.uuid4().hex, "type": "trigger", "enabled": True})
+        self._push_level_actor_undo(f"Create {unique_name}")
+        entities.append(entity); proxy = self._append_asset_placeholder_proxy(entity, position, queue_native=False)
+        self._selected_scene_proxy = proxy; self._finish_level_actor_edit(f"Created {unique_name}")
+        return entity
+
+    def _runtime_entity_for_proxy(self, proxy: SceneProxyInstance | dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(proxy, (dict, SceneProxyInstance)): return None
+        entity_id = str(proxy.get("entity_id") or proxy.get("native_id") or "")
+        for entity in self._runtime_world_state.get("entities") or ():
+            if isinstance(entity, dict) and str(entity.get("entity_id") or "") == entity_id:
+                for component in entity.setdefault("components", []):
+                    if isinstance(component, dict) and not component.get("component_id"): component["component_id"] = uuid.uuid4().hex
+                return entity
+        return None
+
+    def selected_level_actor_proxies(self) -> list[SceneProxyInstance | dict[str, Any]]:
+        tree = getattr(self, "scene_outliner", None); result: list[SceneProxyInstance | dict[str, Any]] = []
+        for item in tree.selectedItems() if tree is not None else ():
+            data = item.data(0, Qt.UserRole) or {}; proxy = data.get("proxy") if isinstance(data, dict) else None
+            if isinstance(proxy, (dict, SceneProxyInstance)) and str(proxy.get("provider_id") or "") == "tech_connector" and proxy not in result: result.append(proxy)
+        selected = getattr(self, "_selected_scene_proxy", None)
+        if not result and isinstance(selected, (dict, SceneProxyInstance)) and str(selected.get("provider_id") or "") == "tech_connector": result.append(selected)
+        return result
+
+    def create_actor_folder(self, name: str) -> bool:
+        value = str(name or "").replace("\\", "/").strip(" /")
+        if not value: return False
+        folders = self._runtime_world_state.setdefault("editor_folders", [])
+        if value not in folders: self._push_level_actor_undo(f"Create folder {value}"); folders.append(value); folders.sort(); self._finish_level_actor_edit(f"Created actor folder {value}")
+        return True
+
+    def move_selected_level_actors_to_folder(self, folder: str) -> int:
+        proxies = self.selected_level_actor_proxies(); value = str(folder or "").replace("\\", "/").strip(" /")
+        if not proxies: return 0
+        self._push_level_actor_undo(f"Move actors to {value or 'root'}"); changed = 0
+        if value:
+            folders = self._runtime_world_state.setdefault("editor_folders", [])
+            if value not in folders: folders.append(value); folders.sort()
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is not None: entity["editor_folder"] = value; changed += 1
+        self._finish_level_actor_edit(f"Moved {changed} actor(s) to {value or 'root'}"); return changed
+
+    def parent_selected_level_actors(self, parent_entity_id: str) -> int:
+        proxies = self.selected_level_actor_proxies(); parent_id = str(parent_entity_id or "")
+        selected_ids = {str(proxy.get("entity_id") or "") for proxy in proxies}
+        if not proxies or parent_id in selected_ids: return 0
+        known = {str(entity.get("entity_id") or "") for entity in self._runtime_world_state.get("entities") or () if isinstance(entity, dict)}
+        if parent_id and parent_id not in known: return 0
+        self._push_level_actor_undo("Parent level actors"); changed = 0
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is not None: entity["parent_entity_id"] = parent_id; changed += 1
+        self._finish_level_actor_edit(f"Updated hierarchy for {changed} actor(s)"); return changed
+
+    def transform_selected_level_actors(self, *, translation: tuple[float, float, float] = (0.0, 0.0, 0.0), rotation: tuple[float, float, float] = (0.0, 0.0, 0.0), scale_multiplier: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> int:
+        proxies = self.selected_level_actor_proxies()
+        if not proxies: return 0
+        self._push_level_actor_undo("Transform actor group")
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy); transform = entity.setdefault("transform", {}) if entity else None
+            if transform is None: continue
+            position = list(transform.get("position") or (0.0, 0.0, 0.0)); angles = list(transform.get("rotation") or (0.0, 0.0, 0.0)); scale = list(transform.get("scale") or (1.0, 1.0, 1.0))
+            new_position = [float(position[i]) + float(translation[i]) for i in range(3)]; transform["position"] = new_position; transform["rotation"] = [float(angles[i]) + float(rotation[i]) for i in range(3)]; transform["scale"] = [float(scale[i]) * float(scale_multiplier[i]) for i in range(3)]
+            self._offset_proxy_preview(proxy, tuple(float(value) for value in translation)); local = dict(proxy.get("local_transform") or {}); local.update({"translation": new_position, "rotation": transform["rotation"], "scale": transform["scale"]}); proxy["local_transform"] = local
+        self._finish_level_actor_edit(f"Transformed {len(proxies)} actor(s)"); return len(proxies)
+
+    def duplicate_selected_level_actor(self) -> bool:
+        source_proxy = getattr(self, "_selected_scene_proxy", None); source = self._runtime_entity_for_proxy(source_proxy)
+        if source is None: return False
+        self._push_level_actor_undo(f"Duplicate {source.get('name') or 'actor'}")
+        duplicate = copy.deepcopy(source); duplicate["entity_id"] = uuid.uuid4().hex
+        base_name = str(source.get("name") or "Actor") + "_Copy"; names = {str(item.get("name") or "") for item in self._runtime_world_state.get("entities") or ()}
+        duplicate["name"] = base_name; suffix = 2
+        while duplicate["name"] in names: duplicate["name"] = f"{base_name}_{suffix}"; suffix += 1
+        transform = duplicate.setdefault("transform", {}); position = list(transform.get("position") or (0.0, 0.0, 0.0)); position += [0.0] * (3 - len(position))
+        step = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 100.0); position[0] = float(position[0]) + step; transform["position"] = position[:3]
+        self._runtime_world_state.setdefault("entities", []).append(duplicate)
+        proxy = self._append_asset_placeholder_proxy(duplicate, tuple(float(value) for value in position[:3]))
+        self._selected_scene_proxy = proxy; self._finish_level_actor_edit(f"Duplicated {duplicate['name']}")
+        return True
+
+    def rename_selected_level_actor(self, name: str) -> bool:
+        proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy); value = str(name or "").strip()
+        if entity is None or not value: return False
+        self._push_level_actor_undo(f"Rename {entity.get('name') or 'actor'}")
+        entity["name"] = value; proxy["name"] = value; self._finish_level_actor_edit(f"Renamed actor to {value}")
+        return True
+
+    def update_selected_level_actor(self, values: dict[str, Any]) -> bool:
+        proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy)
+        if entity is None: return False
+        self._push_level_actor_undo(f"Edit {entity.get('name') or 'actor'}")
+        if str(values.get("name") or "").strip(): entity["name"] = str(values["name"]).strip(); proxy["name"] = entity["name"]
+        transform = entity.setdefault("transform", {}); local = dict(proxy.get("local_transform") or {})
+        old_position = list(transform.get("position") or proxy.get("center") or (0.0, 0.0, 0.0)); old_position += [0.0] * (3 - len(old_position))
+        for key, default in (("position", (0.0, 0.0, 0.0)), ("rotation", (0.0, 0.0, 0.0)), ("scale", (1.0, 1.0, 1.0))):
+            raw = list(values.get(key) or transform.get(key) or default); raw += list(default[len(raw):]); transform[key] = [float(value) for value in raw[:3]]; local[key if key != "position" else "translation"] = list(transform[key])
+        new_position = transform["position"]; delta = tuple(float(new_position[i]) - float(old_position[i]) for i in range(3))
+        if max(abs(value) for value in delta) > 1.0e-9: self._offset_proxy_preview(proxy, delta)
+        proxy["local_transform"] = local; proxy["visible"] = bool(values.get("visible", entity.get("visible", True)))
+        entity["visible"] = bool(proxy.get("visible", True)); entity["mobility"] = str(values.get("mobility") or entity.get("mobility") or "movable")
+        entity["tags"] = [str(tag).strip() for tag in values.get("tags", entity.get("tags", [])) if str(tag).strip()]
+        self._finish_level_actor_edit(f"Updated {entity['name']}"); return True
+
+    def add_component_to_selected_level_actor(self, component_type: str) -> dict[str, Any] | None:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        if entity is None: return None
+        kind = str(component_type or "").strip().casefold().replace(" ", "_")
+        defaults = {
+            "static_mesh": {"mesh_asset_id": "", "materials": []}, "skeletal_mesh": {"mesh_asset_id": "", "skeleton_asset_id": "", "materials": []},
+            "camera": {"fov_degrees": 60.0}, "light": {"light_type": "point", "intensity": 1000.0, "color": [1.0, 1.0, 1.0]},
+            "collider": {"shape": "box", "is_trigger": False}, "rigid_body": {"mass": 1.0, "kinematic": False},
+            "audio_source": {"audio_asset_id": "", "spatial": True}, "behavior": {"behavior_asset_id": "", "enabled": True},
+        }
+        if kind not in defaults: return None
+        self._push_level_actor_undo(f"Add {kind} component")
+        component = {"component_id": uuid.uuid4().hex, "type": kind, "enabled": True, **copy.deepcopy(defaults[kind])}
+        entity.setdefault("components", []).append(component); self._finish_level_actor_edit(f"Added {kind.replace('_', ' ')} component"); return component
+
+    def remove_component_from_selected_level_actor(self, component_id: str) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        if entity is None: return False
+        components = list(entity.get("components") or []); target = next((item for item in components if str(item.get("component_id") or "") == str(component_id)), None)
+        if target is None or str(target.get("type") or "") == "transform": return False
+        self._push_level_actor_undo(f"Remove {target.get('type') or 'component'}")
+        entity["components"] = [item for item in components if item is not target]; self._finish_level_actor_edit(f"Removed {target.get('type') or 'component'} component"); return True
+
+    def update_component_on_selected_level_actor(self, component_id: str, properties: dict[str, Any]) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        if entity is None: return False
+        component = next((item for item in entity.get("components") or () if str(item.get("component_id") or "") == str(component_id)), None)
+        if component is None: return False
+        self._push_level_actor_undo(f"Edit {component.get('type') or 'component'}")
+        for key, value in dict(properties or {}).items():
+            if key not in {"component_id", "type"}: component[str(key)] = copy.deepcopy(value)
+        self._finish_level_actor_edit(f"Updated {str(component.get('type') or 'component').replace('_', ' ')} component"); return True
+
+    def set_prefab_override_on_selected_level_actor(self, path: str, value: Any) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None)); key = str(path or "").strip()
+        instance = entity.get("prefab_instance") if entity else None
+        if not isinstance(instance, dict) or not key: return False
+        self._push_level_actor_undo(f"Override Prefab {key}"); instance.setdefault("overrides", {})[key] = copy.deepcopy(value); instance["override_state"] = "overridden"; self._finish_level_actor_edit(f"Overrode Prefab property {key}"); return True
+
+    def remove_prefab_override_from_selected_level_actor(self, path: str) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None)); instance = entity.get("prefab_instance") if entity else None; key = str(path or "")
+        if not isinstance(instance, dict) or key not in dict(instance.get("overrides") or {}): return False
+        self._push_level_actor_undo(f"Revert Prefab {key}"); instance["overrides"].pop(key, None); instance["override_state"] = "overridden" if instance["overrides"] else "inherited"; self._finish_level_actor_edit(f"Reverted Prefab property {key}"); return True
+
+    def delete_selected_level_actor(self) -> bool:
+        proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy)
+        if entity is None: return False
+        self._push_level_actor_undo(f"Delete {entity.get('name') or 'actor'}")
+        self._runtime_world_state["entities"] = [item for item in self._runtime_world_state.get("entities") or () if item is not entity]
+        proxy["visible"] = False; proxy["deleted"] = True; self._selected_scene_proxy = None
+        self._finish_level_actor_edit(f"Deleted {entity.get('name') or 'actor'}")
+        return True
+
+    def _finish_level_actor_edit(self, message: str) -> None:
+        self._scene_lifecycle.mark_dirty(); self.refresh_scene_outliner(); self.update_instance_details_panel(); self.sync_gpu_viewport(full=True)
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        self._resolved_shaded_status = str(message); self.update_viewport_status()
+
+    def _asset_drop_world_position(
+        self,
+        screen_position: QPointF | None,
+        view_width: float,
+        view_height: float,
+    ) -> tuple[float, float, float]:
+        camera = self.viewport_camera
+        target = tuple(float(value) for value in camera.target)
+        if screen_position is None or view_width <= 1.0 or view_height <= 1.0:
+            return target
+        _forward, right, up = camera.view_axes()
+        nx = (float(screen_position.x()) / view_width - 0.5) * 2.0
+        ny = (float(screen_position.y()) / view_height - 0.5) * 2.0
+        half_height = camera.distance * math.tan(math.radians(camera.fov_degrees * 0.5))
+        half_width = half_height * (view_width / view_height)
+        position = _vec_add(target, _vec_add(_vec_scale(right, nx * half_width), _vec_scale(up, -ny * half_height)))
+        settings = self.configure_asset_placement()
+        if settings["grid_snap"]:
+            step = float(settings["grid_size"])
+            position = tuple(round(value / step) * step for value in position)
+        return position
+
+    def _append_asset_placeholder_proxy(
+        self,
+        entity: dict[str, Any],
+        position: tuple[float, float, float],
+        *,
+        preview_model: FBXMeshModel | None = None,
+        queue_native: bool = True,
+    ) -> SceneProxyInstance:
+        asset = dict(entity["asset_instance"]); entity_id = str(entity.get("entity_id") or uuid.uuid4().hex); entity["entity_id"] = entity_id
+        type_id = str(asset.get("type_id") or "")
+        source_path = Path(str(asset.get("source") or ""))
+        preview = preview_model
+        preview_error = ""
+        if preview is None and type_id in {"tc.static_mesh", "tc.skeletal_mesh"} and source_path.suffix.casefold() == ".obj":
+            try:
+                preview = FBXMeshModel.from_obj(str(source_path))
+            except (OSError, ValueError, IndexError) as exc:
+                preview_error = str(exc)
+        placeholder = preview or DCCProceduralPrimitiveFactory.create_cube_primitive(size=1.5)
+        topology_state = "asset_preview" if preview is not None else "asset_placeholder"
+        asset["preview_state"] = "native" if preview is not None else "fallback"
+        if preview_error:
+            asset["preview_error"] = preview_error
+        entity["asset_instance"] = asset
+        vertex_start = len(self.mesh.vertices)
+        face_start = len(self.mesh.faces)
+        quad_start = len(self.mesh.quad_faces)
+        for vertex in placeholder.vertices:
+            self.mesh.vertices.append(
+                MeshVertex3D(vertex.x + position[0], vertex.y + position[1], vertex.z + position[2], vertex.u, vertex.v)
+            )
+        self.mesh.faces.extend((a + vertex_start, b + vertex_start, c + vertex_start) for a, b, c in placeholder.faces)
+        self.mesh.quad_faces.extend(
+            (a + vertex_start, b + vertex_start, c + vertex_start, d + vertex_start)
+            for a, b, c, d in placeholder.quad_faces
+        )
+        colors = {
+            "tc.effect_system": QColor("#56e0e0"), "tc.simulation_profile": QColor("#4dd5c7"),
+            "tc.audio_clip": QColor("#ff83b7"), "tc.behavior": QColor("#6fb8ff"),
+            "tc.gameplay_graph": QColor("#719cff"), "tc.prefab": QColor("#6ed6c2"),
+        }
+        color = colors.get(type_id, QColor("#7dc4ff"))
+        source_face_colors = list(getattr(placeholder, "face_colors", ()) or ())
+        source_quad_colors = list(getattr(placeholder, "quad_face_colors", ()) or ())
+        self.mesh.face_colors.extend(
+            QColor(source_face_colors[index]) if index < len(source_face_colors) else QColor(color)
+            for index, _face in enumerate(placeholder.faces)
+        )
+        self.mesh.quad_face_colors.extend(
+            QColor(source_quad_colors[index]) if index < len(source_quad_colors) else QColor(color)
+            for index, _face in enumerate(placeholder.quad_faces)
+        )
+        proxy_index = len(self.mesh.scene_proxy_objects)
+        self.mesh.face_proxy_indices.extend(proxy_index for _ in placeholder.faces)
+        self.mesh.quad_proxy_indices.extend(proxy_index for _ in placeholder.quad_faces)
+        placed_vertices = self.mesh.vertices[vertex_start:]
+        min_x = min((vertex.x for vertex in placed_vertices), default=position[0] - 0.75)
+        min_y = min((vertex.y for vertex in placed_vertices), default=position[1] - 0.75)
+        min_z = min((vertex.z for vertex in placed_vertices), default=position[2] - 0.75)
+        max_x = max((vertex.x for vertex in placed_vertices), default=position[0] + 0.75)
+        max_y = max((vertex.y for vertex in placed_vertices), default=position[1] + 0.75)
+        max_z = max((vertex.z for vertex in placed_vertices), default=position[2] + 0.75)
+        proxy = SceneProxyInstance(
+            index=proxy_index,
+            provider_id="tech_connector",
+            native_id=entity_id,
+            name=str(entity["name"]),
+            object_type=type_id.removeprefix("tc."),
+            representation="mesh",
+            center=position,
+            source_bbox=(min_x, min_y, min_z, max_x, max_y, max_z),
+            mesh_data=SceneProxyMeshData(
+                vertex_start=vertex_start, vertex_count=len(placeholder.vertices),
+                face_start=face_start, face_count=len(placeholder.faces),
+                quad_start=quad_start, quad_count=len(placeholder.quad_faces),
+                has_uvs=True, source_vertex_count=len(placeholder.vertices),
+                source_vertex_indices=list(range(len(placeholder.vertices))), topology_state=topology_state,
+            ),
+            material_color=QColor(color), fill_color=QColor(color),
+            source_transform={"translation": list(position), "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+            local_transform={"translation": list(position), "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
+            source_signature=json.dumps(asset, sort_keys=True),
+            source_key=f"entity:{entity_id}",
+            visible=bool(entity.get("visible", True)),
+        )
+        proxy["entity_id"] = entity_id
+        proxy["asset_id"] = str(asset.get("asset_id") or "")
+        proxy["asset_path"] = str(asset.get("source") or "")
+        self.mesh.scene_proxy_objects.append(proxy)
+        self.mesh.update_default_pose()
+        if (
+            queue_native and preview is None
+            and type_id in {"tc.static_mesh", "tc.skeletal_mesh"}
+            and source_path.suffix.casefold() in {".fbx", ".gltf", ".glb", ".stl", ".usd", ".usda", ".usdc", ".usdz", ".abc"}
+        ):
+            self._queue_native_asset_preview(entity, position, proxy)
+        return proxy
+
+    def _queue_native_asset_preview(
+        self, entity: dict[str, Any], position: tuple[float, float, float], placeholder_proxy: SceneProxyInstance,
+    ) -> bool:
+        from tech_connector.game_engine.scene.native_fbx_service import native_scene_import_capabilities
+
+        if not isinstance(self, QObject):
+            entity["asset_instance"]["preview_state"] = "fallback_noninteractive_host"
+            return False
+        source = str(entity.get("asset_instance", {}).get("source") or "")
+        extension = Path(source).suffix.casefold()
+        capability = dict((native_scene_import_capabilities().get("formats") or {}).get(extension) or {})
+        if not capability.get("available"):
+            entity["asset_instance"]["preview_state"] = "fallback_backend_unavailable"
+            return False
+        thread = QThread(self)
+        worker = NativeFbxImportWorker(source)
+        worker.moveToThread(thread)
+        jobs = getattr(self, "_asset_preview_import_jobs", None)
+        if not isinstance(jobs, list):
+            jobs = []
+            self._asset_preview_import_jobs = jobs
+        job = {"thread": thread, "worker": worker, "asset_id": entity["asset_instance"].get("asset_id")}
+        jobs.append(job)
+        entity["asset_instance"]["preview_state"] = "converting"
+        thread.started.connect(worker.run)
+        worker.finished.connect(
+            lambda ok, asset, message, current=job, placed=entity, at=position, old=placeholder_proxy:
+            self._complete_native_asset_preview(current, placed, at, old, ok, asset, message)
+        )
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._resolved_shaded_status = f"Converting {Path(source).name} for an in-place Garden preview…"
+        self.update_viewport_status()
+        thread.start()
+        return True
+
+    def _complete_native_asset_preview(
+        self,
+        job: dict[str, Any],
+        entity: dict[str, Any],
+        position: tuple[float, float, float],
+        placeholder_proxy: SceneProxyInstance,
+        ok: bool,
+        asset: object,
+        message: str,
+    ) -> None:
+        jobs = getattr(self, "_asset_preview_import_jobs", [])
+        if job in jobs:
+            jobs.remove(job)
+        if not ok or asset is None:
+            entity["asset_instance"]["preview_state"] = "fallback_import_failed"
+            entity["asset_instance"]["preview_error"] = str(message)
+            self._resolved_shaded_status = f"Using fallback preview: {message}"
+            self.update_viewport_status()
+            return
+        try:
+            model = FBXMeshModel.from_native_fbx_asset(asset)
+        except Exception as exc:
+            entity["asset_instance"]["preview_state"] = "fallback_import_failed"
+            entity["asset_instance"]["preview_error"] = str(exc)
+            self._resolved_shaded_status = f"Using fallback preview: {exc}"
+            self.update_viewport_status()
+            return
+        placeholder_proxy.visible = False
+        old_mesh = placeholder_proxy.mesh_data
+        for index in range(old_mesh.face_start, old_mesh.face_start + old_mesh.face_count):
+            if index < len(self.mesh.face_colors):
+                self.mesh.face_colors[index].setAlpha(0)
+        for index in range(old_mesh.quad_start, old_mesh.quad_start + old_mesh.quad_count):
+            if index < len(self.mesh.quad_face_colors):
+                self.mesh.quad_face_colors[index].setAlpha(0)
+        entity["asset_instance"]["preview_state"] = "native"
+        entity["asset_instance"].pop("preview_error", None)
+        proxy = self._append_asset_placeholder_proxy(
+            entity, position, preview_model=model, queue_native=False
+        )
+        self._selected_scene_proxy = proxy
+        self._scene_lifecycle.mark_dirty()
+        self.refresh_scene_outliner()
+        self.update_instance_details_panel()
+        self.sync_gpu_viewport(full=True)
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+        self._resolved_shaded_status = f"Native preview ready: {Path(str(asset.source_path)).name}"
+        self.update_viewport_status()
+
+    def _restore_asset_placement_proxies(self) -> int:
+        existing = {str(proxy.get("source_key") or "") for proxy in self.mesh.scene_proxy_objects}
+        restored = 0
+        for entity in self._runtime_world_state.get("entities") or ():
+            if not isinstance(entity, dict) or not isinstance(entity.get("asset_instance"), dict):
+                continue
+            entity_id = str(entity.get("entity_id") or uuid.uuid4().hex); entity["entity_id"] = entity_id
+            source_key = f"entity:{entity_id}"
+            if source_key in existing:
+                continue
+            transform = dict(entity.get("transform") or {})
+            raw_position = list(transform.get("position") or (0.0, 0.0, 0.0))
+            position = tuple(float(raw_position[index] if index < len(raw_position) else 0.0) for index in range(3))
+            self._append_asset_placeholder_proxy(entity, position)
+            existing.add(source_key)
+            restored += 1
+        return restored
+
     def _blender_read_camera_authority_code(self, native_id: str) -> str:
         from tech_connector.ui.dcc_viewer.camera_adapter_code_service import (
             build_camera_authority_code,
@@ -553,6 +1109,7 @@ class ThreeDMeshPainterViewportMixin05:
                 "solution": copy.deepcopy(getattr(self, "last_shot_guide_solution", {}) or {}),
             },
             "runtime_world": copy.deepcopy(getattr(self, "_runtime_world_state", {}) or {}),
+            "engine_world_settings": copy.deepcopy(getattr(self, "_engine_world_settings", {}) or {}),
             "mesh_default_pose": getattr(self.mesh, "default_pose_to_dict", lambda: {})(),
         }
         if native_manifest:
@@ -1098,6 +1655,7 @@ class ThreeDMeshPainterViewportMixin05:
         self._federated_scene_blobs = blobs
         self._cross_dcc_transform_constraints = copy.deepcopy(document.cross_dcc_constraints)
         self._runtime_world_state = copy.deepcopy(dict(document.metadata.get("runtime_world") or {}))
+        self._engine_world_settings = copy.deepcopy(dict(document.metadata.get("engine_world_settings") or {}))
         self._saved_mesh_default_pose = copy.deepcopy(dict(document.metadata.get("mesh_default_pose") or {}))
         self._runtime_world_state.setdefault("entities", [])
         self._runtime_world_state.setdefault("physics_joints", [])
@@ -1248,6 +1806,9 @@ class ThreeDMeshPainterViewportMixin05:
         cached_snapshots = self._cached_dcc_snapshots_from_scene(document, blobs)
         if cached_snapshots:
             self._install_restored_dcc_snapshots(cached_snapshots, replace_existing=False)
+        restored_placements = self._restore_asset_placement_proxies()
+        if restored_placements:
+            self.refresh_scene_outliner()
         self._apply_saved_mesh_default_pose(self.mesh)
         restoration_started = self._start_dcc_scene_restore(document.sources, interactive=interactive)
         timeline = getattr(self, "anim_timeline", None)
@@ -2043,10 +2604,17 @@ class ThreeDMeshPainterViewportMixin05:
                 -float(delta_y) * screen_to_view / scale,
                 0.0,
             )
-        proxy["_pending_shared_delta"] = tuple(
+        raw_total = tuple(
             float(v) + shared_delta[i]
             for i, v in enumerate(proxy.get("_pending_shared_delta") or (0.0, 0.0, 0.0))
         )
+        proxy["_pending_shared_delta"] = raw_total
+        snap = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 0.0)
+        if snap > 0.0:
+            snapped_total = tuple(round(value / snap) * snap for value in raw_total)
+            previous = tuple(proxy.get("_pending_shared_snapped_delta") or (0.0, 0.0, 0.0))
+            shared_delta = tuple(snapped_total[i] - float(previous[i]) for i in range(3))
+            proxy["_pending_shared_snapped_delta"] = snapped_total
         self._offset_proxy_preview(proxy, shared_delta)
 
     def _offset_proxy_preview(
@@ -2081,7 +2649,8 @@ class ThreeDMeshPainterViewportMixin05:
                     vertex.z += view_delta[2]
             if mark_dirty:
                 proxy.sync_state = "dirty"
-        if self._proxy_source_key(proxy) == getattr(self, "_camera_pivot_source_key", ""):
+        source_key = getattr(self, "_proxy_source_key", lambda value: str(value.get("source_key") or ""))(proxy)
+        if source_key == getattr(self, "_camera_pivot_source_key", ""):
             self._move_camera_pivot_to_proxy(proxy, keep_eye_offset=True)
         if hasattr(self, "canvas") and self.canvas:
             self.canvas.update()
@@ -2111,6 +2680,8 @@ class ThreeDMeshPainterViewportMixin05:
             for index, enabled in enumerate(axis_mask):
                 if enabled:
                     rotation[index] = float(rotation[index]) + delta_degrees
+            snap = float((getattr(self, "_transform_snap_settings", {}) or {}).get("rotation", 0.0) or 0.0)
+            if snap > 0.0: rotation = [round(float(value) / snap) * snap for value in rotation]
             local_transform["rotation"] = rotation[:3]
             proxy["_pending_rotation_absolute"] = tuple(float(v) for v in rotation[:3])
         elif mode == "Scale":
@@ -2121,6 +2692,8 @@ class ThreeDMeshPainterViewportMixin05:
             for index, enabled in enumerate(axis_mask):
                 if enabled:
                     values[index] = max(0.001, float(values[index]) * factor)
+            snap = float((getattr(self, "_transform_snap_settings", {}) or {}).get("scale", 0.0) or 0.0)
+            if snap > 0.0: values = [max(0.001, round(float(value) / snap) * snap) for value in values]
             local_transform["scale"] = values[:3]
             proxy["_pending_scale_absolute"] = tuple(float(v) for v in values[:3])
         proxy["local_transform"] = local_transform
@@ -2303,6 +2876,16 @@ class ThreeDMeshPainterViewportMixin05:
         if rotation is None and scale is None:
             return True, "No transform change to commit."
         try:
+            if provider == "tech_connector":
+                entity = self._runtime_entity_for_proxy(proxy)
+                if entity is None: return False, "The selected level actor no longer exists."
+                transform = entity.setdefault("transform", {})
+                if rotation is not None: transform["rotation"] = [float(v) for v in rotation]
+                if scale is not None: transform["scale"] = [float(v) for v in scale]
+                proxy["sync_state"] = "dirty"; self._scene_lifecycle.mark_dirty()
+                self._resolved_shaded_status = f"{mode} committed: {entity.get('name') or native_id}"
+                self.auto_key_committed_transform(proxy, "rotate" if rotation is not None else "scale"); self.update_viewport_status()
+                return True, self._resolved_shaded_status
             if dcc_provider_base_key(provider) == "native_fbx":
                 if native_id in self.editable_rig_graph.joints:
                     self._commit_native_fbx_joint_transform(
@@ -2350,11 +2933,14 @@ class ThreeDMeshPainterViewportMixin05:
         proxy = getattr(self, "_selected_scene_proxy", None)
         if not proxy:
             return False, "No scene proxy is selected."
+        snapped_delta = proxy.pop("_pending_shared_snapped_delta", None)
         if isinstance(proxy, SceneProxyInstance):
             shared_delta = tuple(float(v) for v in proxy.pending_shared_delta)
             proxy.pending_shared_delta = (0.0, 0.0, 0.0)
         else:
             shared_delta = tuple(float(v) for v in (proxy.pop("_pending_shared_delta", (0.0, 0.0, 0.0)) or (0.0, 0.0, 0.0)))
+        if snapped_delta is not None:
+            shared_delta = tuple(float(v) for v in snapped_delta)
         if max(abs(v) for v in shared_delta) <= 1.0e-6:
             return True, "No transform change to commit."
         provider = str(proxy.get("provider_id") or "")
@@ -2362,6 +2948,14 @@ class ThreeDMeshPainterViewportMixin05:
         if not provider or not native_id:
             return False, "Selected proxy does not have a native target."
         try:
+            if provider == "tech_connector":
+                entity = self._runtime_entity_for_proxy(proxy)
+                if entity is None: return False, "The selected level actor no longer exists."
+                transform = entity.setdefault("transform", {}); transform["position"] = [float(v) for v in (proxy.get("local_transform") or {}).get("translation", proxy.get("center") or (0.0, 0.0, 0.0))]
+                proxy["sync_state"] = "dirty"; self._scene_lifecycle.mark_dirty()
+                self._resolved_shaded_status = f"Moved level actor: {entity.get('name') or native_id}"
+                self.auto_key_committed_transform(proxy, "translate"); self.update_viewport_status()
+                return True, self._resolved_shaded_status
             if dcc_provider_base_key(provider) == "native_fbx":
                 if native_id in self.editable_rig_graph.joints:
                     self._commit_native_fbx_joint_transform(

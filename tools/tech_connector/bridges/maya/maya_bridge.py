@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Direct Maya commandPort bridge."""
+"""Direct Maya authenticated JSON socket bridge."""
 
 import base64
 import array
@@ -15,6 +15,7 @@ import zlib
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo
 from tech_connector.bridges.session_preferences import preferred_session_port
+from tech_connector.bridges.session_authorization import bridge_session_token
 from tech_connector.models.constants import APP_ROOT, DEFAULT_MAYA_PORT, TOOLS_ROOT
 from tech_connector.game_engine.deformation.deformation_contract import (
     normalize_deformation_binding,
@@ -49,13 +50,16 @@ def decode_maya_snapshot_geometry(snapshot: dict) -> dict:
 from tech_connector.services.modular_provider_utils import DCCBridgeDelegateMixin
 
 
+_MAX_BRIDGE_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
 class MayaBridge(DCCBridgeDelegateMixin):
-    """Deterministic Maya communication via commandPort."""
+    """Deterministic Maya communication via an authenticated localhost socket."""
 
     info = HostBridgeInfo(
         id="maya",
         display_name="Maya",
-        protocol="commandPort-python",
+        protocol="socket-json",
         default_port=DEFAULT_MAYA_PORT,
         setup_script="installers/maya_command_port_setup.py",
         supports_direct_execute=True,
@@ -182,7 +186,7 @@ class MayaBridge(DCCBridgeDelegateMixin):
     def session_info(self, port: int | None = None, timeout: float = 3.0) -> dict:
         port = int(port or self.find_port() or 0)
         if not port:
-            return {"ok": False, "error": "No Maya commandPort found."}
+            return {"ok": False, "error": "No authenticated Maya bridge found."}
         code = """
 import json
 import os
@@ -266,12 +270,12 @@ print(json.dumps({
 
     def execute(self, code: str, timeout: float = 5) -> tuple[bool, str]:
         """
-        Execute code against Maya's commandPort capture function.
+        Execute code against Maya's authenticated JSON bridge.
         Returns (success, result_or_error_message).
         """
         port = self.find_port()
         if not port:
-            return False, "No Maya commandPort found. Start Maya and run maya_bridge.py."
+            return False, "No authenticated Maya bridge found. Start Maya and update its Tech Connector bridge."
         return self.execute_on_port(code, port=port, timeout=timeout)
 
     def execute_on_port(
@@ -285,7 +289,12 @@ print(json.dumps({
             if cancel_event is not None and cancel_event.is_set():
                 return False, "Maya command canceled."
             encoded = base64.b64encode(code.encode("utf-8")).decode("utf-8")
-            payload = f"maya_execute_and_capture('{encoded}')\n"
+            payload = json.dumps(
+                {
+                    "code_b64": encoded,
+                    "bridge_session": bridge_session_token("maya"),
+                }
+            ) + "\n"
             deadline = time.monotonic() + max(0.05, float(timeout))
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -294,6 +303,7 @@ print(json.dumps({
                 s.sendall(payload.encode("utf-8"))
 
                 chunks: list[bytes] = []
+                response_bytes = 0
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         return False, "Maya command canceled."
@@ -308,10 +318,19 @@ print(json.dumps({
                     if not data:
                         break
                     chunks.append(data)
-                    if b"\x00" in data:
+                    response_bytes += len(data)
+                    if response_bytes > _MAX_BRIDGE_RESPONSE_BYTES:
+                        return False, "Maya bridge response exceeded the 32 MiB wire limit."
+                    if b"\n" in data:
                         break
 
-            result = b"".join(chunks).replace(b"\x00", b"").decode("utf-8", errors="replace").strip()
+            raw = b"".join(chunks).decode("utf-8", errors="replace").strip()
+            if not raw:
+                return False, "Maya bridge returned no response."
+            response = json.loads(raw)
+            result = str(response.get("result") or response.get("error") or "").strip()
+            if not response.get("ok"):
+                return False, result or "Maya bridge request failed."
             if not result:
                 result = "Maya returned no output."
             if _captured_maya_output_has_error(result):
@@ -405,7 +424,7 @@ print(json.dumps(payload))
 """
         target_port = int(port or self.find_port() or 0)
         if not target_port:
-            return False, "No Maya commandPort found for viewport capture metadata."
+            return False, "No authenticated Maya bridge found for viewport capture metadata."
         ok, raw = self.execute_on_port(code, port=target_port, timeout=timeout)
         if not ok:
             return False, raw

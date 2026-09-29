@@ -16,6 +16,10 @@ from tech_connector.bridges.session_discovery import (
     discover_open_ports,
     parse_session_output,
 )
+from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
+    embedded_bridge_authorization_source,
+)
 from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 from tech_connector.game_engine.scene.scene_delta_contract import normalize_frame_delta
 
@@ -112,6 +116,14 @@ def _handle_client(conn):
                 raw += chunk
 
             payload = json.loads(raw.decode("utf-8", errors="replace").strip())
+            if not _tech_connector_bridge_authorized(payload):
+                response = {
+                    "ok": False,
+                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "code": "bridge_authorization_required",
+                }
+                conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
+                return
             code = base64.b64decode(payload["code_b64"]).decode("utf-8", errors="replace")
             done = threading.Event()
             job = [code, done]
@@ -183,6 +195,9 @@ def stop_bridge():
 """
 
 
+PLUGIN_SOURCE_CODE = embedded_bridge_authorization_source("houdini") + "\n" + PLUGIN_SOURCE_CODE
+
+
 def start_plugin_immediately():
     exec(PLUGIN_SOURCE_CODE, globals(), globals())
     if "start_bridge" in globals():
@@ -238,7 +253,10 @@ class HoudiniBridge(DCCBridgeDelegateMixin):
 
         try:
             encoded = base64.b64encode(code.encode("utf-8")).decode("utf-8")
-            payload = json.dumps({"code_b64": encoded}).encode("utf-8") + b"\n"
+            payload = json.dumps({
+                "code_b64": encoded,
+                "bridge_session": bridge_session_token("houdini"),
+            }).encode("utf-8") + b"\n"
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(timeout)

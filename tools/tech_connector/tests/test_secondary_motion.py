@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
 from tech_connector.game_engine.deformation import (
     SECONDARY_MOTION_PRESETS,
     DeformationStackRuntime,
@@ -18,6 +21,9 @@ from tech_connector.game_engine.deformation.skinning_tool_service import (
 )
 from tech_connector.game_engine.scene.federated_scene_service import EditableRigGraph
 from tech_connector.game_engine.scene.tc_native_scene_compiler_service import compile_graph_to_tc_native
+from tech_connector.game_engine.runtime.tc_simulation_compute_provider_service import (
+    ArrayComputeProvider, COMPUTE_PROVIDERS, ComputeProviderStatus, register_compute_provider,
+)
 
 
 def _skin_graph(vertex_count: int = 1):
@@ -107,3 +113,63 @@ def test_secondary_motion_identity_remaps_and_contracts_cover_destinations() -> 
         assert contract["canonical_skin_preserved"]
         assert contract["secondary_motion_transfer"]
     assert {"soft_tissue", "muscle_follow", "stylized_goop"} <= set(SECONDARY_MOTION_PRESETS)
+
+
+def test_gpu_secondary_motion_stack_is_resident_budgeted_and_reference_compatible() -> None:
+    provider_id = "test_gpu_secondary_motion"
+    register_compute_provider(ArrayComputeProvider(
+        ComputeProviderStatus(provider_id, True, "gpu", "Test GPU Deformation", True), np,
+    ))
+    try:
+        vertex_count = 256
+        graph, skin_id = _skin_graph(vertex_count)
+        attach_secondary_motion_preset(
+            graph, skin_id, "body", DeformationWeightMap("soft", [1.0] * vertex_count), "muscle_follow",
+        )
+        reference_runtime = DeformationStackRuntime()
+        gpu_runtime = DeformationStackRuntime()
+        start = [(index * 0.001, 2.0, 0.0) for index in range(vertex_count)]
+        moved = [(x + 0.08, y + 0.12, -0.03) for x, y, _z in start]
+        reference_runtime.evaluate(graph, "body", start, 1.0 / 60.0)
+        gpu_runtime.evaluate_gpu(graph, "body", start, 1.0 / 60.0, provider_id=provider_id, target_ms=100.0)
+        reference, _reference_telemetry = reference_runtime.evaluate(graph, "body", moved, 1.0 / 60.0)
+        gpu, telemetry = gpu_runtime.evaluate_gpu(
+            graph, "body", moved, 1.0 / 60.0, provider_id=provider_id, target_ms=100.0,
+        )
+
+        assert np.asarray(gpu) == pytest.approx(np.asarray(reference), abs=2.0e-5)
+        assert telemetry.backend == "gpu_compute"
+        assert telemetry.reused_states == 2
+        assert telemetry.state_count == 2
+        assert telemetry.memory_bytes > 0
+        assert telemetry.synchronization_points == 1
+
+        collision_runtime = DeformationStackRuntime()
+        inside = [(0.1, index * 0.0001, 0.0) for index in range(vertex_count)]
+        collision_runtime.evaluate_gpu(
+            graph, "body", inside, 1.0 / 60.0, provider_id=provider_id, target_ms=100.0,
+        )
+        collided, collision_telemetry = collision_runtime.evaluate_gpu(
+            graph, "body", inside, 1.0 / 60.0, provider_id=provider_id, target_ms=100.0,
+            colliders=[{"type": "capsule", "start": (0.0, -1.0, 0.0),
+                        "end": (0.0, 1.0, 0.0), "radius": 0.5}],
+        )
+        assert min(row[0] for row in collided) >= 0.51 - 1.0e-5
+        assert collision_telemetry.collision_contacts > 0
+
+        resident_runtime = DeformationStackRuntime()
+        resident_runtime.evaluate_gpu(
+            graph, "body", start, 1.0 / 60.0, provider_id=provider_id,
+            target_ms=0.01, resident_output=True,
+        )
+        resident, resident_telemetry = resident_runtime.evaluate_gpu(
+            graph, "body", moved, 1.0 / 60.0, provider_id=provider_id,
+            target_ms=0.01, resident_output=True,
+        )
+        assert isinstance(resident, np.ndarray)
+        assert resident_telemetry.readback_deferred
+        assert resident_telemetry.synchronization_points == 0
+        assert resident_telemetry.reused_states == 2
+        assert resident_telemetry.lod_quality < 1.0
+    finally:
+        COMPUTE_PROVIDERS.pop(provider_id, None)

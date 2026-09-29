@@ -446,6 +446,19 @@ class TCCreateRigFacade:
         _ctx().changed()
         return result.to_dict()
 
+    def create_joints_along_curve(self, curve, joint_count=5, keep_attached=True, name_prefix=None, **_kwargs):
+        _ctx().checkpoint("Create joints along curve")
+        result = _ctx().adapter._op_rig_create_curve_joints({
+            "curve": curve,
+            "joint_count": int(joint_count),
+            "keep_attached": bool(keep_attached),
+            "name_prefix": name_prefix,
+        })
+        if not result.ok:
+            raise RuntimeError(result.message)
+        _ctx().changed()
+        return result.data
+
     def setup_surface_rig_with_drivers(self, joint_list=None, joint_chain=None, **kwargs):
         chain = list(joint_list or joint_chain or [])
         _ctx().checkpoint("Create surface rig")

@@ -34,6 +34,9 @@ def test_adaptive_command_policy_marks_uncheckpointed_mutations_once() -> None:
     finalize_adaptive_command(lifecycle, "gameplay.set_visual_style", {"executed": True}, 0)
     assert lifecycle.revision == 1
     assert not command_mutates_document("engine.audit_capability_maturity")
+    assert not command_mutates_document("engine.qualify_dcc_host")
+    assert not command_mutates_document("engine.qualify_dcc_source_parity")
+    assert not command_mutates_document("engine.run_dcc_workflow")
 
 
 def test_read_only_adaptive_command_does_not_dirty_document() -> None:

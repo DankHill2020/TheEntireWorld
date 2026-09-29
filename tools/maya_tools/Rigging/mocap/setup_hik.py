@@ -6,6 +6,7 @@ import math
 import re
 import copy
 from maya_tools.Utilities import joints as joints_util
+from utilities.p4_utils import prepare_file_for_write
 
 DEFAULT_FACE_JOINT_MAP = {
 
@@ -390,6 +391,78 @@ def set_t_pose(l_upperarm=None, r_upperarm=None, l_clav=None, r_clav=None, l_elb
 t_pose_character = set_t_pose
 
 
+def _joint_map_entry(value):
+    """Return the joint name and HIK index from either supported map format."""
+    if isinstance(value, dict):
+        return value.get("joint", ""), value.get("index")
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return value[0], value[1]
+    raise ValueError("HIK mapping values must contain a joint name and index")
+
+
+def _is_joint_descendant(joint, ancestor):
+    """Return True when *joint* is below *ancestor* in the Maya joint hierarchy."""
+    if not joint or not ancestor or joint == ancestor:
+        return False
+    descendants = cmds.listRelatives(ancestor, ad=True, type="joint", fullPath=True) or []
+    joint_paths = cmds.ls(joint, long=True) or [joint]
+    return any(path in descendants for path in joint_paths)
+
+
+def _validate_hik_mapping(joint_map):
+    """Validate mapped nodes and complete arm chains before modifying the scene."""
+    parsed = {}
+    missing = []
+    for slot, value in joint_map.items():
+        joint, index = _joint_map_entry(value)
+        if not joint or not cmds.objExists(joint):
+            missing.append("{} -> {}".format(slot, joint or "<empty>"))
+        parsed[slot] = (joint, index)
+    if missing:
+        raise RuntimeError("HIK mapping contains missing joints: {}".format(", ".join(missing)))
+
+    required_slots = (
+        "Hips", "Spine", "Head",
+        "LeftUpLeg", "LeftLeg", "LeftFoot",
+        "RightUpLeg", "RightLeg", "RightFoot",
+        "LeftArm", "LeftForeArm", "LeftHand",
+        "RightArm", "RightForeArm", "RightHand",
+    )
+    missing_slots = [slot for slot in required_slots if slot not in parsed]
+    if missing_slots:
+        raise RuntimeError(
+            "HIK mapping is missing required body slots: {}".format(", ".join(missing_slots))
+        )
+
+    chain_slots = ("Shoulder", "Arm", "ForeArm", "Hand")
+    for side in ("Left", "Right"):
+        for parent_suffix, child_suffix in zip(chain_slots, chain_slots[1:]):
+            parent_slot = side + parent_suffix
+            child_slot = side + child_suffix
+            if parent_slot in parsed and child_slot in parsed:
+                parent = parsed[parent_slot][0]
+                child = parsed[child_slot][0]
+                if not _is_joint_descendant(child, parent):
+                    raise RuntimeError(
+                        "Invalid {} arm hierarchy: '{}' is not below '{}'. "
+                        "Check the auto-mapped joints before characterization.".format(
+                            side.lower(), child, parent
+                        )
+                    )
+    return parsed
+
+
+def _hik_definition_ui_exists():
+    """The definition update MEL is unsafe unless its contextual tab was built."""
+    for query in (cmds.tabLayout, cmds.layout, cmds.control):
+        try:
+            if query("hikContextualTabs", exists=True):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
     """
     Setup a HIK character definition and export to FBX for MotionBuilder.
@@ -401,6 +474,10 @@ def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
     :return:
     """
 
+    parsed_joint_map = _validate_hik_mapping(joint_map)
+    # Resolve output permissions before deleting the rig or changing its pose.
+    prepare_file_for_write(fbx_export_path)
+
     mel.eval("DisableAll")
     for grp_name in ["DNT", "do_not_touch", "rig"]:
         if cmds.objExists(grp_name):
@@ -411,11 +488,17 @@ def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
                 print(f"[WARNING] Could not delete group '{grp_name}': {e}")
     mel.eval("EnableAll")
 
-    if "LeftArm" in joint_map and "RightArm" in joint_map:
-        t_pose_character(joint_map["LeftArm"][0], joint_map["RightArm"][0],
-                         joint_map["LeftShoulder"][0], joint_map["RightShoulder"][0],
-                         joint_map["LeftForeArm"][0], joint_map["RightForeArm"][0],
-                         joint_map["LeftHand"][0], joint_map["RightHand"][0])
+    arm_slots = (
+        "LeftArm", "RightArm", "LeftShoulder", "RightShoulder",
+        "LeftForeArm", "RightForeArm", "LeftHand", "RightHand",
+    )
+    if all(slot in parsed_joint_map for slot in arm_slots):
+        t_pose_character(
+            parsed_joint_map["LeftArm"][0], parsed_joint_map["RightArm"][0],
+            parsed_joint_map["LeftShoulder"][0], parsed_joint_map["RightShoulder"][0],
+            parsed_joint_map["LeftForeArm"][0], parsed_joint_map["RightForeArm"][0],
+            parsed_joint_map["LeftHand"][0], parsed_joint_map["RightHand"][0],
+        )
 
     # Step 1: Create HumanIK character
     MAYA_LOCATION = os.environ['MAYA_LOCATION']
@@ -431,19 +514,29 @@ def setup_hik_character(character_name, joint_map, fbx_export_path, namespace):
 
         mel.eval('hikUpdateCharacterList();')
 
-    for hik_slot, value in joint_map.items():
-        if isinstance(value, dict):
-            joint_name, index = value
-        else:
-            joint_name, index = value
+    for hik_slot, (joint_name, index) in parsed_joint_map.items():
 
         try:
             mel.eval(f'setCharacterObject "{joint_name}" "{character_name}" "{index}" 0;')
 
         except Exception as e:
-            print(f"Failed to map {hik_slot} -> {value}: {e}")
-    mel.eval('hikUpdateDefinitionUI;')
-    mel.eval('hikToggleLockDefinition()')
+            print(f"Failed to map {hik_slot} -> {joint_name}: {e}")
+    # hikToggleLockDefinition always queries UI widgets such as
+    # hikContextualTabs. Characterization also runs from command ports and
+    # hidden tools, so use Autodesk's lower-level lock operation.
+    escaped_character = character_name.replace('"', '\\"')
+    # The validation flag in hikCharacterLock consults a Qt characterization
+    # widget, even when no HIK UI exists. Required slots and hierarchy were
+    # validated above, so capture the stance explicitly and bypass that widget.
+    mel.eval('hikReadStancePoseTRSOffsets("{}");'.format(escaped_character))
+    mel.eval('hikCharacterLock "{}" 1 0;'.format(escaped_character))
+    if not mel.eval('hikIsDefinitionLocked("{}");'.format(escaped_character)):
+        raise RuntimeError("HumanIK could not lock character '{}'".format(character_name))
+    if _hik_definition_ui_exists():
+        try:
+            mel.eval('hikUpdateDefinitionUI;')
+        except RuntimeError as exc:
+            cmds.warning("HumanIK character was created, but its UI could not refresh: {}".format(exc))
 
     os.makedirs(os.path.dirname(fbx_export_path), exist_ok=True)
     cmds.select(all=True)
@@ -618,9 +711,39 @@ def guess_joint_map_from_root(root_joint, base_joint_map=None):
         "Right": {"Thumb": [], "Index": [], "Middle": [], "Ring": [], "Pinky": []}
     }
 
-    # Check if upperarm joint exists to distinguish shoulder vs upperarm
-    has_l_upperarm = any("l_upper" in j.lower() or "upper_l" in j.lower() or "l_arm" in j.lower() or "arm_l" in j.lower() or "l_upperarm" in j.lower() or "upperarm_l" in j.lower() for j in all_joints)
-    has_r_upperarm = any("r_upper" in j.lower() or "upper_r" in j.lower() or "r_arm" in j.lower() or "arm_r" in j.lower() or "r_upperarm" in j.lower() or "upperarm_r" in j.lower() for j in all_joints)
+    def normalized_short_name(joint):
+        short_name = joint.rsplit("|", 1)[-1].rsplit(":", 1)[-1].lower()
+        return re.sub(r"[^a-z0-9]+", "_", short_name).strip("_")
+
+    def matches_alias(joint, aliases):
+        name = normalized_short_name(joint)
+        return any(
+            name == alias or re.fullmatch(re.escape(alias) + r"\d+", name)
+            for alias in aliases
+        )
+
+    left_arm_aliases = {
+        "l_upperarm", "l_upper_arm", "upperarm_l", "upper_arm_l",
+        "left_upperarm", "left_upper_arm", "l_arm", "arm_l", "leftarm",
+    }
+    right_arm_aliases = {
+        "r_upperarm", "r_upper_arm", "upperarm_r", "upper_arm_r",
+        "right_upperarm", "right_upper_arm", "r_arm", "arm_r", "rightarm",
+    }
+    left_forearm_aliases = {
+        "l_lowerarm", "l_lower_arm", "lowerarm_l", "lower_arm_l",
+        "l_forearm", "forearm_l", "left_forearm", "leftforearm",
+        "l_elbow", "elbow_l", "left_elbow",
+    }
+    right_forearm_aliases = {
+        "r_lowerarm", "r_lower_arm", "lowerarm_r", "lower_arm_r",
+        "r_forearm", "forearm_r", "right_forearm", "rightforearm",
+        "r_elbow", "elbow_r", "right_elbow",
+    }
+
+    # Shoulder names are ambiguous only when a distinct upper-arm joint exists.
+    has_l_upperarm = any(matches_alias(joint, left_arm_aliases) for joint in all_joints)
+    has_r_upperarm = any(matches_alias(joint, right_arm_aliases) for joint in all_joints)
 
     twist_map = {
         # arms
@@ -634,6 +757,7 @@ def guess_joint_map_from_root(root_joint, base_joint_map=None):
 
     for jnt in all_joints:
         name = jnt.lower()
+        short_name = normalized_short_name(jnt)
 
         def set_slot(slot):
             if slot in joint_map and not joint_map[slot].get("joint"):
@@ -681,24 +805,24 @@ def guess_joint_map_from_root(root_joint, base_joint_map=None):
         elif "hipswing" in name or "hip_swing" in name:
             set_slot("HipSwing")
 
-        elif "l_clavicle" in name or "clavicle_l" in name or ("l_shoulder" in name and has_l_upperarm):
+        elif matches_alias(jnt, {"l_clavicle", "clavicle_l", "left_clavicle"}) or (matches_alias(jnt, {"l_shoulder", "shoulder_l", "left_shoulder"}) and has_l_upperarm):
             set_slot("LeftShoulder")
-        elif ("l_upper" in name or "upper_l" in name or "l_upperarm" in name or "upperarm_l" in name or "l_upper_arm" in name or "upper_arm_l" in name or ("l_shoulder" in name and not has_l_upperarm) or "l_arm" in name or "arm_l" in name):
+        elif matches_alias(jnt, left_arm_aliases) or (matches_alias(jnt, {"l_shoulder", "shoulder_l", "left_shoulder"}) and not has_l_upperarm):
             set_slot("LeftArm")
-        elif ("l_lower" in name or "lower_l" in name or "l_lowerarm" in name or "lowerarm_l" in name or "l_lower_arm" in name or "lower_arm_l" in name or "l_forearm" in name or "forearm_l" in name or "l_elbow" in name):
+        elif matches_alias(jnt, left_forearm_aliases):
             set_slot("LeftForeArm")
 
-        elif "l_hand" in name or "hand_l" in name and "ik" not in name:
+        elif matches_alias(jnt, {"l_hand", "hand_l", "left_hand", "lefthand"}) and "ik" not in short_name:
             set_slot("LeftHand")
 
-        elif "r_clavicle" in name or "clavicle_r" in name or ("r_shoulder" in name and has_r_upperarm):
+        elif matches_alias(jnt, {"r_clavicle", "clavicle_r", "right_clavicle"}) or (matches_alias(jnt, {"r_shoulder", "shoulder_r", "right_shoulder"}) and has_r_upperarm):
             set_slot("RightShoulder")
-        elif ("r_upper" in name or "upper_r" in name or "r_upperarm" in name or "upperarm_r" in name or "r_upper_arm" in name or "upper_arm_r" in name or ("r_shoulder" in name and not has_r_upperarm) or "r_arm" in name or "arm_r" in name):
+        elif matches_alias(jnt, right_arm_aliases) or (matches_alias(jnt, {"r_shoulder", "shoulder_r", "right_shoulder"}) and not has_r_upperarm):
             set_slot("RightArm")
-        elif ("r_lower" in name or "lower_r" in name or "r_lowerarm" in name or "lowerarm_r" in name or "r_lower_arm" in name or "lower_arm_r" in name or "r_forearm" in name or "forearm_r" in name or "r_elbow" in name):
+        elif matches_alias(jnt, right_forearm_aliases):
             set_slot("RightForeArm")
 
-        elif "r_hand" in name or "hand_r" in name and "ik" not in name:
+        elif matches_alias(jnt, {"r_hand", "hand_r", "right_hand", "righthand"}) and "ik" not in short_name:
             set_slot("RightHand")
 
         elif ("l_thigh" in name or "thigh_l" in name or "l_upperleg" in name):

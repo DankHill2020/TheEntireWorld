@@ -21,6 +21,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from tech_connector.game_engine.rendering.media_texture_service import normalize_media_texture_source
+
 try:
     import numpy as np
 except ImportError:  # The painter keeps a slower compatibility path for minimal installs.
@@ -198,6 +200,8 @@ class SceneProxyMaterialBinding:
     attenuation_color: str = "#ffffff"
     attenuation_distance: float = 1000.0
     texture_color_spaces: dict[str, str] = field(default_factory=dict)
+    texture_sources: dict[str, dict[str, Any]] = field(default_factory=dict)
+    procedural_shader: dict[str, Any] = field(default_factory=dict)
     portable_material: dict[str, Any] = field(default_factory=dict)
 
 
@@ -329,11 +333,34 @@ class SceneProxyInstance:
         return default
 
     def bind_texture_file(self, slot: str, path: str) -> None:
-        self.texture_bindings[str(slot or "base_color")] = str(path or "")
+        self.bind_texture_source(slot, {"path": str(path or "")})
+
+    def bind_texture_source(self, slot: str, source: str | dict[str, Any]) -> None:
+        channel = str(slot or "base_color")
+        descriptor = normalize_media_texture_source(source).to_dict()
+        self.texture_bindings[channel] = descriptor["path"]
         if self.materials:
-            self.materials[0].texture_paths[str(slot or "base_color")] = str(path or "")
-            self.materials[0].approximation = "texture_bound"
+            self.materials[0].texture_paths[channel] = descriptor["path"]
+            self.materials[0].texture_sources[channel] = descriptor
+            self.materials[0].approximation = (
+                "media_texture_bound" if descriptor["source_type"] != "image" else "texture_bound"
+            )
         self.sync_state = "dirty"
+
+    def configure_texture_playback(self, slot: str, **controls: Any) -> dict[str, Any]:
+        if not self.materials:
+            raise ValueError("The proxy has no material to configure.")
+        channel = str(slot or "base_color")
+        existing = dict(self.materials[0].texture_sources.get(channel) or {})
+        path = str(existing.get("path") or self.materials[0].texture_paths.get(channel) or "")
+        if not path:
+            raise ValueError(f"Texture slot '{channel}' has no media source.")
+        existing.update(controls)
+        existing["path"] = path
+        descriptor = normalize_media_texture_source(existing).to_dict()
+        self.materials[0].texture_sources[channel] = descriptor
+        self.sync_state = "dirty"
+        return descriptor
 
 
 @dataclass(frozen=True)
@@ -1193,7 +1220,7 @@ class DccTimelineCacheWorker(QObject):
                     forced_port = None
             port = forced_port or bridge.find_port()
             if not port:
-                self.finished.emit(self.provider, False, "No Maya commandPort found for timeline cache.")
+                self.finished.emit(self.provider, False, "No authenticated Maya bridge found for timeline cache.")
                 return
             total = max(0, self.frame_end - self.frame_start + 1)
             if total <= 0:
@@ -1440,7 +1467,7 @@ class DccSceneSnapshotWorker(QObject):
                             forced_port = None
                     port = forced_port or raw_bridge.find_port()
                     if not port:
-                        errors.append(f"{provider}: no Maya commandPort found")
+                        errors.append(f"{provider}: no authenticated Maya bridge found")
                         continue
                     deformation_binding = request.get("maya_deformation_binding")
                     gpu_skinning_enabled = bool(request.get("maya_gpu_skinning_enabled"))
@@ -1873,7 +1900,7 @@ class DccDeformationBindingWorker(QObject):
                     forced_port = None
             port = forced_port or bridge.find_port()
             if not port:
-                raise RuntimeError("No Maya commandPort found for deformation binding.")
+                raise RuntimeError("No authenticated Maya bridge found for deformation binding.")
             self._raise_if_cancelled()
             phase_started = time.perf_counter()
             ok, binding = bridge.get_deformation_binding(

@@ -8,17 +8,20 @@ from tech_connector.game_engine.integration.dcc_capability_audit_service import 
 from tech_connector.game_engine.integration.dcc_host_qualification_service import (
     DEFAULT_QUALIFICATION_MAX_AGE_SECONDS,
     HOST_ROLE_PROFILES,
+    qualification_ledger,
     validate_host_qualification_receipt,
 )
 from tech_connector.game_engine.integration.dcc_production_workflow_service import (
     DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS,
     PRODUCTION_WORKFLOWS,
+    workflow_receipt_ledger,
     validate_workflow_receipt,
     validate_workflow_catalog,
 )
 from tech_connector.game_engine.rendering.material_contract import provider_lookdev_capture_profile
 from tech_connector.game_engine.integration.dcc_source_parity_qualification_service import (
     DEFAULT_SOURCE_PARITY_MAX_AGE_SECONDS,
+    source_parity_ledger,
     validate_source_parity_receipt,
 )
 
@@ -37,9 +40,15 @@ def audit_dcc_release_readiness(
     verify_live_host_sessions: bool = True,
     workflow_receipt_max_age_seconds: float = DEFAULT_WORKFLOW_RECEIPT_MAX_AGE_SECONDS,
 ) -> dict[str, Any]:
-    qualifications = dict(qualification_receipts or {})
-    receipts = dict(workflow_receipts or {})
-    parity_receipts = dict(source_parity_receipts or {})
+    qualifications = dict(
+        qualification_ledger()["receipts"] if qualification_receipts is None else qualification_receipts
+    )
+    receipts = dict(
+        workflow_receipt_ledger()["receipts"] if workflow_receipts is None else workflow_receipts
+    )
+    parity_receipts = dict(
+        source_parity_ledger()["receipts"] if source_parity_receipts is None else source_parity_receipts
+    )
     capability_rows = {
         row["host"]: row for row in audit_dcc_capabilities()["hosts"]
         if row["host"] != "tech_connector"

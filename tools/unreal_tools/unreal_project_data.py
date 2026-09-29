@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from utilities.p4_utils import prepare_file_for_write
 
 
 def get_engine_association(uproject_path):
@@ -137,12 +138,14 @@ def ensure_unreal_python_plugin_enabled(uproject_path):
         if str(plugin.get("Name", "")).lower() == "pythonscriptplugin":
             if plugin.get("Enabled") is not True:
                 plugin["Enabled"] = True
+                prepare_file_for_write(uproject_path)
                 with open(uproject_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=4)
                     f.write("\n")
             return
 
     plugins.append({"Name": "PythonScriptPlugin", "Enabled": True})
+    prepare_file_for_write(uproject_path)
     with open(uproject_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
         f.write("\n")
@@ -185,6 +188,7 @@ def _set_uproject_plugin_enabled(uproject_path, plugin_name, enabled=True):
         entry["Enabled"] = bool(enabled)
         changed = True
     if changed:
+        prepare_file_for_write(path)
         path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
     return changed
 
@@ -474,6 +478,7 @@ def add_unreal_startup_script(uproject_path, script_path):
     os.makedirs(config_dir, exist_ok=True)
     ini_path = os.path.join(project_dir, "Config", "DefaultEngine.ini")
     if not os.path.exists(ini_path):
+        prepare_file_for_write(ini_path)
         with open(ini_path, "w", encoding="utf-8") as f:
             f.write("")
 
@@ -511,6 +516,7 @@ def add_unreal_startup_script(uproject_path, script_path):
     new_line = f"{startup_script_key}[{new_index}]={cleaned_path}\n"
 
     lines.insert(section_end, new_line)
+    prepare_file_for_write(ini_path)
     with open(ini_path, 'w', encoding='utf-8') as f:
         f.writelines(lines)
 

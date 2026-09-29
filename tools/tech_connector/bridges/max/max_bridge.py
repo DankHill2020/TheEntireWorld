@@ -11,6 +11,10 @@ from typing import Optional
 
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
+from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
+    embedded_bridge_authorization_source,
+)
 from tech_connector.bridges.session_discovery import (
     candidate_session_ports,
     discover_open_ports,
@@ -21,7 +25,7 @@ from tech_connector.services.modular_provider_utils import DCCBridgeDelegateMixi
 
 
 PLUGIN_FILENAME = "tech_connector_3dsmax_bridge.py"
-PLUGIN_SOURCE_CODE = '''"""Tech Connector 3ds Max startup bridge."""
+PLUGIN_SOURCE_CODE = embedded_bridge_authorization_source("3dsmax") + '''"""Tech Connector 3ds Max startup bridge."""
 import base64
 import contextlib
 import io
@@ -93,6 +97,14 @@ def _handle(conn):
                     break
                 raw += chunk
             request = json.loads(raw.decode("utf-8", errors="replace").strip())
+            if not _tech_connector_bridge_authorized(request):
+                response = {
+                    "ok": False,
+                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "code": "bridge_authorization_required",
+                }
+                conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
+                return
             code = base64.b64decode(request["code_b64"]).decode("utf-8", errors="replace")
             done = threading.Event()
             job = [code, done]
@@ -207,6 +219,7 @@ class MaxBridge(DCCBridgeDelegateMixin):
             request = {
                 "code_b64": base64.b64encode(str(code).encode("utf-8")).decode("ascii"),
                 "timeout_seconds": max(0.1, float(timeout) * 0.95),
+                "bridge_session": bridge_session_token("3dsmax"),
             }
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
                 connection.settimeout(max(0.1, float(timeout)))

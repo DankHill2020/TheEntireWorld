@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover - minimal DCC Python environments use the 
     np = None
 
 from tech_connector.game_engine.deformation.weight_map import DeformationWeightMap, Vec3, blend_deformation
+from tech_connector.game_engine.deformation.collision_projection import project_character_point
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ def evaluate_flesh(
         old_positions = list(state.positions)
         for index, target in enumerate(targets):
             position = state.positions[index]
+            previous_position = position
             velocity = state.velocities[index]
             spring = _scale(_subtract(target, position), settings.stiffness)
             drag = _scale(velocity, -settings.damping)
@@ -109,7 +111,9 @@ def evaluate_flesh(
                 velocity = _scale(velocity, 0.45)
             # Collision separation wins over the artistic offset limit; otherwise a
             # deeply intersecting animated target would clamp tissue back inside.
-            position, velocity, contacts = _solve_colliders(position, velocity, settings, colliders)
+            position, velocity, contacts = _solve_colliders(
+                position, velocity, settings, colliders, previous_position=previous_position,
+            )
             state.collision_count += contacts
             state.positions[index] = position
             state.velocities[index] = velocity
@@ -233,6 +237,40 @@ def _evaluate_flesh_numpy(
                         velocity[mask], normals_at_contact, friction, restitution
                     )
                     state.collision_count += int(np.count_nonzero(mask))
+            elif kind == "capsule":
+                start = np.asarray(_vec3(collider.get("start", collider.get("a", (0.0, -0.5, 0.0)))))
+                end = np.asarray(_vec3(collider.get("end", collider.get("b", (0.0, 0.5, 0.0)))))
+                segment = end - start
+                denominator = float(np.dot(segment, segment))
+                amount = np.clip(((position - start) @ segment) / denominator, 0.0, 1.0) if denominator > 1.0e-18 else np.zeros(len(position))
+                closest = start + amount[:, None] * segment
+                delta = position - closest
+                distance = np.linalg.norm(delta, axis=1)
+                minimum = max(0.0, float(collider.get("radius", 0.5))) + settings.collision_radius
+                mask = distance < minimum
+                if np.any(mask):
+                    normals_at_contact = np.zeros_like(delta[mask])
+                    valid = distance[mask] > 1.0e-12
+                    normals_at_contact[valid] = delta[mask][valid] / distance[mask][valid, None]
+                    normals_at_contact[~valid] = (0.0, 0.0, 1.0)
+                    position[mask] = closest[mask] + normals_at_contact * minimum
+                    velocity[mask] = _numpy_collision_velocity(velocity[mask], normals_at_contact, friction, restitution)
+                    state.collision_count += int(np.count_nonzero(mask))
+            elif kind in {"box", "aabb"}:
+                center = np.asarray(_vec3(collider.get("center", (0.0, 0.0, 0.0))))
+                half = np.maximum(0.0, np.asarray(_vec3(collider.get("half_extents", collider.get("extents", (0.5, 0.5, 0.5))))))
+                expanded = half + settings.collision_radius
+                local = position - center
+                mask = np.all(np.abs(local) < expanded, axis=1)
+                if np.any(mask):
+                    selected = np.flatnonzero(mask)
+                    axes = np.argmin(expanded - np.abs(local[mask]), axis=1)
+                    signs = np.where(local[selected, axes] < 0.0, -1.0, 1.0)
+                    normals_at_contact = np.zeros((len(selected), 3), dtype=np.float64)
+                    normals_at_contact[np.arange(len(selected)), axes] = signs
+                    position[selected, axes] = center[axes] + signs * expanded[axes]
+                    velocity[selected] = _numpy_collision_velocity(velocity[selected], normals_at_contact, friction, restitution)
+                    state.collision_count += len(selected)
     state.positions = [tuple(row) for row in position.tolist()]
     state.velocities = [tuple(row) for row in velocity.tolist()]
     influence = np.asarray(influence_map.values, dtype=np.float64)[:, None]
@@ -281,39 +319,14 @@ def _solve_colliders(
     velocity: Vec3,
     settings: FleshDeformerSettings,
     colliders: Sequence[Mapping[str, Any]],
+    *,
+    previous_position: Sequence[float] | None = None,
 ) -> tuple[Vec3, Vec3, int]:
-    contacts = 0
-    for collider in colliders:
-        kind = str(collider.get("type") or "sphere").lower()
-        friction = max(0.0, float(collider.get("friction", settings.friction)))
-        restitution = max(0.0, float(collider.get("restitution", settings.restitution)))
-        if kind == "plane":
-            normal = _normalize(_vec3(collider.get("normal", (0.0, 1.0, 0.0))), (0.0, 1.0, 0.0))
-            offset = float(collider.get("offset", 0.0))
-            distance = _dot(position, normal) - offset
-            if distance < settings.collision_radius:
-                position = _add(position, _scale(normal, settings.collision_radius - distance))
-                velocity = _collision_velocity(velocity, normal, friction, restitution)
-                contacts += 1
-        elif kind == "sphere":
-            center = _vec3(collider.get("center", (0.0, 0.0, 0.0)))
-            radius = max(0.0, float(collider.get("radius", 1.0))) + settings.collision_radius
-            delta = _subtract(position, center)
-            distance = _length(delta)
-            if distance < radius:
-                normal = _normalize(delta, (0.0, 1.0, 0.0))
-                position = _add(center, _scale(normal, radius))
-                velocity = _collision_velocity(velocity, normal, friction, restitution)
-                contacts += 1
-    return position, velocity, contacts
-
-
-def _collision_velocity(velocity: Vec3, normal: Vec3, friction: float, restitution: float) -> Vec3:
-    normal_speed = _dot(velocity, normal)
-    normal_velocity = _scale(normal, normal_speed)
-    tangent = _subtract(velocity, normal_velocity)
-    reflected = _scale(normal_velocity, -restitution if normal_speed < 0.0 else 1.0)
-    return _add(reflected, _scale(tangent, max(0.0, 1.0 - friction)))
+    return project_character_point(
+        position, velocity, radius=settings.collision_radius,
+        friction=settings.friction, restitution=settings.restitution,
+        colliders=colliders, previous_position=previous_position,
+    )
 
 
 def _adjacency(vertex_count: int, edges: Sequence[Sequence[int]]) -> list[list[int]]:

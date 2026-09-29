@@ -32,6 +32,13 @@ class TCEngineAPI:
     """Stable intent-level API; low-level technical choices remain optional."""
 
     @staticmethod
+    def editor(project_root: str | Path, **options: Any) -> Any:
+        """Open the project-scoped editor API used by the UI and Python tools."""
+        from tech_connector.game_engine.assets.editor_python_api import open_editor_api
+
+        return open_editor_api(project_root, **options)
+
+    @staticmethod
     def configure_runtime(
         world: Any,
         *,
@@ -103,12 +110,62 @@ class TCEngineAPI:
         )
 
     @staticmethod
+    def audit_runtime(runtime: SimulationRuntimeInstance, *, determinism_receipt: dict[str, Any] | None = None,
+                      minimum_performance_samples: int = 30) -> dict[str, Any]:
+        from tech_connector.game_engine.runtime.tc_engine_readiness_service import audit_engine_readiness
+
+        return audit_engine_readiness(
+            runtime, determinism_receipt=determinism_receipt,
+            minimum_performance_samples=minimum_performance_samples,
+        ).to_dict()
+
+    @staticmethod
+    def qualify_runtime(runtime: SimulationRuntimeInstance, *, ticks: int = 30, repeats: int = 2,
+                        minimum_performance_samples: int = 30) -> dict[str, Any]:
+        from tech_connector.game_engine.runtime.tc_engine_readiness_service import (
+            audit_engine_readiness, qualify_runtime_determinism,
+        )
+
+        determinism = qualify_runtime_determinism(runtime, ticks=ticks, repeats=repeats)
+        readiness = audit_engine_readiness(
+            runtime, determinism_receipt=determinism,
+            minimum_performance_samples=minimum_performance_samples,
+        )
+        return {"determinism": determinism, "readiness": readiness.to_dict()}
+
+    @staticmethod
     def create_character(world: Any, profile: Any) -> Any:
         from tech_connector.game_engine.authoring.character_intelligence_service import CharacterState
 
         character = CharacterState(profile=profile)
         world.characters[character.character_id] = character
         return character
+
+    @staticmethod
+    def solve_grounded_animation(
+        runtime: Any,
+        limb_settings: Any,
+        bone_positions: Any,
+        ground_query: Any,
+        **options: Any,
+    ) -> Any:
+        """Evaluate post-animation ground IK through the public engine API."""
+        return runtime.step_ground_ik(limb_settings, bone_positions, ground_query, **options)
+
+    @staticmethod
+    def step_vehicle(
+        runtime: Any,
+        wheels: Any,
+        chassis_position: Any,
+        chassis_velocity: Any,
+        controls: Any,
+        ground_query: Any,
+        **options: Any,
+    ) -> Any:
+        """Evaluate suspension, steering, drive, braking, and wheel contacts."""
+        return runtime.step(
+            wheels, chassis_position, chassis_velocity, controls, ground_query, **options,
+        )
 
     @staticmethod
     def decide_character(
@@ -239,14 +296,23 @@ def engine_access_contract() -> dict[str, Any]:
             "chat": ["Use the fastest route to playtest this on a connected console."],
             "command": "engine.plan_playtest",
         },
+        "runtime_readiness": {
+            "manual": "Simulation Runtime > feature paths and runtime summary",
+            "api": "tech_connector.game_engine.runtime.tc_engine_api.engine.audit_runtime / qualify_runtime",
+            "chat": [
+                "Audit this simulation runtime and tell me what is actually production-ready.",
+                "Qualify deterministic replay and performance evidence for this effect.",
+            ],
+            "commands": ["engine.audit_runtime_readiness", "engine.qualify_runtime_determinism"],
+        },
         "deformation": {
-            "manual": "The Entire Scene > Skin > Paint Selected Deformer Influence / Add Jiggle",
+            "manual": "The Entire Scene > Skin > Paint Selected Deformer Influence / Add Muscle Tissue / Add Jiggle",
             "api": "tech_connector.game_engine.deformation",
             "chat": [
                 "Add jiggle after the selected skin cluster and let me paint its influence.",
                 "Paint simulation drive around this region and preserve the rest of the mesh.",
             ],
-            "commands": ["deformation.add_jiggle", "deformation.add_secondary_motion_preset", "deformation.paint_influence", "simulation.add_effect_jiggle"],
+            "commands": ["deformation.add_blend_shape", "deformation.set_blend_shape_weights", "deformation.add_muscle", "deformation.set_muscle_activation", "deformation.add_jiggle", "deformation.add_secondary_motion_preset", "deformation.paint_influence", "simulation.add_effect_jiggle"],
         },
         "characters": {
             "manual": "The Entire Scene > Characters",

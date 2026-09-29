@@ -25,13 +25,20 @@ _PORT = 7011
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
 
 
-def mobu_execute_and_capture(encoded_payload):
+def mobu_execute_and_capture(encoded_payload, bridge_session=""):
     """
     Executes a base64-encoded Python payload in the MotionBuilder session.
 
     :param encoded_payload: UTF-8 Python source encoded as base64
     :return: captured standard output and error text
     """
+    try:
+        from tech_connector.bridges.session_authorization import validate_bridge_session
+
+        if not validate_bridge_session(bridge_session, "motionbuilder"):
+            return "ERROR: Tech Connector activation is required for this MotionBuilder bridge."
+    except Exception:
+        return "ERROR: Tech Connector licensing components are unavailable."
     code = base64.b64decode(encoded_payload.encode("utf-8")).decode("utf-8")
 
     old_stdout = sys.stdout
@@ -75,12 +82,15 @@ def _parse_request(request):
         raise ValueError("Expected mobu_execute_and_capture(<base64 payload>).")
     if not isinstance(call.func, ast.Name) or call.func.id != "mobu_execute_and_capture":
         raise ValueError("Unsupported MotionBuilder command-port operation.")
-    if len(call.args) != 1:
-        raise ValueError("Expected exactly one encoded payload argument.")
+    if len(call.args) != 2:
+        raise ValueError("Expected encoded payload and bridge-session arguments.")
     payload = ast.literal_eval(call.args[0])
+    bridge_session = ast.literal_eval(call.args[1])
     if not isinstance(payload, str):
         raise TypeError("The encoded payload must be a string.")
-    return payload
+    if not isinstance(bridge_session, str):
+        raise TypeError("The bridge session must be a string.")
+    return payload, bridge_session
 
 
 def _client_thread(conn):
@@ -108,7 +118,8 @@ def _client_thread(conn):
         result = ""
         try:
             # Expected: mobu_execute_and_capture('base64...')
-            result = str(mobu_execute_and_capture(_parse_request(request)))
+            payload, bridge_session = _parse_request(request)
+            result = str(mobu_execute_and_capture(payload, bridge_session))
         except Exception:
             result = traceback.format_exc()
 

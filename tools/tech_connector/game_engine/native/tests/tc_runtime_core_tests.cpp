@@ -70,6 +70,54 @@ int main() {
     if (runtime.profile().physics_collision_ms <= 0.0 || runtime.profile().physics_integration_ms < 0.0) return 76;
     if (runtime.physics_contacts().empty() || runtime.physics_contacts().front().penetration <= 0.0) return 41;
 
+    const auto locomotion_manifest = std::filesystem::temp_directory_path() / "tc_runtime_locomotion_test.tcruntime";
+    {
+        std::ofstream stream(locomotion_manifest, std::ios::binary | std::ios::trunc);
+        stream << "TCRUNTIME\t1\n"
+               << "ENTITY\tHero\nTRANSFORM\tHero\t0\t0.2\t0\t0\t0\t0\t1\t1\t1\n"
+               << "RIGID\tHero\t0\t0\t0\t80\t0\t1\t0\t0.08\t0.05\t1\t0\t1\n"
+               << "COLLIDER\tHero\t0.45\t0.9\t0.45\t0\tcapsule\t0.45\t0.9\t4\t4294967295\t0.5\t0\n"
+               << "ENTITY\tGround\nTRANSFORM\tGround\t0\t-0.5\t0\t0\t0\t0\t1\t1\t1\n"
+               << "COLLIDER\tGround\t12\t0.5\t12\t0\tbox\t0.5\t0.5\t1\t4294967295\t0.8\t0\n"
+               << "ENTITY\tPlayerCamera\nTRANSFORM\tPlayerCamera\t0\t4\t-14\t0\t0\t0\t1\t1\t1\n"
+               << "CAMERA\tPlayerCamera\t58\t0.05\t5000\t1\t0\t1\t0\n"
+               << "SKELETON\tsk\t1\n"
+               << "JOINT\tsk\troot\t\troot\t1\t0\t0\t0\t0\t1\t0\t0\t0\t0\t1\t0\t0\t0\t0\t1\n"
+               << "ANIMATION\tidle\tidle\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tforward\tforward\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tforward_right\tforward_right\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tright\tright\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tbackward_right\tbackward_right\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tbackward\tbackward\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tbackward_left\tbackward_left\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tleft\tleft\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tforward_left\tforward_left\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\trun\trun\tsk\t1\t17\t24\t1\n"
+               << "ANIMATION\tjump_clip\tjump_clip\tsk\t1\t25\t24\t1\n"
+               << "ANIMATION\tland\tland\tsk\t1\t13\t24\t0\n"
+               << "GRAPH\ttick\tmove\tcharacter.move\tlocomotion.tcgraph\t1\tHero\t5.5\t30\t38\t0.35\tfree_3d\n"
+               << "GRAPH\ttick\tjump\tcharacter.jump\tlocomotion.tcgraph\t2\tHero\t6.5\t0.1\t0.12\n"
+               << "GRAPH\ttick\tanimate\tanimation.locomotion\tlocomotion.tcgraph\t3\tHero\tidle\tforward\tforward_right\tright\tbackward_right\tbackward\tbackward_left\tleft\tforward_left\trun\tjump_clip\tland\t0.15\t3.4\t0.16\n"
+               << "GRAPH\ttick\tfollow\tcamera.follow\tlocomotion.tcgraph\t4\tPlayerCamera\tHero\t0\t3.2\t-7.5\t1\t0\t14\n"
+               << "SIMULATION\teveryday\t1\t1\t0\t-9.80665\t0\t0.008333333333333333\t8\t10000\t1\t1\t293.15\t0.001\t1\t1\t0.6\t12\n";
+    }
+    Runtime locomotion;
+    if (!locomotion.load_manifest(locomotion_manifest, error)) return 82;
+    locomotion.begin_play();
+    locomotion.tick(1.0F / 60.0F);  // Establish grounded contact before accepting a jump.
+    locomotion.set_input_axis(1.0F, 0.0F);
+    locomotion.tick(1.0F / 60.0F);
+    if (locomotion.active_animation_id() != "right") return 87;
+    if (locomotion.previous_animation_id().empty() || locomotion.animation_blend_alpha() >= 1.0) return 88;
+    locomotion.set_jump_pressed(true);
+    locomotion.tick(1.0F / 60.0F);
+    const auto hero = locomotion.world().find_entity("Hero");
+    const auto player_camera = locomotion.world().find_entity("PlayerCamera");
+    if (locomotion.world().rigid_bodies.at(hero).velocity.x <= 0.0) return 83;
+    if (locomotion.world().rigid_bodies.at(hero).velocity.y <= 0.0) return 84;
+    if (locomotion.world().transforms.at(player_camera).position.z <= -14.0) return 85;
+    if (locomotion.world().events.empty() || locomotion.world().events.back() != "CharacterJump:Hero") return 86;
+
     const auto joint_manifest = std::filesystem::temp_directory_path() / "tc_runtime_joint_test.tcruntime";
     {
         std::ofstream stream(joint_manifest, std::ios::binary | std::ios::trunc);
@@ -370,6 +418,7 @@ int main() {
     std::vector<Matrix4> skin_palette;if(!build_skin_matrix_palette(animated.world(),"skin",skin_palette,error)||skin_palette.size()!=2U)return 36;
     if(std::fabs(skin_palette[1][13]-7.0)>1.0e-12)return 37;
     std::filesystem::remove(manifest);
+    std::filesystem::remove(locomotion_manifest);
     std::filesystem::remove(save);
     std::filesystem::remove(orbital_manifest);
     std::filesystem::remove(microscopic_manifest);std::filesystem::remove(molecular_manifest);

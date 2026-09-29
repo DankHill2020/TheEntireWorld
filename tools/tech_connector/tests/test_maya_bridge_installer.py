@@ -1,4 +1,3 @@
-import base64
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -25,7 +24,8 @@ def test_managed_bootstrap_is_idempotent_and_preserves_unrelated_user_code() -> 
     assert "print('after')" in rendered
     assert rendered.count(BLOCK_BEGIN) == 1
     assert rendered.count(BLOCK_END) == 1
-    assert "def maya_execute_and_capture" in rendered
+    assert "maya_menu.initialize_command_port()" in rendered
+    assert "Authenticated JSON Bridge Startup Script v3" in rendered
     assert render_user_setup(rendered) == rendered
 
 
@@ -34,8 +34,8 @@ def test_legacy_bootstrap_is_migrated_without_duplication() -> None:
 
     assert "Tech Connector Maya Live Link Startup Script" not in rendered
     assert rendered.count(BLOCK_BEGIN) == 1
-    assert "TECH_CONNECTOR_MAYA_BRIDGE_VERSION = \"2\"" in rendered
-    assert "MAYA_COMMAND_PORT_SCAN_COUNT" in rendered
+    assert "TECH_CONNECTOR_MAYA_BRIDGE_VERSION = \"3\"" in rendered
+    assert "maya_menu.initialize_command_port()" in rendered
 
 
 def test_dry_run_reports_changes_without_touching_user_setup(tmp_path) -> None:
@@ -91,33 +91,36 @@ def test_maya_bridge_constructor_does_not_mutate_installation_by_default(monkeyp
     assert called == []
 
 
-def test_generated_bootstrap_falls_back_to_free_port_and_installs_capture(monkeypatch) -> None:
+def test_generated_bootstrap_uses_authenticated_json_bridge_module(monkeypatch) -> None:
     maya_module = ModuleType("maya")
     cmds_module = ModuleType("maya.cmds")
     opened = []
 
-    def command_port(name=None, q=False, **_kwargs):
-        if q:
-            return name in opened
-        if name == ":7001":
-            raise RuntimeError("address already in use")
-        opened.append(name)
-        return name
-
-    cmds_module.commandPort = command_port
+    cmds_module.commandPort = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("raw Maya commandPort must not be used")
+    )
     cmds_module.evalDeferred = lambda callback: callback()
     cmds_module.pluginInfo = lambda *_args, **_kwargs: True
     cmds_module.loadPlugin = lambda *_args, **_kwargs: None
     cmds_module.warning = lambda _message: None
     maya_module.cmds = cmds_module
+    maya_tools_module = ModuleType("maya_tools")
+    menu_module = ModuleType("maya_tools.maya_menu")
+    menu_module.initialize_command_port = lambda: opened.append(7002) or 7002
+    maya_tools_module.maya_menu = menu_module
     monkeypatch.setitem(sys.modules, "maya", maya_module)
     monkeypatch.setitem(sys.modules, "maya.cmds", cmds_module)
+    monkeypatch.setitem(sys.modules, "maya_tools", maya_tools_module)
+    monkeypatch.setitem(sys.modules, "maya_tools.maya_menu", menu_module)
 
     namespace = {"__file__": "C:/Maya/2026/scripts/userSetup.py"}
     exec(compile(MAYA_USER_SETUP_CODE, "<test_maya_bootstrap>", "exec"), namespace, namespace)
-    payload = base64.b64encode(b"print('capture-ok')").decode("ascii")
 
-    assert opened == [":7002"]
-    assert namespace["TECH_CONNECTOR_MAYA_BRIDGE_VERSION"] == "2"
+    assert opened == [7002]
+    assert namespace["TECH_CONNECTOR_MAYA_BRIDGE_VERSION"] == "3"
     assert namespace["TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE"].endswith("userSetup.py")
-    assert namespace["maya_execute_and_capture"](payload).strip() == "capture-ok"
+
+
+def test_current_bootstrap_never_opens_a_raw_maya_command_port() -> None:
+    assert "cmds.commandPort" not in MAYA_USER_SETUP_CODE
+    assert "sourceType=" not in MAYA_USER_SETUP_CODE

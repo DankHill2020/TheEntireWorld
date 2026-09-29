@@ -519,6 +519,8 @@ class ThreeDMeshPainterViewportMixin03:
             self.deformation_weight_map(key)
             if key == "emission_source":
                 self._resolved_shaded_status = "Painting Emission Source: blue does not emit; green emits at full density. Hold Ctrl to erase."
+            elif key == "cloth_skin_simulation":
+                self._resolved_shaded_status = "Painting Skin ↔ Simulation: blue follows imported skinning; green is fully simulated. Bone weights are preserved."
             else:
                 self._resolved_shaded_status = f"Painting {label}: blue preserves upstream; green follows the driven result. Hold Ctrl to erase."
         else:
@@ -537,11 +539,17 @@ class ThreeDMeshPainterViewportMixin03:
         vertex_count = len(getattr(self.mesh, "vertices", ()) or ())
         result = maps.get(str(key))
         if result is None or len(result.values) != vertex_count:
-            default = 1.0 if str(key) == "skin_output" else 0.0
+            default = 1.0 if str(key) in {"skin_output", "cloth_skin_simulation"} else 0.0
             result = DeformationWeightMap.create(str(key), vertex_count, default_value=default)
             maps[str(key)] = result
         if str(key) == "emission_source":
             result.semantics = "mesh_emission_density"
+        elif str(key) == "cloth_skin_simulation":
+            result.semantics = "cloth_skin_to_simulation_influence"
+        elif str(key) == "cloth_animation_drive":
+            result.semantics = "cloth_animation_drive"
+        elif str(key) == "cloth_max_distance":
+            result.semantics = "cloth_max_distance_normalized"
         return result
 
     def _sync_deformation_weight_map_contract(self, key: str, influence_map: Any) -> None:
@@ -559,6 +567,23 @@ class ThreeDMeshPainterViewportMixin03:
                         revision=influence_map.revision,
                     )
             if world is not None:
+                self.simulation_initial_world = copy.deepcopy(world)
+            return
+        cloth_map_names = {
+            "cloth_skin_simulation": "skin_simulation",
+            "cloth_animation_drive": "animation_drive",
+            "cloth_max_distance": "max_distance",
+        }
+        if str(key) in cloth_map_names:
+            world = getattr(self, "simulation_world", None)
+            if world is not None:
+                from tech_connector.game_engine.runtime.tc_cloth_authoring_service import (
+                    apply_cloth_property_maps,
+                )
+
+                authored = dict((getattr(world, "cloth_settings", {}) or {}).get("property_maps") or {})
+                authored[cloth_map_names[str(key)]] = list(influence_map.values)
+                apply_cloth_property_maps(world, authored)
                 self.simulation_initial_world = copy.deepcopy(world)
             return
         if prefix in {"skin", "deformer"} and separator and source_id:
@@ -665,6 +690,29 @@ class ThreeDMeshPainterViewportMixin03:
             )
         except Exception as exc:
             self._resolved_shaded_status = f"Fleshy skin unavailable: {exc}"
+        self.update_viewport_status()
+
+    def add_muscle_to_selected_skin(self) -> None:
+        try:
+            from tech_connector.game_engine.deformation import attach_muscle_deformer
+
+            source_id, source_kind, mesh_id = self._selected_skin_or_deformer()
+            if source_kind != "skin":
+                raise ValueError("Muscle tissue must start from a skin cluster so canonical weights remain portable.")
+            key = f"muscle:{source_id}"
+            activation_map = self.deformation_weight_map(key)
+            self.push_rig_undo_state(f"Add muscle tissue to {source_id}")
+            muscle_id = attach_muscle_deformer(
+                self.editable_rig_graph, source_id, mesh_id, activation_map,
+            )
+            self._select_deformation_paint_target(key, f"{source_id.split('::')[-1]} Muscle")
+            self.refresh_scene_outliner()
+            self._resolved_shaded_status = (
+                f"Muscle tissue added as {muscle_id}. Paint activation, then drive activation or pose values live; "
+                "canonical skin weights remain unchanged for export."
+            )
+        except Exception as exc:
+            self._resolved_shaded_status = f"Muscle tissue unavailable: {exc}"
         self.update_viewport_status()
 
     def add_secondary_motion_preset_to_selected_skin(self, preset_id: str) -> None:
@@ -850,6 +898,8 @@ class ThreeDMeshPainterViewportMixin03:
             "world_intelligence_runtime": copy.deepcopy(getattr(self, "world_intelligence_runtime", None)),
             "game_experience_profile": copy.deepcopy(getattr(self, "game_experience_profile", None)),
             "deformation_weight_maps": copy.deepcopy(getattr(self, "deformation_weight_maps", {})),
+            "runtime_world_state": copy.deepcopy(getattr(self, "_runtime_world_state", {})),
+            "engine_world_settings": copy.deepcopy(getattr(self, "_engine_world_settings", {})),
         }
 
     def mark_scene_dirty(self) -> None:
@@ -967,6 +1017,8 @@ class ThreeDMeshPainterViewportMixin03:
         self.game_experience_profile = copy.deepcopy(state.get("game_experience_profile"))
         self._sync_viewer_visual_actions()
         self.deformation_weight_maps = copy.deepcopy(state.get("deformation_weight_maps") or {})
+        self._runtime_world_state = copy.deepcopy(state.get("runtime_world_state") or {"entities": [], "physics_joints": []})
+        self._engine_world_settings = copy.deepcopy(state.get("engine_world_settings") or {})
         self.sync_gpu_viewport(full=True)
         if "native_fbx" in (getattr(self, "_dcc_deformation_bindings", {}) or {}):
             try:
@@ -1097,6 +1149,8 @@ class ThreeDMeshPainterViewportMixin03:
                     "metalness_texture": str(textures.get("metalness") or ""),
                     "emission_texture": str(textures.get("emission") or ""),
                     "opacity_texture": str(textures.get("opacity") or ""),
+                    "texture_sources": dict(material.texture_sources) if self.show_texture else {},
+                    "procedural_shader": dict(material.procedural_shader) if self.show_texture else {},
                     "emission_color": QColor.fromRgbF(*[max(0.0, min(1.0, float(value))) for value in emission[:3]]),
                     "opacity": float(material.opacity),
                     "transmission": float(material.transmission),

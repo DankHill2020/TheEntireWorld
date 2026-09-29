@@ -7,11 +7,14 @@ import pytest
 from tech_connector.game_engine.integration import dcc_production_workflow_service as workflow_service
 from tech_connector.game_engine.integration.dcc_production_workflow_service import (
     PRODUCTION_WORKFLOWS,
+    WORKFLOW_LEDGER_SCHEMA,
     attach_workflow_receipt_to_scene,
     execute_dcc_workflow,
     plan_dcc_workflow,
+    store_workflow_receipt,
     validate_workflow_catalog,
     validate_workflow_receipt,
+    workflow_receipt_ledger,
 )
 from tech_connector.game_engine.scene.federated_scene_service import (
     FederatedSceneDocument,
@@ -325,3 +328,46 @@ def test_successful_operations_and_artifacts_remain_unverified_without_parity_ev
     assert receipt.artifact_readback_complete
     assert not receipt.parity_readback_complete
     assert receipt.missing_gates == ("parity_readback",)
+
+
+def test_verified_workflow_receipt_round_trips_through_atomic_ledger(tmp_path) -> None:
+    ledger_path = tmp_path / "workflow-ledger.json"
+
+    def executor(_host, operation, _callable, params, _session_port):
+        if operation == "io.export_fbx":
+            Path(params["filepath"]).write_text("plotted", encoding="utf-8")
+        return {
+            "ok": True,
+            "parity_checks": {
+                check: True for check in PRODUCTION_WORKFLOWS["motionbuilder.retarget_plot"].parity_checks
+            },
+        }
+
+    receipt = execute_dcc_workflow(
+        "motionbuilder.retarget_plot",
+        workspace=tmp_path,
+        session_port=7011,
+        confirm_mutating=True,
+        executor=executor,
+    )
+    stored = store_workflow_receipt(receipt, ledger_path)
+    restored = workflow_receipt_ledger(ledger_path)
+
+    assert stored == restored
+    assert restored["schema"] == WORKFLOW_LEDGER_SCHEMA
+    assert restored["summary"]["recorded_workflows"] == 1
+    assert restored["summary"]["verified_workflows"] == 1
+    assert restored["receipts"][receipt.workflow]["receipt_id"] == receipt.receipt_id
+    assert not list(tmp_path.glob("workflow-ledger.json.*.tmp"))
+
+
+def test_workflow_receipt_ledger_rejects_wrong_schema_and_unknown_workflow(tmp_path) -> None:
+    ledger_path = tmp_path / "workflow-ledger.json"
+    ledger_path.write_text(
+        '{"schema":"unexpected","receipts":{"maya.character_asset":{"status":"verified"}}}',
+        encoding="utf-8",
+    )
+
+    assert workflow_receipt_ledger(ledger_path)["receipts"] == {}
+    with pytest.raises(ValueError, match="registered production workflow"):
+        store_workflow_receipt({"workflow": "unknown.workflow", "status": "verified"}, ledger_path)

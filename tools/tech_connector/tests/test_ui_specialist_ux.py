@@ -9,6 +9,9 @@ from tech_connector.ui.dcc_viewer.driver_widget import DccDriverDialog
 from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
 from tech_connector.ui.game_engine.animation_timeline import AnimationFrameSequence, AnimationTimelineBar
 from tech_connector.ui.game_engine.fx_properties import FxPropertiesDialog
+from tech_connector.ui.game_engine.physics_joint_editor import PhysicsJointEditorWidget
+from tech_connector.ui.game_engine.simulation_runtime_setup import SimulationRuntimeSetupDialog
+from tech_connector.game_engine.authoring.tc_physics_joint_editor_service import PhysicsJointEditorModel
 from tech_connector.ui.image_viewer.editor import ImageEditorWidget
 
 
@@ -100,6 +103,8 @@ def test_timeline_uses_clear_playback_and_onion_skin_states() -> None:
     assert timeline.play_btn.text() == "Play"
     assert timeline.onion_btn.text() == "Onion skin on"
     assert timeline.onion_btn.isChecked()
+    assert timeline.workflow_guide.toggle.text() == "Animation quick guide"
+    assert "timing" in timeline.fps_spin.toolTip().lower()
 
     timeline.toggle_playback()
     assert timeline.play_btn.text() == "Pause"
@@ -120,11 +125,19 @@ def test_fx_properties_exposes_quality_emitters_and_live_module_values() -> None
     assert dialog.emitter_combo.count() == len(world.effect_system.emitters)
     assert dialog.module_tree.topLevelItemCount() > 0
     assert "emitters" in dialog.active_summary.text()
-    assert dialog.property_tabs.count() == 5
+    assert dialog.property_tabs.count() == 6
+    assert dialog.property_tabs.tabText(1) == "Physics Lab"
+    assert dialog.lab_preset_combo.findData("binary_star") >= 0
+    created = []
+    dialog.simulation_lab_create_requested.connect(lambda *values: created.append(values))
+    dialog.lab_preset_combo.setCurrentIndex(dialog.lab_preset_combo.findData("magnetosphere"))
+    dialog.lab_particle_count.setValue(768)
+    dialog._emit_simulation_lab_create()
+    assert created == [("magnetosphere", "approximation", 1, 768, "auto", 0.65)]
     assert dialog.solver_profile_combo.currentData() == "particle_realtime"
     assert dialog.workflow_tree.topLevelItemCount() >= 4
     assert dialog.solver_controls_tree.topLevelItemCount() >= 3
-    assert "CPU preview" in dialog.backend_status.text()
+    assert "Automatic" in dialog.backend_status.text()
     dialog.set_execution_telemetry({
         "backend": "d3d11", "dispatch_ms": 1.25, "particle_count": 100_000,
         "gpu_resident": False, "readback_bytes": 3_200_000,
@@ -181,4 +194,28 @@ def test_fx_properties_exposes_quality_emitters_and_live_module_values() -> None
 
     assert set_effect_parameter(world.effect_system, "quality", "mobile") == "mobile"
     assert set_effect_parameter(world.effect_system, "deterministic_seed", 99) == 99
+    dialog.close()
+
+
+def test_physics_joint_editor_explains_selection_stability_and_portability() -> None:
+    _application()
+    model = PhysicsJointEditorModel({"entities": [{"name": "Body A"}, {"name": "Body B"}]})
+    editor = PhysicsJointEditorWidget(model)
+
+    assert editor.workflow_guide.toggle.text() == "How to connect physics bodies"
+    assert "Select one or more joints" in editor.stiffness.toolTip()
+    assert "jitter" in editor.stiffness.toolTip()
+    assert "unbreakable" in editor.break_force.toolTip()
+    editor.close()
+
+
+def test_runtime_setup_defaults_to_guided_adaptive_portable_path() -> None:
+    _application()
+    dialog = SimulationRuntimeSetupDialog({})
+
+    assert dialog.workflow_guide.toggle.text() == "How runtime setup works"
+    assert dialog.adaptive_check.isChecked()
+    assert dialog.quality_combo.currentData() == "auto"
+    assert "fallback" in dialog.workflow_guide.recipe.output.lower()
+    assert "collision accuracy" in dialog.tick_rate.toolTip()
     dialog.close()

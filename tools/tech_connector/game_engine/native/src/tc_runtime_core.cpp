@@ -688,7 +688,7 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
             return false;
         }
         world_ = World{};
-        active_animation_id_.clear();animation_time_seconds_=0.0;animation_playback_speed_=1.0;animation_playing_=true;
+        active_animation_id_.clear();previous_animation_id_.clear();animation_time_seconds_=0.0;previous_animation_time_seconds_=0.0;animation_blend_duration_seconds_=0.0;animation_blend_elapsed_seconds_=0.0;animation_playback_speed_=1.0;animation_playing_=true;
         std::string line;
         if (!std::getline(stream, line)) {
             error = "TC runtime manifest is empty";
@@ -968,6 +968,8 @@ void Runtime::set_input_axis(float x, float y) noexcept {
     input_axis_.y = std::clamp(y, -1.0F, 1.0F);
 }
 
+void Runtime::set_jump_pressed(bool pressed) noexcept { jump_pressed_ = pressed; }
+
 void Runtime::tick(float delta_seconds) {
     const auto frame_start = Clock::now();
     const auto graph_start = Clock::now();
@@ -976,6 +978,7 @@ void Runtime::tick(float delta_seconds) {
     apply_physical_animation_drives(delta_seconds);
     const auto graph_end = Clock::now();
     simulate(static_cast<double>(delta_seconds) * std::max(0.0, world_.simulation_settings.time_scale));
+    jump_was_pressed_ = jump_pressed_;
     blend_physical_animation_pose();
     const auto physics_end = Clock::now();
     profile_.frame_ms = milliseconds(frame_start, physics_end);
@@ -1000,10 +1003,15 @@ void Runtime::tick(float delta_seconds) {
 
 void Runtime::evaluate_animation(double delta_seconds){
     if(active_animation_id_.empty())return;const auto clip_found=world_.animation_clips.find(active_animation_id_);if(clip_found==world_.animation_clips.end())return;const auto& clip=clip_found->second;auto skeleton_found=world_.skeletons.find(clip.skeleton_id);if(skeleton_found==world_.skeletons.end())return;auto& skeleton=skeleton_found->second;
-    if(animation_playing_)animation_time_seconds_+=delta_seconds*animation_playback_speed_;const double duration_frames=std::max(0.0,clip.end_frame-clip.start_frame);double frame=clip.start_frame+animation_time_seconds_*std::max(1.0e-6,clip.frame_rate);if(clip.looping&&duration_frames>0.0){double wrapped=std::fmod(frame-clip.start_frame,duration_frames);if(wrapped<0.0)wrapped+=duration_frames;frame=clip.start_frame+wrapped;}else frame=std::clamp(frame,clip.start_frame,clip.end_frame);
     struct Channels{bool initialized[9]{};double values[9]{};};std::unordered_map<std::string,Channels> channels;
     auto channel_index=[](const std::string& attribute){const auto key=normalized_attribute(attribute);if(key=="translatex"||key=="tx")return 0;if(key=="translatey"||key=="ty")return 1;if(key=="translatez"||key=="tz")return 2;if(key=="rotatex"||key=="rotationx"||key=="rx")return 3;if(key=="rotatey"||key=="rotationy"||key=="ry")return 4;if(key=="rotatez"||key=="rotationz"||key=="rz")return 5;if(key=="scalex"||key=="sx")return 6;if(key=="scaley"||key=="sy")return 7;if(key=="scalez"||key=="sz")return 8;return -1;};
-    for(const auto& curve:clip.curves){const int index=channel_index(curve.attribute);if(index<0||!skeleton.joint_indices.contains(curve.joint_id))continue;const double sample=sample_animation_curve(curve,frame);auto& target=channels[curve.joint_id];if(!target.initialized[index]){target.values[index]=sample;target.initialized[index]=true;}else if(curve.additive)target.values[index]+=sample*curve.layer_weight;else target.values[index]=target.values[index]*(1.0-curve.layer_weight)+sample*curve.layer_weight;}
+    auto sample_clip=[&](const AnimationClip& sampled_clip,double time_seconds){std::unordered_map<std::string,Channels> sampled;const double duration_frames=std::max(0.0,sampled_clip.end_frame-sampled_clip.start_frame);double frame=sampled_clip.start_frame+time_seconds*std::max(1.0e-6,sampled_clip.frame_rate);if(sampled_clip.looping&&duration_frames>0.0){double wrapped=std::fmod(frame-sampled_clip.start_frame,duration_frames);if(wrapped<0.0)wrapped+=duration_frames;frame=sampled_clip.start_frame+wrapped;}else frame=std::clamp(frame,sampled_clip.start_frame,sampled_clip.end_frame);for(const auto& curve:sampled_clip.curves){const int index=channel_index(curve.attribute);if(index<0||!skeleton.joint_indices.contains(curve.joint_id))continue;const double sample=sample_animation_curve(curve,frame);auto& target=sampled[curve.joint_id];if(!target.initialized[index]){target.values[index]=sample;target.initialized[index]=true;}else if(curve.additive)target.values[index]+=sample*curve.layer_weight;else target.values[index]=target.values[index]*(1.0-curve.layer_weight)+sample*curve.layer_weight;}return sampled;};
+    if(animation_playing_){animation_time_seconds_+=delta_seconds*animation_playback_speed_;if(!previous_animation_id_.empty())previous_animation_time_seconds_+=delta_seconds*animation_playback_speed_;}
+    channels=sample_clip(clip,animation_time_seconds_);
+    double blend_alpha=1.0;
+    std::unordered_map<std::string,Channels> previous_channels;
+    if(!previous_animation_id_.empty()&&animation_blend_duration_seconds_>0.0){const auto previous=world_.animation_clips.find(previous_animation_id_);if(previous!=world_.animation_clips.end()&&previous->second.skeleton_id==clip.skeleton_id){animation_blend_elapsed_seconds_+=std::max(0.0,delta_seconds);blend_alpha=std::clamp(animation_blend_elapsed_seconds_/animation_blend_duration_seconds_,0.0,1.0);previous_channels=sample_clip(previous->second,previous_animation_time_seconds_);}else blend_alpha=1.0;}
+    if(blend_alpha<1.0){for(const auto& [joint_id,previous_channel]:previous_channels){auto& current=channels[joint_id];for(int index=0;index<9;++index){if(!previous_channel.initialized[index])continue;if(current.initialized[index])current.values[index]=previous_channel.values[index]*(1.0-blend_alpha)+current.values[index]*blend_alpha;else if(blend_alpha<0.5){current.values[index]=previous_channel.values[index];current.initialized[index]=true;}}}}else previous_animation_id_.clear();
     for(auto& joint:skeleton.joints){joint.local=joint.rest_local;const auto values=channels.find(joint.id);if(values!=channels.end()){const auto& channel=values->second;if(channel.initialized[0])joint.local[12]=channel.values[0];if(channel.initialized[1])joint.local[13]=channel.values[1];if(channel.initialized[2])joint.local[14]=channel.values[2];if(channel.initialized[3]||channel.initialized[4]||channel.initialized[5]){Matrix4 rest=joint.rest_local;rest[12]=rest[13]=rest[14]=0.0;const auto rotation=rotation_matrix(channel.initialized[3]?channel.values[3]:0.0,channel.initialized[4]?channel.values[4]:0.0,channel.initialized[5]?channel.values[5]:0.0);const double tx=joint.local[12],ty=joint.local[13],tz=joint.local[14];joint.local=multiply_matrix(rotation,rest);joint.local[12]=tx;joint.local[13]=ty;joint.local[14]=tz;}for(int axis=0;axis<3;++axis)if(channel.initialized[6+axis]){const double length=std::sqrt(joint.local[axis*4]*joint.local[axis*4]+joint.local[axis*4+1]*joint.local[axis*4+1]+joint.local[axis*4+2]*joint.local[axis*4+2]);const double factor=channel.values[6+axis]/std::max(1.0e-12,length);joint.local[axis*4]*=factor;joint.local[axis*4+1]*=factor;joint.local[axis*4+2]*=factor;}}
         joint.world=joint.parent_index>=0?multiply_matrix(joint.local,skeleton.joints[static_cast<std::size_t>(joint.parent_index)].world):joint.local;
     }
@@ -1134,6 +1142,96 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 body.velocity.z = input_axis_.y * speed;
             } else if (item.operation == "input.read_axis" && !args.empty()) {
                 store_vector(graph_value_key(item, "value"), {input_axis_.x, input_axis_.y, 0.0});
+            } else if (item.operation == "character.move" && args.size() >= 6) {
+                const auto id = resolve_entity(args[0]);
+                if (id == 0U || !world_.rigid_bodies.contains(id))
+                    throw std::runtime_error("character rigid body not found: " + args[0]);
+                auto& body = world_.rigid_bodies.at(id);
+                const double speed = std::max(0.0, argument_real(item, 1, 5.5));
+                double acceleration = std::max(0.0, argument_real(item, 2, 30.0));
+                const double deceleration = std::max(0.0, argument_real(item, 3, 38.0));
+                const double air_control = std::clamp(argument_real(item, 4, 0.35), 0.0, 1.0);
+                bool grounded = false;
+                for (const auto& contact : physics_contacts_) {
+                    if (contact.trigger) continue;
+                    const EntityId other = contact.first == id ? contact.second : (contact.second == id ? contact.first : 0U);
+                    if (other != 0U && world_.transforms.contains(other) &&
+                        world_.transforms.at(other).position.y < world_.transforms.at(id).position.y - 0.05) {
+                        grounded = true;
+                        break;
+                    }
+                }
+                if (!grounded && world_.simulation_settings.floor_enabled && world_.colliders.contains(id)) {
+                    grounded = world_.transforms.at(id).position.y <=
+                        world_.colliders.at(id).half_extents.y + 0.05;
+                }
+                if (!grounded) acceleration *= air_control;
+                double input_x = static_cast<double>(input_axis_.x);
+                double input_z = static_cast<double>(input_axis_.y);
+                if (args[5] == "plane_2d") input_z = 0.0;
+                const double length = std::sqrt(input_x * input_x + input_z * input_z);
+                if (length > 1.0) { input_x /= length; input_z /= length; }
+                const bool has_input = length > 1.0e-5;
+                const double maximum_change = (has_input ? acceleration : deceleration) * std::max(0.0F, delta_seconds);
+                const auto approach = [maximum_change](double value, double target) {
+                    return value + std::clamp(target - value, -maximum_change, maximum_change);
+                };
+                body.velocity.x = approach(body.velocity.x, input_x * speed);
+                body.velocity.z = approach(body.velocity.z, input_z * speed);
+                body.sleeping = false;
+            } else if (item.operation == "character.jump" && args.size() >= 4) {
+                const auto id = resolve_entity(args[0]);
+                if (id == 0U || !world_.rigid_bodies.contains(id))
+                    throw std::runtime_error("character rigid body not found: " + args[0]);
+                bool grounded = false;
+                for (const auto& contact : physics_contacts_) {
+                    if (contact.trigger) continue;
+                    const EntityId other = contact.first == id ? contact.second : (contact.second == id ? contact.first : 0U);
+                    if (other != 0U && world_.transforms.contains(other) &&
+                        world_.transforms.at(other).position.y < world_.transforms.at(id).position.y - 0.05) {
+                        grounded = true;
+                        break;
+                    }
+                }
+                if (!grounded && world_.simulation_settings.floor_enabled && world_.colliders.contains(id)) {
+                    grounded = world_.transforms.at(id).position.y <=
+                        world_.colliders.at(id).half_extents.y + 0.05;
+                }
+                const double coyote_time = std::max(0.0, argument_real(item, 2, 0.1));
+                const double jump_buffer = std::max(0.0, argument_real(item, 3, 0.12));
+                auto& ground_grace = character_ground_grace_seconds_[id];
+                auto& buffered_jump = character_jump_buffer_seconds_[id];
+                ground_grace = grounded ? coyote_time : std::max(0.0, ground_grace - std::max(0.0F, delta_seconds));
+                if (jump_pressed_ && !jump_was_pressed_) buffered_jump = jump_buffer;
+                else buffered_jump = std::max(0.0, buffered_jump - std::max(0.0F, delta_seconds));
+                if (buffered_jump > 0.0 && ground_grace > 0.0) {
+                    auto& body = world_.rigid_bodies.at(id);
+                    body.velocity.y = std::max(0.0, argument_real(item, 1, 6.5));
+                    body.sleeping = false;
+                    buffered_jump = 0.0;
+                    ground_grace = 0.0;
+                    world_.events.push_back("CharacterJump:" + args[0]);
+                }
+            } else if (item.operation == "camera.follow" && args.size() >= 8) {
+                const auto camera_id = resolve_entity(args[0]);
+                const auto target_id = resolve_entity(args[1]);
+                if (camera_id == 0U || !world_.cameras.contains(camera_id) || !world_.transforms.contains(camera_id))
+                    throw std::runtime_error("camera not found: " + args[0]);
+                if (target_id == 0U || !world_.transforms.contains(target_id))
+                    throw std::runtime_error("camera target not found: " + args[1]);
+                auto& camera_transform = world_.transforms.at(camera_id);
+                const auto& target = world_.transforms.at(target_id).position;
+                const WorldVector3 desired{
+                    target.x + argument_real(item, 2, 0.0), target.y + argument_real(item, 3, 3.0),
+                    target.z + argument_real(item, 4, -7.5),
+                };
+                const double smoothing = std::max(0.0, argument_real(item, 7, 14.0));
+                const double weight = smoothing <= 0.0 ? 1.0 : 1.0 - std::exp(-smoothing * std::max(0.0F, delta_seconds));
+                camera_transform.position = add(camera_transform.position, scale(subtract(desired, camera_transform.position), weight));
+                world_.cameras.at(camera_id).look_at = {
+                    target.x, target.y + argument_real(item, 5, 1.0),
+                    target.z + argument_real(item, 6, 0.0),
+                };
             } else if (item.operation == "movement.calculate_velocity" && args.size() >= 4) {
                 WorldVector3 direction = linked_vector(args[0]);
                 const double direction_length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
@@ -1172,8 +1270,40 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 world_.events.push_back("SaveRequested");
             } else if(item.operation=="animation.play"&&!args.empty()){
                 if(!world_.animation_clips.contains(args[0]))throw std::runtime_error("animation clip not found: "+args[0]);
-                if(active_animation_id_!=args[0])animation_time_seconds_=0.0;active_animation_id_=args[0];animation_playing_=true;
+                if(active_animation_id_!=args[0]){previous_animation_id_=active_animation_id_;previous_animation_time_seconds_=animation_time_seconds_;animation_blend_duration_seconds_=0.12;animation_blend_elapsed_seconds_=0.0;animation_time_seconds_=0.0;}active_animation_id_=args[0];animation_playing_=true;
                 if(args.size()>=2&&args[1]=="restart")animation_time_seconds_=0.0;
+            } else if(item.operation=="animation.locomotion"&&args.size()>=8){
+                const auto id=resolve_entity(args[0]);
+                if(id==0U||!world_.rigid_bodies.contains(id)||!world_.transforms.contains(id))
+                    throw std::runtime_error("locomotion character not found: "+args[0]);
+                bool grounded=false;
+                for(const auto& contact:physics_contacts_){
+                    if(contact.trigger)continue;
+                    const EntityId other=contact.first==id?contact.second:(contact.second==id?contact.first:0U);
+                    if(other!=0U&&world_.transforms.contains(other)&&
+                       world_.transforms.at(other).position.y<world_.transforms.at(id).position.y-0.05){grounded=true;break;}
+                }
+                if(!grounded&&world_.simulation_settings.floor_enabled&&world_.colliders.contains(id))
+                    grounded=world_.transforms.at(id).position.y<=world_.colliders.at(id).half_extents.y+0.05;
+                const auto& velocity=world_.rigid_bodies.at(id).velocity;
+                const double planar_speed=std::sqrt(velocity.x*velocity.x+velocity.z*velocity.z);
+                const bool was_grounded=character_was_grounded_.contains(id)?character_was_grounded_.at(id):grounded;
+                const bool directional=args.size()>=16;
+                const std::size_t run_index=directional?10U:3U,jump_index=directional?11U:4U,land_index=directional?12U:5U;
+                const std::size_t walk_threshold_index=directional?13U:6U,run_threshold_index=directional?14U:7U;
+                if(!was_grounded&&grounded)character_land_seconds_[id]=0.13;
+                auto& landing_seconds=character_land_seconds_[id];landing_seconds=std::max(0.0,landing_seconds-static_cast<double>(delta_seconds));
+                std::string desired;
+                if(!grounded||velocity.y>0.5)desired=args[jump_index];
+                else if(landing_seconds>0.0)desired=args[land_index];
+                else if(planar_speed>=argument_real(item,run_threshold_index,3.4))desired=args[run_index];
+                else if(planar_speed>=argument_real(item,walk_threshold_index,0.15)){
+                    if(!directional)desired=args[2];
+                    else{constexpr double pi=3.14159265358979323846;const double angle=std::atan2(static_cast<double>(input_axis_.x),static_cast<double>(input_axis_.y))*180.0/pi;int sector=static_cast<int>(std::lround(angle/45.0));if(sector>4)sector-=8;if(sector<-4)sector+=8;const std::size_t directional_index=sector==0?2U:sector==1?3U:sector==2?4U:sector==3?5U:(sector==4||sector==-4)?6U:sector==-3?7U:sector==-2?8U:9U;desired=args[directional_index];}
+                }else desired=args[1];
+                character_was_grounded_[id]=grounded;
+                if(!world_.animation_clips.contains(desired))throw std::runtime_error("locomotion clip not found: "+desired);
+                if(active_animation_id_!=desired){previous_animation_id_=active_animation_id_;previous_animation_time_seconds_=animation_time_seconds_;active_animation_id_=desired;animation_time_seconds_=0.0;animation_blend_duration_seconds_=directional?std::max(0.0,argument_real(item,15,0.16)):0.12;animation_blend_elapsed_seconds_=0.0;animation_playing_=true;}
             } else if(item.operation=="animation.stop"){
                 animation_playing_=false;
             } else if(item.operation=="animation.set_speed"&&!args.empty()){

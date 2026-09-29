@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 
 from tech_connector.models.constants import TOOLS_ROOT
+from tech_connector.bridges.session_authorization import validate_bridge_session
 
 
 HOST = "127.0.0.1"
@@ -86,6 +87,17 @@ def _handle_client(conn):
                 raw += chunk
 
             payload = json.loads(raw.decode("utf-8", errors="replace").strip())
+            if not validate_bridge_session(
+                payload.get("bridge_session", ""),
+                "substance_painter",
+            ):
+                response = {
+                    "ok": False,
+                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "code": "bridge_authorization_required",
+                }
+                conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
+                return
             code = base64.b64decode(payload["code_b64"]).decode("utf-8", errors="replace")
             done = threading.Event()
             job = [code, done]

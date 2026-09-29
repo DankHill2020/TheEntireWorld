@@ -70,6 +70,10 @@ def create_ribbon(controller: RiggingWorkspaceController, **payload: Any) -> dic
     return run(controller, "rig.create_ribbon", **payload)
 
 
+def create_curve_joints(controller: RiggingWorkspaceController, **payload: Any) -> dict[str, Any]:
+    return run(controller, "rig.create_curve_joints", **payload)
+
+
 def create_twist(controller: RiggingWorkspaceController, **payload: Any) -> dict[str, Any]:
     return run(controller, "rig.create_twist", **payload)
 
@@ -96,7 +100,7 @@ def transfer_take(controller: RiggingWorkspaceController, **payload: Any) -> dic
 
 __all__ = [
     "auto_map", "bake_retarget", "build_module", "build_rig", "capabilities",
-    "capture_reference_pose", "create_constraint", "create_control", "create_ik_fk_limb",
+    "capture_reference_pose", "create_constraint", "create_control", "create_curve_joints", "create_ik_fk_limb",
     "create_reverse_foot", "create_ribbon", "create_space_switch", "create_twist",
     "rebuild_module", "remove_module", "run", "session", "set_space",
     "solve_retarget_pose", "transfer_take", "validate_definition",

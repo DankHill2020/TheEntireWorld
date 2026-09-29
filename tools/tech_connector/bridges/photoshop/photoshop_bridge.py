@@ -25,6 +25,27 @@ PLUGIN_ID = "com.theentireworld.aistudio.bridge"
 PLUGIN_FILENAME = "index.js"
 PLUGIN_MANIFEST_FILENAME = "manifest.json"
 
+_DISABLED_MESSAGE = (
+    "The Photoshop UXP bridge is disabled until entitlement-derived pairing is available. "
+    "Source developers may opt in with the documented development-only flags."
+)
+
+
+def experimental_photoshop_bridge_allowed() -> bool:
+    """Allow the unauthenticated prototype only in explicit, non-frozen development."""
+    from tech_connector.services.licensing_startup_policy import (
+        development_entitlement_bypass_allowed,
+    )
+
+    return (
+        development_entitlement_bypass_allowed()
+        and os.environ.get(
+            "TECH_CONNECTOR_ENABLE_EXPERIMENTAL_PHOTOSHOP_BRIDGE",
+            "",
+        ).strip()
+        == "1"
+    )
+
 PLUGIN_MANIFEST = json.dumps({
     "id": PLUGIN_ID,
     "name": "The Entire World Tech Connector Bridge",
@@ -229,7 +250,7 @@ class PhotoshopBridge:
         protocol="http-json",
         default_port=7061,
         setup_script="bridges/photoshop/photoshop_bridge.py",
-        supports_direct_execute=True,
+        supports_direct_execute=False,
         supports_mcp=False,
     )
     PORT_FILES = [
@@ -259,6 +280,8 @@ class PhotoshopBridge:
 
     def execute(self, code: str, timeout: float = 10) -> tuple[bool, str]:
         """Send a command dict or raw batchPlay JSON to the Photoshop UXP bridge."""
+        if not experimental_photoshop_bridge_allowed():
+            return False, _DISABLED_MESSAGE
         port = self.find_port()
         if not port:
             return (
@@ -269,6 +292,8 @@ class PhotoshopBridge:
         return self.execute_on_port(code, port=port, timeout=timeout)
 
     def execute_on_port(self, code: str, *, port: int, timeout: float = 10) -> tuple[bool, str]:
+        if not experimental_photoshop_bridge_allowed():
+            return False, _DISABLED_MESSAGE
         try:
             body = code.encode("utf-8")
             request = (
@@ -437,6 +462,8 @@ def plugin_needs_install(plugin_dir: Path) -> bool:
 
 def install_to_plugin_dir(plugin_dir: Path, dry_run: bool = False) -> Path:
     plugin_dir = Path(plugin_dir)
+    if not dry_run and not experimental_photoshop_bridge_allowed():
+        raise PermissionError(_DISABLED_MESSAGE)
     if not dry_run:
         plugin_dir.mkdir(parents=True, exist_ok=True)
         (plugin_dir / PLUGIN_FILENAME).write_text(PLUGIN_JS_SOURCE, encoding="utf-8")

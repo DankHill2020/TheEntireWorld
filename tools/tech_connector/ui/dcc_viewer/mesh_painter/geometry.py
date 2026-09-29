@@ -258,8 +258,10 @@ class MayaViewportCamera:
         offset = _vec_sub(self.eye, self.target)
         radius = max(0.001, _vec_length(offset))
         world_up = (0.0, 1.0, 0.0)
-        yaw = math.radians(float(-delta_x) * 0.45)
-        pitch = math.radians(float(delta_y) * 0.45)
+        # Drag follows the content under the pointer: right turns right and up
+        # raises the view.  The old signs made both axes feel inverted.
+        yaw = math.radians(float(delta_x) * 0.45)
+        pitch = math.radians(float(-delta_y) * 0.45)
 
         yawed_offset = _rotate_vec_around_axis(offset, world_up, yaw)
         forward_after_yaw = _vec_normalize(_vec_scale(yawed_offset, -1.0), (0.0, 0.0, 1.0))
@@ -372,8 +374,11 @@ class FBXMeshModel:
         self.name = name
         self.vertices: list[MeshVertex3D] = []
         self.faces: list[tuple[int, int, int]] = []
+        self.quad_faces: list[tuple[int, int, int, int]] = []
         self.face_colors: list[QColor] = []
         self.quad_face_colors: list[QColor] = []
+        self.face_proxy_indices: list[int] = []
+        self.quad_proxy_indices: list[int] = []
         self.scene_proxy_objects: list[SceneProxyInstance] = []
         self.source_texture_images: dict[str, QImage] = {}
         self.provider_id = "tech_connector"
@@ -704,6 +709,8 @@ class FBXMeshModel:
                     ior=float(approximation.get("ior", 1.5)),
                     clearcoat=float(approximation.get("clearcoat", 0.0)),
                     texture_color_spaces=dict(approximation.get("texture_color_spaces") or {}),
+                    texture_sources=dict(approximation.get("texture_sources") or {}),
+                    procedural_shader=dict(approximation.get("procedural_shader") or {}),
                     portable_material=dict(approximation.get("portable_material") or {}),
                 ))
             proxy_color = materials[0].color if materials else QColor(190, 196, 205, 255)
@@ -925,6 +932,8 @@ class FBXMeshModel:
                 attenuation_color=attenuation_color,
                 attenuation_distance=attenuation_distance,
                 texture_color_spaces=dict(approximation.get("texture_color_spaces") or {}),
+                texture_sources=dict(approximation.get("texture_sources") or {}),
+                procedural_shader=dict(approximation.get("procedural_shader") or {}),
                 portable_material=dict(approximation.get("portable_material") or {}),
             )
 
@@ -1665,6 +1674,45 @@ class ThreeDMeshCanvas(QWidget):
         ] = []
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-tech-connector-asset"):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-tech-connector-asset"):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        mime = event.mimeData()
+        if not mime.hasFormat("application/x-tech-connector-asset"):
+            super().dropEvent(event)
+            return
+        try:
+            payload = json.loads(bytes(mime.data("application/x-tech-connector-asset")).decode("utf-8"))
+            placed = bool(
+                self.owner
+                and self.owner.place_asset_from_browser(
+                    payload,
+                    event.position(),
+                    float(self.width()),
+                    float(self.height()),
+                )
+            )
+        except Exception as exc:
+            if self.owner is not None:
+                self.owner._resolved_shaded_status = f"Asset placement failed: {exc}"
+                self.owner.update_viewport_status()
+            placed = False
+        if placed:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def enterEvent(self, event):
         self.setFocus()
@@ -1686,6 +1734,7 @@ class ThreeDMeshCanvas(QWidget):
             painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
             self._draw_gpu_interaction_overlay(painter, self.width(), self.height())
+            self._draw_world_production_overlay(painter, self.width(), self.height())
             painter.end()
             self.owner._last_viewport_paint_ms = (time.perf_counter() - paint_started) * 1000.0
             request_started = float(getattr(self.owner, "_frame_render_request_started_s", 0.0) or 0.0)
@@ -2369,6 +2418,7 @@ class ThreeDMeshCanvas(QWidget):
         self._draw_deformation_weight_overlay(painter, w, h)
         self._draw_debug_vectors(painter, w, h)
         self._draw_simulation_world(painter, w, h)
+        self._draw_world_production_overlay(painter, w, h)
         self._draw_viewport_hud(painter, w, h)
         self._draw_component_marquee(painter)
         painter.end()
@@ -2377,6 +2427,58 @@ class ThreeDMeshCanvas(QWidget):
         if request_started > 0.0:
             self.owner._last_frame_total_ms = (time.perf_counter() - request_started) * 1000.0
             self.owner._frame_render_request_started_s = 0.0
+
+    def _draw_world_production_overlay(self, painter: QPainter, w: int, h: int) -> None:
+        visualization = getattr(self.owner, "_tc_world_visualization", None)
+        if not isinstance(visualization, dict):
+            return
+        kind = str(visualization.get("kind") or "")
+        payload = dict(visualization.get("payload") or {})
+        panel_width = min(420.0, max(220.0, w * 0.34)); panel_height = min(310.0, max(170.0, h * 0.38))
+        area = QRectF(w - panel_width - 16.0, h - panel_height - 42.0, panel_width, panel_height)
+        painter.fillRect(area, QColor(4, 12, 18, 218)); painter.setPen(QPen(QColor(99, 175, 220, 210), 1)); painter.drawRect(area)
+        content = area.adjusted(10, 28, -10, -10)
+        painter.setPen(QColor("#e7f6ff")); painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        painter.drawText(QRectF(area.left() + 10, area.top() + 5, area.width() - 20, 20), Qt.AlignLeft | Qt.AlignVCenter,
+                         f"WORLD • {kind.replace('_', ' ').upper()}")
+        if kind in {"navigation", "partition"}:
+            key = "tiles" if kind == "navigation" else "cells"
+            columns, rows = max(1, int(payload.get("columns", 1))), max(1, int(payload.get("rows", 1)))
+            cell_w, cell_h = content.width() / columns, content.height() / rows
+            color = QColor("#45d6bb" if kind == "navigation" else "#55aaff")
+            for cell in payload.get(key) or ():
+                rect = QRectF(content.left() + int(cell.get("x", 0)) * cell_w,
+                              content.top() + int(cell.get("z", 0)) * cell_h, cell_w, cell_h)
+                active = str(cell.get("state") or "built") in {"built", "loaded"}
+                fill = QColor(color); fill.setAlpha(90 if active else 12); painter.fillRect(rect, fill)
+                painter.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 145), 1)); painter.drawRect(rect)
+        elif kind == "terrain":
+            columns, rows = int(payload.get("width", 0)), int(payload.get("depth", 0)); heights = list(payload.get("heights") or ())
+            if columns and len(heights) == columns * rows:
+                minimum, maximum = min(heights), max(heights); span = max(1e-9, maximum - minimum)
+                sample_step = max(1, math.ceil(max(columns / 96, rows / 72)))
+                cell_w, cell_h = content.width() / columns * sample_step, content.height() / rows * sample_step
+                for z in range(0, rows, sample_step):
+                    for x in range(0, columns, sample_step):
+                        value = (float(heights[z * columns + x]) - minimum) / span
+                        painter.fillRect(QRectF(content.left() + x / columns * content.width(),
+                                                content.top() + z / rows * content.height(), cell_w + 1, cell_h + 1),
+                                         QColor.fromHsvF(0.30 - value * 0.22, 0.58, 0.3 + value * 0.65, 0.92))
+        elif kind in {"foliage", "biome"}:
+            instances = list(payload.get("instances") or payload.get("manual_instances") or ())
+            painter.setPen(Qt.NoPen); painter.setBrush(QColor("#78d65b"))
+            for row in instances[:10000]:
+                if "u" in row: u, v = float(row.get("u", 0.0)), float(row.get("v", 0.0))
+                else:
+                    position = list(row.get("position") or [0, 0, 0]); u = (float(position[0]) % 10000.0) / 10000.0; v = (float(position[2]) % 10000.0) / 10000.0
+                painter.drawEllipse(QPointF(content.left() + u * content.width(), content.top() + v * content.height()), 2, 2)
+        elif kind == "hlod":
+            source, proxy = int(payload.get("source_triangles", 0)), int(payload.get("proxy_triangles", 0))
+            painter.setPen(QColor("#dcecff")); painter.drawText(content, Qt.AlignCenter,
+                f"SOURCE  {source:,} tris\n\n⇄\n\nPROXY  {proxy:,} tris\n{payload.get('triangle_reduction_percent', 0)}% reduction")
+        elif kind == "lighting":
+            painter.setPen(QColor("#f3cf62")); painter.drawText(content, Qt.AlignCenter,
+                f"{str(payload.get('mode', 'hybrid')).title()} Lighting\n{payload.get('estimated_texels', 0):,} estimated texels\n{payload.get('reflection_capture_count', 0)} reflection capture(s)")
 
     def _draw_gpu_interaction_overlay(self, painter: QPainter, w: int, h: int) -> None:
         camera = getattr(self.owner, "viewport_camera", MayaViewportCamera())
@@ -3002,6 +3104,92 @@ class ThreeDMeshCanvas(QWidget):
                         for first, second in zip(points, points[1:]):
                             if first[2] > camera.near_clip and second[2] > camera.near_clip:
                                 painter.drawLine(QPointF(first[0], first[1]), QPointF(second[0], second[1]))
+        exotic_view = dict(getattr(self.owner, "_exotic_simulation_view", {}) or {})
+        if exotic_view.get("trails"):
+            painter.setPen(QPen(QColor(95, 205, 255, 155), 1.25))
+            for history in list((getattr(self.owner, "_exotic_particle_trails", {}) or {}).values())[:4096]:
+                points = [project(position) for position in history]
+                for first, second in zip(points, points[1:]):
+                    if first[2] > camera.near_clip and second[2] > camera.near_clip:
+                        painter.drawLine(QPointF(first[0], first[1]), QPointF(second[0], second[1]))
+        if exotic_view.get("field_lines"):
+            painter.setBrush(Qt.NoBrush)
+            for force in list(getattr(world, "fields", ()) or ())[:64]:
+                if not getattr(force, "enabled", True):
+                    continue
+                center = tuple(float(value) for value in force.center)
+                vector = _vec_normalize(tuple(float(value) for value in force.vector))
+                magnitude = max(0.25, min(3.0, abs(float(force.strength))))
+                start = project(center)
+                end = project(_vec_add(center, _vec_scale(vector, magnitude)))
+                if start[2] <= camera.near_clip or end[2] <= camera.near_clip:
+                    continue
+                color = QColor(100, 190, 255, 210) if "magnetic" in str(force.field_type) else QColor(255, 205, 75, 210)
+                painter.setPen(QPen(color, 2.0, Qt.DashLine))
+                painter.drawLine(QPointF(start[0], start[1]), QPointF(end[0], end[1]))
+                painter.drawEllipse(QPointF(start[0], start[1]), 4.0, 4.0)
+            painter.setPen(QPen(QColor(80, 225, 255, 130), 1.0))
+            for grid in list(getattr(world, "pic_grids", ()) or ())[:4]:
+                electric = getattr(grid, "electric_field", None)
+                if electric is None:
+                    continue
+                resolution = electric.shape[:3]
+                strides = tuple(max(1, int(value) // 5) for value in resolution)
+                for x in range(0, resolution[0], strides[0]):
+                    for y in range(0, resolution[1], strides[1]):
+                        for z in range(0, resolution[2], strides[2]):
+                            vector = tuple(float(value) for value in electric[x, y, z])
+                            magnitude = math.sqrt(sum(value * value for value in vector))
+                            if magnitude <= 1.0e-8:
+                                continue
+                            position = tuple(
+                                float(grid.bounds_min[axis])
+                                + (float(grid.bounds_max[axis]) - float(grid.bounds_min[axis]))
+                                * (index / max(1, resolution[axis] - 1))
+                                for axis, index in enumerate((x, y, z))
+                            )
+                            direction = tuple(value / magnitude for value in vector)
+                            glyph_length = max(0.06, min(0.4, math.log1p(magnitude) * 0.15))
+                            field_end = _vec_add(position, _vec_scale(direction, glyph_length))
+                            start = project(position)
+                            end = project(field_end)
+                            if start[2] > camera.near_clip and end[2] > camera.near_clip:
+                                painter.drawLine(QPointF(start[0], start[1]), QPointF(end[0], end[1]))
+            for grid in list(getattr(world, "magnetic_grids", ()) or ())[:4]:
+                magnetic = getattr(grid, "magnetic_field", None)
+                current = getattr(grid, "current_density", None)
+                if magnetic is None:
+                    continue
+                resolution = magnetic.shape[:3]
+                strides = tuple(max(1, int(value) // 5) for value in resolution)
+                for x in range(0, resolution[0], strides[0]):
+                    for y in range(0, resolution[1], strides[1]):
+                        for z in range(0, resolution[2], strides[2]):
+                            position = tuple(
+                                float(grid.bounds_min[axis])
+                                + (float(grid.bounds_max[axis]) - float(grid.bounds_min[axis]))
+                                * (index / max(1, resolution[axis] - 1))
+                                for axis, index in enumerate((x, y, z))
+                            )
+                            vector = tuple(float(value) for value in magnetic[x, y, z])
+                            magnitude = math.sqrt(sum(value * value for value in vector))
+                            if magnitude > 1.0e-8:
+                                direction = tuple(value / magnitude for value in vector)
+                                field_end = _vec_add(position, _vec_scale(direction, max(0.08, min(0.45, math.log1p(magnitude) * 0.18))))
+                                start, end = project(position), project(field_end)
+                                if start[2] > camera.near_clip and end[2] > camera.near_clip:
+                                    painter.setPen(QPen(QColor(185, 105, 255, 150), 1.2))
+                                    painter.drawLine(QPointF(start[0], start[1]), QPointF(end[0], end[1]))
+                            if current is not None:
+                                current_vector = tuple(float(value) for value in current[x, y, z])
+                                current_magnitude = math.sqrt(sum(value * value for value in current_vector))
+                                if current_magnitude > 1.0e-5:
+                                    direction = tuple(value / current_magnitude for value in current_vector)
+                                    current_end = _vec_add(position, _vec_scale(direction, max(0.05, min(0.25, math.log1p(current_magnitude) * 0.12))))
+                                    start, end = project(position), project(current_end)
+                                    if start[2] > camera.near_clip and end[2] > camera.near_clip:
+                                        painter.setPen(QPen(QColor(255, 135, 55, 120), 1.0))
+                                        painter.drawLine(QPointF(start[0], start[1]), QPointF(end[0], end[1]))
         if bool(getattr(self.owner, "show_simulation_diagnostics", False)):
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(QColor(255, 196, 55, 210), 1.5, Qt.DashLine))
@@ -3442,11 +3630,33 @@ class ThreeDMeshCanvas(QWidget):
         else:
             super().keyReleaseEvent(event)
 
+    def _world_production_stroke(self, position: QPointF, erase: bool) -> bool:
+        visualization = getattr(self.owner, "_tc_world_visualization", None)
+        callback = getattr(self.owner, "_tc_world_brush_callback", None)
+        if not isinstance(visualization, dict) or not callable(callback):
+            return False
+        if str(visualization.get("kind") or "") not in {"terrain", "foliage"}:
+            return False
+        panel_width = min(420.0, max(220.0, self.width() * 0.34)); panel_height = min(310.0, max(170.0, self.height() * 0.38))
+        content = QRectF(self.width() - panel_width - 6.0, self.height() - panel_height - 14.0,
+                         panel_width - 20.0, panel_height - 38.0)
+        if not content.contains(position):
+            return False
+        u = (position.x() - content.left()) / max(1.0, content.width())
+        v = (position.y() - content.top()) / max(1.0, content.height())
+        callback(max(0.0, min(1.0, u)), max(0.0, min(1.0, v)), bool(erase))
+        self.update()
+        return True
+
     def mousePressEvent(self, event):
         self.setFocus()
         self.owner.last_mouse_pos = event.position()
         mods = event.modifiers()
         btn = event.button()
+
+        if btn in {Qt.LeftButton, Qt.RightButton} and self._world_production_stroke(event.position(), btn == Qt.RightButton):
+            self._world_production_drag = True
+            return
 
         if (
             btn == Qt.LeftButton
@@ -3609,6 +3819,10 @@ class ThreeDMeshCanvas(QWidget):
     def mouseMoveEvent(self, event):
         self.owner.current_mouse_pos = event.position()
 
+        if getattr(self, "_world_production_drag", False) and event.buttons() & (Qt.LeftButton | Qt.RightButton):
+            self._world_production_stroke(event.position(), bool(event.buttons() & Qt.RightButton))
+            return
+
         marquee_start = getattr(self.owner, "_component_marquee_start", None)
         if marquee_start is not None and (event.buttons() & Qt.LeftButton):
             self.owner._component_marquee_current = QPointF(event.position())
@@ -3662,6 +3876,10 @@ class ThreeDMeshCanvas(QWidget):
                     dy = 0.0
                 else:
                     dx = 0.0
+            if bool(getattr(self.owner, "invert_orbit_x", False)):
+                dx = -dx
+            if bool(getattr(self.owner, "invert_orbit_y", False)):
+                dy = -dy
             self.owner.viewport_camera.tumble(dx, dy)
             self.owner.schedule_dcc_camera_drive("orbit")
             self.update()
@@ -3722,6 +3940,9 @@ class ThreeDMeshCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if getattr(self, "_world_production_drag", False):
+            self._world_production_drag = False
+            return
         if getattr(self.owner, "_component_marquee_start", None) is not None:
             if getattr(self.owner, "_component_marquee_dragging", False):
                 self.owner.select_mesh_components_in_viewport_rectangle(

@@ -9,6 +9,11 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from tech_connector.game_engine.rendering.media_texture_service import (
+    media_texture_runtime_capabilities,
+    normalize_media_texture_source,
+)
+
 
 PORTABLE_MATERIAL_SCHEMA = "tech_connector.portable_material.v1"
 PORTABLE_LOOKDEV_SCHEMA = "tech_connector.portable_lookdev.v1"
@@ -136,6 +141,8 @@ class PortableTextureBinding:
     wrap_u: str = "periodic"
     wrap_v: str = "periodic"
     source_channel: str = ""
+    source_type: str = "image"
+    playback: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -153,6 +160,7 @@ class PortableMaterial:
     source_graph: dict[str, Any] = field(default_factory=dict)
     unsupported_nodes: tuple[str, ...] = ()
     approximation: str = "openpbr"
+    procedural_graph: dict[str, Any] = field(default_factory=dict)
     schema: str = PORTABLE_MATERIAL_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
@@ -201,6 +209,7 @@ def portable_material_runtime_capabilities() -> dict[str, Any]:
         "materialx_document_io": available["materialx"],
         "ocio_processor": available["opencolorio"],
         "usd_shade_io": available["openusd"],
+        "media_textures": media_texture_runtime_capabilities(),
         "fallback": "portable_contract_and_source_graph",
     }
 
@@ -294,6 +303,7 @@ def normalize_portable_material(
             if binding is not None:
                 textures[channel] = binding
     source_graph = dict(source.get("source_graph") or {})
+    procedural_graph = dict(source.get("procedural_graph") or source.get("procedural_shader") or {})
     unsupported = tuple(sorted({str(item) for item in source.get("unsupported_nodes") or [] if str(item)}))
     approximation = "openpbr" if not unsupported else "openpbr_with_source_fallback"
     return PortableMaterial(
@@ -306,6 +316,7 @@ def normalize_portable_material(
         source_graph,
         unsupported,
         approximation,
+        procedural_graph,
     )
 
 
@@ -813,6 +824,15 @@ def viewer_material_approximation(material: PortableMaterial) -> dict[str, Any]:
         "clearcoat": float(parameters["coat_weight"]),
         "textures": {key: binding.path for key, binding in material.textures.items()},
         "texture_color_spaces": {key: binding.color_space for key, binding in material.textures.items()},
+        "texture_sources": {
+            key: {
+                "path": binding.path,
+                "source_type": binding.source_type,
+                "playback": dict(binding.playback),
+            }
+            for key, binding in material.textures.items()
+        },
+        "procedural_shader": copy.deepcopy(material.procedural_graph),
         "approximation": material.approximation,
         "portable_material": material.to_dict(),
     }
@@ -827,13 +847,17 @@ def _texture_binding(
 ) -> PortableTextureBinding | None:
     metadata: dict[str, Any] = {}
     if isinstance(raw_binding, dict):
-        path = str(raw_binding.get("path") or raw_binding.get("file") or "")
+        path = str(raw_binding.get("path") or raw_binding.get("file") or raw_binding.get("url") or "")
         color_space = str(raw_binding.get("color_space") or raw_binding.get("colorspace") or "")
         uv_set = str(raw_binding.get("uv_set") or "st")
         wrap_u = str(raw_binding.get("wrap_u") or "periodic")
         wrap_v = str(raw_binding.get("wrap_v") or "periodic")
         metadata = {key: value for key, value in raw_binding.items() if key not in {
-            "path", "file", "color_space", "colorspace", "uv_set", "wrap_u", "wrap_v"
+            "path", "file", "url", "color_space", "colorspace", "uv_set", "wrap_u", "wrap_v",
+            "source_type", "media_type", "type", "playback", "autoplay", "loop", "playback_rate",
+            "start_time_seconds", "end_time_seconds", "frame_rate", "muted", "synchronization",
+            "fallback_frame",
+            "sequence_start", "sequence_end", "sequence_padding",
         }}
     else:
         path = str(raw_binding or "")
@@ -843,11 +867,14 @@ def _texture_binding(
         wrap_v = "periodic"
     if not path:
         return None
+    remote_source = "://" in path and not path.lower().startswith("file://")
     candidate = Path(path).expanduser()
     source_was_absolute = candidate.is_absolute()
-    if not source_was_absolute and source_path:
+    if not remote_source and not source_was_absolute and source_path:
         candidate = Path(source_path).expanduser().resolve().parent / candidate
-    if candidate.exists():
+    if remote_source:
+        normalized_path = path
+    elif candidate.exists():
         normalized_path = str(candidate.resolve())
     elif source_was_absolute:
         normalized_path = path
@@ -855,6 +882,23 @@ def _texture_binding(
         normalized_path = str(candidate)
     if not color_space:
         color_space = "sRGB - Texture" if channel in COLOR_TEXTURE_CHANNELS else "Raw"
+    media_payload = dict(raw_binding) if isinstance(raw_binding, dict) else {"path": normalized_path}
+    media_payload["path"] = normalized_path
+    media_source = normalize_media_texture_source(media_payload)
+    playback = {
+        "autoplay": media_source.autoplay,
+        "loop": media_source.loop,
+        "playback_rate": media_source.playback_rate,
+        "start_time_seconds": media_source.start_time_seconds,
+        "end_time_seconds": media_source.end_time_seconds,
+        "frame_rate": media_source.frame_rate,
+        "muted": media_source.muted,
+        "synchronization": media_source.synchronization,
+        "fallback_frame": media_source.fallback_frame,
+        "sequence_start": media_source.sequence_start,
+        "sequence_end": media_source.sequence_end,
+        "sequence_padding": media_source.sequence_padding,
+    }
     return PortableTextureBinding(
         channel,
         normalized_path,
@@ -863,6 +907,8 @@ def _texture_binding(
         wrap_u,
         wrap_v,
         source_channel,
+        media_source.source_type,
+        playback,
         metadata,
     )
 

@@ -11,6 +11,8 @@ from typing import Any
 from tech_connector.game_engine.authoring.rigging_workspace_service import RIGGING_CAPABILITIES
 from tech_connector.game_engine.integration.dcc_operation_service import dcc_operation_registry
 from tech_connector.game_engine.integration.rigging_host_adapter_service import (
+    BLENDER_CAPABILITY_STATUS,
+    MAX_CAPABILITY_STATUS,
     MAYA_CAPABILITY_STATUS,
     MOTIONBUILDER_CAPABILITY_STATUS,
 )
@@ -124,6 +126,8 @@ def _audit_tc_native() -> DccHostAudit:
 
 def _bridged_rigging_evidence(host: str) -> DccDepartmentEvidence | None:
     statuses = {
+        "blender": BLENDER_CAPABILITY_STATUS,
+        "3dsmax": MAX_CAPABILITY_STATUS,
         "maya": MAYA_CAPABILITY_STATUS,
         "motionbuilder": MOTIONBUILDER_CAPABILITY_STATUS,
     }.get(host)
@@ -134,6 +138,8 @@ def _bridged_rigging_evidence(host: str) -> DccDepartmentEvidence | None:
     executable = tuple(sorted(key for key, status in statuses.items() if status == "translated"))
     missing = tuple(sorted(key for key in declared if statuses.get(key) != "translated"))
     module = {
+        "blender": "blender_tools/Rigging/rigging_host_adapter.py",
+        "3dsmax": "max_tools/Rigging/rigging_host_adapter.py",
         "maya": "maya_tools/Rigging/rigging_host_adapter.py",
         "motionbuilder": "motionbuilder_tools/Rigging/rigging_host_adapter.py",
     }[host]

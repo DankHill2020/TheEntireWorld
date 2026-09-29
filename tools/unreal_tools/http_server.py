@@ -15,6 +15,8 @@ tools_dir = os.path.dirname(script_dir)
 if tools_dir not in sys.path:
     sys.path.append(tools_dir)
 
+from tech_connector.bridges.session_authorization import validate_bridge_session
+
 # Shared queue between HTTP server and tick handler
 request_queue = queue.Queue()
 PORT = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
@@ -167,6 +169,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         post_data = self.rfile.read(content_length)
         try:
             data = json.loads(post_data.decode('utf-8'))
+
+            if not validate_bridge_session(data.get("bridge_session", ""), "unreal"):
+                self._send_json(403, {
+                    "error": "Tech Connector activation is required for this Unreal bridge.",
+                    "code": "bridge_authorization_required",
+                })
+                return
 
             if "function" not in data:
                 raise ValueError("Missing 'function' in request body")

@@ -47,24 +47,36 @@ def p4_edit(filepath, changelist=None):
         
     if os.path.exists(filepath):
         try:
+            filepath = os.path.abspath(filepath)
             cwd = os.path.dirname(filepath)
             cmd = ['p4', 'edit']
             if changelist:
                 cmd.extend(['-c', str(changelist)])
             cmd.append(filepath)
             
-            subprocess.run(cmd, check=False, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(cmd, check=False, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         except Exception:
             pass
             
         # Fallback: forcefully remove read-only flag so Python/Maya don't crash
         # when trying to overwrite a P4-managed file if the server is unreachable.
         try:
-            os.chmod(filepath, stat.S_IWRITE)
+            os.chmod(filepath, os.stat(filepath).st_mode | stat.S_IWRITE)
         except Exception:
             pass
             
     return True
+
+
+def prepare_file_for_write(filepath):
+    """Check out existing outputs, falling back to local write permission."""
+    filepath = os.path.abspath(os.fspath(filepath))
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    if os.path.exists(filepath):
+        p4_edit(filepath)
+        if not os.stat(filepath).st_mode & stat.S_IWRITE or not os.access(filepath, os.W_OK):
+            raise PermissionError("Cannot make output writable: {}".format(filepath))
+    return filepath
 
 def p4_add(filepath, changelist=None):
     """

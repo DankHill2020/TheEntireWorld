@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any, Callable, Iterable, Iterator
 
+from .asset_metadata_service import ASSET_METADATA_SCHEMA, ensure_asset_metadata
+
 
 SCHEMA_VERSION = 1
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -84,10 +86,37 @@ class AssetDatabase:
         if not source.is_file():
             raise FileNotFoundError(source)
         canonical = _canonical_path(source)
-        resolved_id = str(asset_id or stable_asset_id(asset_type, source))
+        existing_path_record = self.asset_for_path(source)
+        preferred_id = str(asset_id or (existing_path_record.asset_id if existing_path_record else ""))
+        try:
+            identity = ensure_asset_metadata(source, str(asset_type), preferred_asset_id=preferred_id)
+            sidecar_persisted = True
+        except OSError:
+            # Read-only external source roots remain indexable. Project imports
+            # should be writable and therefore receive the persistent sidecar.
+            identity = {
+                "schema": ASSET_METADATA_SCHEMA,
+                "asset_id": preferred_id or stable_asset_id(asset_type, source),
+                "type_id": str(asset_type),
+            }
+            sidecar_persisted = False
+        resolved_id = str(identity["asset_id"])
+        existing_identity_record = self.asset(resolved_id)
+        if (
+            existing_identity_record is not None
+            and _canonical_path(existing_identity_record.source_path) != canonical
+            and not asset_id
+        ):
+            raise ValueError(
+                f"Duplicate asset UUID {resolved_id} is assigned to both "
+                f"'{existing_identity_record.source_path}' and '{source}'. Import as a new asset or repair its .tcmeta sidecar."
+            )
         stat = source.stat()
         content_hash = _file_hash(source)
-        metadata_json = _json(metadata or {})
+        record_metadata = dict(metadata or {})
+        record_metadata.setdefault("identity_schema", identity.get("schema"))
+        record_metadata.setdefault("metadata_sidecar", source.name + ".tcmeta" if sidecar_persisted else "")
+        metadata_json = _json(record_metadata)
         with self._transaction() as connection:
             existing = connection.execute(
                 "SELECT content_hash, revision FROM assets WHERE asset_id = ?", (resolved_id,)
@@ -172,6 +201,99 @@ class AssetDatabase:
                 "SELECT dependency_id FROM dependencies WHERE asset_id = ? ORDER BY dependency_id", (str(asset_id),)
             ).fetchall()
         return tuple(row[0] for row in rows)
+
+    def dependency_edges(self, asset_id: str) -> tuple[tuple[str, str], ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT dependency_id, kind FROM dependencies WHERE asset_id = ? ORDER BY dependency_id",
+                (str(asset_id),),
+            ).fetchall()
+        return tuple((str(row[0]), str(row[1])) for row in rows)
+
+    def referencers(self, asset_id: str, *, recursive: bool = False) -> tuple[str, ...]:
+        target = str(asset_id)
+        found: set[str] = set()
+        pending = [target]
+        with self._connect() as connection:
+            while pending:
+                current = pending.pop()
+                rows = connection.execute(
+                    "SELECT asset_id FROM dependencies WHERE dependency_id = ? ORDER BY asset_id",
+                    (current,),
+                ).fetchall()
+                for row in rows:
+                    value = str(row[0])
+                    if value in found:
+                        continue
+                    found.add(value)
+                    if recursive:
+                        pending.append(value)
+                if not recursive:
+                    break
+        return tuple(sorted(found))
+
+    def referencer_edges(self, asset_id: str) -> tuple[tuple[str, str], ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT asset_id, kind FROM dependencies WHERE dependency_id = ? ORDER BY asset_id",
+                (str(asset_id),),
+            ).fetchall()
+        return tuple((str(row[0]), str(row[1])) for row in rows)
+
+    def replace_dependency(self, owner_asset_id: str, old_asset_id: str, new_asset_id: str) -> bool:
+        """Replace one dependency while retaining its relationship kind."""
+        owner = str(owner_asset_id)
+        old = str(old_asset_id)
+        new = str(new_asset_id)
+        if old == new:
+            return False
+        with self._transaction() as connection:
+            known = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT asset_id FROM assets WHERE asset_id IN (?, ?, ?)", (owner, old, new)
+                )
+            }
+            missing = {owner, old, new} - known
+            if missing:
+                raise KeyError("Unknown asset IDs: " + ", ".join(sorted(missing)))
+            row = connection.execute(
+                "SELECT kind FROM dependencies WHERE asset_id = ? AND dependency_id = ?", (owner, old)
+            ).fetchone()
+            if row is None:
+                return False
+            kind = str(row[0])
+            connection.execute(
+                "DELETE FROM dependencies WHERE asset_id = ? AND dependency_id = ?", (owner, old)
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO dependencies(asset_id, dependency_id, kind) VALUES(?, ?, ?)",
+                (owner, new, kind),
+            )
+            if owner in self._dependency_closure(connection, [new]):
+                raise ValueError(f"Asset dependency cycle detected at {owner}.")
+            self._append_event(
+                connection, "dependency_replaced", owner,
+                {"previous_dependency": old, "dependency": new, "kind": kind},
+            )
+        return True
+
+    def unregister_asset(self, asset_id: str) -> AssetRecord:
+        """Remove an unreferenced asset record after its source has been safely relocated."""
+        record = self.asset(asset_id)
+        if record is None:
+            raise KeyError(f"Unknown asset: {asset_id}")
+        referencers = self.referencers(asset_id)
+        if referencers:
+            raise ValueError(
+                f"Cannot unregister {asset_id}; it is referenced by {len(referencers)} asset(s)."
+            )
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM assets WHERE asset_id = ?", (str(asset_id),))
+            self._append_event(
+                connection, "unregistered", str(asset_id), {"source_path": str(record.source_path)}
+            )
+        return record
 
     def dependency_closure(self, asset_ids: Iterable[str]) -> tuple[str, ...]:
         with self._connect() as connection:

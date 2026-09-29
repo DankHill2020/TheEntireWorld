@@ -130,7 +130,7 @@ def test_maya_install_recovery_is_proven_only_when_disk_and_runtime_versions_mat
         def session_info(self, *, port: int, timeout: float):
             row = super().session_info(port=port, timeout=timeout)
             row.update({
-                "bridge_bootstrap_version": "2",
+                "bridge_bootstrap_version": "3",
                 "bridge_bootstrap_source": "C:/Maya/2026/scripts/userSetup.py",
                 "bridge_capture_installed": True,
             })

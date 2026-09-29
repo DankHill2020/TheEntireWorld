@@ -28,6 +28,16 @@ def load_tc_rig_template(path: str | Path = DEFAULT_TC_BIPED_TEMPLATE) -> dict[s
     return payload
 
 
+def expanded_tc_rig_template_joints(
+    path: str | Path = DEFAULT_TC_BIPED_TEMPLATE,
+) -> list[dict[str, Any]]:
+    """Return the complete authored hierarchy, including generated finger chains."""
+
+    rows = _expanded_joint_rows(load_tc_rig_template(path))
+    _validate_rows(rows)
+    return copy.deepcopy(rows)
+
+
 def instantiate_tc_rig_template(
     graph: EditableRigGraph,
     *,
@@ -173,6 +183,7 @@ def _namespace_prefix(namespace: str) -> str:
 __all__ = [
     "DEFAULT_TC_BIPED_TEMPLATE",
     "TC_RIG_TEMPLATE_SCHEMA",
+    "expanded_tc_rig_template_joints",
     "instantiate_tc_rig_template",
     "load_tc_rig_template",
 ]

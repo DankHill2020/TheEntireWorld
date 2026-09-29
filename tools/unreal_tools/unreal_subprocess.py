@@ -5,6 +5,29 @@ import json
 import requests
 
 
+def _post_unreal(payload):
+    from tech_connector.bridges.session_authorization import bridge_session_token
+    payload = dict(payload, bridge_session=bridge_session_token("unreal"))
+    port = int(os.environ.get("UNREAL_HTTP_PORT", "12347"))
+    response = requests.post("http://127.0.0.1:{}".format(port), json=payload, timeout=125)
+    data = response.json()
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError("Unreal bridge: {} ({})".format(
+            data["error"], data.get("code", response.status_code)))
+    response.raise_for_status()
+    return data
+
+
+def _validate_asset_result(data, asset_type):
+    if not isinstance(data, dict) or any(
+        not isinstance(path, str) or not path.startswith("/")
+        or not isinstance(row, dict) or row.get("class_name") != asset_type
+        for path, row in data.items()
+    ):
+        raise RuntimeError("Unreal returned an invalid {} asset response.".format(asset_type))
+    return data
+
+
 def run_get_skeletons(unreal_project_path, log_file_path,
                               unreal_command_path="C:/Program Files/Epic "
                                                   "Games/UE_5.5/Engine/Binaries/Win64/UnrealEditor-Cmd.exe",
@@ -22,39 +45,26 @@ def run_get_skeletons(unreal_project_path, log_file_path,
             "args": [asset_type, "/Game/"]
             }
 
-        response = requests.post("http://127.0.0.1:12347", json=payload)
-        print(response.json())
-        return response.json()
-    except:
+        return _validate_asset_result(_post_unreal(payload), asset_type)
+    except requests.ConnectionError:
+        if not unreal_command_path or not os.path.isfile(unreal_command_path):
+            raise RuntimeError("Unreal bridge is unavailable and the Unreal command-line editor was not found.")
         script_dir = os.path.dirname(__file__)
         unreal_cmd = [
             unreal_command_path,
             unreal_project_path,
             "-run=pythonscript",
-            "-script=" + script_dir + "/get_skeletons.py"
+            '-script="{}" {}'.format(script_dir + "/get_skeletons.py", asset_type)
         ]
 
         try:
             result = subprocess.run(unreal_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-            '''print("STDOUT:\n", result.stdout)
-            print("STDERR:\n", result.stderr)'''
-
-            time.sleep(5)
-
-            with open(log_file_path, "r") as log_file:
-                log_data = log_file.read()
-
-                if f"'class_name': {asset_type}" in log_data:
-                    start_index = log_data.find("{")
-                    end_index = log_data.rfind("}") + 1
-
-
-                    relevant_data = log_data[start_index:end_index]
-                    return relevant_data
-
-                # If no relevant data found, return a fallback message
-                return "No relevant asset dictionary found in the log."
+            for line in (result.stdout + "\n" + result.stderr).splitlines():
+                if "HIK_ASSETS_JSON=" in line:
+                    return _validate_asset_result(
+                        json.loads(line.split("HIK_ASSETS_JSON=", 1)[1]), asset_type)
+            raise RuntimeError("Unreal asset scan completed without an asset result.")
 
         except subprocess.CalledProcessError as e:
             return f"Error: {e.stderr}"
@@ -80,10 +90,8 @@ def run_create_cinematic_sequence(anim_dict_path, destination_path, unreal_proje
             }
         }
 
-        response = requests.post("http://127.0.0.1:12347", json=payload)
-        print(response.json())
-        return response.json()
-    except:
+        return _post_unreal(payload)
+    except requests.ConnectionError:
         script_dir = os.path.dirname(__file__)
         script_path = os.path.join(script_dir, "sequence_func.py").replace('\\', '/')
 
@@ -140,10 +148,8 @@ def run_import_gameplay_animations(anim_dict_path, unreal_project_path, log_file
             "args": [anim_dict_path]
             }
 
-        response = requests.post("http://127.0.0.1:12347", json=payload)
-        print(response.json())
-        return response.json()
-    except:
+        return _post_unreal(payload)
+    except requests.ConnectionError:
         script_dir = os.path.dirname(__file__)
         script_path = os.path.join(script_dir, "gameplay_import_func.py").replace('\\', '/')
 
@@ -201,10 +207,8 @@ def run_create_modular_control_rig(skeletal_mesh_name, rig_name, joint_map, unre
             "args": [skeletal_mesh_name, rig_name, joint_map]
             }
 
-        response = requests.post("http://127.0.0.1:12347", json=payload)
-        print(response.json())
-        return response.json()
-    except:
+        return _post_unreal(payload)
+    except requests.ConnectionError:
         script_dir = os.path.dirname(__file__)
         script_path = os.path.join(script_dir, "gameplay_import_func.py").replace('\\', '/')
 
@@ -243,4 +247,4 @@ def run_create_modular_control_rig(skeletal_mesh_name, rig_name, joint_map, unre
             return "Log file not found."
 
         except subprocess.CalledProcessError as e:
-            return f"Error: {e.stderr}"
+            raise RuntimeError("Unreal asset scan failed: {}".format(e.stderr)) from e

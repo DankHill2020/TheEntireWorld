@@ -10,6 +10,7 @@ from maya_tools.Rigging import enum_attrs
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
+RIG_BUILD_REVISION = "rig-centered-curve-frame-v15"
 
 
 def _get_joint(body_joint_map, slot, default=None):
@@ -321,6 +322,484 @@ def setup_show_twist_ctrls(side, limb, twist_joints=None, attr_nice_name="Show T
     }
 
 
+def _stretch_node_token(node):
+    """Return a short Maya-safe token for stretch helper-node names."""
+    short_name = node.split("|")[-1].replace(":", "_")
+    return re.sub(r"[^A-Za-z0-9_]", "_", short_name)
+
+
+def _ensure_stretch_attr(control, attr_name="stretch"):
+    """Create and return a keyable 0-1 stretch blend on ``control``."""
+    if not control or not cmds.objExists(control):
+        return None
+    plug = f"{control}.{attr_name}"
+    if not cmds.attributeQuery(attr_name, node=control, exists=True):
+        cmds.addAttr(
+            control,
+            longName=attr_name,
+            niceName="Stretch",
+            attributeType="float",
+            minValue=0.0,
+            maxValue=1.0,
+            defaultValue=0.0,
+            keyable=True,
+        )
+    else:
+        cmds.setAttr(plug, edit=True, keyable=True)
+    return plug
+
+
+def _joint_segment_axis(joint):
+    """Return the dominant local translate axis and its signed rest value."""
+    values = cmds.getAttr(f"{joint}.translate")[0]
+    axis_index = max(range(3), key=lambda index: abs(values[index]))
+    return "XYZ"[axis_index], float(values[axis_index])
+
+
+def _create_stretch_ratio_network(
+        prefix,
+        current_distance_attr,
+        rest_length,
+        stretch_attr,
+        scale_reference=None,
+        rest_length_attr=None,
+):
+    """Create a scale-aware stretch/compression ratio and return its output."""
+    created_nodes = []
+    token = _stretch_node_token(prefix)
+
+    rest_distance_attr = rest_length_attr
+    if not rest_distance_attr:
+        rest_scaled = cmds.createNode("multiplyDivide", name=f"{token}_stretch_restScale_md")
+        created_nodes.append(rest_scaled)
+        cmds.setAttr(f"{rest_scaled}.operation", 1)
+        cmds.setAttr(f"{rest_scaled}.input1X", max(float(rest_length), 0.0001))
+
+        if scale_reference and cmds.objExists(scale_reference):
+            scale_decompose = cmds.createNode("decomposeMatrix", name=f"{token}_stretch_scale_dcm")
+            created_nodes.append(scale_decompose)
+            _connect_attr_once(
+                f"{scale_reference}.worldMatrix[0]",
+                f"{scale_decompose}.inputMatrix",
+                force=True,
+            )
+            _connect_attr_once(
+                f"{scale_decompose}.outputScaleX",
+                f"{rest_scaled}.input2X",
+                force=True,
+            )
+        else:
+            cmds.setAttr(f"{rest_scaled}.input2X", 1.0)
+        rest_distance_attr = f"{rest_scaled}.outputX"
+
+    ratio = cmds.createNode("multiplyDivide", name=f"{token}_stretch_ratio_md")
+    created_nodes.append(ratio)
+    cmds.setAttr(f"{ratio}.operation", 2)
+    _connect_attr_once(current_distance_attr, f"{ratio}.input1X", force=True)
+    _connect_attr_once(rest_distance_attr, f"{ratio}.input2X", force=True)
+
+    blend = cmds.createNode("blendColors", name=f"{token}_stretch_blend")
+    created_nodes.append(blend)
+    # blendColors computes color1 * blender + color2 * (1 - blender).
+    cmds.setAttr(f"{blend}.color2R", 1.0)
+    # Feed the measured ratio directly into the enabled side of the blend.
+    # Ratios above one extend the chain and ratios below one compress it.
+    _connect_attr_once(f"{ratio}.outputX", f"{blend}.color1R", force=True)
+    _connect_attr_once(stretch_attr, f"{blend}.blender", force=True)
+
+    return f"{blend}.outputR", created_nodes
+
+
+def _create_distance_dimension(prefix, start_position, end_position, start_parent=None, end_parent=None):
+    """Create a hidden distanceDimension and return all nodes it owns."""
+    token = _stretch_node_token(prefix)
+    distance_group = _ensure_distance_nodes_group()
+    transform = cmds.createNode("transform", name=f"{token}_dim", parent=distance_group)
+    shape = cmds.createNode("distanceDimShape", name=f"{token}_dimShape", parent=transform)
+    locator_nodes = []
+    for role, plug, position, parent in (
+        ("start", "startPoint", start_position, start_parent),
+        ("end", "endPoint", end_position, end_parent),
+    ):
+        locator = cmds.spaceLocator(name=f"{token}_{role}_loc")[0]
+        cmds.xform(locator, worldSpace=True, translation=position)
+        if parent and cmds.objExists(parent):
+            cmds.parent(locator, parent, absolute=True)
+        else:
+            cmds.parent(locator, distance_group, absolute=True)
+        locator_shape = (cmds.listRelatives(
+            locator,
+            shapes=True,
+            noIntermediate=True,
+            fullPath=True,
+        ) or [None])[0]
+        if not locator_shape:
+            raise RuntimeError(f"Could not create the {role} locator for {shape}.")
+        _connect_attr_once(f"{locator_shape}.worldPosition[0]", f"{shape}.{plug}", force=True)
+        cmds.setAttr(f"{locator}.visibility", 0)
+        locator_nodes.append(locator)
+
+    cmds.setAttr(f"{transform}.visibility", 0)
+    return {
+        "shape": shape,
+        "transform": transform,
+        "locators": locator_nodes,
+        "nodes": [transform] + locator_nodes,
+    }
+
+
+def _ensure_distance_nodes_group():
+    """Return the hidden ``Do_Not_Touch|distance_nodes`` DAG group."""
+    dnt_matches = cmds.ls("Do_Not_Touch", type="transform", long=True) or []
+    if dnt_matches:
+        dnt = dnt_matches[0]
+    else:
+        dnt = cmds.group(empty=True, name="Do_Not_Touch")
+
+    children = cmds.listRelatives(dnt, children=True, type="transform", fullPath=True) or []
+    distance_group = next(
+        (child for child in children if child.rsplit("|", 1)[-1] == "distance_nodes"),
+        None,
+    )
+    if distance_group is None:
+        distance_group = cmds.group(empty=True, name="distance_nodes", parent=dnt)
+
+    distance_group_long = (cmds.ls(distance_group, long=True) or [distance_group])[0]
+    for shape in cmds.ls(type="distanceDimShape", long=True) or []:
+        transforms = cmds.listRelatives(shape, parent=True, fullPath=True) or []
+        if not transforms:
+            continue
+        transform = transforms[0]
+        parents = cmds.listRelatives(transform, parent=True, fullPath=True) or []
+        if not parents or parents[0] != distance_group_long:
+            cmds.parent(transform, distance_group_long, absolute=True)
+
+    cmds.setAttr(f"{dnt}.visibility", 0)
+    cmds.setAttr(f"{distance_group_long}.visibility", 0)
+    return distance_group_long
+
+
+def _curve_world_up_vector(curve_shape):
+    """Return a stable world-space normal for motion paths on a curve.
+
+    Closed facial loops are especially prone to a single motionPath roll when
+    Maya has to infer an up vector. A Newell-style normal computed from the
+    curve CVs gives every sample the same reference frame. The fallback also
+    deliberately chooses the world axis least parallel to the first tangent.
+    """
+    selection = om.MSelectionList()
+    selection.add(curve_shape)
+    curve_path = selection.getDagPath(0)
+    curve_fn = om.MFnNurbsCurve(curve_path)
+    points = list(curve_fn.cvPositions(om.MSpace.kWorld))
+
+    normal = om.MVector()
+    if len(points) > 2:
+        center = om.MPoint()
+        for point in points:
+            center += om.MVector(point)
+        center /= float(len(points))
+        offsets = [om.MVector(point - center) for point in points]
+        for current, following in zip(offsets, offsets[1:] + offsets[:1]):
+            normal += current ^ following
+
+    if normal.length() <= 1.0e-8:
+        parameter = curve_fn.knotDomain[0]
+        tangent = curve_fn.tangent(parameter, om.MSpace.kWorld)
+        tangent.normalize()
+        candidates = (
+            om.MVector(1.0, 0.0, 0.0),
+            om.MVector(0.0, 1.0, 0.0),
+            om.MVector(0.0, 0.0, 1.0),
+        )
+        normal = min(candidates, key=lambda axis: abs(tangent * axis))
+
+    normal.normalize()
+    return normal.x, normal.y, normal.z
+
+
+def create_joints_along_curve(curve, joint_count=5, keep_attached=True, name_prefix=None):
+    """Create evenly spaced independent joints along a NURBS curve.
+
+    When ``keep_attached`` is true, each joint is placed below a transform
+    driven by its own fraction-mode motionPath node. Otherwise the evaluated
+    world transforms are baked onto the joints and all helper nodes are
+    removed.
+    """
+    joint_count = int(joint_count)
+    if joint_count < 1:
+        raise ValueError("Joint count must be at least 1.")
+
+    matches = cmds.ls(curve, long=True) or []
+    if not matches:
+        raise ValueError(f"Curve does not exist: {curve}")
+    curve_node = matches[0]
+    if cmds.nodeType(curve_node) == "nurbsCurve":
+        curve_shape = curve_node
+        curve_transform = (cmds.listRelatives(curve_shape, parent=True, fullPath=True) or [None])[0]
+    else:
+        curve_transform = curve_node
+        curve_shapes = cmds.listRelatives(
+            curve_transform,
+            shapes=True,
+            noIntermediate=True,
+            type="nurbsCurve",
+            fullPath=True,
+        ) or []
+        curve_shape = curve_shapes[0] if curve_shapes else None
+    if not curve_shape or not curve_transform:
+        raise ValueError(f"Selected object is not a NURBS curve: {curve}")
+
+    leaf = curve_transform.rsplit("|", 1)[-1].split(":")[-1]
+    prefix = _stretch_node_token(name_prefix or leaf.removesuffix("_crv") or "curve")
+    form = int(cmds.getAttr(f"{curve_shape}.form"))
+    closed = form in (1, 2)
+    denominator = joint_count if closed else max(1, joint_count - 1)
+    fractions = [index / float(denominator) for index in range(joint_count)]
+    world_up = _curve_world_up_vector(curve_shape)
+
+    root_group = cmds.group(empty=True, name=f"{prefix}_path_joints_grp")
+    joints = []
+    pads = []
+    motion_paths = []
+    for index, fraction in enumerate(fractions, start=1):
+        pad = cmds.group(empty=True, name=f"{prefix}_path_{index:02d}_pad", parent=root_group)
+        cmds.select(clear=True)
+        joint = cmds.joint(name=f"{prefix}_path_{index:02d}_jnt")
+        joint = cmds.parent(joint, pad, relative=True)[0]
+
+        motion_path = cmds.createNode("motionPath", name=f"{prefix}_path_{index:02d}_mp")
+        cmds.setAttr(f"{motion_path}.fractionMode", True)
+        cmds.setAttr(f"{motion_path}.uValue", fraction)
+        cmds.setAttr(f"{motion_path}.follow", True)
+        # Maya joint controls use local Y as their forward/length axis. Give
+        # every path sample one explicit curve-plane up reference so a closed
+        # loop cannot roll one control onto local Z at its frame seam.
+        cmds.setAttr(f"{motion_path}.frontAxis", 1)
+        cmds.setAttr(f"{motion_path}.upAxis", 2)
+        cmds.setAttr(f"{motion_path}.worldUpType", 3)
+        cmds.setAttr(f"{motion_path}.worldUpVector", *world_up, type="double3")
+        _connect_attr_once(f"{curve_shape}.worldSpace[0]", f"{motion_path}.geometryPath", force=True)
+        _connect_attr_once(f"{motion_path}.allCoordinates", f"{pad}.translate", force=True)
+        _connect_attr_once(f"{motion_path}.rotate", f"{pad}.rotate", force=True)
+
+        joints.append(joint)
+        pads.append(pad)
+        motion_paths.append(motion_path)
+
+    if not keep_attached:
+        matrices = [cmds.xform(joint, query=True, worldSpace=True, matrix=True) for joint in joints]
+        baked_joints = []
+        for joint, matrix in zip(joints, matrices):
+            joint = cmds.parent(joint, world=True, absolute=True)[0]
+            cmds.xform(joint, worldSpace=True, matrix=matrix)
+            baked_joints.append(joint)
+        cmds.delete(motion_paths)
+        cmds.delete(root_group)
+        joints = baked_joints
+        pads = []
+        motion_paths = []
+        root_group = None
+
+    cmds.select(joints, replace=True)
+    return {
+        "curve": curve_transform,
+        "joints": joints,
+        "pads": pads,
+        "motion_paths": motion_paths,
+        "group": root_group,
+        "keep_attached": bool(keep_attached),
+        "closed": closed,
+        "parameters": fractions,
+    }
+
+
+def setup_spine_segment_stretch(spine_joints, control_data, pelvis_ctrl, scale_reference=None):
+    """Add per-bone distance stretch without replacing the existing FK spine."""
+    if len(spine_joints) < 3 or len(control_data) != len(spine_joints):
+        return {"enabled": False, "reason": "requires at least three spine joints", "nodes": []}
+    if not pelvis_ctrl or not cmds.objExists(pelvis_ctrl):
+        return {"enabled": False, "reason": "pelvis control is unavailable", "nodes": []}
+
+    for parent_joint, child_joint in zip(spine_joints[:-1], spine_joints[1:]):
+        parents = cmds.listRelatives(child_joint, parent=True, type="joint", fullPath=True) or []
+        expected = cmds.ls(parent_joint, long=True) or [parent_joint]
+        if not parents or parents[0] != expected[0]:
+            return {"enabled": False, "reason": "spine joints are not contiguous", "nodes": []}
+
+    stretch_attr = _ensure_stretch_attr(pelvis_ctrl)
+    controls = [row["ctrl"] for row in control_data]
+    constraint_drivers = [row.get("sub_ctrl") or row["ctrl"] for row in control_data]
+    created_nodes = []
+
+    for index, (joint, child_joint) in enumerate(zip(spine_joints[:-1], spine_joints[1:]), start=1):
+        prefix = f"{_stretch_node_token(joint)}_segment{index}"
+        start_position = cmds.xform(joint, query=True, worldSpace=True, translation=True)
+        end_position = cmds.xform(child_joint, query=True, worldSpace=True, translation=True)
+        rest_dimension = _create_distance_dimension(
+            f"{prefix}_rest",
+            start_position,
+            end_position,
+            start_parent=scale_reference,
+            end_parent=scale_reference,
+        )
+        current_dimension = _create_distance_dimension(
+            f"{prefix}_current",
+            start_position,
+            end_position,
+            start_parent=controls[index - 1],
+            end_parent=controls[index],
+        )
+        ratio_attr, ratio_nodes = _create_stretch_ratio_network(
+            prefix,
+            f"{current_dimension['shape']}.distance",
+            1.0,
+            stretch_attr,
+            rest_length_attr=f"{rest_dimension['shape']}.distance",
+        )
+
+        driver_parent = constraint_drivers[index - 1]
+        scale_driver = cmds.createNode(
+            "transform",
+            name=f"{prefix}_stretch_scale_driver",
+            parent=driver_parent,
+        )
+        cmds.setAttr(f"{scale_driver}.translate", 0.0, 0.0, 0.0, type="double3")
+        cmds.setAttr(f"{scale_driver}.rotate", 0.0, 0.0, 0.0, type="double3")
+        cmds.setAttr(f"{scale_driver}.scale", 1.0, 1.0, 1.0, type="double3")
+        cmds.setAttr(f"{scale_driver}.visibility", 0)
+        axis, _rest_translate = _joint_segment_axis(child_joint)
+        _connect_attr_once(ratio_attr, f"{scale_driver}.scale{axis}", force=True)
+
+        constraints = cmds.listConnections(
+            joint,
+            source=True,
+            destination=False,
+            type="scaleConstraint",
+        ) or []
+        constraints = list(dict.fromkeys(constraints))
+        if constraints:
+            constraint = constraints[0]
+            cmds.scaleConstraint(scale_driver, joint, edit=True, weight=0.0)
+        else:
+            constraint = cmds.scaleConstraint(
+                driver_parent,
+                scale_driver,
+                joint,
+                maintainOffset=False,
+                name=f"{prefix}_stretch_scaleConstraint",
+            )[0]
+
+        weights = cmds.scaleConstraint(constraint, query=True, weightAliasList=True) or []
+        targets = cmds.scaleConstraint(constraint, query=True, targetList=True) or []
+        fk_weight = cmds.createNode("reverse", name=f"{prefix}_stretch_fkWeight_rev")
+        _connect_attr_once(stretch_attr, f"{fk_weight}.inputX", force=True)
+        driver_long = (cmds.ls(scale_driver, long=True) or [scale_driver])[0]
+        for target, weight in zip(targets, weights):
+            target_long = (cmds.ls(target, long=True) or [target])[0]
+            weight_source = stretch_attr if target_long == driver_long else f"{fk_weight}.outputX"
+            _connect_attr_once(weight_source, f"{constraint}.{weight}", force=True)
+
+        created_nodes.extend(rest_dimension["nodes"])
+        created_nodes.extend(current_dimension["nodes"])
+        created_nodes.extend(ratio_nodes)
+        created_nodes.extend([scale_driver, fk_weight])
+
+    return {
+        "enabled": True,
+        "attr": stretch_attr,
+        "nodes": created_nodes,
+    }
+
+
+def _drive_stretch_segments(prefix, segment_joints, ratio_attr):
+    """Drive signed local joint translations from a shared stretch ratio."""
+    created_nodes = []
+    token = _stretch_node_token(prefix)
+    for index, joint in enumerate(segment_joints, start=1):
+        axis, rest_translate = _joint_segment_axis(joint)
+        if abs(rest_translate) < 0.0001:
+            continue
+        multiplier = cmds.createNode(
+            "multDoubleLinear",
+            name=f"{token}_stretch_segment{index}_mdl",
+        )
+        created_nodes.append(multiplier)
+        cmds.setAttr(f"{multiplier}.input1", rest_translate)
+        _connect_attr_once(ratio_attr, f"{multiplier}.input2", force=True)
+        _connect_attr_once(
+            f"{multiplier}.output",
+            f"{joint}.translate{axis}",
+            force=True,
+        )
+    return created_nodes
+
+
+def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None):
+    """Add a 0-1 stretch/compression blend to a two-bone IK chain."""
+    if len(ik_joints) < 3 or not all(cmds.objExists(node) for node in ik_joints[:3]):
+        return {"enabled": False, "nodes": []}
+
+    stretch_attr = _ensure_stretch_attr(switch_ctrl)
+    if not stretch_attr:
+        return {"enabled": False, "nodes": []}
+
+    prefix = _stretch_node_token(ik_joints[0]).replace("_ik", "")
+    positions = [
+        cmds.xform(joint, query=True, worldSpace=True, translation=True)
+        for joint in ik_joints[:3]
+    ]
+    upper_dimension = _create_distance_dimension(
+        f"{prefix}_upper_rest",
+        positions[0],
+        positions[1],
+        start_parent=scale_reference,
+        end_parent=scale_reference,
+    )
+    lower_dimension = _create_distance_dimension(
+        f"{prefix}_lower_rest",
+        positions[1],
+        positions[2],
+        start_parent=scale_reference,
+        end_parent=scale_reference,
+    )
+    reach_dimension = _create_distance_dimension(
+        f"{prefix}_reach",
+        positions[0],
+        positions[2],
+        # Never parent the measurement anchor below the IK chain it drives.
+        # Doing so creates feedback through the IK solve:
+        # ratio -> segment translate -> IK solve -> root matrix -> distance.
+        start_parent=scale_reference,
+        end_parent=ik_ctrl,
+    )
+    rest_sum = cmds.createNode("plusMinusAverage", name=f"{prefix}_stretch_restLength_pma")
+    cmds.setAttr(f"{rest_sum}.operation", 1)
+    _connect_attr_once(f"{upper_dimension['shape']}.distance", f"{rest_sum}.input1D[0]", force=True)
+    _connect_attr_once(f"{lower_dimension['shape']}.distance", f"{rest_sum}.input1D[1]", force=True)
+
+    rest_length = sum(abs(_joint_segment_axis(joint)[1]) for joint in ik_joints[1:3])
+    ratio_attr, ratio_nodes = _create_stretch_ratio_network(
+        prefix,
+        f"{reach_dimension['shape']}.distance",
+        rest_length,
+        stretch_attr,
+        rest_length_attr=f"{rest_sum}.output1D",
+    )
+    segment_nodes = _drive_stretch_segments(prefix, ik_joints[1:3], ratio_attr)
+    dimension_nodes = (
+        upper_dimension["nodes"]
+        + lower_dimension["nodes"]
+        + reach_dimension["nodes"]
+    )
+    return {
+        "enabled": True,
+        "attr": stretch_attr,
+        "dimensions": [upper_dimension, lower_dimension, reach_dimension],
+        "nodes": dimension_nodes + [rest_sum] + ratio_nodes + segment_nodes,
+    }
+
+
 def create_ik_fk_limb(sel, root_parent):
     """
         Creates an IK/FK limb from either:
@@ -349,44 +828,44 @@ def create_ik_fk_limb(sel, root_parent):
     mid_joint = sel[1]
     end_joint = sel[ik_end_index]
 
-    fk_chain = cmds.duplicate(top_joint, rc=True)
-    ik_chain = cmds.duplicate(top_joint, rc=True)
-    driver_chain = cmds.duplicate(top_joint, rc=True)
-    cmds.parent(fk_chain[0], root_parent)
-    cmds.parent(ik_chain[0], root_parent)
-    cmds.parent(driver_chain[0], root_parent)
+    def duplicate_exact_chain(source_chain, suffix):
+        """Duplicate only the requested limb path, excluding twist branches."""
+        target_names = []
+        for source in source_chain:
+            base = source.split("|")[-1].split(":")[-1].replace("_jnt", "")
+            base = re.sub(r"_(fk|ik|driver)$", "", base)
+            target_names.append(f"{base}_{suffix}")
+        if len(set(target_names)) != len(target_names):
+            raise ValueError(
+                f"{suffix.upper()} limb chain produces duplicate joint names: {target_names}. "
+                "Check the mapped limb path and twist branches."
+            )
 
-    def rename_chain(chain, suffix, count):
-        """
-            Rename chain.
-        :param chain: chain
-        :param suffix: suffix
-        :param count: count
-        :return: result
-        """
-        new_chain = []
-        for jnt in chain[:count]:
-            base = jnt.split("|")[-1]
-            base = re.sub(r'\d+$', '', base)
-            base = base.replace("_jnt", "")
-            new_name = f"{base}_{suffix}"
-            if cmds.objExists(new_name):
-                cmds.delete(new_name)
-            new_chain.append(cmds.rename(jnt, new_name))
+        for target_name in target_names:
+            existing = cmds.ls(target_name, long=True, type="joint") or []
+            if existing:
+                cmds.delete(existing)
 
-        # remove unexpected children after renaming using long names
-        expected = set(cmds.ls(new_chain, long=True) or [])
-        for jnt in new_chain:
-            kids = cmds.listRelatives(jnt, c=True, type="joint", fullPath=True) or []
-            for kid in kids:
-                if kid not in expected:
-                    cmds.delete(kid)
+        duplicated = []
+        previous = None
+        for source, target_name in zip(source_chain, target_names):
+            duplicate = cmds.duplicate(source, parentOnly=True, name=target_name)[0]
+            parent_target = previous or root_parent
+            if parent_target and cmds.objExists(parent_target):
+                duplicate = cmds.parent(duplicate, parent_target, absolute=True)[0]
+            duplicate_matches = cmds.ls(duplicate, long=True, type="joint") or []
+            if len(duplicate_matches) != 1:
+                raise RuntimeError(
+                    f"Could not uniquely resolve duplicated {suffix.upper()} joint {target_name}: "
+                    f"{duplicate_matches}"
+                )
+            previous = duplicate_matches[0]
+            duplicated.append(previous.rsplit("|", 1)[-1])
+        return duplicated
 
-        return new_chain
-
-    fk_joints = rename_chain(fk_chain, "fk", joint_count)
-    ik_joints = rename_chain(ik_chain, "ik", joint_count)
-    driver_joints = rename_chain(driver_chain, "driver", joint_count)
+    fk_joints = duplicate_exact_chain(sel, "fk")
+    ik_joints = duplicate_exact_chain(sel, "ik")
+    driver_joints = duplicate_exact_chain(sel, "driver")
 
     for chain_name, chain in (
         ("FK", fk_joints),
@@ -470,6 +949,22 @@ def create_ik_fk_limb(sel, root_parent):
     )
     cmds.parent(ik_handle, ik_ctrl)
     cmds.poleVectorConstraint(pv_ctrl, ik_handle)
+
+    # Maya persists the global IK solver toggle between scenes and sessions.
+    # A perfectly connected rig appears inert when that toggle (or the
+    # handle-level blend) is off, so a rig build must establish both states.
+    try:
+        cmds.ikSystem(edit=True, solve=True)
+    except Exception:
+        pass
+    if cmds.attributeQuery("ikBlend", node=ik_handle, exists=True):
+        cmds.setAttr(f"{ik_handle}.ikBlend", 1.0)
+
+    handle_parent = (cmds.listRelatives(ik_handle, parent=True, fullPath=False) or [None])[0]
+    handle_parent_short = str(handle_parent or "").split("|")[-1].split(":")[-1]
+    ik_ctrl_short = str(ik_ctrl or "").split("|")[-1].split(":")[-1]
+    if handle_parent_short != ik_ctrl_short:
+        ik_handle = cmds.parent(ik_handle, ik_ctrl)[0]
 
     # Pole Vector placement
     mid_pos = cmds.xform(fk_joints[1], q=True, ws=True, t=True)
@@ -566,7 +1061,14 @@ def create_ik_fk_limb(sel, root_parent):
     cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{fk_rev}.inputX")
     cmds.connectAttr(f"{fk_rev}.outputX", f"{fk_ctrl_dict['pad']}.visibility")
 
-    print("✅ IK/FK limb created (joint-count driven).")
+    stretch_data = setup_ik_limb_stretch(
+        ik_joints,
+        ik_ctrl,
+        switch_ctrl_name,
+        scale_reference=root_parent,
+    )
+
+    print("IK/FK limb created (joint-count driven).")
 
     return {
         "fk_chain": fk_joints,
@@ -576,7 +1078,9 @@ def create_ik_fk_limb(sel, root_parent):
         "ik_ctrl": ik_ctrl,
         "pv_ctrl": pv_ctrl,
         "ik_handle": ik_handle,
-        "blend_constraints": blend_constraints
+        "blend_constraints": blend_constraints,
+        "switch_ctrl": switch_ctrl_name,
+        "stretch": stretch_data,
     }
 
 
@@ -1256,15 +1760,31 @@ def create_surface_from_joints_original(
         curves_to_loft.append(dup_curve)
 
     # Loft the curves to create a surface
-    loft_surf = cmds.loft(curves_to_loft, ch=True, u=True, c=False, ar=True, d=deg, ss=1, rn=False, po=0, name=name)[0]
+    # The input curves are temporary, so bake the loft result instead of
+    # leaving construction-history dependencies that are removed below.
+    loft_surf = cmds.loft(curves_to_loft, ch=False, u=True, c=False, ar=True, d=deg, ss=1, rn=False, po=0, name=name)[0]
 
     # Delete the curves if you want to clean up
     cmds.delete(curves_to_loft)
 
-    min_u = cmds.getAttr(loft_surf + ".minValueU")
-    max_u = cmds.getAttr(loft_surf + ".maxValueU")
-    min_v = cmds.getAttr(loft_surf + ".minValueV")
-    max_v = cmds.getAttr(loft_surf + ".maxValueV")
+    # ``cmds.loft`` returns the surface transform.  Surface attributes such as
+    # ``local`` and ``minValueU`` live on its nurbsSurface shape; addressing
+    # them through the transform is not reliable and raises errors such as
+    # ``No object matches name: mouth.local`` in Maya.
+    loft_shapes = cmds.listRelatives(
+        loft_surf,
+        shapes=True,
+        noIntermediate=True,
+        fullPath=True,
+    ) or []
+    if not loft_shapes:
+        raise RuntimeError("Loft surface {!r} has no nurbsSurface shape.".format(loft_surf))
+    loft_shape = loft_shapes[0]
+
+    min_u = cmds.getAttr(loft_shape + ".minValueU")
+    max_u = cmds.getAttr(loft_shape + ".maxValueU")
+    min_v = cmds.getAttr(loft_shape + ".minValueV")
+    max_v = cmds.getAttr(loft_shape + ".maxValueV")
 
     follicle_joints = []
 
@@ -1272,7 +1792,7 @@ def create_surface_from_joints_original(
         pos = cmds.xform(jnt, q=True, ws=True, t=True)
 
         cps = cmds.createNode("closestPointOnSurface")
-        cmds.connectAttr(loft_surf + ".local", cps + ".inputSurface", f=True)
+        cmds.connectAttr(loft_shape + ".local", cps + ".inputSurface", f=True)
         cmds.setAttr(cps + ".inPosition", *pos)
 
         u_real = cmds.getAttr(cps + ".parameterU")
@@ -1286,8 +1806,8 @@ def create_surface_from_joints_original(
         fol_shape = cmds.createNode("follicle", name=f"{name}_{jnt}_folShape")
         fol_tr = cmds.listRelatives(fol_shape, parent=True)[0]
 
-        cmds.connectAttr(loft_surf + ".local", fol_shape + ".inputSurface", f=True)
-        cmds.connectAttr(loft_surf + ".worldMatrix[0]", fol_shape + ".inputWorldMatrix", f=True)
+        cmds.connectAttr(loft_shape + ".local", fol_shape + ".inputSurface", f=True)
+        cmds.connectAttr(loft_shape + ".worldMatrix[0]", fol_shape + ".inputWorldMatrix", f=True)
 
         cmds.setAttr(fol_shape + ".parameterU", u_norm)
         cmds.setAttr(fol_shape + ".parameterV", v_norm)
@@ -1295,8 +1815,10 @@ def create_surface_from_joints_original(
         cmds.connectAttr(fol_shape + ".outTranslate", fol_tr + ".translate", f=True)
         cmds.connectAttr(fol_shape + ".outRotate", fol_tr + ".rotate", f=True)
 
+        cmds.select(clear=True)
         fol_joint = cmds.joint(name=f"{name}_{jnt}_folJoint")
         cmds.delete(cmds.parentConstraint(fol_tr, fol_joint, mo=False))
+        cmds.parent(fol_joint, fol_tr, absolute=True)
 
         follicle_joints.append(fol_joint)
 
@@ -1331,16 +1853,26 @@ def create_loft_surface_with_follicle_joints(joint_chain, name="surface", offset
 
     # Loft surface
     deg = 3 if len(joint_chain) >= 4 else 1
-    loft_surf = cmds.loft(fwd_crv, bwd_crv, ch=True, u=True, c=False, ar=True, d=deg, ss=1, name=f"{name}_surf")[0]
+    loft_surf = cmds.loft(fwd_crv, bwd_crv, ch=False, u=True, c=False, ar=True, d=deg, ss=1, name=f"{name}_surf")[0]
 
     # Optional: delete curves
     cmds.delete(fwd_crv, bwd_crv)
 
+    loft_shapes = cmds.listRelatives(
+        loft_surf,
+        shapes=True,
+        noIntermediate=True,
+        fullPath=True,
+    ) or []
+    if not loft_shapes:
+        raise RuntimeError("Loft surface {!r} has no nurbsSurface shape.".format(loft_surf))
+    loft_shape = loft_shapes[0]
+
     # Surface param ranges
-    min_u = cmds.getAttr(loft_surf + ".minValueU")
-    max_u = cmds.getAttr(loft_surf + ".maxValueU")
-    min_v = cmds.getAttr(loft_surf + ".minValueV")
-    max_v = cmds.getAttr(loft_surf + ".maxValueV")
+    min_u = cmds.getAttr(loft_shape + ".minValueU")
+    max_u = cmds.getAttr(loft_shape + ".maxValueU")
+    min_v = cmds.getAttr(loft_shape + ".minValueV")
+    max_v = cmds.getAttr(loft_shape + ".maxValueV")
 
     follicle_joints = []
 
@@ -1348,7 +1880,7 @@ def create_loft_surface_with_follicle_joints(joint_chain, name="surface", offset
         pos = cmds.xform(jnt, q=True, ws=True, t=True)
 
         cps = cmds.createNode("closestPointOnSurface")
-        cmds.connectAttr(loft_surf + ".local", cps + ".inputSurface")
+        cmds.connectAttr(loft_shape + ".local", cps + ".inputSurface")
         cmds.setAttr(cps + ".inPosition", pos[0], pos[1], pos[2])
         u_real = cmds.getAttr(cps + ".parameterU")
         v_real = cmds.getAttr(cps + ".parameterV")
@@ -1363,16 +1895,18 @@ def create_loft_surface_with_follicle_joints(joint_chain, name="surface", offset
         fol_tr = cmds.listRelatives(fol_shape, parent=True)[0]
 
         # Connect inputs & outputs
-        cmds.connectAttr(loft_surf + ".local", fol_shape + ".inputSurface", f=True)
-        cmds.connectAttr(loft_surf + ".worldMatrix[0]", fol_shape + ".inputWorldMatrix", f=True)
+        cmds.connectAttr(loft_shape + ".local", fol_shape + ".inputSurface", f=True)
+        cmds.connectAttr(loft_shape + ".worldMatrix[0]", fol_shape + ".inputWorldMatrix", f=True)
         cmds.setAttr(fol_shape + ".parameterU", u_norm)
         cmds.setAttr(fol_shape + ".parameterV", v_norm)
         cmds.connectAttr(fol_shape + ".outTranslate", fol_tr + ".translate", f=True)
         cmds.connectAttr(fol_shape + ".outRotate", fol_tr + ".rotate", f=True)
 
         # Create a follicle joint at the follicle transform
+        cmds.select(clear=True)
         fol_joint = cmds.joint(name=f"{name}_{jnt}_folJoint")
         cmds.delete(cmds.parentConstraint(fol_tr, fol_joint, mo=False))
+        cmds.parent(fol_joint, fol_tr, absolute=True)
 
         follicle_joints.append(fol_joint)
 
@@ -1401,26 +1935,46 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
     cmds.delete(cmds.parentConstraint(joint_chain[0], temp_joint))
 
     # Create loft + follicles + follicle joints
+    closed_loop_region = region in ("eyelid", "mouth", "center_eyelid", "eyelid_center")
     if region == "eyelid":
         joint_chain = joint_chain + [temp_joint]
         side = temp_joint[0]
         loft_surf, follicle_joints = create_surface_from_joints_original(joint_chain, name=loft_name)
-    elif region == "mouth":
+    elif region in ("mouth", "center_eyelid", "eyelid_center"):
         joint_chain = joint_chain + [temp_joint]
         side = temp_joint[0]
         loft_surf, follicle_joints = create_surface_from_joints_original(joint_chain, name=loft_name)
     else:
         loft_surf, follicle_joints = create_surface_from_joints_original(joint_chain, name=loft_name)
 
-    group = cmds.group(loft_surf, n=loft_surf + "_surface_grp")
+    # Maya may return an absolute DAG path (for example ``|mouth``). Grouping
+    # reparents the surface and immediately invalidates that path, so reacquire
+    # the current path before returning it to the skinning step.
+    loft_leaf = loft_surf.rsplit("|", 1)[-1]
+    group = cmds.group(loft_surf, n=loft_leaf + "_surface_grp")
     if not cmds.objExists("Do_Not_Touch"):
         dnt = cmds.group(em=True, name="Do_Not_Touch")
         cmds.setAttr(dnt + ".visibility", 0)
-    cmds.parent(group, "Do_Not_Touch")
+    group = cmds.parent(group, "Do_Not_Touch")[0]
+    surface_children = cmds.listRelatives(
+        group,
+        children=True,
+        type="transform",
+        fullPath=True,
+    ) or []
+    loft_matches = [
+        child for child in surface_children
+        if cmds.listRelatives(child, shapes=True, type="nurbsSurface")
+    ]
+    if not loft_matches:
+        raise RuntimeError(
+            "Could not resolve loft surface {!r} after grouping it under Do_Not_Touch.".format(loft_leaf)
+        )
+    loft_surf = loft_matches[0]
     for fj in follicle_joints:
         parent = cmds.listRelatives(fj, p=1, ap=1)[0]
         cmds.parent(parent, group)
-    if region == "eyelid" or region == "mouth":
+    if closed_loop_region:
         follicle_joints = follicle_joints[:-1]
 
     # Create controls and aim them at follicle joints
@@ -1470,7 +2024,9 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                     control_shape=control_shape,
                     root_parent=local_root_parent,
                     sub_ctrls=False,
-                    keep_constraint=False
+                    # The follicle drives the control pad; the control must in
+                    # turn remain constrained to the original bind joint.
+                    keep_constraint=True
                 )
                 ctrl_name = ctrl_data[0]['ctrl']
                 ctrl_pad = ctrl_data[0]['pad']
@@ -1504,13 +2060,91 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
             )
 
     # Clean up the temporary joint used for closed loops
-    if region in ("eyelid", "mouth") and cmds.objExists(temp_joint):
+    if closed_loop_region and cmds.objExists(temp_joint):
         try:
             cmds.delete(temp_joint)
         except Exception:
             pass
 
     return loft_surf, follicle_joints, joint_to_ctrl
+
+
+def _bind_surface_to_joints(surface, influences, **skin_options):
+    """Bind a NURBS surface in place using an explicit transform DAG path."""
+    surface_matches = cmds.ls(surface, long=True) or []
+    if not surface_matches:
+        raise RuntimeError(f"Surface does not exist: {surface}")
+    surface = surface_matches[0]
+
+    # Always parent the owning transform.  Passing a mesh/NURBS shape to
+    # ``parent -world`` raises a generic Maya command error, which is easy to
+    # hit when callers supply the result of a shape query.
+    if cmds.nodeType(surface) in ("mesh", "nurbsSurface", "subdiv"):
+        owners = cmds.listRelatives(surface, parent=True, fullPath=True) or []
+        if not owners:
+            raise RuntimeError(f"Surface shape has no transform: {surface}")
+        surface = owners[0]
+
+    bind_surface = (cmds.ls(surface, long=True) or [surface])[0]
+    try:
+        skin = cmds.skinCluster(*(list(influences) + [bind_surface]), **skin_options)[0]
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "Could not bind surface {!r} to drivers {}: {}".format(
+                bind_surface,
+                ", ".join(str(node) for node in influences),
+                exc,
+            )
+        ) from exc
+    return skin, (cmds.ls(bind_surface, long=True) or [bind_surface])[0]
+
+
+def _group_center_surface_controls(loft_name, root_parent, driver_data, joint_to_ctrl):
+    """Group centered main controls and share their scale with joint controls."""
+    main_pads = []
+    for data in driver_data.values():
+        pad = data.get("pad") if isinstance(data, dict) else None
+        if pad and cmds.objExists(pad) and pad not in main_pads:
+            main_pads.append(pad)
+    if not main_pads:
+        return None
+
+    group_name = f"{_stretch_node_token(loft_name)}_main_ctrls_grp"
+    matches = cmds.ls(group_name, type="transform", long=True) or []
+    created_group = not bool(matches)
+    if matches:
+        main_group = matches[0]
+    elif root_parent and cmds.objExists(root_parent):
+        main_group = cmds.group(empty=True, name=group_name, parent=root_parent)
+    else:
+        main_group = cmds.group(empty=True, name=group_name)
+
+    main_group = (cmds.ls(main_group, long=True) or [main_group])[0]
+    if created_group:
+        positions = [cmds.xform(pad, query=True, worldSpace=True, translation=True) for pad in main_pads]
+        center = [sum(position[axis] for position in positions) / len(positions) for axis in range(3)]
+        cmds.xform(main_group, worldSpace=True, translation=center)
+    for pad in main_pads:
+        pad_long = (cmds.ls(pad, long=True) or [pad])[0]
+        current_parent = cmds.listRelatives(pad_long, parent=True, fullPath=True) or []
+        if not current_parent or current_parent[0] != main_group:
+            cmds.parent(pad_long, main_group, absolute=True)
+
+    for ctrl in joint_to_ctrl.values():
+        if not ctrl or not cmds.objExists(ctrl):
+            continue
+        sdk = cmds.listRelatives(ctrl, parent=True, fullPath=True) or []
+        pads = cmds.listRelatives(sdk[0], parent=True, fullPath=True) if sdk else []
+        if not pads:
+            continue
+        pad = pads[0]
+        for axis in "XYZ":
+            _connect_attr_once(
+                f"{main_group}.scale{axis}",
+                f"{pad}.scale{axis}",
+                force=True,
+            )
+    return main_group
 
 
 def setup_surface_rig_with_drivers(
@@ -1536,13 +2170,36 @@ def setup_surface_rig_with_drivers(
     :return: tuple
     """
     N = len(joint_list)
+    region = str(region or "other").lower()
+    side = str(side or "c").lower()
+    centered_eyelid = region in ("center_eyelid", "eyelid_center") or (
+        region == "eyelid" and side in ("c", "center", "centre")
+    )
+    if centered_eyelid:
+        region = "center_eyelid"
+        side = "c"
     is_twist_surface = (
             "twist" in loft_name.lower()
             or "twist" in region.lower()
             or region.lower() in ("upperarm", "lowerarm", "thigh", "knee")
             or any("_twist" in str(j).lower() for j in joint_list)
     )
-    if region == "eyelid":
+    if region == "center_eyelid":
+        if driver_follicle_indices is None:
+            default_indices = [0, 2, 5, 8, 10, 12, 15, 18]
+            driver_follicle_indices = [
+                int(round(idx * (N - 1) / 19.0)) for idx in default_indices
+            ]
+        driver_follicle_indices = list(dict.fromkeys(driver_follicle_indices))
+        # A centered eyelid uses the closed-loop, direct-control layout used by
+        # the mouth, but derives neutral c_ driver names from the selected
+        # joints instead of inventing left/right eyelid semantics.
+        driver_index_map = {
+            idx: f"{_stretch_node_token(joint_list[idx])}_main"
+            for idx in driver_follicle_indices
+            if 0 <= idx < N
+        }
+    elif region == "eyelid":
         if driver_follicle_indices is None:
             default_indices = [0, 3, 6, 9, 12, 15, 18, 20]
             scaled_indices = [int(round(idx * (N - 1) / 20.0)) for idx in default_indices]
@@ -1676,11 +2333,14 @@ def setup_surface_rig_with_drivers(
             name=driver_name
         )[0]
 
-        # World parent
-        cmds.parent(driver_joint, world=True)
+        # Duplicate preserves the source joint's parent. Detach only when it
+        # actually has one; ``parent -world`` on an existing world child emits
+        # the misleading "already a child" warning seen with baked path joints.
+        if cmds.listRelatives(driver_joint, parent=True):
+            driver_joint = cmds.parent(driver_joint, world=True, absolute=True)[0]
 
         control_shape = "circle"
-        if region == "mouth":
+        if region in ("mouth", "center_eyelid"):
             control_shape = "cube"
 
         # Create control
@@ -1695,7 +2355,10 @@ def setup_surface_rig_with_drivers(
         ctrl = ctrl_data[0]["ctrl"]
         apply_side_color_override(ctrl)
         pad = ctrl_data[0]["pad"]
-        cmds.parent(driver_joint, ctrl)
+        current_parent = (cmds.listRelatives(driver_joint, parent=True, fullPath=True) or [None])[0]
+        ctrl_long = (cmds.ls(ctrl, long=True) or [ctrl])[0]
+        if current_parent != ctrl_long:
+            cmds.parent(driver_joint, ctrl)
         driver_data[semantic] = {
             "joint": driver_joint,
             "ctrl": ctrl,
@@ -1704,14 +2367,22 @@ def setup_surface_rig_with_drivers(
         scale_ctrl_cvs_local(ctrl, [.5, .5, .5])
         driver_joints.append(driver_joint)
 
+    if region == "center_eyelid":
+        _group_center_surface_controls(
+            loft_name,
+            root_parent,
+            driver_data,
+            joint_to_ctrl,
+        )
+
     if driver_joints:
-        cmds.skinCluster(
+        _skin, loft_surf = _bind_surface_to_joints(
             loft_surf,
             driver_joints,
             tsb=True,
             bindMethod=0,
             skinMethod=0,
-            normalizeWeights=1
+            normalizeWeights=1,
         )
 
     def constrain_pad(pad, driver_joints):
@@ -3287,9 +3958,12 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict, head_ctrl="h
     main_ctrl_dict = create_joint_controls(
         [temp_grp],
         control_shape="circle",
-        root_parent=head_ctrl
+        root_parent=head_ctrl,
+        keep_constraint=False,
     )[0]
     main_ctrl = main_ctrl_dict["ctrl"]
+    cmds.delete(temp_grp)
+    temp_grp = ""
     main_con = cmds.parentConstraint(head_ctrl, jaw_ctrl, main_ctrl_dict["pad"], mo=True)[0]
     cmds.setAttr(f"{main_con}.interpType", 2)
     for each in [upper_ctrl, lower_ctrl]:
@@ -3325,6 +3999,7 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict, head_ctrl="h
         "jaw_ctrl": jaw_ctrl,
         "upper_lip_ctrl": upper_ctrl,
         "lower_lip_ctrl": lower_ctrl,
+        "main_ctrl": main_ctrl,
         "temp_group": temp_grp
     }
 
@@ -3355,8 +4030,27 @@ def create_twist_driver(driver_bone="l_thigh_driver",
     if children:
         cmds.delete(children)
 
+    # duplicate() normally leaves the joint beside the source hierarchy. Honor
+    # the requested rig parent explicitly (notably knee_twist_driver beneath
+    # knee_driver) while preserving the duplicate's world-space pose.
+    if parent and cmds.objExists(parent):
+        desired_matches = cmds.ls(parent, long=True) or []
+        twist_matches = cmds.ls(twist_bone, long=True) or []
+        if len(desired_matches) != 1 or len(twist_matches) != 1:
+            raise RuntimeError(
+                "Could not uniquely resolve twist parenting: twist={!r}, parent={!r}".format(
+                    twist_matches, desired_matches,
+                )
+            )
+        desired_parent = desired_matches[0]
+        twist_bone = twist_matches[0]
+        current_parent = cmds.listRelatives(twist_bone, parent=True, fullPath=True) or []
+        if not current_parent or current_parent[0] != desired_parent:
+            twist_bone = cmds.parent(twist_bone, desired_parent, absolute=True)[0]
+
+    world_up_object = parent
     if "lower" in driver_bone or "knee" in driver_bone:
-        parent = child_bone
+        world_up_object = child_bone
     cmds.pointConstraint(child_bone, twist_bone, mo=False)
 
     x_val = 1
@@ -3372,12 +4066,19 @@ def create_twist_driver(driver_bone="l_thigh_driver",
                        aimVector=(x_val, 0, 0),
                        upVector=(0, 1, 0),
                        worldUpType="objectrotation",
-                       worldUpObject=parent,
+                       worldUpObject=world_up_object,
                        worldUpVector=wuv,
                        mo=True)
 
     if surface and cmds.objExists(surface):
-        skin = cmds.skinCluster(twist_bone, driver_bone, surface, toSelectedBones=True)[0]
+        skin, surface = _bind_surface_to_joints(
+            surface,
+            [twist_bone, driver_bone],
+            tsb=True,
+            bindMethod=0,
+            skinMethod=0,
+            normalizeWeights=1,
+        )
 
         num_cvs = 4
 

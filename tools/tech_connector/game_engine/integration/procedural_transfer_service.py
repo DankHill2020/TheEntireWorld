@@ -119,16 +119,30 @@ TARGET_NODE_MAPPINGS: dict[str, dict[str, str]] = {
 }
 
 _MESH_NODE_MAPPINGS = {
-    "unreal": ("Geometry Script Cube", "Geometry Script Grid", "Geometry Script Transform", "Geometry Script Extrude", "Geometry Script Triangulate"),
-    "blender": ("Geometry Nodes Cube", "Geometry Nodes Grid", "Transform Geometry", "Extrude Mesh", "Triangulate"),
-    "houdini": ("Box SOP", "Grid SOP", "Transform SOP", "PolyExtrude SOP", "Divide SOP"),
-    "unity": ("TC cube mesh job", "TC grid mesh job", "Burst mesh transform", "TC topology extrude", "TC triangulation job"),
-    "godot": ("ArrayMesh cube", "ArrayMesh grid", "ArrayMesh transform", "TC topology extrude", "SurfaceTool triangles"),
+    "unreal": ("Geometry Script Cube", "Geometry Script Grid", "Geometry Script Cylinder", "Geometry Script Sphere", "Geometry Script Append Mesh", "Geometry Script Transform", "Geometry Script Extrude", "Geometry Script Subdivide", "Geometry Script Bevel", "Geometry Script Delete Triangles", "Geometry Script Weld", "Geometry Script Triangulate"),
+    "blender": ("Geometry Nodes Cube", "Geometry Nodes Grid", "Geometry Nodes Cylinder", "Geometry Nodes UV Sphere", "Join Geometry", "Transform Geometry", "Extrude Mesh", "Subdivide Mesh", "Bevel", "Delete Geometry", "Merge by Distance", "Triangulate"),
+    "houdini": ("Box SOP", "Grid SOP", "Tube SOP", "Sphere SOP", "Merge SOP", "Transform SOP", "PolyExtrude SOP", "Subdivide SOP", "PolyBevel SOP", "Blast SOP", "Fuse SOP", "Divide SOP"),
+    "unity": ("TC cube mesh job", "TC grid mesh job", "TC cylinder mesh job", "TC sphere mesh job", "TC mesh join job", "Burst mesh transform", "TC topology extrude", "TC subdivision job", "TC bevel job", "TC face delete job", "TC weld job", "TC triangulation job"),
+    "godot": ("ArrayMesh cube", "ArrayMesh grid", "ArrayMesh cylinder", "ArrayMesh sphere", "ArrayMesh join", "ArrayMesh transform", "TC topology extrude", "TC subdivision", "TC bevel", "TC face delete", "TC weld", "SurfaceTool triangles"),
 }
 for _target, _nodes in _MESH_NODE_MAPPINGS.items():
     TARGET_NODE_MAPPINGS[_target].update(dict(zip(
-        ("mesh_cube", "mesh_grid", "mesh_transform", "mesh_extrude_faces", "mesh_triangulate"),
+        ("mesh_cube", "mesh_grid", "mesh_cylinder", "mesh_uv_sphere", "mesh_join", "mesh_transform", "mesh_extrude_faces", "mesh_subdivide", "mesh_bevel_edges", "mesh_delete_faces", "mesh_weld", "mesh_triangulate"),
         _nodes,
+    )))
+
+_ADVANCED_NODE_MAPPINGS = {
+    "unreal": ("Geometry Script PolyPath", "Geometry Script Circle", "Geometry Script Sweep", "PCG Set Attribute", "PCG Attribute Math", "PCG Attribute Reduce/Map", "Geometry Script Recompute Normals", "Geometry Script UV Projection", "Geometry Script Mesh Boolean", "Geometry Script Smooth", "Geometry Script Displace", "Geometry Script Voxel Solidify", "Dynamic Mesh to Volume", "Marching Cubes"),
+    "blender": ("Curve Line", "Curve Circle", "Curve to Mesh", "Store Named Attribute", "Math Field", "Evaluate on Domain", "Set Shade Smooth / Normal", "Store UV Named Attribute", "Mesh Boolean", "Set Position Smooth", "Set Position", "Mesh to Volume", "Mesh to Volume", "Volume to Mesh"),
+    "houdini": ("Line SOP", "Circle SOP", "Sweep SOP", "Attribute Create SOP", "Attribute Adjust SOP", "Attribute Promote SOP", "Normal SOP", "UV Project SOP", "Boolean SOP", "Smooth SOP", "Mountain/Point VOP", "Remesh SOP", "VDB From Polygons SOP", "Convert VDB SOP"),
+    "unity": ("TC Curve Line", "TC Curve Circle", "TC Curve Sweep", "TC Field Store", "TC Field Math", "TC Field Domain Map", "TC Normal Job", "TC UV Job", "TC Boolean Job", "TC Smooth Job", "TC Displace Job", "TC Voxel Remesh Job", "TC SDF Build Job", "TC SDF Mesh Job"),
+    "godot": ("Curve3D line", "Curve3D circle", "CSG sweep adapter", "TC field store", "TC field math", "TC field domain map", "SurfaceTool normals", "SurfaceTool UV", "CSG boolean adapter", "TC smooth", "TC displace", "TC voxel remesh", "TC SDF volume", "TC SDF mesher"),
+}
+for _target, _nodes in _ADVANCED_NODE_MAPPINGS.items():
+    TARGET_NODE_MAPPINGS[_target].update(dict(zip(
+        ("curve_line", "curve_circle", "curve_to_mesh", "field_set", "field_math", "field_map_domain",
+         "mesh_compute_normals", "mesh_generate_uv", "mesh_boolean", "mesh_smooth", "mesh_displace",
+         "mesh_voxel_remesh", "mesh_to_volume", "volume_to_mesh"), _nodes,
     )))
 
 

@@ -10,6 +10,10 @@ import shutil
 from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
+from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
+    embedded_bridge_authorization_source,
+)
 from tech_connector.bridges.session_discovery import (
     candidate_session_ports,
     discover_open_ports,
@@ -20,7 +24,7 @@ from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 
 PLUGIN_FILENAME = "the_entire_world_ai_studio_bridge.py"
 
-PLUGIN_SOURCE_CODE = """\"\"\"Substance Painter plugin for The Entire World Tech Connector direct bridge.\"\"\"
+PLUGIN_SOURCE_CODE = embedded_bridge_authorization_source("substance_painter") + """\"\"\"Substance Painter plugin for The Entire World Tech Connector direct bridge.\"\"\"
 
 import base64
 import contextlib
@@ -109,6 +113,14 @@ def _handle_client(conn):
                 raw += chunk
 
             payload = json.loads(raw.decode("utf-8", errors="replace").strip())
+            if not _tech_connector_bridge_authorized(payload):
+                response = {
+                    "ok": False,
+                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "code": "bridge_authorization_required",
+                }
+                conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
+                return
             code = base64.b64decode(payload["code_b64"]).decode("utf-8", errors="replace")
             done = threading.Event()
             job = [code, done]
@@ -336,7 +348,12 @@ class SubstancePainterBridge(DCCBridgeDelegateMixin):
     def execute_on_port(self, code: str, *, port: int, timeout: float = 10) -> tuple[bool, str]:
         try:
             encoded = base64.b64encode(code.encode("utf-8")).decode("utf-8")
-            payload = json.dumps({"code_b64": encoded}).encode("utf-8") + b"\n"
+            payload = json.dumps(
+                {
+                    "code_b64": encoded,
+                    "bridge_session": bridge_session_token("substance_painter"),
+                }
+            ).encode("utf-8") + b"\n"
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(timeout)

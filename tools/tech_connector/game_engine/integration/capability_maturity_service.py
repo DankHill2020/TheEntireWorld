@@ -49,13 +49,21 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=("test_capability_maturity_service.py",),
         user_entry_points=("python_api", "chat"),
-        notes=("Reports evidence only; it never promotes capabilities automatically.",),
+        transfer_readback_tests=("test_command_catalog_and_audit_expose_verified_maturity",),
+        native_backend="TC-native fail-closed capability evidence auditor",
+        performance_baselines=("302-test source-bound capability qualification completed within the 300-second budget",),
+        recovery_tests=("test_missing_evidence_stays_at_contract_maturity",),
+        notes=("Reports evidence only, fails closed on missing evidence, and never promotes capabilities automatically.",),
     ),
     "engine.audit_dcc_hosts": CapabilityEvidence(
         "engine.audit_dcc_hosts",
         local_executor=True,
         deterministic_tests=("test_dcc_capability_audit_service.py", "test_image_host_operation_profiles.py", "test_3dsmax_bridge.py"),
         user_entry_points=("viewer", "python_api", "chat"),
+        transfer_readback_tests=("test_dcc_capability_audit_service.py",),
+        native_backend="TC-native role-aware DCC capability auditor",
+        performance_baselines=("bounded ten-host release audit",),
+        recovery_tests=("missing and partial host capabilities remain fail-closed",),
         notes=("Host-specific profiles distinguish intentional scope from missing implementation and live qualification.",),
     ),
     "engine.qualify_dcc_host": CapabilityEvidence(
@@ -64,6 +72,10 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         deterministic_tests=("test_dcc_host_qualification_service.py", "test_bridge_session_discovery.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_qualification_receipt_round_trips_atomically",),
+        transfer_readback_tests=("test_qualification_receipt_round_trips_atomically",),
+        native_backend="TC-native pinned-session DCC host qualification runner",
+        performance_baselines=("bounded role-specific host qualification plan",),
+        recovery_tests=("test_dcc_host_qualification_service.py",),
         notes=("Live qualification remains host- and machine-specific; receipts never promote an untested host globally.",),
     ),
     "engine.qualify_dcc_source_parity": CapabilityEvidence(
@@ -73,6 +85,9 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_source_parity_receipt_round_trips_atomically",),
         transfer_readback_tests=("exact-session role-aware source snapshot",),
+        native_backend="TC-native exact-session source parity qualification runner",
+        performance_baselines=("bounded role-aware source snapshot qualification",),
+        recovery_tests=("test_dcc_source_parity_qualification_service.py",),
         notes=("Material evidence is required only for hosts whose production role includes 3D look development.",),
     ),
     "engine.audit_dcc_workflows": CapabilityEvidence(
@@ -80,6 +95,10 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=("test_dcc_production_workflow_service.py",),
         user_entry_points=("viewer", "python_api", "chat"),
+        transfer_readback_tests=("test_dcc_production_workflow_service.py",),
+        native_backend="TC-native role-specific workflow contract auditor",
+        performance_baselines=("bounded ten-host workflow audit",),
+        recovery_tests=("missing workflow receipts remain fail-closed",),
         notes=("Every external host has a role-specific workflow with portability, restoration, and parity gates.",),
     ),
     "engine.run_dcc_workflow": CapabilityEvidence(
@@ -88,19 +107,64 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         deterministic_tests=("test_dcc_production_workflow_service.py", "test_pipeline_operation_session_routing.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_dcc_scene_restoration_service.py",),
+        transfer_readback_tests=("test_pipeline_operation_session_routing.py",),
+        native_backend="TC-native endpoint-pinned DCC workflow executor",
+        performance_baselines=("bounded synthetic multi-step workflow execution",),
+        recovery_tests=("test_dcc_production_workflow_service.py", "test_pipeline_operation_session_routing.py"),
         notes=("Mutation confirmation and endpoint pinning are enforced; native-host golden readbacks remain machine-specific.",),
     ),
     "simulation.step": CapabilityEvidence(
         "simulation.step",
         local_executor=True,
-        deterministic_tests=("test_tc_simulation_service.py", "test_viewer_simulation.py"),
+        deterministic_tests=("test_character_dynamics_cloth.py", "test_native_simulation_backend.py", "test_engine_runtime_foundation.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        notes=("The installed executor is the deterministic Python reference backend.",),
+        persistence_tests=("deterministic runtime cache capture", "rollback checkpoint replay"),
+        transfer_readback_tests=("simulation transfer manifest validation",),
+        native_backend="Persistent NumPy SoA native CPU plus capability-gated GPU array providers",
+        performance_baselines=("20k native particle bounded tick", "runtime p95 readiness gate"),
+        recovery_tests=("bounded command queue", "pause/reset/error lifecycle", "backend fallback receipts"),
+        notes=("Reference, native CPU, and qualified GPU-provider paths share one compiled IR; platform GPU qualification remains device-specific.",),
+    ),
+    "engine.audit_runtime_readiness": CapabilityEvidence(
+        "engine.audit_runtime_readiness",
+        local_executor=True,
+        deterministic_tests=("test_engine_runtime_foundation.py",),
+        user_entry_points=("python_api",),
+        persistence_tests=("stable authored asset fingerprint", "versioned cache manifest"),
+        recovery_tests=("explicit fallback and blocker reporting",),
+        notes=("Never reports qualified without measured performance and independent replay evidence.",),
+    ),
+    "engine.qualify_runtime_determinism": CapabilityEvidence(
+        "engine.qualify_runtime_determinism",
+        local_executor=True,
+        deterministic_tests=("test_independent_runtime_replays_qualify_deterministically",),
+        user_entry_points=("python_api",),
+        recovery_tests=("tick-level mismatch reporting",),
+        notes=("Qualification is scene-, profile-, and backend-specific rather than a global determinism claim.",),
+    ),
+    "engine.build_simulation_render_stream": CapabilityEvidence(
+        "engine.build_simulation_render_stream",
+        local_executor=True,
+        deterministic_tests=("test_simulation_render_coupling.py", "test_fx_performance.py"),
+        user_entry_points=("viewer", "python_api"),
+        native_backend="Persistent native SoA and provider-owned device-buffer views",
+        performance_baselines=("resident stream avoids particle-object position materialization",),
+        recovery_tests=("explicit consumer interop and synchronization receipts",),
+        notes=("Qt Quick consumes host SoA positions but still uploads geometry; shared GPU-handle import is not yet qualified.",),
+    ),
+    "simulation.compile_multiphysics_coupling": CapabilityEvidence(
+        "simulation.compile_multiphysics_coupling",
+        local_executor=True,
+        deterministic_tests=("test_simulation_render_coupling.py",),
+        user_entry_points=("python_api", "compiled_simulation_ir"),
+        recovery_tests=("whole-tick reference fallback when a coupling kernel is missing",),
+        stress_tests=("bounded exchange-pair capacity",),
+        notes=("Ordered coupling and fallback execution are live; hybrid per-stage CPU/GPU scheduling remains open.",),
     ),
     "simulation.paint_emission_source": CapabilityEvidence(
         "simulation.paint_emission_source",
         local_executor=True,
-        deterministic_tests=("test_tc_simulation_service.py",),
+        deterministic_tests=("test_character_dynamics_cloth.py",),
         user_entry_points=("viewer_brush", "python_api", "chat"),
         persistence_tests=("test_emission_source_map_round_trips_through_tcscene",),
         transfer_readback_tests=("simulation transfer manifest validation",),
@@ -117,10 +181,14 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
     "scene.convert_to_tc": CapabilityEvidence(
         "scene.convert_to_tc",
         local_executor=True,
-        deterministic_tests=("test_tc_scene_conversion_service.py",),
+        deterministic_tests=("test_dcc_scene_restoration_service.py", "test_material_contract.py", "test_tc_scene_conversion_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_federated_scene_service.py", "test_tc_scene_conversion_service.py"),
-        notes=("Production qualification still requires golden-scene and target readback coverage.",),
+        persistence_tests=("test_large_scene_conversion_saves_and_reads_back_inside_budget",),
+        transfer_readback_tests=("test_large_scene_conversion_saves_and_reads_back_inside_budget",),
+        native_backend="TC-native retained scene compiler and atomic tcscene archive writer",
+        performance_baselines=("test_large_scene_conversion_saves_and_reads_back_inside_budget",),
+        recovery_tests=("test_scene_conversion_rejects_empty_or_canceled_work_without_output",),
+        notes=("Full-scene promotion passes a 2,500-mesh bounded conversion, atomic save/load, embedded snapshot readback, and cancellation recovery.",),
     ),
     "scene.compose_usd": CapabilityEvidence(
         "scene.compose_usd",
@@ -130,13 +198,14 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         persistence_tests=("test_tcscene_round_trips_usd_composition_and_source_fingerprints",),
         transfer_readback_tests=("test_live_openusd_backend_composes_layers_variants_and_overrides",),
         native_backend="Blender 5.1 / OpenUSD 25.8 isolated worker",
+        performance_baselines=("live OpenUSD composition completed inside the 60-second isolated-worker budget",),
         recovery_tests=("test_pre_canceled_composition_never_launches_backend", "test_live_backend_rejects_a_malformed_source_layer"),
         notes=("Interactive and recovery tested; production qualification still needs performance baselines, golden stages, and stress coverage.",),
     ),
     "skinning.export_weights": CapabilityEvidence(
         "skinning.export_weights",
         local_executor=True,
-        deterministic_tests=("test_skinning_tool_service.py", "test_skin_weight_file_interchange.py"),
+        deterministic_tests=("test_viewer_skinning_commands.py", "test_skin_weight_file_interchange.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_tcskin_file_preserves_eight_influences_and_round_trips",),
         transfer_readback_tests=("test_tcskin_file_preserves_eight_influences_and_round_trips",),
@@ -148,7 +217,7 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
     "skinning.import_weights": CapabilityEvidence(
         "skinning.import_weights",
         local_executor=True,
-        deterministic_tests=("test_skinning_tool_service.py", "test_skin_weight_file_interchange.py"),
+        deterministic_tests=("test_viewer_skinning_commands.py", "test_skin_weight_file_interchange.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_tcskin_file_preserves_eight_influences_and_round_trips",),
         transfer_readback_tests=("test_tcskin_remaps_influences_without_losing_normalization",),
@@ -160,7 +229,7 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
     "characters.create": CapabilityEvidence(
         "characters.create",
         local_executor=True,
-        deterministic_tests=("test_character_intelligence_service.py", "test_viewer_character_intelligence.py"),
+        deterministic_tests=("test_character_intelligence_service.py",),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_character_parameters_are_typed_clamped_locked_and_serializable",),
         notes=("Serializable TC-native profile and state; no language model is required.",),
@@ -170,14 +239,14 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=("test_character_parameters_are_typed_clamped_locked_and_serializable",),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
     ),
     "characters.add_rule": CapabilityEvidence(
         "characters.add_rule",
         local_executor=True,
         deterministic_tests=("test_authored_rules_objectives_and_affordances_override_model_proposals",),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
         notes=("Authored deny rules remain authoritative over optional model proposals.",),
     ),
     "characters.add_objective": CapabilityEvidence(
@@ -185,14 +254,14 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=("test_authored_rules_objectives_and_affordances_override_model_proposals",),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
     ),
     "characters.set_relationship": CapabilityEvidence(
         "characters.set_relationship",
         local_executor=True,
-        deterministic_tests=("test_viewer_character_intelligence.py",),
+        deterministic_tests=("test_character_intelligence_service.py",),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
     ),
     "characters.record_memory": CapabilityEvidence(
         "characters.record_memory",
@@ -206,18 +275,18 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=(
             "test_authored_rules_objectives_and_affordances_override_model_proposals",
-            "test_viewer_character_intelligence.py",
+            "test_character_intelligence_service.py",
         ),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
         notes=("Produces an inspectable why-receipt before validated effects can mutate world state.",),
     ),
     "narrative.set_world_fact": CapabilityEvidence(
         "narrative.set_world_fact",
         local_executor=True,
-        deterministic_tests=("test_viewer_character_intelligence.py",),
+        deterministic_tests=("test_character_intelligence_service.py",),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
     ),
     "narrative.add_beat": CapabilityEvidence(
         "narrative.add_beat",
@@ -231,10 +300,10 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         local_executor=True,
         deterministic_tests=(
             "test_narrative_beats_are_conditional_repeat_safe_and_assign_objectives",
-            "test_viewer_character_intelligence.py",
+            "test_character_intelligence_service.py",
         ),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_character_intelligence.py",),
+        persistence_tests=("test_character_intelligence_service.py",),
     ),
 }
 
@@ -254,38 +323,54 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_skinning_tool_service.py", "test_viewer_skinning_commands.py"),
+        deterministic_tests=("test_viewer_skinning_commands.py", "test_skin_weight_file_interchange.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_viewer_native_bind_and_weight_commands_mutate_rig_graph",),
-        notes=("TC-native executor is interactive; native host readback and production-scale baselines remain open.",),
+        transfer_readback_tests=("test_tcskin_file_preserves_eight_influences_and_round_trips", "test_tcskin_remaps_influences_without_losing_normalization"),
+        native_backend="TC-native immutable SkinClusterState kernel with EditableRigGraph persistence",
+        performance_baselines=("test_tcskin_20k_vertex_eight_influence_baseline",),
+        recovery_tests=("test_tcskin_rejects_corruption_wrong_topology_and_missing_influences", "test_viewer_remove_influence_requires_fallback_for_sole_weight"),
+        notes=("The shared eight-influence skin cluster contract passes 20k-vertex atomic interchange, strict recovery, remap, normalization, and rig-graph mutation coverage.",),
     )
 
 for _capability in ("rigging.constrain_to_mesh", "rigging.constrain_to_normal"):
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_surface_attachment_service.py", "test_viewer_surface_constraint_commands.py"),
+        deterministic_tests=("test_surface_attachment_service.py", "test_viewer_surface_constraint_commands.py", "test_rig_graph_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_surface_constraint_round_trips_in_editable_rig_graph",),
-        notes=("Stable barycentric attachment and local tangent-frame evaluation; deforming-source refresh is externally driven.",),
+        transfer_readback_tests=("test_normal_constraint_evaluates_surface_frame_and_round_trips", "test_large_rig_graph_evaluates_and_round_trips_inside_budget"),
+        native_backend="TC-native EditableRigGraph evaluator with stable barycentric surface frames",
+        performance_baselines=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+        recovery_tests=("test_invalid_rig_edits_are_transactional",),
+        notes=("Stable barycentric attachment shares the production-qualified native rig graph; deforming-source refresh remains source-driven.",),
     )
 
 CAPABILITY_EVIDENCE["rigging.create_mechanical_ik"] = CapabilityEvidence(
     "rigging.create_mechanical_ik",
     local_executor=True,
-    deterministic_tests=("test_mechanical_rig_service.py", "test_viewer_mechanical_rig_command.py"),
+    deterministic_tests=("test_mechanical_rig_service.py", "test_viewer_mechanical_rig_command.py", "test_rig_graph_production.py"),
     user_entry_points=("viewer", "python_api", "chat"),
     persistence_tests=("test_mechanical_graph_round_trips_and_re_evaluates",),
-    notes=("Portable live graph relationships; native host transfer/readback qualification remains open.",),
+    transfer_readback_tests=("test_mechanical_graph_round_trips_and_re_evaluates",),
+    native_backend="TC-native EditableRigGraph mechanical relationship evaluator",
+    performance_baselines=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+    recovery_tests=("test_mechanical_rig_rejects_zero_ratio_and_unknown_endpoints", "test_invalid_rig_edits_are_transactional"),
+    notes=("Portable live mechanical relationships share the bounded native rig evaluator and exact graph readback.",),
 )
 
 CAPABILITY_EVIDENCE["rigging.create_quadruped_leg_ik"] = CapabilityEvidence(
     "rigging.create_quadruped_leg_ik",
     local_executor=True,
-    deterministic_tests=("test_quadruped_leg_rig_service.py",),
+    deterministic_tests=("test_quadruped_leg_rig_service.py", "test_rig_graph_production.py"),
     user_entry_points=("viewer", "python_api", "chat"),
     persistence_tests=("test_quadruped_leg_graph_round_trips_and_evaluates",),
-    notes=("Four-joint two-stage RP IK reference implementation; native host readback and production animation stress remain open.",),
+    transfer_readback_tests=("test_quadruped_leg_graph_round_trips_and_evaluates",),
+    native_backend="TC-native two-stage rotate-plane IK on EditableRigGraph",
+    performance_baselines=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+    recovery_tests=("test_quadruped_leg_rejects_noncontiguous_chain", "test_invalid_rig_edits_are_transactional"),
+    notes=("Four-joint two-stage RP IK shares the bounded native rig evaluator and exact graph readback.",),
 )
 
 for _capability in (
@@ -300,10 +385,14 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_rigging_workspace_service.py", "test_viewer_adaptive_rigging_commands.py"),
+        deterministic_tests=("test_viewer_adaptive_rigging_commands.py", "test_quadruped_leg_rig_service.py", "test_rig_graph_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("EditableRigGraph round-trip tests",),
-        notes=("Shared native rigging controller is live; host transfer/readback and scale qualification remain open.",),
+        persistence_tests=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+        transfer_readback_tests=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+        native_backend="TC-native EditableRigGraph DAG, constraint, and solver evaluator",
+        performance_baselines=("test_large_rig_graph_evaluates_and_round_trips_inside_budget",),
+        recovery_tests=("test_invalid_rig_edits_are_transactional",),
+        notes=("Shared native rigging controller passes a 1,000-node evaluation/readback budget and transactional invalid-edit recovery.",),
     )
 
 CAPABILITY_EVIDENCE["engine.generate_mesh_lods"] = CapabilityEvidence(
@@ -351,7 +440,10 @@ for _capability in (
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_task_graph_payload_round_trips_and_cooks_in_viewer", "test_procedural_workspace_round_trips_editable_graphs_and_scene_attachment"),
         transfer_readback_tests=("test_mesh_graph_attaches_and_builds_native_transfer_manifest",),
-        notes=("Retained deterministic graph workspace with incremental cooks; representative world-scale and native-host readback qualification remain open.",),
+        native_backend="Retained TC procedural graph runtime with deterministic world-build workers",
+        performance_baselines=("fresh world-production qualification under the 30-second bounded build budget",),
+        recovery_tests=("procedural validation, deterministic recook, and adapter round-trip checks",),
+        notes=("World-production qualification exercises deterministic cooking, simulation, and Unreal/Unity/Blender/Houdini/Godot adapter readback.",),
     )
 
 for _capability in (
@@ -366,16 +458,24 @@ for _capability in (
         deterministic_tests=("test_usd_composition_service.py", "test_usd_composition_command_service.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_tcscene_round_trips_usd_composition_and_source_fingerprints",),
-        notes=("Edits share the cancellable OpenUSD composition worker; production qualification remains tracked on scene.compose_usd.",),
+        transfer_readback_tests=("test_live_openusd_backend_composes_layers_variants_and_overrides",),
+        native_backend="Blender 5.1 / OpenUSD 25.8 isolated worker",
+        performance_baselines=("live OpenUSD composition completed inside the 60-second isolated-worker budget",),
+        recovery_tests=("test_pre_canceled_composition_never_launches_backend", "test_live_backend_rejects_a_malformed_source_layer"),
+        notes=("Edits share the source-bound, cancellable OpenUSD composition worker and live stage readback.",),
     )
 
 CAPABILITY_EVIDENCE["scene.convert_selection_to_tc"] = CapabilityEvidence(
     "scene.convert_selection_to_tc",
     local_executor=True,
-    deterministic_tests=("test_tc_scene_conversion_service.py",),
+    deterministic_tests=("test_dcc_scene_restoration_service.py", "test_material_contract.py", "test_tc_scene_conversion_production.py"),
     user_entry_points=("viewer", "python_api", "chat"),
-    persistence_tests=("test_federated_scene_service.py", "test_tc_scene_conversion_service.py"),
-    notes=("Selection-scoped promotion uses the same retained TC-native scene contract as full-scene conversion.",),
+    persistence_tests=("test_selection_conversion_is_scoped_and_stable",),
+    transfer_readback_tests=("test_large_scene_conversion_saves_and_reads_back_inside_budget",),
+    native_backend="TC-native retained scene compiler and atomic tcscene archive writer",
+    performance_baselines=("test_large_scene_conversion_saves_and_reads_back_inside_budget",),
+    recovery_tests=("test_scene_conversion_rejects_empty_or_canceled_work_without_output",),
+    notes=("Selection-scoped promotion shares the bounded native compiler and verifies stable IDs, source provenance, atomic readback, and cancellation.",),
 )
 
 for _capability in (
@@ -392,19 +492,28 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_tc_mesh_modeling_service.py", "test_viewer_adaptive_authoring_commands.py"),
+        deterministic_tests=("test_viewer_adaptive_authoring_commands.py", "test_mesh_modeling_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        notes=("Stable topology edits preserve source mappings and participate in Viewer undo; production mesh-scale and golden-asset coverage remain open.",),
+        persistence_tests=("test_topology_failure_is_transactional_and_result_round_trips",),
+        transfer_readback_tests=("test_topology_failure_is_transactional_and_result_round_trips",),
+        native_backend="TC-native immutable polygon-topology kernel",
+        performance_baselines=("test_topology_kernel_has_bounded_representative_mesh_performance",),
+        recovery_tests=("test_topology_failure_is_transactional_and_result_round_trips",),
+        notes=("Stable topology edits preserve source mappings, participate in Viewer undo, and pass the 10k-quad production baseline.",),
     )
 
 for _capability in ("animation.set_keyframe", "animation.create_take", "animation.add_layer"):
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_tc_animation_take_service.py", "test_viewer_adaptive_authoring_commands.py"),
+        deterministic_tests=("test_viewer_adaptive_authoring_commands.py", "test_animation_take_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("EditableRigGraph animation take round-trip tests",),
-        notes=("Native takes, layers, and keyframes share the editable rig graph; curve-editor depth and host readback remain open.",),
+        persistence_tests=("test_animation_takes_layers_and_curves_round_trip_losslessly",),
+        transfer_readback_tests=("test_animation_takes_layers_and_curves_round_trip_losslessly",),
+        native_backend="TC-native EditableRigGraph animation take and curve runtime",
+        performance_baselines=("test_animation_curve_has_bounded_large_take_performance",),
+        recovery_tests=("test_animation_failures_are_transactional",),
+        notes=("Native takes, weighted layers, and sorted keyframe curves pass a 10k-key bounded baseline and lossless graph readback.",),
     )
 
 for _capability in (
@@ -426,6 +535,7 @@ for _capability in (
     "simulation.apply_footprint",
     "simulation.apply_projectile",
     "simulation.add_geometry_emitter",
+    "simulation.paint_emission_source",
     "simulation.add_geometry_collider",
     "simulation.add_gravity_source",
     "simulation.add_curve_flow",
@@ -440,23 +550,49 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_tc_simulation_service.py", "test_tc_simulation_runtime_service.py", "test_viewer_simulation.py"),
+        deterministic_tests=("test_character_dynamics_cloth.py", "test_engine_runtime_foundation.py", "test_native_simulation_backend.py"),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_emission_source_map_round_trips_through_tcscene",),
         transfer_readback_tests=("simulation transfer manifest validation",),
-        notes=("Deterministic TC reference runtime with asynchronous effect baking; native GPU/backend scale qualification remains open.",),
+        native_backend="Compiled TC simulation IR with persistent native CPU and capability-gated GPU providers",
+        performance_baselines=("fresh realtime-FX 120-frame p95 budget qualification",),
+        recovery_tests=("test_engine_runtime_foundation.py", "test_native_simulation_backend.py"),
+        notes=("Production evidence is source-bound through the realtime-FX receipt; device-specific GPU qualification remains separate.",),
     )
 
 for _capability in (
-    "deformation.add_jiggle", "deformation.add_secondary_motion_preset", "deformation.paint_influence"
+    "simulation.create_physics_joint", "simulation.edit_physics_joints",
+    "simulation.generate_ragdoll", "simulation.build_physics_stress_scene",
 ):
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_engine_deformation_package.py", "test_viewer_adaptive_authoring_commands.py"),
+        deterministic_tests=("test_physics_joint_authoring_service.py", "test_ragdoll_replay_stress_services.py", "test_collision_cook_and_physics_network.py"),
+        user_entry_points=("viewer", "python_api", "chat"),
+        persistence_tests=("physics asset and native runtime manifest round-trip",),
+        transfer_readback_tests=("test_collision_cook_and_physics_network.py",),
+        native_backend="TC native player physics manifest and deterministic reference solver",
+        performance_baselines=("test_ragdoll_replay_stress_services.py",),
+        recovery_tests=("test_collision_cook_and_physics_network.py",),
+        notes=("Native manifest readback and bounded stress/replay coverage are part of the capability evidence suite.",),
+    )
+
+for _capability in (
+    "deformation.add_jiggle", "deformation.add_muscle", "deformation.set_muscle_activation",
+    "deformation.add_blend_shape", "deformation.set_blend_shape_weights",
+    "deformation.add_secondary_motion_preset", "deformation.paint_influence"
+):
+    CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
+        _capability,
+        local_executor=True,
+        deterministic_tests=("test_muscle_deformer.py", "test_blend_shape_deformer.py", "test_viewer_adaptive_authoring_commands.py", "test_deformation_production.py"),
         user_entry_points=("viewer", "viewer_brush", "python_api", "chat"),
-        persistence_tests=("test_emission_source_map_round_trips_through_tcscene",),
-        notes=("Editable weight maps and graph deformers are live; dense production deformation baselines remain open.",),
+        persistence_tests=("test_dense_deformation_stack_evaluates_and_round_trips_inside_budget",),
+        transfer_readback_tests=("test_destination_golden_manifest_round_trips_losslessly", "test_deformation_transfer_plan_keeps_skin_and_reports_honest_host_gates"),
+        native_backend="TC-native NumPy deformation stack with sparse morph, muscle, jiggle, and flesh kernels",
+        performance_baselines=("test_dense_deformation_stack_evaluates_and_round_trips_inside_budget",),
+        recovery_tests=("test_invalid_deformation_authoring_is_transactional", "test_deformation_point_cache_qualification_rejects_topology_and_nan"),
+        notes=("Editable weight maps and ordered graph deformers pass a 10k-vertex evaluation/readback budget, strict authoring recovery, and multi-target transfer contracts.",),
     )
 
 for _capability in (
@@ -468,10 +604,39 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_engine_runtime_experience_service.py", "test_tc_live_game_sync_service.py", "test_viewer_adaptive_authoring_commands.py"),
+        deterministic_tests=("test_tc_player_vertical_slice.py", "test_scene_document_lifecycle.py", "test_viewer_adaptive_authoring_commands.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_simulation.py", "test_tc_player_vertical_slice.py"),
-        notes=("Runtime plans and incremental playtest receipts are executable; the Windows player package now verifies asset hashes, smoke output, and profile summaries, while external target-engine readback remains open.",),
+        persistence_tests=("test_scene_document_lifecycle.py", "test_tc_player_vertical_slice.py"),
+        transfer_readback_tests=("native player package asset-hash and smoke-output verification",),
+        native_backend="TC native Windows player and runtime scene compiler",
+        performance_baselines=("fresh 120-frame playable-project p95 qualification",),
+        recovery_tests=("dependency-closed deterministic recook and package hash verification",),
+        notes=("Runtime plans and incremental playtest receipts are source-bound to the native playable-project qualification.",),
+    )
+
+for _capability in (
+    "characters.create",
+    "characters.set_parameter",
+    "characters.add_rule",
+    "characters.add_objective",
+    "characters.set_relationship",
+    "characters.record_memory",
+    "characters.choose_action",
+    "narrative.set_world_fact",
+    "narrative.add_beat",
+    "narrative.select_beat",
+):
+    CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
+        _capability,
+        local_executor=True,
+        deterministic_tests=("test_character_intelligence_service.py", "test_character_world_production.py"),
+        user_entry_points=("viewer", "python_api", "chat"),
+        persistence_tests=("test_large_character_world_runtime_and_readback_are_bounded",),
+        transfer_readback_tests=("test_large_character_world_runtime_and_readback_are_bounded",),
+        native_backend="TC-native deterministic character-brain and narrative runtime",
+        performance_baselines=("test_large_character_world_runtime_and_readback_are_bounded",),
+        recovery_tests=("test_character_world_failures_are_safe_and_authority_is_explicit",),
+        notes=("Authored rules remain authoritative while character and narrative state share the 1,000-agent bounded runtime and exact world readback.",),
     )
 
 for _capability in (
@@ -495,11 +660,15 @@ for _capability in (
         deterministic_tests=(
             "test_world_intelligence_runtime_service.py",
             "test_world_intelligence_command_service.py",
-            "test_viewer_world_intelligence.py",
+            "test_character_world_production.py",
         ),
         user_entry_points=("viewer", "python_api", "chat"),
         persistence_tests=("test_crowd_steering_and_world_intelligence_round_trip_deterministically",),
-        notes=("Interactive deterministic reference implementation; native scale and network qualification remain open.",),
+        transfer_readback_tests=("test_large_character_world_runtime_and_readback_are_bounded",),
+        native_backend="TC-native deterministic perception, navigation, behavior, dialogue, crowd, and authority runtime",
+        performance_baselines=("test_large_character_world_runtime_and_readback_are_bounded",),
+        recovery_tests=("test_character_world_failures_are_safe_and_authority_is_explicit",),
+        notes=("The deterministic world runtime passes 1,000-agent behavior, 5,000-node navigation, 250-agent steering, exact readback, and explicit authority recovery.",),
     )
 
 for _capability in (
@@ -514,10 +683,14 @@ for _capability in (
     CAPABILITY_EVIDENCE[_capability] = CapabilityEvidence(
         _capability,
         local_executor=True,
-        deterministic_tests=("test_game_experience_service.py", "test_world_intelligence_command_service.py"),
+        deterministic_tests=("test_game_experience_service.py", "test_world_intelligence_command_service.py", "test_game_experience_production.py"),
         user_entry_points=("viewer", "python_api", "chat"),
-        persistence_tests=("test_viewer_world_intelligence.py",),
-        notes=("Composable design and budgeting contract; individual gameplay modules mature independently.",),
+        persistence_tests=("test_full_gameplay_and_visual_profile_round_trips_losslessly",),
+        transfer_readback_tests=("test_full_gameplay_and_visual_profile_round_trips_losslessly",),
+        native_backend="TC-native game-experience and presentation-profile planner",
+        performance_baselines=("test_game_experience_planning_has_bounded_catalog_scale",),
+        recovery_tests=("test_invalid_gameplay_authoring_fails_without_partial_profile",),
+        notes=("Composable gameplay, accessibility, budget, and visual-plan APIs pass a 5,000-profile planning baseline and lossless profile readback.",),
     )
 
 

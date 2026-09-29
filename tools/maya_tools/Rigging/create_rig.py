@@ -27,6 +27,7 @@ from maya_tools.Rigging.create_rig_core import (
     create_eye_aim_setup,
     create_finger_rigs,
     create_ik_fk_limb,
+    create_joints_along_curve,
     create_joint_controls,
     create_leg_space_switches,
     create_loft_surface_with_follicle_joints,
@@ -61,6 +62,7 @@ from maya_tools.Rigging.create_rig_core import (
     setup_jaw_lip_driver,
     setup_rfl_sdks,
     setup_show_twist_ctrls,
+    setup_spine_segment_stretch,
     setup_surface_rig,
     setup_surface_rig_with_drivers,
     snap_to_joint_matrix,
@@ -318,7 +320,7 @@ def create_brow_main_setup(side, root_parent='head1_ctrl'):
         control_shape="circle",
         root_parent=root_parent,
         sub_ctrls=False,
-        keep_constraint=True
+        keep_constraint=False
     )
 
     if not ctrl_data or "ctrl" not in ctrl_data[0]:
@@ -352,8 +354,13 @@ def create_brow_main_setup(side, root_parent='head1_ctrl'):
             if cmds.objExists(driver_pad):
                 cmds.setAttr(driver_pad + ".visibility", 0)
 
+    # brow_main is only a snap target used to place the real control hierarchy.
+    # Leaving it in world creates an inert top-level scaffold node.
+    if cmds.objExists(brow_main_transform):
+        cmds.delete(brow_main_transform)
+
     return {
-        "group": brow_main_transform,
+        "group": "",
         "ctrl_data": ctrl_data,
         "parent_target": main_ctrl
     }
@@ -999,48 +1006,54 @@ def query_space_switches(driven):
 
 def delete_unused_scaffold_nodes():
     """
-    Finds and deletes any nodes in the scene whose names end in '_main'
-    or contain '_temp'.
+    Delete unused scaffold and temporary nodes without removing rig drivers.
+
+    A ``*_main`` joint with a matching control (or parented beneath a control)
+    is a persistent surface driver used by the lips, brows, and eyelids.  It
+    must survive even if Maya does not report its skinCluster through a direct
+    ``listConnections`` query.
     """
     to_delete = []
+    legacy_snap_nodes = {"l_brow_main", "r_brow_main", "lip_main"}
+
+    def is_unused_scaffold(node):
+        nt = cmds.nodeType(node)
+        short_name = node.rsplit("|", 1)[-1].split(":")[-1]
+        if short_name in legacy_snap_nodes and nt in ("transform", "joint"):
+            return True
+        if nt == "transform":
+            shapes = cmds.listRelatives(node, shapes=True) or []
+            if not shapes:
+                return True
+
+        if nt not in ("transform", "joint"):
+            return False
+
+        is_skinned = bool(cmds.listConnections(node, type="skinCluster"))
+        is_constrained = bool(cmds.listConnections(node, type="constraint"))
+        all_descendants = cmds.listRelatives(node, ad=True, fullPath=True) or []
+        has_ctrl_descendants = any("_ctrl" in desc.lower() for desc in all_descendants)
+        has_matching_ctrl = cmds.objExists(node + "_ctrl")
+        parents = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        is_parented_to_ctrl = any("_ctrl" in parent.lower() for parent in parents)
+
+        return not any((
+            is_skinned,
+            is_constrained,
+            has_ctrl_descendants,
+            has_matching_ctrl,
+            is_parented_to_ctrl,
+        ))
 
     # 1. Gather nodes ending in '_main'
     for node in cmds.ls("*_main") or []:
-        if cmds.objExists(node):
-            nt = cmds.nodeType(node)
-            if nt == "transform":
-                shapes = cmds.listRelatives(node, shapes=True) or []
-                if not shapes:
-                    to_delete.append(node)
-                    continue
-
-            if nt in ("transform", "joint"):
-                is_skinned = bool(cmds.listConnections(node, type="skinCluster"))
-                is_constrained = bool(cmds.listConnections(node, type="constraint"))
-                all_descendants = cmds.listRelatives(node, ad=True, fullPath=True) or []
-                has_ctrl_descendants = any("_ctrl" in desc.lower() for desc in all_descendants)
-
-                if not is_skinned and not is_constrained and not has_ctrl_descendants:
-                    to_delete.append(node)
+        if cmds.objExists(node) and not cmds.objExists(node + "_ctrl") and is_unused_scaffold(node):
+            to_delete.append(node)
 
     # 2. Gather nodes containing '_temp'
     for node in cmds.ls("*_temp*") or []:
-        if cmds.objExists(node):
-            nt = cmds.nodeType(node)
-            if nt == "transform":
-                shapes = cmds.listRelatives(node, shapes=True) or []
-                if not shapes:
-                    to_delete.append(node)
-                    continue
-
-            if nt in ("transform", "joint"):
-                is_skinned = bool(cmds.listConnections(node, type="skinCluster"))
-                is_constrained = bool(cmds.listConnections(node, type="constraint"))
-                all_descendants = cmds.listRelatives(node, ad=True, fullPath=True) or []
-                has_ctrl_descendants = any("_ctrl" in desc.lower() for desc in all_descendants)
-
-                if not is_skinned and not is_constrained and not has_ctrl_descendants:
-                    to_delete.append(node)
+        if cmds.objExists(node) and is_unused_scaffold(node):
+            to_delete.append(node)
 
     # Delete them
     if to_delete:
@@ -1336,8 +1349,27 @@ def rig_mouth_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None):
             f"{l_co}_main_ctrl"
         ]
 
-        if all(cmds.objExists(d) for d in drivers) and cmds.objExists(jaw_ctrl) and lip_ctrls:
-            setup_jaw_lip_driver(jaw_ctrl, drivers, lip_ctrls, head_ctrl=parent_ctrl)
+        missing_drivers = [driver for driver in drivers if not cmds.objExists(driver)]
+        if missing_drivers:
+            raise RuntimeError(
+                "Mouth surface was created without required main lip controls: {}".format(
+                    ", ".join(missing_drivers)
+                )
+            )
+        if not cmds.objExists(jaw_ctrl):
+            raise RuntimeError("Mouth setup requires jaw control: {}".format(jaw_ctrl))
+        if not lip_ctrls:
+            raise RuntimeError("Mouth setup did not create any lip sub-controls.")
+
+        jaw_lip_data = setup_jaw_lip_driver(
+            jaw_ctrl,
+            drivers,
+            lip_ctrls,
+            head_ctrl=parent_ctrl,
+        )
+        main_ctrl = (jaw_lip_data or {}).get("main_ctrl", "lip_main_ctrl")
+        if not cmds.objExists(main_ctrl):
+            raise RuntimeError("Mouth setup did not create the main lip control: {}".format(main_ctrl))
     save_module_metadata("Mouth & Lips", {
         "joints": mouth_joints,
         "parent": parent_ctrl or "",
@@ -1667,6 +1699,26 @@ def rig_other_face_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None, jaw_j
 
         scale_ctrl_cvs_local(ctrl_data[0]["ctrl"], [0.2, 0.2, 0.2])
 
+    # Keep the principal nose controls together beneath the root control. The
+    # pads preserve their world transforms and remain the animation offsets.
+    nose_root_ctrl = "nose_root_ctrl"
+    nose_control_pads = (
+        "nose_upper_ctrl_pad",
+        "nose_base_ctrl_pad",
+        "nose_tip_ctrl_pad",
+        "l_nostril_ctrl_pad",
+        "r_nostril_ctrl_pad",
+    )
+    if cmds.objExists(nose_root_ctrl):
+        root_long = (cmds.ls(nose_root_ctrl, long=True) or [nose_root_ctrl])[0]
+        for pad in nose_control_pads:
+            if not cmds.objExists(pad):
+                continue
+            pad_long = (cmds.ls(pad, long=True) or [pad])[0]
+            current_parent = cmds.listRelatives(pad_long, parent=True, fullPath=True) or []
+            if not current_parent or current_parent[0] != root_long:
+                cmds.parent(pad_long, root_long, absolute=True)
+
     setup_secondary_face_constraints(face_joint_map, parent_ctrl)
     save_module_metadata("Other Face Joints", {
         "joints": face_joints,
@@ -1792,8 +1844,9 @@ def rig_arm_module(side, body_joint_map, parent_ctrl=None):
             if upperarm and cmds.objExists(upperarm):
                 snap_ctrl_cvs_to_child(clav_ctrl, upperarm)
 
+    limb_data = {}
     if len(arm_chain) >= 3 and cmds.objExists(clav_ctrl):
-        create_ik_fk_limb(arm_chain, clav_ctrl)
+        limb_data = create_ik_fk_limb(arm_chain, clav_ctrl)
 
     finger_slots = []
     if body_joint_map:
@@ -1890,6 +1943,7 @@ def rig_arm_module(side, body_joint_map, parent_ctrl=None):
         "twist_upper": upperarm_joints,
         "twist_lower": lowerarm_joints,
         "parent": clav_ctrl,
+        "cleanup_nodes": (limb_data.get("stretch") or {}).get("nodes", []),
         "built": True
     })
 
@@ -2285,6 +2339,7 @@ _MODULE_CLEANUP_NODE_TYPES = {
     "ikHandle",
     "joint",
     "multiplyDivide",
+    "multDoubleLinear",
     "orientConstraint",
     "parentConstraint",
     "pointConstraint",
@@ -2387,21 +2442,32 @@ def _connected_module_nodes(seed_nodes, prefixes=None):
         related.extend(cmds.listConnections(node, source=True, destination=True) or [])
         related.extend(cmds.listRelatives(node, children=True, fullPath=False) or [])
 
-        for rel in related:
-            rel = _short_node_name(rel)
-            if not rel or rel in module_nodes or not cmds.objExists(rel):
-                continue
-            if _is_rfl_pivot_joint(rel):
-                continue
-            node_type = cmds.nodeType(rel)
-            matches_prefix = any(rel.startswith(prefix) for prefix in prefixes)
-            is_owned_dag = matches_prefix and node_type in {"joint", "transform", "ikHandle"} and rel.endswith(
-                _MODULE_CLEANUP_SUFFIXES)
-            is_owned_helper = node_type not in {"joint", "transform",
-                                                "ikHandle"} and node_type in _MODULE_CLEANUP_NODE_TYPES
-            if is_owned_dag or is_owned_helper:
-                module_nodes.add(rel)
-                queue.append(rel)
+        for related_node in related:
+            # Keep Maya's resolved DAG path for API queries. Converting a
+            # nested node such as |Do_Not_Touch|mouth_surface_grp|mouth to the
+            # short name "mouth" can make nodeType fail even when objExists
+            # previously reported a match.
+            resolved_nodes = cmds.ls(related_node, long=True) or []
+            for resolved in resolved_nodes:
+                rel = _short_node_name(resolved)
+                if not rel or rel in module_nodes:
+                    continue
+                try:
+                    node_type = cmds.nodeType(resolved)
+                except RuntimeError:
+                    # Cleanup metadata is advisory. A stale history/DAG entry
+                    # must never fail an otherwise successful rig build.
+                    continue
+                if _is_rfl_pivot_joint(rel):
+                    continue
+                matches_prefix = any(rel.startswith(prefix) for prefix in prefixes)
+                is_owned_dag = matches_prefix and node_type in {"joint", "transform", "ikHandle"} and rel.endswith(
+                    _MODULE_CLEANUP_SUFFIXES)
+                is_owned_helper = node_type not in {"joint", "transform",
+                                                    "ikHandle"} and node_type in _MODULE_CLEANUP_NODE_TYPES
+                if is_owned_dag or is_owned_helper:
+                    module_nodes.add(rel)
+                    queue.append(resolved)
 
     return list(module_nodes)
 
@@ -2760,8 +2826,9 @@ def rig_leg_module(side, body_joint_map, parent_ctrl=None):
         else:
             hip_ctrl = "origin_ctrl"
 
+    limb_data = {}
     if len(leg_chain) >= 3:
-        create_ik_fk_limb(leg_chain, hip_ctrl)
+        limb_data = create_ik_fk_limb(leg_chain, hip_ctrl)
 
     side_prefix_title = "Left" if side == "l" else "Right"
 
@@ -2915,6 +2982,7 @@ def rig_leg_module(side, body_joint_map, parent_ctrl=None):
         "twist_thigh": thigh_joints,
         "twist_knee": knee_joints,
         "parent": hip_ctrl,
+        "cleanup_nodes": (limb_data.get("stretch") or {}).get("nodes", []),
         "built": True
     })
 
@@ -3057,9 +3125,13 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
     :param parent_ctrl: parent control node name
     :return: None
     """
+    def spine_slot_key(slot):
+        match = re.fullmatch(r"Spine(\d*)", slot)
+        return int(match.group(1) or 0) if match else 9999
+
     spine_joints = []
     if body_joint_map:
-        for key in sorted(body_joint_map.keys()):
+        for key in sorted(body_joint_map.keys(), key=spine_slot_key):
             if key.startswith("Spine") and not key.endswith("Tip"):
                 jnt = body_joint_map[key].get("joint")
                 if jnt and cmds.objExists(jnt):
@@ -3071,7 +3143,41 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
     pelvis_jnt = body_joint_map.get("Hips", {}).get("joint") if body_joint_map else "pelvis"
     root_p = parent_ctrl or (pelvis_jnt + "_ctrl" if cmds.objExists(pelvis_jnt + "_ctrl") else None)
 
-    if spine_joints:
+    stretch_data = {"enabled": False, "nodes": []}
+    eligible_for_spline = len(spine_joints) >= 3
+    if eligible_for_spline:
+        for parent_joint, child_joint in zip(spine_joints[:-1], spine_joints[1:]):
+            actual_parent = cmds.listRelatives(child_joint, parent=True, type="joint", fullPath=True) or []
+            expected_parent = cmds.ls(parent_joint, long=True) or [parent_joint]
+            if not actual_parent or actual_parent[0] != expected_parent[0]:
+                eligible_for_spline = False
+                break
+
+    pelvis_ctrl = pelvis_jnt + "_ctrl" if pelvis_jnt else ""
+    eligible_for_spline = eligible_for_spline and cmds.objExists(pelvis_ctrl)
+
+    if spine_joints and eligible_for_spline:
+        spine_tip = spine_joints[-1]
+        spine_base = spine_joints[:-1]
+        control_data = create_joint_controls(
+            spine_base,
+            control_shape="sphere",
+            root_parent=root_p,
+            sub_ctrls=True,
+        )
+        tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
+        control_data.extend(create_joint_controls(
+            [spine_tip],
+            control_shape="sphere",
+            root_parent=tip_root,
+        ))
+        stretch_data = setup_spine_segment_stretch(
+            spine_joints,
+            control_data,
+            pelvis_ctrl,
+            scale_reference=root_p or pelvis_ctrl,
+        )
+    elif spine_joints:
         spine_tip = spine_joints[-1]
         spine_base = spine_joints[:-1]
         if spine_base:
@@ -3083,6 +3189,8 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
     save_module_metadata("Spine", {
         "joints": spine_joints,
         "parent": root_p or "",
+        "stretch_enabled": bool(stretch_data.get("enabled")),
+        "cleanup_nodes": stretch_data.get("nodes", []),
         "built": True
     })
 
