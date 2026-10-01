@@ -23,3 +23,12 @@ Test install, upgrade, repair, uninstall, SmartScreen reputation behavior, clean
 machine startup, mandatory account/license acceptance, offline restart, and
 deactivation/replacement on every release candidate.
 
+## Current unsigned evidence
+
+The core 6.7 Windows freeze build and executable launch smoke passed on CPython
+3.14.7 on 2026-10-01. See
+`tech_connector/docs/operations/evidence/UNSIGNED_WINDOWS_RC_2026-10-01.md`.
+This validates the packaging path but cannot satisfy the signed-release control
+until publisher verification, protected signing, and clean-machine installer
+tests are complete.
+
