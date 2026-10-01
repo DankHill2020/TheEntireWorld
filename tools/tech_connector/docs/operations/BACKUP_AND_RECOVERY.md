@@ -23,3 +23,13 @@ controlled cutover is approved.
 Evidence includes backup/PITR configuration, the latest successful restore drill,
 measured RPO/RTO, exceptions, and approver.
 
+## Current staging evidence
+
+The free-tier Neon staging service passed a snapshot-to-isolated-branch recovery
+exercise on 2026-10-01. See
+`tech_connector/docs/operations/evidence/STAGING_RESTORE_DRILL_2026-10-01.md`.
+That drill proves the schema can be recovered without replacing the active
+branch, but it does not satisfy this production control: the free plan's current
+six-hour history window, single manual snapshot, and lack of approved production
+RPO/RTO remain launch limitations.
+
