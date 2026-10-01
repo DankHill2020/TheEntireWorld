@@ -6,14 +6,16 @@
   "clock_skew_seconds": 60,
   "maximum_offline_days": 90,
   "endpoints": {
-    "login_start": "",
-    "login_poll": "",
-    "session_refresh": "",
-    "logout": "",
-    "entitlement": "",
-    "activation": "",
-    "deactivation": "",
-    "project_registration": ""
+    "login_start": "https://license.theentireworld.net/v1/login/start",
+    "login_poll": "https://license.theentireworld.net/v1/login/poll",
+    "session_refresh": "https://license.theentireworld.net/v1/session/refresh",
+    "logout": "https://license.theentireworld.net/v1/logout",
+    "entitlement": "https://license.theentireworld.net/v1/entitlements/refresh",
+    "activation": "https://license.theentireworld.net/v1/activations",
+    "deactivation": "https://license.theentireworld.net/v1/activations/deactivate",
+    "project_registration": "https://license.theentireworld.net/v1/projects/register"
   },
-  "public_keys": {}
+  "public_keys": {
+    "render-preview-2026-01": "ns-vpFbR0FPneY8ttS1utduOESV2XBaJnFrcFqwLpxo"
+  }
 }
