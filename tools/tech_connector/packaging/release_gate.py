@@ -265,6 +265,46 @@ def validate_production_configuration(source_root: Path) -> list[str]:
     return list(configuration_errors(configuration, production=True))
 
 
+def validate_production_readiness(source_root: Path) -> list[str]:
+    """Require auditable evidence for every externally operated launch control."""
+    path = source_root / "tech_connector/config/production_readiness.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"production-readiness evidence is unreadable: {exc}"]
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return ["production-readiness evidence schema is not supported"]
+    required = {
+        "legal_and_privacy",
+        "production_backend",
+        "entitlement_signing_key",
+        "payments_and_tax",
+        "signed_installers",
+        "monitoring_and_incident_response",
+        "backups_and_restore",
+        "support_operations",
+    }
+    controls = payload.get("controls")
+    if not isinstance(controls, dict):
+        return ["production-readiness controls are missing"]
+    failures = []
+    for name in sorted(required):
+        control = controls.get(name)
+        if not isinstance(control, dict):
+            failures.append(f"production-readiness control is missing: {name}")
+            continue
+        if control.get("status") != "verified":
+            failures.append(f"production-readiness control is not verified: {name}")
+        for field in ("owner", "verified_at", "evidence_reference"):
+            if not str(control.get(field) or "").strip():
+                failures.append(f"production-readiness control {name} lacks {field}")
+    if payload.get("status") != "approved_for_production":
+        failures.append("production readiness has not been approved for production")
+    if not str(payload.get("release_approval_reference") or "").strip():
+        failures.append("production readiness lacks a release approval reference")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", default=".")
@@ -280,6 +320,7 @@ def main() -> int:
         failures.extend(validate_production_configuration(source_root))
         failures.extend(validate_production_legal_approval(source_root))
         failures.extend(validate_production_source_access(source_root))
+        failures.extend(validate_production_readiness(source_root))
     if failures:
         print("Release gate failed:", file=sys.stderr)
         for failure in failures:

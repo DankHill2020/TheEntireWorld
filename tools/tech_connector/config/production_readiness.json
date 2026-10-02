@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "status": "blocked_external",
+  "release_approval_reference": "",
+  "instructions": "Set a control to verified only after its runbook verification is complete and its durable evidence reference is recorded. Do not place credentials, tokens, keys, customer data, or private contracts here.",
+  "controls": {
+    "legal_and_privacy": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/LEGAL_AND_PRIVACY_APPROVAL.md"
+    },
+    "production_backend": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/PRODUCTION_BACKEND.md"
+    },
+    "entitlement_signing_key": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/KEY_MANAGEMENT.md"
+    },
+    "payments_and_tax": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/PAYMENTS_AND_TAX.md"
+    },
+    "signed_installers": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/SIGNED_RELEASES.md"
+    },
+    "monitoring_and_incident_response": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/MONITORING_AND_INCIDENT_RESPONSE.md"
+    },
+    "backups_and_restore": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/BACKUP_AND_RECOVERY.md"
+    },
+    "support_operations": {
+      "status": "pending_external",
+      "owner": "",
+      "verified_at": "",
+      "evidence_reference": "",
+      "runbook": "tech_connector/docs/operations/SUPPORT_OPERATIONS.md"
+    }
+  }
+}

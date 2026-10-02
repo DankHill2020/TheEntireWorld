@@ -1,0 +1,80 @@
+# Install this file at repository root as .github/workflows/signed-windows-release.yml
+# after replacing every REQUIRED_* value and enabling required reviewers on the
+# production-signing GitHub Environment.
+name: Signed Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without a leading v
+        required: true
+        type: string
+      tier:
+        description: Package tier
+        required: true
+        type: choice
+        options: [core, combined]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-sign-package:
+    runs-on: windows-latest
+    environment: production-signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Production evidence gate
+        shell: pwsh
+        run: python tools/tech_connector/packaging/release_gate.py --source-root tools --production
+      - name: Freeze application
+        shell: pwsh
+        run: tools/tech_connector/packaging/windows/build_windows_package.ps1 -Tier '${{ inputs.tier }}' -Mode freeze -Version '${{ inputs.version }}'
+      - name: Sign frozen executables
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: tools/dist/windows/frozen/${{ inputs.tier }}/TechConnector
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Assemble installer from signed inventory
+        id: installer
+        shell: pwsh
+        run: tools/tech_connector/packaging/windows/assemble_signed_installer.ps1 -Tier '${{ inputs.tier }}' -Version '${{ inputs.version }}'
+      - name: Sign installer
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: tools/dist/windows/installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify signatures and create checksums
+        shell: pwsh
+        run: |
+          tools/tech_connector/packaging/windows/verify_windows_signatures.ps1 -Path tools/dist/windows/installer -ExpectedPublisher 'The Entire World'
+          Get-ChildItem tools/dist/windows/installer/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ASCII
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TechConnector-${{ inputs.tier }}-${{ inputs.version }}-signed
+          path: |
+            tools/dist/windows/installer/*.exe
+            tools/dist/windows/installer/*.sha256
+          if-no-files-found: error
+

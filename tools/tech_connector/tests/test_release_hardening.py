@@ -11,6 +11,7 @@ from tech_connector.packaging.release_gate import (
     validate_github_root_surface,
     validate_legal_surface,
     validate_production_legal_approval,
+    validate_production_readiness,
     validate_production_source_access,
 )
 from tech_connector.packaging.smoke_test_package import verify_package_manifest
@@ -120,6 +121,49 @@ def test_production_gate_accepts_verified_public_monorepo_contract(tmp_path) -> 
     )
 
     assert validate_production_source_access(tmp_path) == []
+
+
+def test_current_production_readiness_stays_fail_closed_until_external_controls_are_verified() -> None:
+    failures = validate_production_readiness(TOOLS_ROOT)
+    assert any("legal_and_privacy" in failure for failure in failures)
+    assert any("entitlement_signing_key" in failure for failure in failures)
+    assert "production readiness has not been approved for production" in failures
+
+
+def test_production_readiness_requires_evidence_for_every_control(tmp_path) -> None:
+    config = tmp_path / "tech_connector" / "config"
+    config.mkdir(parents=True)
+    names = {
+        "legal_and_privacy", "production_backend", "entitlement_signing_key",
+        "payments_and_tax", "signed_installers",
+        "monitoring_and_incident_response", "backups_and_restore",
+        "support_operations",
+    }
+    controls = {
+        name: {
+            "status": "verified", "owner": "release-owner@example.com",
+            "verified_at": "2026-09-29T12:00:00Z",
+            "evidence_reference": f"change/{name}/123",
+        }
+        for name in names
+    }
+    (config / "production_readiness.json").write_text(json.dumps({
+        "schema_version": 1, "status": "approved_for_production",
+        "release_approval_reference": "release/2026.1/approval",
+        "controls": controls,
+    }), encoding="utf-8")
+    assert validate_production_readiness(tmp_path) == []
+
+
+def test_external_signing_assembly_is_fail_closed_and_verifies_frozen_binaries() -> None:
+    script = (
+        PACKAGE_ROOT / "packaging" / "windows" / "assemble_signed_installer.ps1"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(script.split())
+    assert "--source-root $repoRoot --production" in normalized
+    assert "verify_windows_signatures.ps1" in script
+    assert "-Recurse -ExpectedPublisher $ExpectedPublisher" in normalized
+    assert normalized.index("verify_windows_signatures.ps1") < normalized.index("& $iscc")
 
 
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
