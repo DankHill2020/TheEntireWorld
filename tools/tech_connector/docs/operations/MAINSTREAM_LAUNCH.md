@@ -22,6 +22,13 @@ or signing material in the readiness file. Store only references to protected
 evidence. A release approver changes the top-level status to
 `approved_for_production` only after all controls read `verified`.
 
+For the signed-installer bootstrap only, an approver may use
+`approved_for_signing_candidate` with a protected
+`signing_candidate_approval_reference` after every other control is verified.
+That state authorizes creation of a private signing candidate—not distribution.
+The ordinary production gate remains mandatory after the signed-installer
+evidence is reviewed and recorded.
+
 The private backend is intentionally outside this public repository. Provider
 choices are adapters; the public client depends only on the documented HTTPS and
 signed-entitlement contracts.

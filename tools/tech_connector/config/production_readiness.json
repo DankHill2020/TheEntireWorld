@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "status": "blocked_external",
+  "signing_candidate_approval_reference": "",
   "release_approval_reference": "",
   "instructions": "Set a control to verified only after its runbook verification is complete and its durable evidence reference is recorded. Do not place credentials, tokens, keys, customer data, or private contracts here.",
   "controls": {

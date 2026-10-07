@@ -47,6 +47,16 @@ unless Inno Setup 6, production HTTPS licensing endpoints, entitlement public
 keys, and a current-user Authenticode code-signing certificate are configured.
 Local `stage` and `freeze` modes remain available for unsigned iteration.
 
+The protected signing workflow uses the separate signing-candidate readiness
+state because the final production gate cannot truthfully pass until a signed
+installer already exists. A candidate remains a private workflow artifact, not
+a public release. After signing, it verifies the frozen inventory and installer,
+runs Microsoft Defender, performs silent install/repair/launch/uninstall on the
+clean runner, writes post-signing checksums and provenance, and uploads the
+candidate for review. Final production approval still requires upgrade testing
+from the previous supported release plus recording the candidate evidence under
+the `signed_installers` control.
+
 ## Outputs
 
 ```text

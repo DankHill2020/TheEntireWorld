@@ -11,7 +11,11 @@
 > commercial project before using Tech Connector on that project.
 >
 > See the [Tech Connector Community Source License](tech_connector/LICENSE.md)
-> and [licensing overview](tech_connector/README.md#download-account-and-activation).
+> [Community Project Terms](tech_connector/COMMUNITY_PROJECT_TERMS.md), and
+> [licensing overview](tech_connector/README.md#download-account-and-activation).
+> Paid use is described in the draft [Indie](tech_connector/INDIE_LICENSE_TERMS.md)
+> and [Enterprise](tech_connector/ENTERPRISE_LICENSE_TERMS.md) terms; neither is
+> an active offer until approved and published through the licensing service.
 
 Tech Connector is a local-first AI production environment for digital content
 creation (DCC) applications and game engines. This repository contains the

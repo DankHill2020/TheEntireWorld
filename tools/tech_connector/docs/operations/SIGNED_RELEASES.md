@@ -23,6 +23,17 @@ Test install, upgrade, repair, uninstall, SmartScreen reputation behavior, clean
 machine startup, mandatory account/license acceptance, offline restart, and
 deactivation/replacement on every release candidate.
 
+The first signed artifact cannot require its own completed evidence as a
+prerequisite. Use the protected `approved_for_signing_candidate` readiness state
+and `signing_candidate_approval_reference` only after every control except
+`signed_installers` is verified. The signing workflow may then produce a private
+candidate, verify signatures, scan it, exercise install/repair/launch/uninstall,
+and write provenance. It is not a public production release. After independent
+review and upgrade testing from the prior supported release, attach the durable
+candidate evidence to `signed_installers`, mark that control verified, change
+the top-level readiness state to `approved_for_production`, and run the ordinary
+production gate again before publication.
+
 ## Current unsigned evidence
 
 The core 6.7 Windows freeze build and executable launch smoke passed on CPython

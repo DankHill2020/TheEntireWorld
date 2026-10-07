@@ -22,19 +22,28 @@ requires registration of each commercial project and acceptance of that
 project's versioned terms. Downloading source does not waive the USD $500,000
 lifetime Adjusted Project Profit threshold, residual terms, seat rules,
 version entitlement, or redistribution restrictions.
+The current pre-release [Community Project Terms](COMMUNITY_PROJECT_TERMS.md)
+show the true-cost standard, excluded expenses, studio-size marginal schedules,
+privacy boundary, and acceptance evidence that still require counsel approval.
+The paid paths likewise have pre-release [Indie](INDIE_LICENSE_TERMS.md) and
+[Enterprise](ENTERPRISE_LICENSE_TERMS.md) named-user terms for counsel review;
+neither document is an active offer until its approval is recorded and the
+matching immutable backend catalog is deliberately published.
 
 The first-launch activation service receives only identity, entitlement,
 project-registration, and pseudonymous activation metadata. It does not receive
 project assets, scenes, source files, animation, prompts, or other creative
 work. See [PRIVACY.md](PRIVACY.md).
 
-For mainstream distribution, Tech Connector Core is publicly source-available
-under the controlling license. The complete first-party Official Tools Bundle
-is one optional product delivered separately through an account-gated download
-or repository. Users can install both together, keep them side by side, or point
-Core at the bundle through its existing project/tool directory settings. Users'
-own project directories and independently obtained tools do not require the
-Official Tools Bundle entitlement. See
+For mainstream distribution, Tech Connector Core and the complete first-party
+Official Tools Bundle source are publicly visible in this source-available
+monorepo under the controlling license. Public source visibility does not grant
+an activated execution or commercial entitlement. Official Tools execution is
+controlled by the signed `official_tools_bundle` capability. Users can install
+Core and the bundle together, keep them side by side, or point Core at the
+bundle through its existing project/tool directory settings. Users' own project
+directories and independently obtained tools do not require the Official Tools
+Bundle entitlement. See
 [docs/SOURCE_ACCESS_MODEL.md](docs/SOURCE_ACCESS_MODEL.md).
 
 The intent is simple:

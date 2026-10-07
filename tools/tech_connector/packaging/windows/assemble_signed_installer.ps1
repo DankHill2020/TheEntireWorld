@@ -2,7 +2,8 @@ param(
     [ValidateSet("core", "combined")][string]$Tier = "core",
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$DistRoot = "dist\windows",
-    [string]$ExpectedPublisher = "The Entire World"
+    [string]$ExpectedPublisher = "The Entire World",
+    [switch]$SigningCandidate
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,7 +11,9 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..\..")).Path
 Set-Location $repoRoot
 
-python tech_connector\packaging\release_gate.py --source-root $repoRoot --production
+$gateArguments = @("tech_connector\packaging\release_gate.py", "--source-root", $repoRoot, "--production")
+if ($SigningCandidate) { $gateArguments += "--signed-installer-candidate" }
+python @gateArguments
 if ($LASTEXITCODE -ne 0) { throw "Production release gate failed." }
 
 $freezeRoot = Join-Path $repoRoot "$DistRoot\frozen\$Tier\TechConnector"
