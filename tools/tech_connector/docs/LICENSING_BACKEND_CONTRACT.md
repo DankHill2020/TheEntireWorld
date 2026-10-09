@@ -82,16 +82,17 @@ not-before, and expiration claims. The payload schema is versioned.
 
 New entitlements use payload schema v2. The signed `license` object includes:
 
-- `type`: `community`, `perpetual`, or `custom`;
+- `type`: `community`, `annual`, `perpetual`, or `custom`;
 - `market_segment`: `community`, `indie`, `enterprise`, or `custom`;
 - `offer_id`: the immutable/configuration-driven offer identifier;
 - `classification_version`: the classification rules used at issuance;
 - agreement version and acceptance time; and
 - individual or organization grantee identity.
 
-Community commercial and Indie success-based offers use the same registered
-project-terms mechanism; their exact rate can differ because the rate is signed
-terms data. Indie perpetual offers carry covered major versions instead of
+Community commercial offers use the registered project-terms mechanism, with
+the exact studio-size schedule carried in signed terms data. Annual Indie and
+Enterprise offers emit the explicit `annual` type; negotiated grants remain
+`custom`. Indie perpetual offers carry covered major versions instead of
 silently acquiring success-based terms. Enterprise issuance requires an active
 organization membership, organization grantee, and explicit `enterprise_use`
 capability. A segment name alone never grants a feature or determines a price.
