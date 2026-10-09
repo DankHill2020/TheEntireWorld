@@ -1,0 +1,120 @@
+# Install this file at repository root as .github/workflows/signed-windows-release.yml
+# after replacing every REQUIRED_* value and enabling required reviewers on the
+# production-signing GitHub Environment.
+name: Signed Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without a leading v
+        required: true
+        type: string
+      tier:
+        description: Package tier
+        required: true
+        type: choice
+        options: [core, combined]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-sign-package:
+    runs-on: windows-latest
+    environment: production-signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Production evidence gate
+        shell: pwsh
+        run: python tools/tech_connector/packaging/release_gate.py --source-root tools --production --signed-installer-candidate
+      - name: Freeze application
+        shell: pwsh
+        run: tools/tech_connector/packaging/windows/build_windows_package.ps1 -Tier '${{ inputs.tier }}' -Mode freeze -Version '${{ inputs.version }}'
+      - name: Sign frozen executables
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: tools/dist/windows/frozen/${{ inputs.tier }}/TechConnector
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Assemble installer from signed inventory
+        id: installer
+        shell: pwsh
+        run: tools/tech_connector/packaging/windows/assemble_signed_installer.ps1 -Tier '${{ inputs.tier }}' -Version '${{ inputs.version }}' -SigningCandidate
+      - name: Sign installer
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: tools/dist/windows/installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify signatures and create checksums
+        shell: pwsh
+        run: |
+          tools/tech_connector/packaging/windows/verify_windows_signatures.ps1 -Path tools/dist/windows/frozen/${{ inputs.tier }}/TechConnector -Recurse -ExpectedPublisher 'The Entire World'
+          tools/tech_connector/packaging/windows/verify_windows_signatures.ps1 -Path tools/dist/windows/installer -ExpectedPublisher 'The Entire World'
+          Get-ChildItem tools/dist/windows/installer/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ASCII
+          }
+      - name: Microsoft Defender scan
+        shell: pwsh
+        run: |
+          $scanner = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          if (-not (Test-Path -LiteralPath $scanner)) { throw 'Microsoft Defender command-line scanner is unavailable.' }
+          & $scanner -Scan -ScanType 3 -File (Resolve-Path 'tools/dist/windows/installer').Path -DisableRemediation
+          if ($LASTEXITCODE -ne 0) { throw "Microsoft Defender scan failed with exit code $LASTEXITCODE." }
+      - name: Clean-runner install, repair, launch, and uninstall smoke
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem tools/dist/windows/installer/*.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one installer, found $($installers.Count)." }
+          $installer = $installers[0]
+          tools/tech_connector/packaging/windows/test_signed_installer.ps1 -Installer $installer.FullName -ExpectedPublisher 'The Entire World'
+      - name: Write signing-candidate provenance
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem tools/dist/windows/installer -File | Sort-Object Name | ForEach-Object {
+            [ordered]@{
+              name = $_.Name
+              size = $_.Length
+              sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          [ordered]@{
+            schema_version = 1
+            status = 'signed_installer_candidate_not_public_release'
+            source_commit = $env:GITHUB_SHA
+            workflow_run_id = $env:GITHUB_RUN_ID
+            workflow_run_attempt = $env:GITHUB_RUN_ATTEMPT
+            tier = '${{ inputs.tier }}'
+            version = '${{ inputs.version }}'
+            generated_at_utc = [DateTime]::UtcNow.ToString('o')
+            signature_verification = 'passed'
+            malware_scan = 'passed'
+            install_repair_launch_uninstall = 'passed'
+            artifacts = @($files)
+          } | ConvertTo-Json -Depth 5 | Set-Content tools/dist/windows/installer/release-manifest.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TechConnector-${{ inputs.tier }}-${{ inputs.version }}-signed
+          path: |
+            tools/dist/windows/installer/*.exe
+            tools/dist/windows/installer/*.sha256
+            tools/dist/windows/installer/release-manifest.json
+          if-no-files-found: error
+
