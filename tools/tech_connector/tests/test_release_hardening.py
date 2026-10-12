@@ -313,6 +313,22 @@ def test_protected_signing_workflow_scans_smokes_and_keeps_candidate_private() -
     assert "StartsWith($resolvedTemp" in smoke
 
 
+def test_protected_signing_workflow_attests_every_release_artifact() -> None:
+    template = (
+        PACKAGE_ROOT / "packaging" / "github" / "signed-windows-release.yml"
+    ).read_text(encoding="utf-8")
+    installed = (
+        TOOLS_ROOT.parent / ".github" / "workflows" / "signed-windows-release.yml"
+    ).read_text(encoding="utf-8")
+
+    assert installed == template
+    assert "attestations: write" in template
+    assert "uses: actions/attest@v4" in template
+    assert "tools/dist/windows/installer/*.exe" in template
+    assert "tools/dist/windows/installer/*.sha256" in template
+    assert "tools/dist/windows/installer/release-manifest.json" in template
+
+
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
     package = tmp_path / "stage"
     module = package / "tech_connector" / "__init__.py"

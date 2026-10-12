@@ -17,6 +17,7 @@ on:
         options: [core, combined]
 
 permissions:
+  attestations: write
   contents: read
   id-token: write
 
@@ -109,6 +110,13 @@ jobs:
             install_repair_launch_uninstall = 'passed'
             artifacts = @($files)
           } | ConvertTo-Json -Depth 5 | Set-Content tools/dist/windows/installer/release-manifest.json -Encoding UTF8
+      - name: Generate GitHub build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            tools/dist/windows/installer/*.exe
+            tools/dist/windows/installer/*.sha256
+            tools/dist/windows/installer/release-manifest.json
       - uses: actions/upload-artifact@v4
         with:
           name: TechConnector-${{ inputs.tier }}-${{ inputs.version }}-signed
