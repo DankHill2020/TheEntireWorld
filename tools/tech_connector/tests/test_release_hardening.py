@@ -350,6 +350,17 @@ def test_public_repository_runs_free_security_maintenance() -> None:
     assert "/tools/tech_connector/packaging" in dependabot
 
 
+def test_public_security_policy_uses_private_privacy_safe_intake() -> None:
+    policy = (TOOLS_ROOT.parent / "SECURITY.md").read_text(encoding="utf-8")
+    normalized = " ".join(policy.split())
+
+    assert "Security report" in policy
+    assert "license.theentireworld.net/ui/portal.html" in policy
+    assert "Do not send project assets" in normalized
+    assert "Do **not** post exploitable details" in policy
+    assert "best-effort targets, not a contractual SLA" in normalized
+
+
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
     package = tmp_path / "stage"
     module = package / "tech_connector" / "__init__.py"

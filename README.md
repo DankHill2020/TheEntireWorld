@@ -235,6 +235,7 @@ for the independent checks to perform before running an installer.
 - [Headless API](tools/tech_connector/docs/HEADLESS_API.md)
 - [Licensing launch readiness](tools/tech_connector/docs/LICENSING_LAUNCH_READINESS.md)
 - [Release signature and provenance verification](tools/tech_connector/docs/operations/SIGNED_RELEASES.md#verifying-a-downloaded-release)
+- [Security policy and private reporting](SECURITY.md)
 - [Contribution policy](tools/tech_connector/CONTRIBUTING.md)
 
 ## Release-status note
