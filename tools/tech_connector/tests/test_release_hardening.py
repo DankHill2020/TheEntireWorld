@@ -350,6 +350,20 @@ def test_public_repository_runs_free_security_maintenance() -> None:
     assert "/tools/tech_connector/packaging" in dependabot
 
 
+def test_release_workflow_rejects_invalid_mobile_javascript() -> None:
+    template = (
+        PACKAGE_ROOT / "packaging" / "github" / "release-readiness.yml"
+    ).read_text(encoding="utf-8")
+    installed = (
+        TOOLS_ROOT.parent / ".github" / "workflows" / "release-readiness.yml"
+    ).read_text(encoding="utf-8")
+
+    assert installed == template
+    assert "node --check tools/tech_connector/mobile_app/app.js" in template
+    assert "actions/checkout@v6" in template
+    assert "actions/checkout@v4" not in template
+
+
 def test_public_security_policy_uses_private_privacy_safe_intake() -> None:
     policy = (TOOLS_ROOT.parent / "SECURITY.md").read_text(encoding="utf-8")
     normalized = " ".join(policy.split())
