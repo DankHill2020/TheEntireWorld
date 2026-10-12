@@ -361,6 +361,18 @@ def test_public_security_policy_uses_private_privacy_safe_intake() -> None:
     assert "best-effort targets, not a contractual SLA" in normalized
 
 
+def test_public_issue_intake_routes_sensitive_reports_to_private_portal() -> None:
+    templates = TOOLS_ROOT.parent / ".github" / "ISSUE_TEMPLATE"
+    bug_form = (templates / "bug_report.yml").read_text(encoding="utf-8")
+    config = (templates / "config.yml").read_text(encoding="utf-8")
+
+    assert "Do not include credentials" in bug_form
+    assert "This is not an account, billing, licensing" in bug_form
+    assert "blank_issues_enabled: false" in config
+    assert config.count("https://license.theentireworld.net/ui/portal.html") == 2
+    assert "Security vulnerability report" in config
+
+
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
     package = tmp_path / "stage"
     module = package / "tech_connector" / "__init__.py"
