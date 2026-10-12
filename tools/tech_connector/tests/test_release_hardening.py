@@ -329,6 +329,27 @@ def test_protected_signing_workflow_attests_every_release_artifact() -> None:
     assert "tools/dist/windows/installer/release-manifest.json" in template
 
 
+def test_public_repository_runs_free_security_maintenance() -> None:
+    github_root = TOOLS_ROOT.parent / ".github"
+    codeql = (github_root / "workflows" / "codeql.yml").read_text(encoding="utf-8")
+    codeql_config = (github_root / "codeql" / "codeql-config.yml").read_text(
+        encoding="utf-8"
+    )
+    dependabot = (github_root / "dependabot.yml").read_text(encoding="utf-8")
+
+    assert "security-events: write" in codeql
+    assert "github/codeql-action/init@v4" in codeql
+    assert "github/codeql-action/analyze@v4" in codeql
+    assert "python" in codeql
+    assert "javascript-typescript" in codeql
+    assert "c-cpp" in codeql
+    assert "uses: security-extended" in codeql_config
+    assert "tools/external_tools" in codeql_config
+    assert "package-ecosystem: github-actions" in dependabot
+    assert "package-ecosystem: pip" in dependabot
+    assert "/tools/tech_connector/packaging" in dependabot
+
+
 def test_staged_manifest_verifies_before_code_import(tmp_path) -> None:
     package = tmp_path / "stage"
     module = package / "tech_connector" / "__init__.py"
