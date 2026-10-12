@@ -34,6 +34,42 @@ candidate evidence to `signed_installers`, mark that control verified, change
 the top-level readiness state to `approved_for_production`, and run the ordinary
 production gate again before publication.
 
+## Verifying a downloaded release
+
+Do not treat a filename, download page, or green workflow badge as sufficient
+proof. Before running an official Windows installer, verify all three layers:
+
+1. In PowerShell, inspect the Authenticode signature and require `Status` to be
+   `Valid` and `SignerCertificate.Subject` to identify The Entire World:
+
+   ```powershell
+   Get-AuthenticodeSignature .\TechConnector-Setup.exe | Format-List Status,StatusMessage,SignerCertificate
+   ```
+
+2. Download the matching `.sha256` sidecar, compute the installer digest, and
+   compare the lowercase hexadecimal values exactly:
+
+   ```powershell
+   (Get-FileHash .\TechConnector-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+   Get-Content .\TechConnector-Setup.exe.sha256
+   ```
+
+3. With GitHub CLI installed, verify the build provenance against the public
+   source repository:
+
+   ```powershell
+   gh attestation verify .\TechConnector-Setup.exe -R DankHill2020/TheEntireWorld
+   ```
+
+The protected workflow attests the final installer, checksum sidecar, and
+release manifest after signature, malware, and clean-runner smoke verification.
+GitHub provenance proves which repository workflow produced those exact bytes;
+it does not replace Authenticode publisher trust or SmartScreen reputation.
+
+If any check fails, do not run the installer. Preserve the download URL and the
+failing command output, then use the published support channel. Never send
+project assets or source files as part of a licensing or installer report.
+
 ## Current unsigned evidence
 
 The core 6.7 Windows freeze build and executable launch smoke passed on CPython
