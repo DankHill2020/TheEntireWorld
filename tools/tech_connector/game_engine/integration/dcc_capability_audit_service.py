@@ -12,6 +12,7 @@ from tech_connector.game_engine.authoring.rigging_workspace_service import RIGGI
 from tech_connector.game_engine.integration.dcc_operation_service import dcc_operation_registry
 from tech_connector.game_engine.integration.rigging_host_adapter_service import (
     BLENDER_CAPABILITY_STATUS,
+    HOUDINI_CAPABILITY_STATUS,
     MAX_CAPABILITY_STATUS,
     MAYA_CAPABILITY_STATUS,
     MOTIONBUILDER_CAPABILITY_STATUS,
@@ -129,6 +130,7 @@ def _bridged_rigging_evidence(host: str) -> DccDepartmentEvidence | None:
         "blender": BLENDER_CAPABILITY_STATUS,
         "3dsmax": MAX_CAPABILITY_STATUS,
         "maya": MAYA_CAPABILITY_STATUS,
+        "houdini": HOUDINI_CAPABILITY_STATUS,
         "motionbuilder": MOTIONBUILDER_CAPABILITY_STATUS,
     }.get(host)
     if statuses is None:
@@ -141,6 +143,7 @@ def _bridged_rigging_evidence(host: str) -> DccDepartmentEvidence | None:
         "blender": "blender_tools/Rigging/rigging_host_adapter.py",
         "3dsmax": "max_tools/Rigging/rigging_host_adapter.py",
         "maya": "maya_tools/Rigging/rigging_host_adapter.py",
+        "houdini": "houdini_tools/Rigging/rigging_host_adapter.py",
         "motionbuilder": "motionbuilder_tools/Rigging/rigging_host_adapter.py",
     }[host]
     module_exists = (_workspace_root() / module).is_file()

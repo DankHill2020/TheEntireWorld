@@ -69,7 +69,7 @@ def _run_server():
             if not _tech_connector_bridge_authorized(request):
                 conn.sendall(json.dumps({
                     "ok": False,
-                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "error": "A valid local Tech Connector bridge session is required.",
                     "code": "bridge_authorization_required",
                 }).encode("utf-8"))
                 conn.close()
@@ -107,7 +107,7 @@ class GimpBridge:
         default_port=7081,
         setup_script="bridges/gimp/gimp_bridge.py",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
 
     PORT_FILES = [
@@ -115,6 +115,11 @@ class GimpBridge:
         str(TOOLS_ROOT / "gimp_port.txt"),
     ]
     DEFAULT_PORT = 7081
+
+    def session_registry(self, host: str = "127.0.0.1") -> dict[str, Any]:
+        from tech_connector.bridges.session_discovery import bridge_session_diagnostics
+
+        return bridge_session_diagnostics("gimp", self, host=host)
 
     def find_port(self, host: str = "127.0.0.1") -> int | None:
         ports = self.find_ports(host=host)

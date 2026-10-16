@@ -2271,9 +2271,9 @@ def model_for_project_edit_stage(
     if tier == "local_plan":
         model = settings.get("router_local_plan") or settings.get("plan_model") or settings.get("general_model")
     elif tier == "local_semantic":
-        model = settings.get("semantic_intent_model") or "qwen3:4b-instruct"
+        model = settings.get("semantic_intent_model") or "qwen3.5:4b"
     elif tier == "local_semantic_verify":
-        model = settings.get("semantic_verifier_model") or "qwen3:4b-instruct"
+        model = settings.get("semantic_verifier_model") or "qwen3.5:4b"
     elif tier == "local_deep":
         model = settings.get("router_local_deep") or settings.get("model") or selected_model
     elif tier == "local_fast":
@@ -2304,7 +2304,7 @@ def model_for_project_edit_stage(
                 model = default_profile_model
     else:
         model = None
-    selected = str(model or selected_model or settings.get("model") or "qwen2.5-coder:7b")
+    selected = str(model or selected_model or settings.get("model") or "qwen3.5:4b")
     # Preserve the configured tier for telemetry, approval fingerprints, and
     # deterministic tests. The Ollama transport resolves installed aliases at
     # call time; doing it here silently changed the user's routing policy.

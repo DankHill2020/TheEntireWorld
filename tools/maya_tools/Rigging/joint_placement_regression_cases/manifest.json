@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "studio_juice_approved",
+      "scene": "C:/depot/ArtSource/Rigs/Juice_rig_update.ma",
+      "mesh": "|juice|do_not_touch|body_geo1_Skinning",
+      "baseline": "baselines/studio_juice_approved.json",
+      "build_skeleton": false
+    },
+    {
+      "id": "studio_john_healthy_approved",
+      "scene": "C:/depot/ArtSource/Rigs/johnHealthy_rig.ma",
+      "mesh": "|john|geo|johnHealthy_model:model|johnHealthy_model:nude_mod|johnHealthy_model:body_mod|johnHealthy_model:body_geo",
+      "baseline": "baselines/studio_john_healthy_approved.json",
+      "build_skeleton": false
+    },
+    {
+      "id": "cc0_quaternius_superhero_female",
+      "scene": "assets/quaternius_universal_base/Superhero_Female_FullBody.fbx",
+      "source_namespace": "source",
+      "mesh": "source:Superhero_Female",
+      "baseline": "baselines/cc0_quaternius_superhero_female.json",
+      "build_skeleton": true
+    },
+    {
+      "id": "cc0_quaternius_superhero_male",
+      "scene": "assets/quaternius_universal_base/Superhero_Male_FullBody.fbx",
+      "source_namespace": "source",
+      "mesh": "source:SuperHero_Male",
+      "baseline": "baselines/cc0_quaternius_superhero_male.json",
+      "build_skeleton": true
+    }
+  ]
+}

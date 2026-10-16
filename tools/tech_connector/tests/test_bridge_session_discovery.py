@@ -59,6 +59,92 @@ def test_direct_socket_bridges_share_multi_session_contract() -> None:
         assert callable(getattr(bridge_type, "find_ports", None)), bridge_type.__name__
         assert callable(getattr(bridge_type, "session_info", None)), bridge_type.__name__
         assert callable(getattr(bridge_type, "sessions", None)), bridge_type.__name__
+        assert callable(getattr(bridge_type, "session_registry", None)), bridge_type.__name__
+
+
+def test_maya_bridge_reads_and_explains_disk_session_registry(monkeypatch, tmp_path) -> None:
+    registry = tmp_path / "maya_sessions.json"
+    preferred = tmp_path / "maya_port.txt"
+    central_registry = tmp_path / "bridge_ports.json"
+    monkeypatch.setenv("TECH_CONNECTOR_BRIDGE_PORT_REGISTRY_FILE", str(central_registry))
+    registry.write_text(json.dumps([
+        {"port": 7002, "pid": 42, "scene": "C:/show/hero.ma", "version": "2025"},
+        {"port": "invalid", "pid": 99},
+    ]), encoding="utf-8")
+    preferred.write_text("7001", encoding="utf-8")
+    monkeypatch.setattr(MayaBridge, "SESSION_FILE", registry)
+    monkeypatch.setattr(MayaBridge, "PORT_FILE", preferred)
+
+    bridge = MayaBridge()
+    monkeypatch.setattr(bridge, "_is_port_open", lambda _host, port: port == 7002)
+
+    assert bridge.recorded_sessions() == [
+        {"port": 7002, "pid": 42, "scene": "C:/show/hero.ma", "version": "2025"},
+    ]
+    assert bridge.find_ports() == [7002]
+    evidence = bridge.session_registry()
+    assert evidence["schema"] == "tech_connector.bridge_port_diagnostics.v1"
+    assert evidence["session_registry_path"] == str(registry)
+    assert {row["path"] for row in evidence["port_files"]} == {str(preferred)}
+    assert evidence["live_ports"] == [7002]
+    assert evidence["stale_ports"] == []
+    assert evidence["registry_path"] == str(central_registry)
+    assert session_discovery.load_bridge_port_registry()["providers"]["maya"]["live_ports"] == [7002]
+
+
+def test_port_diagnostics_attribute_every_candidate_source(monkeypatch, tmp_path) -> None:
+    port_file = tmp_path / "unity_port.txt"
+    central_registry = tmp_path / "bridge_ports.json"
+    port_file.write_text("7442", encoding="utf-8")
+    monkeypatch.setenv("TECH_CONNECTOR_BRIDGE_PORT_REGISTRY_FILE", str(central_registry))
+    monkeypatch.setenv("UNITY_COMMAND_PORT", "7443")
+    monkeypatch.setenv("UNITY_COMMAND_PORT_SCAN_COUNT", "3")
+    monkeypatch.setattr(session_discovery, "preferred_session_port", lambda _provider: 7441)
+
+    class Bridge:
+        DEFAULT_PORT = 7041
+        PORT_FILES = [str(port_file)]
+
+        def _candidate_ports(self):
+            return [7441, 7442, 7443, 7041, 7042, 7043]
+
+        def find_ports(self, host="127.0.0.1"):
+            assert host == "127.0.0.1"
+            return [7442]
+
+    evidence = session_discovery.bridge_session_diagnostics("unity", Bridge())
+
+    assert evidence["preferred_port"] == 7441
+    assert evidence["environment"] == {
+        "name": "UNITY_COMMAND_PORT",
+        "configured": True,
+        "port": 7443,
+    }
+    assert evidence["scan"]["range"] == [7041, 7043]
+    assert evidence["port_files"][0]["port"] == 7442
+    assert evidence["selected_port"] == 7442
+    assert evidence["live_ports"] == [7442]
+    assert evidence["stale_ports"] == []
+    assert evidence["port_sources"]["7441"] == ["preferred_session"]
+    assert "environment:UNITY_COMMAND_PORT" in evidence["port_sources"]["7443"]
+    persisted = session_discovery.load_bridge_port_registry()
+    assert persisted["path"] == str(central_registry)
+    assert persisted["providers"]["unity"]["selected_port"] == 7442
+
+
+def test_unreal_mixin_uses_initialized_provider_name(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(
+        "TECH_CONNECTOR_BRIDGE_PORT_REGISTRY_FILE",
+        str(tmp_path / "bridge_ports.json"),
+    )
+    bridge = UnrealBridge()
+    monkeypatch.setattr(bridge, "find_ports", lambda host="127.0.0.1": [])
+
+    evidence = bridge.session_registry()
+
+    assert evidence["provider"] == "unreal"
+    assert "unreal" in session_discovery.load_bridge_port_registry()["providers"]
+    assert "" not in session_discovery.load_bridge_port_registry()["providers"]
 
 
 def test_auto_reconnect_preflights_all_ten_external_hosts() -> None:

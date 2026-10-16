@@ -27,7 +27,7 @@ def test_managed_bootstrap_is_idempotent_and_preserves_unrelated_user_code() -> 
     assert rendered.count(BLOCK_BEGIN) == 1
     assert rendered.count(BLOCK_END) == 1
     assert "maya_menu.initialize_command_port()" in rendered
-    assert "Authenticated JSON Bridge Startup Script v3" in rendered
+    assert "Authenticated JSON Bridge Startup Script v4" in rendered
     assert render_user_setup(rendered) == rendered
 
 

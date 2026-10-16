@@ -224,7 +224,9 @@ def test_all_license_types_round_trip(signing_material, license_type):
     (
         ("community", "community"),
         ("indie", "community"),
+        ("indie", "annual"),
         ("indie", "perpetual"),
+        ("enterprise", "annual"),
         ("enterprise", "custom"),
     ),
 )
@@ -249,6 +251,7 @@ def test_v2_market_segments_round_trip(
     ("license_type", "expected_segment"),
     (
         ("community", LicenseMarketSegment.COMMUNITY),
+        ("annual", LicenseMarketSegment.CUSTOM),
         ("perpetual", LicenseMarketSegment.CUSTOM),
         ("custom", LicenseMarketSegment.CUSTOM),
     ),

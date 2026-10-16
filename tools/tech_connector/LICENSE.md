@@ -1,5 +1,7 @@
 # Tech Connector Community Source License
 
+Release status: pre-release draft — qualified legal review required
+
 Copyright (c) 2026 The Entire World, LLC. All rights reserved.
 
 License version: TC-2026.2

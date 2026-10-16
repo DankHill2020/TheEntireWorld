@@ -667,34 +667,6 @@ function renderSmartChannelsList() {
   container.innerHTML = htmlStr;
 }
 
-  pendingSharePayload = { content, title, targetChannel: defaultSmartChannels[0] };
-  const modal = document.getElementById("smartChannelPickerModal");
-  const titleEl = document.getElementById("smartSnippetTitle");
-  const contentEl = document.getElementById("smartSnippetContent");
-
-  if (titleEl) titleEl.textContent = title;
-  if (contentEl) contentEl.textContent = content;
-
-  renderSmartChannelsList();
-  if (modal) modal.hidden = false;
-}
-
-function renderSmartChannelsList() {
-  const container = document.getElementById("smartChannelsList");
-  const query = (document.getElementById("smartChannelFilter")?.value || "").toLowerCase();
-  if (!container) return;
-
-  const filtered = defaultSmartChannels.filter((c) => !query || c.name.toLowerCase().includes(query) || c.target.toLowerCase().includes(query));
-
-  container.innerHTML = filtered.map((c, index) => {
-    const isSelected = pendingSharePayload.targetChannel?.target === c.target && pendingSharePayload.targetChannel?.platform === c.platform;
-    return `<div class="smart-channel-pill ${isSelected ? "selected" : ""}" data-smart-channel-idx="${index}">
-      <span>${c.icon}</span>
-      <span>${escapeHtml(c.name)}</span>
-    </div>`;
-  }).join("") || '<div class="muted">No matching channels</div>';
-}
-
 async function confirmShareSmartChannel() {
   if (!pendingSharePayload.targetChannel) return;
   const { platform, target } = pendingSharePayload.targetChannel;

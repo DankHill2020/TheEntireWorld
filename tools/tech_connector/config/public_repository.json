@@ -2,7 +2,7 @@
   "schema_version": 1,
   "files": [
     {"source": "README.md", "target": "README.md"},
-    {"source": "LICENSE", "target": "LICENSE"},
+    {"source": "LICENSE.md", "target": "LICENSE.md"},
     {"source": "tools/README.md", "target": "tools/README.md"},
     {"source": "tools/tech_connector/README.md", "target": "tools/tech_connector/README.md"},
     {"source": "tools/tech_connector/LICENSE.md", "target": "tools/tech_connector/LICENSE.md"},

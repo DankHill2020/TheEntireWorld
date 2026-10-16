@@ -140,6 +140,18 @@ UTILITY_NODE_REGISTRY: dict[str, UtilityNodeDefinition] = {
         return_annotation="Path",
         description="Join a base path and child path.",
     ),
+    "select_file_path": UtilityNodeDefinition(
+        kind="select_file_path",
+        name="Select File Path",
+        category="Filesystem",
+        params=[_p("file_path", "str", "", "filesystem.path.file")],
+        outputs=[_o("file_path", "str", "filesystem.path.file")],
+        return_annotation="str",
+        description=(
+            "Choose a file with the Browse button or type/paste a path directly, "
+            "then output that path to downstream nodes."
+        ),
+    ),
     "constant": UtilityNodeDefinition(
         kind="constant",
         name="Constant Value",
@@ -311,6 +323,11 @@ def utility_codegen(kind: str, idx: int, call_args_by_name: dict[str, str], para
             "        from pathlib import Path",
             f"        step{idx}_result = Path({call_args_by_name.get('base', repr(''))}) / str({call_args_by_name.get('child', repr(''))})",
             f"        step{idx}_outputs = {{'path': step{idx}_result}}",
+        ]
+    if kind == "select_file_path":
+        return [
+            f"        step{idx}_result = str({call_args_by_name.get('file_path', repr(''))} or '')",
+            f"        step{idx}_outputs = {{'file_path': step{idx}_result}}",
         ]
     if kind == "constant":
         return [

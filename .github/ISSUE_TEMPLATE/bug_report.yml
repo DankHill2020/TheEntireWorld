@@ -1,0 +1,78 @@
+name: Product bug report
+description: Report a reproducible, non-sensitive Tech Connector product defect.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form only for non-sensitive product bugs. Do not include credentials, tokens, license or device IDs, personal data, project assets, scenes, source files, animation, renders, or customer material. Use the private account portal for licensing/account problems and security reports.
+
+  - type: input
+    id: version
+    attributes:
+      label: Tech Connector version
+      description: Use the exact version shown in About or the release filename.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (headless/source only)
+        - macOS (headless/source only)
+        - Other or unknown
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host application and version
+      description: For example Maya 2025, Blender 4.3, Unreal 5.6, or Standalone.
+      placeholder: Standalone
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction steps
+      description: Use a new empty test project and remove private paths or identifiers.
+      placeholder: |
+        1. Start Tech Connector...
+        2. Open...
+        3. Choose...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste only short, sanitized error text. Do not upload a project or account data.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy and scope confirmation
+      options:
+        - label: I removed credentials, identifiers, personal data, private paths, and creative/customer content.
+          required: true
+        - label: This is not an account, billing, licensing, privacy, or security report.
+          required: true

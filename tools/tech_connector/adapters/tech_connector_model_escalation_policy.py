@@ -40,10 +40,10 @@ class TechConnectorLocalModelEscalationPolicy(ModelTierEscalationPolicy):
             ]
         except Exception:
             tiers = [
-                ModelTier("micro", "ollama", "qwen2.5-coder:3b", "local"),
-                ModelTier("small", "ollama", "qwen2.5-coder:3b", "local"),
-                ModelTier("standard", "ollama", "qwen2.5-coder:7b", "local"),
-                ModelTier("quality", "ollama", "qwen2.5-coder:7b", "local"),
-                ModelTier("deep", "ollama", "qwen2.5-coder:7b", "local"),
+                ModelTier("micro", "ollama", "qwen3.5:4b", "local"),
+                ModelTier("small", "ollama", "qwen3.5:4b", "local"),
+                ModelTier("standard", "ollama", "qwen3.5:4b", "local"),
+                ModelTier("quality", "ollama", "qwen3.5:9b", "local"),
+                ModelTier("deep", "ollama", "qwen3.5:9b", "local"),
             ]
         super().__init__(tiers)

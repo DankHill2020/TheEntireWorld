@@ -63,7 +63,7 @@ class MayaBridge(DCCBridgeDelegateMixin):
         default_port=DEFAULT_MAYA_PORT,
         setup_script="installers/maya_command_port_setup.py",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
 
     def __init__(self):
@@ -82,6 +82,12 @@ class MayaBridge(DCCBridgeDelegateMixin):
         os.environ.get(
             "MAYA_COMMAND_PORT_FILE",
             Path.home() / "temp" / "maya_port.txt",
+        )
+    ).expanduser()
+    SESSION_FILE = Path(
+        os.environ.get(
+            "MAYA_COMMAND_SESSION_FILE",
+            Path.home() / "temp" / "maya_sessions.json",
         )
     ).expanduser()
 
@@ -109,6 +115,12 @@ class MayaBridge(DCCBridgeDelegateMixin):
         except Exception:
             pass
 
+        for session in self.recorded_sessions():
+            try:
+                candidates.append((int(session["port"]), "session_registry"))
+            except (KeyError, TypeError, ValueError):
+                continue
+
         try:
             scan_count = max(1, int(os.environ.get("MAYA_COMMAND_PORT_SCAN_COUNT", "10")))
         except Exception:
@@ -116,6 +128,38 @@ class MayaBridge(DCCBridgeDelegateMixin):
         for offset in range(scan_count):
             candidates.append((DEFAULT_MAYA_PORT + offset, "scan"))
         return candidates
+
+
+    def recorded_sessions(self) -> list[dict]:
+        """Return the Maya-authored on-disk bridge registry without probing sockets."""
+
+        try:
+            payload = json.loads(self.SESSION_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        sessions: list[dict] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                port = int(item.get("port") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not 0 < port < 65536:
+                continue
+            row = dict(item)
+            row["port"] = port
+            sessions.append(row)
+        return sessions
+
+    def session_registry(self, host: str = "127.0.0.1") -> dict:
+        """Expose Maya through the shared source-attributed port contract."""
+
+        from tech_connector.bridges.session_discovery import bridge_session_diagnostics
+
+        return bridge_session_diagnostics("maya", self, host=host)
 
     def _is_port_open(self, host: str, port: int) -> bool:
         try:
@@ -299,8 +343,32 @@ print(json.dumps({
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(min(1.0, max(0.05, float(timeout))))
-                s.connect(("127.0.0.1", port))
-                s.sendall(payload.encode("utf-8"))
+                try:
+                    s.connect(("127.0.0.1", port))
+                except socket.timeout:
+                    return False, (
+                        f"Maya bridge connection to 127.0.0.1:{int(port)} timed out; "
+                        "the selected port is not accepting TCP connections."
+                    )
+                except ConnectionRefusedError:
+                    return False, (
+                        f"Maya bridge connection to 127.0.0.1:{int(port)} was refused; "
+                        "no bridge server is listening on that port."
+                    )
+                except OSError as exc:
+                    return False, (
+                        f"Maya bridge connection to 127.0.0.1:{int(port)} failed: {exc}"
+                    )
+                try:
+                    s.sendall(payload.encode("utf-8"))
+                except socket.timeout:
+                    return False, (
+                        f"Maya bridge request send to 127.0.0.1:{int(port)} timed out."
+                    )
+                except OSError as exc:
+                    return False, (
+                        f"Maya bridge request send to 127.0.0.1:{int(port)} failed: {exc}"
+                    )
 
                 chunks: list[bytes] = []
                 response_bytes = 0
@@ -309,7 +377,10 @@ print(json.dumps({
                         return False, "Maya command canceled."
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
-                        return False, f"Maya command timed out after {float(timeout):g} seconds."
+                        return False, (
+                            f"Maya bridge at 127.0.0.1:{int(port)} accepted the TCP connection "
+                            f"but did not return a command response within {float(timeout):g} seconds."
+                        )
                     s.settimeout(min(0.25, remaining))
                     try:
                         data = s.recv(262144)

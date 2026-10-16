@@ -1005,6 +1005,12 @@ ADAPTIVE_SCENE_COMMANDS: dict[str, AdaptiveSceneCommand] = {
         preferred_hosts=("tech_connector",), tc_native_status="implemented",
         notes="Execute an explicitly confirmed production journey on one pinned DCC session and return ordered operation, artifact, and readback receipts.",
     ),
+    "engine.qualify_dcc_release": AdaptiveSceneCommand(
+        key="engine.qualify_dcc_release", label="Qualify DCC For Release", department="engine",
+        subjects=("engine", "dcc", "release", "qualification", "session", "workflow"), component_types=("object",),
+        preferred_hosts=("tech_connector",), tc_native_status="implemented",
+        notes="Collect host identity, source parity, production-workflow, and final readiness receipts against one pinned DCC session; mutation remains explicitly approval-gated.",
+    ),
     "engine.build_runtime_geometry_plan": AdaptiveSceneCommand(
         key="engine.build_runtime_geometry_plan", label="Plan Runtime Geometry", department="engine",
         subjects=("mesh", "material", "textures", "runtime", "performance"), component_types=("object",),

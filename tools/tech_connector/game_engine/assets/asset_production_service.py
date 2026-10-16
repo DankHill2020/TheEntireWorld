@@ -186,19 +186,19 @@ class AssetProductionService:
                     "kind": kind, "path": self._project_relative(physics_artifact.path),
                     "content_hash": physics_artifact.content_hash,
                 })
-            if record.asset_type in {"tc.skeletal_mesh", "tc.skin_binding"}:
-                from .character_asset_service import compile_skeletal_mesh_plan, compile_skin_binding_payload
+            if record.asset_type in {"tc.skeleton", "tc.skeletal_mesh", "tc.skin_binding"}:
+                from .character_asset_service import compile_skeletal_mesh_plan, compile_skeleton_payload, compile_skin_binding_payload
 
                 try:
                     source_payload = json.loads(record.source_path.read_text(encoding="utf-8"))
-                    compiler = compile_skeletal_mesh_plan if record.asset_type == "tc.skeletal_mesh" else compile_skin_binding_payload
+                    compiler = {"tc.skeleton": compile_skeleton_payload, "tc.skeletal_mesh": compile_skeletal_mesh_plan, "tc.skin_binding": compile_skin_binding_payload}[record.asset_type]
                     cooked_payload = compiler(
                         dict(source_payload.get("properties") or {}), platform=str(platform), quality=str(quality),
                     )
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                     raise ValueError(f"{record.source_path.name}: could not compile character source: {exc}") from exc
-                kind = "skeletal_mesh_plan" if record.asset_type == "tc.skeletal_mesh" else "skin_binding_runtime"
-                extension = ".tcskmeshbin" if record.asset_type == "tc.skeletal_mesh" else ".tcskinbin"
+                kind = {"tc.skeleton": "skeleton_runtime", "tc.skeletal_mesh": "skeletal_mesh_plan", "tc.skin_binding": "skin_binding_runtime"}[record.asset_type]
+                extension = {"tc.skeleton": ".tcskeletonbin", "tc.skeletal_mesh": ".tcskmeshbin", "tc.skin_binding": ".tcskinbin"}[record.asset_type]
                 character_artifact = self.database.store_derived(
                     record.asset_id, f"{kind}:{platform}:{quality}", cooked_payload,
                     metadata={"platform": platform, "quality": quality}, extension=extension,

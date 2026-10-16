@@ -67,6 +67,22 @@ def test_world_builds_generate_runtime_geometry_navigation_lighting_and_hlod(tmp
     assert partition_payload["cells"][0]["members"][0]["asset_id"]
 
 
+def test_navigation_build_applies_area_modifiers_to_baked_polygons(tmp_path) -> None:
+    database, api, _terrain, navigation, _lighting, _hlod, _partition = _world_stack(tmp_path)
+    values = api.get_world_asset(navigation.asset_id)
+    values["areas"] = [{"name": "Walkable", "cost": 1.0}, {"name": "Mud", "cost": 4.0}, {"name": "Blocked", "cost": -1.0}]
+    values["modifiers"] = [
+        {"id": "mud", "area": "Mud", "minimum": [0.0, 0.0], "maximum": [0.5, 1.0], "enabled": True},
+        {"id": "wall", "area": "Blocked", "minimum": [0.5, 0.0], "maximum": [0.75, 1.0], "enabled": True},
+    ]
+    api.update_world_asset(navigation.asset_id, values, replace=True)
+    receipt = WorldBuildService(tmp_path, database).build(navigation.asset_id)
+    payload = json.loads(receipt.artifact.path.read_text(encoding="utf-8"))
+    polygons = [polygon for tile in payload["tiles"] for polygon in tile["polygons"]]
+    assert any(polygon["area"] == "Mud" and polygon["cost"] == 4.0 for polygon in polygons)
+    assert len(polygons) < 16 * 16
+
+
 def test_world_streaming_runtime_respects_request_memory_and_hysteresis(tmp_path) -> None:
     database, api, _terrain, _navigation, _lighting, _hlod, partition = _world_stack(tmp_path)
     runtime = api.open_world_streaming_runtime(partition.asset_id)

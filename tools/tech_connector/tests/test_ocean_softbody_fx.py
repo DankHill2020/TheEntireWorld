@@ -57,7 +57,7 @@ def test_softbody_and_ocean_presets_execute_real_simulation_domains() -> None:
     assert len(jello.particles) == 8 and len(jello.volume_constraints) == 1
     assert {particle.phase for particle in jello.particles} == {"softbody"}
     assert jello.substeps == 3
-    assert jello.constraint_iterations == 3
+    assert jello.constraint_iterations == 2
     assert len(ocean.deformable_surfaces) == 1
     assert {"softbody", "effect"} <= set(compile_simulation_world(jello, backend="reference_cpu").domains)
     assert {"surface", "effect"} <= set(compile_simulation_world(ocean, backend="reference_cpu").domains)

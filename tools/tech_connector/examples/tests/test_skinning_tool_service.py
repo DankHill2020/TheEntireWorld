@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tech_connector.services.dcc.skinning_tool_service import (
     add_skin_influence,
     SkinInfluence,
@@ -24,6 +26,9 @@ from tech_connector.services.dcc.skinning_tool_service import (
     transfer_skin_weights,
 )
 from tech_connector.game_engine.deformation.spatial_skin_smoothing_service import (
+    detect_deformation_ripple_indices,
+    detect_weight_outlier_indices,
+    estimate_spatial_smoothing_radius,
     spatial_smooth_weight_rows,
 )
 
@@ -217,6 +222,90 @@ def test_spatial_smooth_area_weights_prevent_dense_patch_from_crowding_out_surfa
 
     assert unweighted[0]["B"] > 0.0
     assert area_weighted[0]["B"] > unweighted[0]["B"]
+
+
+def test_automatic_spatial_radius_scales_and_accounts_for_sparse_regions() -> None:
+    positions = [(0.0, 0.0, 0.0), (100.0, 0.0, 0.0), (0.0, 100.0, 0.0)]
+    uniform = estimate_spatial_smoothing_radius(
+        positions,
+        sample_weights=[1.0, 1.0, 1.0],
+    )
+    mixed_density = estimate_spatial_smoothing_radius(
+        positions,
+        sample_weights=[1.0, 1.0, 25.0],
+    )
+    scaled = estimate_spatial_smoothing_radius(
+        [(x * 10.0, y * 10.0, z * 10.0) for x, y, z in positions],
+        sample_weights=[100.0, 100.0, 2500.0],
+    )
+
+    assert mixed_density > uniform
+    assert scaled == pytest.approx(mixed_density * 10.0)
+
+
+def test_hybrid_surface_smoothing_follows_connected_rows_over_spatial_distractors() -> None:
+    positions = [
+        (0.0, 0.0, 0.0),
+        (10.0, 0.0, 0.0),
+        (0.01, 0.0, 0.0),
+    ]
+    rows = [{"A": 1.0}, {"B": 1.0}, {"A": 1.0}]
+    adjacency = [[1], [0], []]
+
+    spatial_only, _ = spatial_smooth_weight_rows(
+        positions,
+        rows,
+        radius=0.1,
+        strength=1.0,
+        target_indices=[0],
+        max_influences=2,
+    )
+    hybrid, _ = spatial_smooth_weight_rows(
+        positions,
+        rows,
+        radius=0.1,
+        strength=1.0,
+        target_indices=[0],
+        max_influences=2,
+        topology_neighbors=adjacency,
+        topology_share=0.8,
+    )
+
+    assert spatial_only[0].get("B", 0.0) == 0.0
+    assert hybrid[0]["B"] > 0.75
+
+
+def test_weight_outlier_detection_finds_spike_without_flagging_smooth_gradient() -> None:
+    adjacency = [[1], [0, 2], [1, 3], [2, 4], [3]]
+    spike_rows = [
+        {"A": 1.0},
+        {"A": 1.0},
+        {"B": 1.0},
+        {"A": 1.0},
+        {"A": 1.0},
+    ]
+    assert detect_weight_outlier_indices(spike_rows, adjacency) == (2,)
+
+    gradient_rows = [
+        {"A": 1.0},
+        {"A": 0.75, "B": 0.25},
+        {"A": 0.5, "B": 0.5},
+        {"A": 0.25, "B": 0.75},
+        {"B": 1.0},
+    ]
+    assert detect_weight_outlier_indices(gradient_rows, adjacency) == ()
+
+
+def test_deformation_ripple_detection_ignores_linear_bend_and_finds_saw_tooth() -> None:
+    bind = [(float(index), 0.0, 0.0) for index in range(5)]
+    adjacency = [[1], [0, 2], [1, 3], [2, 4], [3]]
+    smooth_pose = [(x, 0.0, x * 0.2) for x, _y, _z in bind]
+    jagged_pose = [
+        (x, 0.0, offset) for (x, _y, _z), offset in zip(bind, (0.0, 0.4, 0.0, 0.4, 0.0))
+    ]
+
+    assert detect_deformation_ripple_indices(bind, smooth_pose, adjacency) == ()
+    assert detect_deformation_ripple_indices(bind, jagged_pose, adjacency) == (1, 2, 3)
 
 
 def test_add_and_remove_influence_preserve_valid_normalized_rows() -> None:

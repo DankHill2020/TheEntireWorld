@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -112,9 +113,23 @@ class AssetEditorSession:
             "created_ns": time.time_ns(),
             "values": deepcopy(values),
         }
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(temporary, path)
+        handle, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.{os.getpid()}.", suffix=".tmp", dir=str(path.parent),
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            for attempt in range(5):
+                try:
+                    os.replace(temporary, path)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.01 * (2 ** attempt))
+        finally:
+            temporary.unlink(missing_ok=True)
         return path
 
     def read_recovery(self) -> dict[str, Any] | None:

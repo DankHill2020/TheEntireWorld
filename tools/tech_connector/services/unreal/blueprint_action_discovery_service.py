@@ -67,7 +67,7 @@ def semantic_operation_search_terms(
 def suggest_action_search_terms(
     semantic_operations: Iterable[dict[str, Any] | str],
     *,
-    model: str = "qwen2.5-coder:7b",
+    model: str = "qwen3.5:4b",
 ) -> dict[str, list[str]]:
     """Ask a reasoning model for UE palette vocabulary; live reflection remains authoritative."""
 
@@ -185,7 +185,7 @@ def discover_action_candidates(
     semantic_operations: Iterable[dict[str, Any] | str],
     max_results_per_query: int = 15,
     use_reasoning: bool = True,
-    reasoning_model: str = "qwen2.5-coder:7b",
+    reasoning_model: str = "qwen3.5:4b",
 ) -> dict[str, Any]:
     """Search live context-filtered actions; do not mutate the project or select a winner."""
 

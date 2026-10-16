@@ -2,6 +2,7 @@ from tech_connector.game_engine.integration.adaptive_scene_command_service impor
 from tech_connector.game_engine.integration.capability_maturity_service import audit_capability_maturity
 from tech_connector.game_engine.integration import dcc_host_qualification_service as qualification
 from tech_connector.game_engine.integration import dcc_source_parity_qualification_service as source_parity
+from tech_connector.game_engine.integration import dcc_release_qualification_runner as release_runner
 from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
 
 
@@ -71,18 +72,57 @@ def test_viewer_live_qualification_persists_the_host_receipt(monkeypatch, tmp_pa
         status="live",
         missing_gates=("install_recovery_readback",),
     )
-    monkeypatch.setattr(qualification, "probe_dcc_host", lambda *_args, **_kwargs: receipt)
+    calls = []
+    monkeypatch.setattr(
+        qualification,
+        "probe_dcc_host",
+        lambda *_args, **kwargs: calls.append(kwargs) or receipt,
+    )
     ledger_path = tmp_path / "receipts.json"
 
     result = ThreeDMeshPainterViewport._execute_tc_engine_command(
         _ViewportHarness(),
         "engine.qualify_dcc_host",
-        {"host": "motionbuilder", "ledger_path": str(ledger_path)},
+        {
+            "host": "motionbuilder",
+            "ledger_path": str(ledger_path),
+            "install_recovery_verified": True,
+        },
     )
 
     assert result["dcc_host_qualification"]["status"] == "live"
+    assert calls[0]["install_recovery_verified"] is True
     assert result["qualification_summary"]["recorded_hosts"] == 1
     assert qualification.qualification_ledger(ledger_path)["receipts"]["motionbuilder"]["preferred_session_honored"]
+
+
+def test_viewer_can_run_complete_release_qualification_for_one_session(monkeypatch, tmp_path) -> None:
+    calls = []
+    monkeypatch.setattr(
+        release_runner,
+        "qualify_dcc_release_host",
+        lambda host, **kwargs: calls.append((host, kwargs)) or {
+            "status": "release_qualified",
+            "session_port": 7011,
+        },
+    )
+
+    result = ThreeDMeshPainterViewport._execute_tc_engine_command(
+        _ViewportHarness(),
+        "engine.qualify_dcc_release",
+        {
+            "host": "motionbuilder",
+            "workspace": str(tmp_path),
+            "session_port": 7011,
+            "install_recovery_verified": True,
+            "confirm_mutating": True,
+        },
+    )
+
+    assert result["dcc_release_qualification"]["status"] == "release_qualified"
+    assert calls[0][0] == "motionbuilder"
+    assert calls[0][1]["session_port"] == 7011
+    assert calls[0][1]["confirm_mutating"] is True
 
 
 def test_viewer_source_parity_qualification_pins_and_persists_session(monkeypatch, tmp_path) -> None:

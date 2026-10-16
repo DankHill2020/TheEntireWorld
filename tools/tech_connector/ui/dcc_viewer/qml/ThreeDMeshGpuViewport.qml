@@ -7,6 +7,10 @@ Rectangle {
     id: root
     color: "#090e14"
     property color sceneClearColor: "#090e14"
+    property string lightingModel: "physically_based"
+    property string viewportMode: "lit"
+    property real viewportExposure: 1.0
+    property bool showEditorGrid: true
     property color keyLightColor: "#fff2db"
     property real keyLightBrightness: 1.15
     property real keyLightEulerX: -38
@@ -186,7 +190,7 @@ Rectangle {
             ditheringEnabled: true
             aoEnabled: true
             aoStrength: 35
-            probeExposure: root.environmentExposure
+            probeExposure: root.environmentExposure * root.viewportExposure
             lightProbe: root.environmentTexture.toString().length > 0 ? environmentProbe : null
         }
 
@@ -219,7 +223,7 @@ Rectangle {
             DirectionalLight {
                 eulerRotation.x: root.keyLightEulerX
                 eulerRotation.y: root.keyLightEulerY
-                brightness: root.keyLightBrightness
+                brightness: root.keyLightBrightness * root.viewportExposure
                 color: root.keyLightColor
                 castsShadow: true
                 shadowFactor: 35
@@ -228,8 +232,23 @@ Rectangle {
             DirectionalLight {
                 eulerRotation.x: 35
                 eulerRotation.y: 145
-                brightness: root.fillLightBrightness
+                brightness: root.fillLightBrightness * root.viewportExposure
                 color: root.fillLightColor
+            }
+
+            Model {
+                visible: root.showEditorGrid
+                y: -0.002
+                geometry: DynamicEditorGridGeometry {}
+                castsShadows: false
+                receivesShadows: false
+                materials: [PrincipledMaterial {
+                    lighting: PrincipledMaterial.NoLighting
+                    baseColor: "#304052"
+                    opacity: 0.46
+                    alphaMode: PrincipledMaterial.Blend
+                    cullMode: Material.NoCulling
+                }]
             }
 
             Model {
@@ -239,7 +258,10 @@ Rectangle {
                 materials: root.proceduralNativeReady ? [nativeProceduralMaterial] : [principledMaterial]
                 PrincipledMaterial {
                     id: principledMaterial
-                    baseColor: root.materialColor
+                    lighting: root.viewportMode === "unlit" || root.lightingModel === "unlit"
+                        ? PrincipledMaterial.NoLighting
+                        : PrincipledMaterial.FragmentLighting
+                    baseColor: root.viewportMode === "lighting_only" ? "#b8bec7" : root.materialColor
                     roughness: root.materialRoughness
                     metalness: root.materialMetalness
                     opacity: root.materialOpacity
@@ -252,9 +274,9 @@ Rectangle {
                     attenuationDistance: root.materialAttenuationDistance
                     cullMode: Material.BackFaceCulling
                     baseColorMap: Texture {
-                        source: root.proceduralTextureReady || baseColorMedia.animated ? "" : root.baseColorTexture
-                        sourceItem: !root.proceduralTextureReady && baseColorMedia.animated ? baseColorMedia : null
-                        textureData: root.proceduralTextureReady ? proceduralTextureData : null
+                        source: root.viewportMode === "lighting_only" || root.proceduralTextureReady || baseColorMedia.animated ? "" : root.baseColorTexture
+                        sourceItem: root.viewportMode !== "lighting_only" && !root.proceduralTextureReady && baseColorMedia.animated ? baseColorMedia : null
+                        textureData: root.viewportMode !== "lighting_only" && root.proceduralTextureReady ? proceduralTextureData : null
                         generateMipmaps: true
                         minFilter: Texture.LinearMipMapLinear
                         magFilter: Texture.Linear

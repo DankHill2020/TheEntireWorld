@@ -67,10 +67,25 @@ class GameTemplateVariant:
 
 
 @dataclass(frozen=True)
+class GameQualityProfile:
+    profile_id: str
+    display_name: str
+    description: str
+    output_width: int
+    output_height: int
+    target_frame_ms: float
+    scalability: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class GameTemplateReceipt:
     template_id: str
     variant_id: str
     visual_style: str
+    quality_profile: str
     level_asset_id: str
     player_prefab_asset_id: str
     input_map_asset_id: str
@@ -122,6 +137,24 @@ _TEMPLATES: tuple[GameTemplateVariant, ...] = (
         "fighting", "versus", "Fighting — Versus", "A two-player fighting foundation with attacks, guard, throw, and round actions.",
         "2.5d", ("action",), "fighting", "plane_2d", maturity="preview",
     ),
+    GameTemplateVariant(
+        "top_down", "action", "Top Down — Action", "A high-angle action foundation with directional movement and camera follow.",
+        "3d", ("action",), "top_down", "free_3d", maturity="preview",
+    ),
+    GameTemplateVariant(
+        "pixel_platformer", "8bit", "8-Bit Platformer", "A pixel-perfect 2.5D platformer with an integer-scaled 320 × 180 presentation.",
+        "2.5d", ("platformer", "action"), "side", "plane_2d", default_visual_style="pixel_8bit", maturity="preview",
+    ),
+)
+
+
+_QUALITY_PROFILES: tuple[GameQualityProfile, ...] = (
+    GameQualityProfile("cinematic", "Cinematic", "Maximum visual fidelity for high-end capture and powerful hardware.", 3840, 2160, 33.3333, "cinematic"),
+    GameQualityProfile("high", "High", "High-detail desktop and console presentation.", 2560, 1440, 16.6667, "high"),
+    GameQualityProfile("balanced", "Balanced", "A dependable 1080p default for broad desktop hardware.", 1920, 1080, 16.6667, "balanced"),
+    GameQualityProfile("performance", "Performance", "Reduced rendering cost while preserving a responsive 60 FPS target.", 1600, 900, 16.6667, "performance"),
+    GameQualityProfile("low_spec", "Low Spec", "A conservative 720p profile for integrated and older GPUs.", 1280, 720, 33.3333, "low"),
+    GameQualityProfile("retro", "Retro / Pixel Perfect", "A 320 × 180 nearest-filtered canvas for 8-bit and retro games.", 320, 180, 16.6667, "retro"),
 )
 
 
@@ -129,6 +162,22 @@ def available_game_templates() -> tuple[dict[str, Any], ...]:
     """Return the user-facing catalog with explicit maturity per variant."""
 
     return tuple(item.to_dict() for item in _TEMPLATES)
+
+
+def available_game_quality_profiles() -> tuple[dict[str, Any], ...]:
+    """Return stable quality choices shared by the New Game UI and Python API."""
+
+    return tuple(item.to_dict() for item in _QUALITY_PROFILES)
+
+
+def resolve_game_quality_profile(profile_id: str, visual_style: str = "") -> GameQualityProfile:
+    key = str(profile_id or _quality_for_style(visual_style)).strip().casefold().replace(" ", "_")
+    aliases = {"low": "low_spec", "pixel": "retro", "8bit": "retro", "8_bit": "retro"}
+    key = aliases.get(key, key)
+    for profile in _QUALITY_PROFILES:
+        if profile.profile_id == key:
+            return profile
+    raise KeyError(f"Unknown game quality profile: {profile_id}")
 
 
 def resolve_game_template(template_id: str, variant_id: str = "") -> GameTemplateVariant:
@@ -166,12 +215,14 @@ class GameTemplateService:
         template_id: str = "playable_sandbox",
         variant_id: str = "",
         visual_style: str = "",
+        quality_profile: str = "",
         project_name: str = "StarterGame",
         platform: str = "windows",
         root_folder: str | Path = "Assets",
     ) -> GameTemplateReceipt:
         recipe = resolve_game_template(template_id, variant_id)
         style = str(visual_style or recipe.default_visual_style)
+        quality = resolve_game_quality_profile(quality_profile, style)
         safe_prefix = _safe_prefix(project_name)
         root = Path(root_folder)
         created: list[str] = []
@@ -244,7 +295,7 @@ class GameTemplateService:
             created.append(level.asset_id)
             self._author_level(
                 level.asset_id, recipe, style, player.asset_id, inputs.asset_id,
-                locomotion.asset_id, physics.asset_id, character,
+                locomotion.asset_id, physics.asset_id, character, quality,
             )
             rules = self.operations.create_asset(
                 "tc.game_ruleset", f"GR_{safe_prefix}", folder=root / "Gameplay", properties={
@@ -280,7 +331,7 @@ class GameTemplateService:
             build = self.operations.create_asset(
                 "tc.build_profile", f"BP_{safe_prefix}_Development", folder=root / "Build", properties={
                     "platform": str(platform).casefold(), "configuration": "development",
-                    "entry_level": level.asset_id, "quality_profile": _quality_for_style(style),
+                    "entry_level": level.asset_id, "quality_profile": quality.profile_id,
                     "included_levels": [level.asset_id], "incremental": True,
                     "output_directory": "Build", "include_debug_symbols": True,
                 },
@@ -291,13 +342,21 @@ class GameTemplateService:
             ])
             validation = self.validate_project(rules.asset_id, build.asset_id)
             return GameTemplateReceipt(
-                recipe.template_id, recipe.variant_id, style, level.asset_id, player.asset_id,
-                inputs.asset_id, locomotion.asset_id, character.skeleton_asset_id,
-                character.skeletal_mesh_asset_id, character.skin_binding_asset_id,
-                character.material_asset_id, character.texture_asset_id,
-                character.ik_rig_asset_id, character.control_rig_asset_id, character.physics_asset_id,
-                physics.asset_id, rules.asset_id,
-                build.asset_id, tuple(created), validation,
+                template_id=recipe.template_id, variant_id=recipe.variant_id,
+                visual_style=style, quality_profile=quality.profile_id,
+                level_asset_id=level.asset_id, player_prefab_asset_id=player.asset_id,
+                input_map_asset_id=inputs.asset_id, locomotion_controller_asset_id=locomotion.asset_id,
+                skeleton_asset_id=character.skeleton_asset_id,
+                skeletal_mesh_asset_id=character.skeletal_mesh_asset_id,
+                skin_binding_asset_id=character.skin_binding_asset_id,
+                character_material_asset_id=character.material_asset_id,
+                character_texture_asset_id=character.texture_asset_id,
+                ik_rig_asset_id=character.ik_rig_asset_id,
+                control_rig_asset_id=character.control_rig_asset_id,
+                character_physics_asset_id=character.physics_asset_id,
+                physics_scene_asset_id=physics.asset_id, ruleset_asset_id=rules.asset_id,
+                build_profile_asset_id=build.asset_id, created_asset_ids=tuple(created),
+                validation=validation,
             )
         except Exception:
             self._rollback(created)
@@ -488,6 +547,7 @@ class GameTemplateService:
         locomotion_controller_id: str,
         physics_scene_id: str,
         character: StarterCharacterReceipt,
+        quality: GameQualityProfile,
     ) -> None:
         record = self.database.asset(level_asset_id)
         if record is None:
@@ -496,8 +556,12 @@ class GameTemplateService:
         presentation = create_presentation_profile(
             f"{recipe.template_id}_{recipe.variant_id}_presentation", visual_style,
             dimensionality=recipe.dimensionality,
+            overrides={"metadata": {"quality_profile": quality.profile_id}},
         )
-        presentation_plan = compile_presentation_plan(presentation)
+        presentation_plan = compile_presentation_plan(
+            presentation, viewport_size=(quality.output_width, quality.output_height),
+        )
+        presentation_plan["quality_profile"] = quality.to_dict()
         presentation_validation = validate_presentation_profile(presentation)
         experience = create_game_experience_profile(
             f"{recipe.template_id}_{recipe.variant_id}_experience", recipe.game_types,
@@ -517,7 +581,7 @@ class GameTemplateService:
         blobs.update(character_blobs)
         document.metadata["starter_character"] = character.to_dict()
         document.metadata["runtime_world"] = _runtime_world(
-            recipe, visual_style, locomotion_controller_id, character,
+            recipe, visual_style, locomotion_controller_id, character, quality,
         )
         save_federated_scene(record.source_path, document, blobs=blobs)
         self.database.register_asset(
@@ -637,11 +701,12 @@ def _player_entity(
 
 def _runtime_world(
     recipe: GameTemplateVariant, visual_style: str, locomotion_controller_id: str,
-    character: StarterCharacterReceipt,
+    character: StarterCharacterReceipt, quality: GameQualityProfile,
 ) -> dict[str, Any]:
     camera_position = {
         "first_person": [0.0, 1.65, 0.05], "side": [0.0, 3.0, -14.0],
         "fighting": [0.0, 3.2, -13.0], "third_person": [0.0, 4.2, -9.5],
+        "top_down": [0.0, 13.0, -7.0],
     }[recipe.camera_mode]
     pixel = visual_style.casefold().startswith("pixel_")
     toon = visual_style.casefold() in {"toon", "vector_flat", "hand_painted", "low_poly", "retro_3d"}
@@ -650,14 +715,20 @@ def _runtime_world(
         "save_slot": f"{recipe.template_id}_{recipe.variant_id}_autosave",
         "locomotion_controller_asset_id": str(locomotion_controller_id),
         "rendering": {
-            "upscaler": "native" if pixel else "tc_temporal", "quality": "native" if pixel else "quality",
-            "output_width": 320 if visual_style == "pixel_8bit" else 1920,
-            "output_height": 180 if visual_style == "pixel_8bit" else 1080,
+            "upscaler": "native" if pixel else "tc_temporal",
+            "quality": "native" if pixel else {
+                "cinematic": "quality", "high": "quality", "balanced": "balanced",
+                "performance": "performance", "low_spec": "ultra_performance", "retro": "native",
+            }[quality.profile_id],
+            "quality_profile": quality.profile_id,
+            "scalability": quality.scalability,
+            "output_width": 320 if visual_style == "pixel_8bit" else quality.output_width,
+            "output_height": 180 if visual_style == "pixel_8bit" else quality.output_height,
             "sharpness": 0.0 if pixel else 0.18, "exposure": 1.05,
             "lighting_model": "toon" if toon else "physically_based",
             "global_illumination": "probe", "dynamic_diffuse_gi": not pixel,
             "sky_color": [0.12, 0.28, 0.58], "ground_color": [0.035, 0.05, 0.075],
-            "atmosphere_enabled": not pixel, "target_frame_ms": 16.6667,
+            "atmosphere_enabled": not pixel, "target_frame_ms": quality.target_frame_ms,
         },
         "simulation": {
             "domain": "everyday", "meters_per_world_unit": 1.0,
@@ -719,6 +790,7 @@ def _runtime_world(
                 "RuntimeCamera", "Player", *({
                     "first_person": [0.0, 0.7, 0.05], "side": [0.0, 2.2, -12.0],
                     "fighting": [0.0, 2.4, -11.0], "third_person": [0.0, 3.2, -7.5],
+                    "top_down": [0.0, 12.0, -6.0],
                 }[recipe.camera_mode]), 1.0, 5.0 if recipe.camera_mode == "first_person" else 0.0, 14.0,
             ]},
         ],
@@ -730,7 +802,9 @@ def _runtime_world(
 
 def _quality_for_style(visual_style: str) -> str:
     style = str(visual_style).casefold()
-    if style in {"pixel_8bit", "pixel_16bit", "vector_flat", "low_poly"}:
+    if style in {"pixel_8bit", "pixel_16bit", "retro_3d"}:
+        return "retro"
+    if style in {"vector_flat", "low_poly"}:
         return "performance"
     if style in {"photoreal", "hyperreal"}:
         return "cinematic"

@@ -29,7 +29,7 @@ class UnityBridge(DCCBridgeDelegateMixin):
         default_port=7041,
         setup_script="installers/Install_Unity_AI_Studio_Bridge.bat",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
     PORT_FILES = [
         str(APP_DIR / "unity_port.txt"),

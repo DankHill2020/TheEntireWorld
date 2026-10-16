@@ -307,8 +307,12 @@ class TCSetupHikFacade:
 
     def set_t_pose(self, joint_map=None):
         definition = _definition_from_maps(joint_map or {}, {})
-        _ctx().adapter._op_definition_set_reference_pose({"definition": definition})
-        return True
+        _ctx().checkpoint("Set T-Pose")
+        result = _ctx().adapter._op_rig_set_t_pose({"definition": definition})
+        if not result.ok:
+            raise RuntimeError(result.message)
+        _ctx().changed()
+        return result.to_dict()
 
     def setup_hik_character(self, character_name, joint_map, fbx_export_path="", namespace=""):
         definition = _definition_from_maps(joint_map, {})

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
 from tech_connector.game_engine.runtime.tc_effect_system_service import create_effect_world, set_effect_parameter
@@ -49,6 +51,8 @@ def test_image_editor_uses_stable_modes_and_exclusive_visual_tool_state() -> Non
 
     assert editor.mode_combo.currentData() == "standard"
     assert editor.tool_buttons["brush"].isChecked()
+    assert len(editor._standard_shortcuts) == 9
+    assert "Ctrl+0" in editor.view.accessibleDescription()
 
     editor._set_active_tool("eraser")
     assert editor.tool_buttons["eraser"].isChecked()
@@ -56,6 +60,10 @@ def test_image_editor_uses_stable_modes_and_exclusive_visual_tool_state() -> Non
 
     editor.mode_combo.setCurrentIndex(1)
     assert editor.diagnostic_mode == "pbr_albedo"
+    editor.view.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_M, Qt.NoModifier))
+    assert editor.active_tool == "rect_select"
+    editor.view.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.NoModifier))
+    assert editor.active_tool == "brush"
     editor.close()
 
 
@@ -66,6 +74,8 @@ def test_mesh_painter_exposes_fx_and_fluids_as_primary_workflows() -> None:
     assert viewer.fx_btn.text() == "FX"
     assert viewer.fluids_btn.text() == "Water & Fluids"
     assert viewer.dynamics_btn.text() == "Dynamics"
+    assert len(viewer._standard_viewport_shortcuts) == 4
+    assert "Ctrl+D Duplicate" in viewer.gizmo_mode_combo.accessibleDescription()
     assert viewer.simulation_btn.text() == "Simulation"
     assert viewer.fx_btn.menu() is not None
     assert viewer.fluids_btn.menu() is not None
@@ -78,6 +88,9 @@ def test_mesh_painter_exposes_fx_and_fluids_as_primary_workflows() -> None:
     assert "Destruction & phase change" in dynamics_sections
     assert "Reactive surfaces" in dynamics_sections
     assert viewer._mesh_toolbar_frame.height() == 46
+    viewer.set_viewport_interaction_mode("Selection")
+    viewer.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier))
+    assert viewer.viewport_mode == "Selection"
     viewer.create_simulation_preset_from_payload(
         "simulation.create_effect", {"preset": "explosion", "quality": "realtime", "seed": 7}
     )
@@ -101,6 +114,8 @@ def test_timeline_uses_clear_playback_and_onion_skin_states() -> None:
     timeline = AnimationTimelineBar(AnimationFrameSequence())
 
     assert timeline.play_btn.text() == "Play"
+    assert len(timeline._timeline_shortcuts) == 8
+    assert "Space" in timeline.play_btn.toolTip()
     assert timeline.onion_btn.text() == "Onion skin on"
     assert timeline.onion_btn.isChecked()
     assert timeline.workflow_guide.toggle.text() == "Animation quick guide"

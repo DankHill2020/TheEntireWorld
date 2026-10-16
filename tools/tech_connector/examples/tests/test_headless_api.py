@@ -9,10 +9,14 @@ from tech_connector.api import (
     API_VERSION,
     TechConnectorHeadlessAPI,
     call_function,
+    dispatch_integration,
     execute_prompt_chain,
+    integration_status,
+    integration_suggestions,
     plan_prompt_chain,
     reasoning_capabilities,
     run_reasoning,
+    run_reasoning_chain,
     verify_license,
 )
 from tech_connector.services.license_entitlement_service import make_license_token
@@ -179,6 +183,112 @@ class HeadlessAPITests(unittest.TestCase):
             "reasoning.runtime",
             features["models.provider_routing"]["owner_feature_id"],
         )
+
+    def test_public_surface_lists_integrations_and_existing_namespaces(self):
+        secret = "api-secret"
+        api = TechConnectorHeadlessAPI(
+            settings=self._settings(secret),
+            license_secret=secret,
+        )
+
+        surface = api.surface()
+        paths = {item["path"] for item in surface["operations"]}
+
+        self.assertEqual("tech_connector.api.v2.surface", surface["schema"])
+        self.assertIn("api.integrations.status", paths)
+        self.assertIn("api.integrations.dispatch", paths)
+        self.assertIn("api.kingdom.editor_call", paths)
+        self.assertIn("api.garden.execute_active", paths)
+        self.assertIn("api.ophanim.capture_viewport", paths)
+        self.assertNotIn("api.integrations._run", paths)
+
+    def test_integration_feature_registers_every_namespace_operation(self):
+        secret = "api-secret"
+        api = TechConnectorHeadlessAPI(
+            settings=self._settings(secret),
+            license_secret=secret,
+        )
+
+        feature = api.features.get("integrations.connected_services")
+
+        self.assertEqual(
+            {
+                "status",
+                "applications",
+                "suggest",
+                "resolve",
+                "targets",
+                "oauth_url",
+                "dispatch",
+            },
+            set(feature["operations"]),
+        )
+
+    def test_integrations_namespace_exposes_status_and_smart_suggestions(self):
+        secret = "api-secret"
+        settings = self._settings(secret)
+        settings.update({
+            "slack_webhook_url": "https://hooks.slack.invalid/default",
+            "slack_default_channel": "pipeline-alerts",
+            "slack_channels": ["pipeline-alerts"],
+        })
+        api = TechConnectorHeadlessAPI(settings=settings, license_secret=secret)
+
+        status = api.integrations.status("slack")
+        suggestions = api.integrations.suggest("Slack.pipe")
+        resolved = api.integrations.resolve("Send to @Slack.pipeline-alerts")
+
+        self.assertTrue(status.ok, status.to_dict())
+        self.assertTrue(status.result["value"]["connected"])
+        self.assertTrue(suggestions.ok, suggestions.to_dict())
+        self.assertEqual(
+            "Slack.pipeline-alerts",
+            suggestions.result["value"][0]["token"],
+        )
+        self.assertIn("Do not silently substitute", resolved.result["value"])
+
+    def test_integration_dispatch_is_previewable_and_requires_approval(self):
+        secret = "api-secret"
+        api = TechConnectorHeadlessAPI(
+            settings=self._settings(secret),
+            license_secret=secret,
+        )
+
+        preview = api.integrations.dispatch(
+            "@Slack.pipeline-alerts build complete",
+            dry_run=True,
+        )
+        blocked = api.integrations.dispatch(
+            "@Slack.pipeline-alerts build complete",
+        )
+
+        self.assertTrue(preview.ok, preview.to_dict())
+        self.assertTrue(preview.result["value"]["dry_run"])
+        self.assertEqual("pipeline-alerts", preview.result["value"]["references"][0]["target"])
+        self.assertFalse(blocked.ok)
+        self.assertEqual("permission_denied", blocked.error_detail["code"])
+
+    def test_module_level_integration_helpers(self):
+        secret = "api-secret"
+        settings = self._settings(secret)
+        settings["slack_channels"] = ["pipeline-alerts"]
+
+        status = integration_status("slack", settings=settings, license_secret=secret)
+        suggestions = integration_suggestions(
+            "Slack.pipe",
+            settings=settings,
+            license_secret=secret,
+        )
+        preview = dispatch_integration(
+            "@Slack.pipeline-alerts complete",
+            settings=settings,
+            license_secret=secret,
+            dry_run=True,
+        )
+
+        self.assertTrue(status.ok, status.to_dict())
+        self.assertTrue(suggestions.ok, suggestions.to_dict())
+        self.assertTrue(preview.ok, preview.to_dict())
 
     def test_direct_lifecycle_feature_is_invokable(self):
         secret = "api-secret"
@@ -417,6 +527,67 @@ class HeadlessAPITests(unittest.TestCase):
             "Keep the full context.",
             observed["context"].extras["conversation_history"][0]["content"],
         )
+
+    def test_reasoning_chain_carries_context_through_many_prompts_with_bounded_history(self):
+        secret = "api-secret"
+        observed = []
+
+        class FakeRequestEngine:
+            def __init__(self, **_kwargs):
+                pass
+
+            def process(self, context):
+                observed.append(context)
+                return EngineResult(
+                    action="answer",
+                    label="Reasoning",
+                    text=f"answered {len(observed)}",
+                    metadata={"selected_file": "sample_tool.py", "result_type": "answer"},
+                )
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            result = run_reasoning_chain(
+                [f"Inspect step {index}" for index in range(100)],
+                settings=self._settings(secret),
+                license_secret=secret,
+            )
+
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(100, result.result["completed_steps"])
+        self.assertEqual("sample_tool.py", observed[1].extras["operation_memory"]["selected_file"])
+        self.assertEqual("sample_tool.py", observed[99].extras["operation_memory"]["selected_file"])
+        self.assertLessEqual(len(observed[99].extras["conversation_history"]), 12)
+        self.assertEqual("sample_tool.py", result.result["state"]["operation_memory"]["selected_file"])
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            resumed = run_reasoning_chain(
+                ["Explain that file"], context=result.result["state"],
+                settings=self._settings(secret), license_secret=secret,
+            )
+        self.assertTrue(resumed.ok, resumed.error)
+        self.assertEqual("sample_tool.py", observed[100].extras["operation_memory"]["selected_file"])
+
+    def test_reasoning_chain_stops_before_following_clarification(self):
+        secret = "api-secret"
+        calls = []
+
+        class FakeRequestEngine:
+            def __init__(self, **_kwargs):
+                pass
+
+            def process(self, context):
+                calls.append(context.text)
+                return EngineResult(action="clarify", label="Question", text="Which file?")
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            result = run_reasoning_chain(
+                ["Edit that file", "Run tests"],
+                settings=self._settings(secret), license_secret=secret,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(["Edit that file"], calls)
+        self.assertEqual("Step 1 needs clarification.", result.result["stop_reason"])
 
     def test_runtime_tools_are_discoverable_and_mutation_requires_approval(self):
         secret = "api-secret"

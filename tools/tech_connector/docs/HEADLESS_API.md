@@ -30,6 +30,177 @@ through `api.llm_queue_status()` and `api.cancel_llm_request(request_id)`. See
 [LLM_QUEUE_MANAGEMENT.md](LLM_QUEUE_MANAGEMENT.md) for scheduling categories,
 configuration, deadlines, superseding, and cancellation semantics.
 
+## Simple AI API
+
+For direct generation, use the provider-neutral `api.ai` namespace. It keeps
+credentials out of results and makes routing inspectable before a paid call:
+
+```python
+from tech_connector.api import create_api
+
+api = create_api(project_root="C:/project")
+
+catalog = api.ai.models()
+local = api.ai.local_recommendation()
+route = api.ai.route(depth="deep")
+result = api.ai.generate(
+    "Explain the safest way to refactor this Maya exporter.",
+    system="Be concise and cite affected symbols.",
+    depth="deep",
+)
+
+if not result.ok:
+    raise RuntimeError(result.error)
+print(result.result["text"])
+print(result.result["route"])
+```
+
+`local_recommendation()` reports the detected GPU, target models, currently
+active installed fallbacks, missing recommended downloads, and runtime guidance.
+Use `api.ai.benchmark_local()` for a short Ollama speed probe; it reports load
+time and generated tokens per second and does not contact a cloud provider.
+
+Depths are `fast`, `balanced`, `deep`, and `maximum`. With OpenAI automatic
+selection enabled they map to GPT-6 Luna, GPT-6.1 Sol, GPT-6.1 Sol with higher
+reasoning, and GPT-6 Astra respectively. An explicit unrelated model is
+preserved. Cloud failure never silently changes the model during a run;
+`allow_local_fallback=True` must be set explicitly.
+
+Use `api.reasoning` when you need project context, planning, tools, progress
+events, or the full Tech Connector orchestration pipeline.
+
+## Discovering operations and handling errors
+
+The API is self-describing, so integrations do not need to hard-code every
+feature or signature:
+
+```python
+overview = api.describe()
+matches = api.features.search("material generation")
+help_payload = api.features.describe("ai.generate", "generate")
+
+for parameter in help_payload["operations"][0]["parameters"]:
+    print(parameter["name"], parameter["required"], parameter["default"])
+```
+
+Every `APIResult` keeps the existing `ok`, `result`, and `error` fields and now
+also includes `error_detail` with a stable code, retry guidance, and a suggested
+next action. Small scripts can use `unwrap()`:
+
+```python
+try:
+    text = api.ai.generate("Summarize this scene").unwrap()["text"]
+except TechConnectorAPIError as exc:
+    print(exc.code, exc.retryable, exc.suggestion)
+```
+
+### Complete public surface inventory
+
+Use `api.surface()` when building wrappers, bindings, or documentation. It
+returns every supported core and namespace operation with its current Python
+signature and documentation. Dynamic catalogs are identified separately so a
+caller can enumerate them from their authoritative runtime source:
+
+```python
+surface = api.surface()
+
+for operation in surface["operations"]:
+    print(operation["path"], operation["signature"])
+
+# Dynamic surfaces
+dcc_functions = api.dcc.catalog()
+editor_operations = api.kingdom.editor_capabilities().unwrap()
+runtime_tools = api.reasoning.tools().unwrap()
+ui_actions = api.ui.catalog().unwrap()  # requires an attached UI for actions
+```
+
+`api.features.get("api.surface")` and
+`api.features.invoke("api.surface", "list")` expose the same inventory through
+the modular feature registry. The checked-in
+[API_FUNCTION_CATALOG.md](API_FUNCTION_CATALOG.md) is generated from the current
+DCC packages and documents every public module-level host function, including
+functions without a friendly alias.
+
+## Connected Services and Smart Functions
+
+`api.integrations` is the official boundary for Slack, Discord, Jira,
+Confluence, ClickUp, connected-account state, and chat smart references such as
+`@Slack.pipeline-alerts` and `@Maya.scene.select`.
+
+```python
+status = api.integrations.status("slack").unwrap()["value"]
+applications = api.integrations.applications().unwrap()["value"]
+
+suggestions = api.integrations.suggest("Slack.pipe").unwrap()["value"]
+context = api.integrations.resolve(
+    "Send the validation report to @Slack.pipeline-alerts"
+).unwrap()["value"]
+```
+
+Status results never return raw credentials. Secret fields are either empty or
+masked by the connected-account service.
+
+Cached channel/user discovery is side-effect free. Set `refresh=True` only when
+the caller wants a live provider request:
+
+```python
+cached = api.integrations.targets("slack").unwrap()["value"]
+live = api.integrations.targets("slack", refresh=True).unwrap()["value"]
+setup = api.integrations.oauth_url("slack").unwrap()["value"]
+```
+
+Dispatch is fail-closed. Previewing requires no mutation approval; execution
+requires `approved=True` and preserves explicit targets rather than silently
+falling back to a different Slack or Discord destination:
+
+```python
+preview = api.integrations.dispatch(
+    "@Slack.pipeline-alerts Build completed successfully",
+    dry_run=True,
+)
+
+sent = api.integrations.dispatch(
+    "@Slack.pipeline-alerts Build completed successfully",
+    approved=True,
+)
+```
+
+The same operations are discoverable as feature
+`integrations.connected_services`. Small scripts may import
+`integration_status`, `integration_suggestions`, and `dispatch_integration`
+directly from `tech_connector.api`.
+
+## Namespace Coverage
+
+The supported high-level namespaces are:
+
+| Namespace | Purpose | Dynamic discovery |
+| --- | --- | --- |
+| `api.ai` | Model catalog, routing, local recommendations, benchmarks, generation | `api.ai.models()` |
+| `api.reasoning` / `api.runtime` | Context preparation, reasoning, chains, tools | `api.reasoning.capabilities()`, `api.reasoning.tools()` |
+| `api.features` | Feature search, signatures, manifests, generic invocation | `api.features.manifest()` |
+| `api.integrations` | Connected services, smart references, targets, approved dispatch | `api.integrations.applications()` |
+| `api.dcc` | Host function aliases and bridge execution | `api.dcc.catalog()` |
+| `api.kingdom` / `api.game_engine` | Game-engine runtime and project editor | `api.kingdom.editor_capabilities()` |
+| `api.garden` / `api.scene_viewer` | Active scene-viewer commands | `api.garden.commands()` |
+| `api.ophanim` / `api.image_editor` | Viewport capture and image editing | `api.describe()` |
+| `api.ui` | Actions on an explicitly attached desktop window | `api.ui.catalog()` |
+
+Call `api.describe()` for the stable namespace map and `api.surface()` for the
+exact operation list used by the installed version.
+
+The Kingdom namespace also exposes the full project editor contract without
+requiring callers to import internal engine modules:
+
+```python
+operations = api.kingdom.editor_capabilities().unwrap()
+help_payload = api.kingdom.editor_describe("asset_dependency_graph").unwrap()
+graph = api.kingdom.editor_call(
+    "asset_dependency_graph",
+    asset_id="tc.asset.example",
+).unwrap()["value"]
+```
+
 ## Reasoning Runtime API
 
 API version 2 exposes the same shared reasoning runtime used by Tech Connector's
@@ -249,9 +420,11 @@ result = api.execute_prompt_chain(
 )
 ```
 
-`project_roots` is optional, but passing the tagged file/package/workspace scope
-keeps experimentation responsive and matches how the UI should narrow work when
-the user tags a specific source.
+`project_roots` is optional. By default Tech Connector uses the primary project,
+all secondary folders configured with **+ Add Folder**, and the installed tools
+root. The tools root is permanent so built-in APIs remain discoverable even when
+the user's project lives on another drive. Passing `project_roots` explicitly
+narrows one request to the tagged file/package/workspace scope.
 
 ## Calling Functions
 
@@ -475,6 +648,53 @@ Returns an execution report dictionary.
 
 Returns `APIResult` with `result["code"]`, `result["graph"]`, and
 `result["workflow_plan"]` when successful.
+
+### `api.integrations.status(account_id="")`
+
+- `account_id`: Optional connected-account ID such as `slack`, `discord`,
+  `atlassian`, `github`, or `perforce`. Empty returns every account.
+
+Returns a sanitized `APIResult`; configured secrets are masked.
+
+### `api.integrations.suggest(query="", active_hosts=(), limit=20)`
+
+- `query`: Text after the chat `@`, for example `Slack.pipe`, `Maya.scene`, or
+  `Jira.ART.b`.
+- `active_hosts`: Optional live DCC host identifiers used to prioritize roots.
+- `limit`: Maximum suggestions, clamped to 1–100.
+
+### `api.integrations.resolve(text)`
+
+Returns deterministic context for smart references, including connection
+readiness and unresolved-target warnings.
+
+### `api.integrations.targets(provider, refresh=False)`
+
+- `provider`: `slack` or `discord`.
+- `refresh`: When `False`, returns cached channels/users. When `True`, performs
+  live provider discovery and updates only this API instance's in-memory cache.
+
+### `api.integrations.oauth_url(provider, client_id="", redirect_uri="")`
+
+Returns the provider's official setup or OAuth authorization URL. Supported
+providers are Slack, Discord, Atlassian/Jira/Confluence, and ClickUp.
+
+### `api.integrations.dispatch(text, default_title="Tech Connector Output", approved=False, dry_run=False)`
+
+- `text`: Inline integration command containing one or more supported `@`
+  references.
+- `default_title`: Title applied to generated messages, issues, or pages.
+- `approved`: Required for external writes.
+- `dry_run`: Parses and returns references without contacting an external
+  service.
+
+Explicit Slack and Discord targets fail rather than using an unrelated default
+webhook.
+
+### `api.surface()`
+
+Returns the complete supported operation inventory, per-namespace counts,
+signatures, documentation, and links to dynamic discovery surfaces.
 
 ### `APIResult`
 

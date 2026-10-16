@@ -36,13 +36,14 @@ LOCAL_NODE_TYPES = {
     "matrix.literal",
     "matrix.add",
     "solver.ik_rotate_plane",
+    "solver.ik_rotate_plane_chain",
     "solver.motion_path",
     "solver.ribbon_attachment",
     "utility.pose_reader",
     "animation.curve",
 }
 LOCAL_CONSTRAINT_TYPES = {
-    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "spine_stretch", "motion_path", "ribbon",
+    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "ik_chain", "spine_stretch", "motion_path", "ribbon",
     "geometry", "normal", "tangent",
 }
 LOCAL_DEFORMER_TYPES = {"linear_blend_skinning", "blend_shape", "muscle", "jiggle", "flesh"}
@@ -228,7 +229,7 @@ def calculate_constraint_offset_matrix(
 
 def _evaluate_node(node_type: str, attributes: dict[str, Any]) -> None:
     if node_type in {
-        "dag.transform", "dag.joint", "dag.control", "solver.ik_rotate_plane",
+        "dag.transform", "dag.joint", "dag.control", "solver.ik_rotate_plane", "solver.ik_rotate_plane_chain",
         "solver.motion_path", "solver.ribbon_attachment", "utility.pose_reader",
     }:
         return
@@ -363,6 +364,12 @@ def _evaluate_constraints(constraints: dict[str, dict[str, Any]], nodes: dict[st
         if kind == "ik":
             try:
                 _solve_two_bone_ik(constraint, nodes, result)
+            except Exception as exc:
+                result.errors.append(f"{constraint_id}: {exc}")
+            continue
+        if kind == "ik_chain":
+            try:
+                _solve_rotate_plane_chain_ik(constraint, nodes, result)
             except Exception as exc:
                 result.errors.append(f"{constraint_id}: {exc}")
             continue
@@ -599,6 +606,101 @@ def _solve_spine_stretch(constraint: dict[str, Any], nodes: dict[str, dict[str, 
         local_matrix = desired_world @ np.linalg.inv(parent_world)
         result.local_matrices[joint_id] = local_matrix.reshape(-1).tolist()
         solved_world[joint_id] = desired_world
+    _rebuild_world_matrices(nodes, result)
+
+
+def _solve_rotate_plane_chain_ik(
+    constraint: dict[str, Any],
+    nodes: dict[str, dict[str, Any]],
+    result: RigEvaluationResult,
+) -> None:
+    """Solve a three-or-more-joint chain in the plane selected by its pole."""
+    settings = dict(constraint.get("settings") or {})
+    joint_ids = [str(value) for value in settings.get("joint_ids") or []]
+    target_id = str(settings.get("target_node_id") or "")
+    pole_id = str(settings.get("pole_node_id") or "")
+    if len(joint_ids) < 3:
+        raise ValueError("rotate-plane chain IK requires at least three joints")
+    if any(node_id not in result.world_matrices for node_id in joint_ids + [target_id]):
+        raise ValueError("IK chain or target world matrix is unavailable")
+
+    original_world = [_matrix(result.world_matrices[node_id]) for node_id in joint_ids]
+    positions = np.asarray([matrix[3, :3] for matrix in original_world], dtype=np.float64)
+    target = _matrix(result.world_matrices[target_id])[3, :3].copy()
+    # Creating a solver at the authored endpoint must be a true bind-pose no-op.
+    if float(np.linalg.norm(target - positions[-1])) <= 1.0e-8:
+        return
+
+    lengths = np.linalg.norm(positions[1:] - positions[:-1], axis=1)
+    if np.any(lengths <= 1.0e-8):
+        raise ValueError("IK bones must have non-zero lengths")
+    root = positions[0].copy()
+    target_vector = target - root
+    target_distance = float(np.linalg.norm(target_vector))
+    if target_distance <= 1.0e-8:
+        target_vector = positions[-1] - root
+        target_distance = float(np.linalg.norm(target_vector))
+    plane_x = target_vector / max(target_distance, 1.0e-12)
+
+    pole = _matrix(result.world_matrices[pole_id])[3, :3] if pole_id in result.world_matrices else positions[1]
+    plane_y = pole - root
+    plane_y -= plane_x * float(np.dot(plane_y, plane_x))
+    if float(np.linalg.norm(plane_y)) <= 1.0e-8:
+        deviations = positions[1:-1] - root
+        deviations -= np.outer(deviations @ plane_x, plane_x)
+        plane_y = deviations[int(np.argmax(np.linalg.norm(deviations, axis=1)))] if len(deviations) else np.zeros(3)
+    if float(np.linalg.norm(plane_y)) <= 1.0e-8:
+        fallback = np.asarray((0.0, 1.0, 0.0)) if abs(plane_x[1]) < 0.9 else np.asarray((0.0, 0.0, 1.0))
+        plane_y = fallback - plane_x * float(np.dot(fallback, plane_x))
+    plane_y /= max(1.0e-12, float(np.linalg.norm(plane_y)))
+    plane_normal = np.cross(plane_x, plane_y)
+    plane_normal /= max(1.0e-12, float(np.linalg.norm(plane_normal)))
+
+    total_length = float(lengths.sum())
+    if target_distance >= total_length:
+        solved = np.asarray([
+            root + plane_x * float(lengths[:index].sum())
+            for index in range(len(joint_ids))
+        ])
+    else:
+        relative = positions - root
+        planar = np.column_stack((relative @ plane_x, relative @ plane_y))
+        planar[0] = (0.0, 0.0)
+        target_2d = np.asarray((target_distance, 0.0), dtype=np.float64)
+        for _iteration in range(32):
+            planar[-1] = target_2d
+            for index in range(len(planar) - 2, -1, -1):
+                delta = planar[index] - planar[index + 1]
+                planar[index] = planar[index + 1] + delta / max(float(np.linalg.norm(delta)), 1.0e-12) * lengths[index]
+            planar[0] = (0.0, 0.0)
+            for index in range(1, len(planar)):
+                delta = planar[index] - planar[index - 1]
+                planar[index] = planar[index - 1] + delta / max(float(np.linalg.norm(delta)), 1.0e-12) * lengths[index - 1]
+            if float(np.linalg.norm(planar[-1] - target_2d)) <= 1.0e-7:
+                break
+        solved = root + np.outer(planar[:, 0], plane_x) + np.outer(planar[:, 1], plane_y)
+
+    solved_world: dict[str, Any] = {}
+    for index, node_id in enumerate(joint_ids):
+        if index < len(joint_ids) - 1:
+            desired = _aim_bone_world_matrix(
+                original_world[index],
+                positions[index + 1] - positions[index],
+                solved[index + 1] - solved[index],
+                plane_normal,
+            )
+        else:
+            desired = original_world[index].copy()
+        desired[3, :3] = solved[index]
+        solved_world[node_id] = desired
+    for node_id in joint_ids:
+        parent_id = str(nodes.get(node_id, {}).get("dag_parent_id") or "")
+        parent_world = solved_world.get(parent_id)
+        if parent_world is None and parent_id in result.world_matrices:
+            parent_world = _matrix(result.world_matrices[parent_id])
+        if parent_world is None:
+            parent_world = np.eye(4)
+        result.local_matrices[node_id] = (solved_world[node_id] @ np.linalg.inv(parent_world)).reshape(-1).tolist()
     _rebuild_world_matrices(nodes, result)
 
 
@@ -996,10 +1098,11 @@ def _local_node_supported(
     node_type = _contract_node_type(node)
     if node_type not in LOCAL_NODE_TYPES:
         return False
-    if node_type in {"solver.ik_rotate_plane", "solver.motion_path", "solver.ribbon_attachment"}:
+    if node_type in {"solver.ik_rotate_plane", "solver.ik_rotate_plane_chain", "solver.motion_path", "solver.ribbon_attachment"}:
         solver = constraints.get(str(node_id)) or {}
         expected = {
             "solver.ik_rotate_plane": "ik",
+            "solver.ik_rotate_plane_chain": "ik_chain",
             "solver.motion_path": "motion_path",
             "solver.ribbon_attachment": "ribbon",
         }[node_type]

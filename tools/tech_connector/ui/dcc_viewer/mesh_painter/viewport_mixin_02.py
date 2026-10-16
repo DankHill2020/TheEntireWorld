@@ -217,6 +217,35 @@ from tech_connector.ui.dcc_viewer.mesh_painter.support import (
 
 
 class ThreeDMeshPainterViewportMixin02:
+    def _release_background_thread(self, thread: QThread | None) -> None:
+        """Request shutdown without freezing tab switches or window hides."""
+        if thread is None:
+            return
+        try:
+            thread.requestInterruption()
+        except Exception:
+            pass
+        thread.quit()
+        if not thread.isRunning():
+            return
+        retained = getattr(self, "_detached_background_threads", None)
+        if retained is None:
+            retained = []
+            self._detached_background_threads = retained
+        if thread not in retained:
+            retained.append(thread)
+        try:
+            thread.setParent(QApplication.instance())
+        except Exception:
+            pass
+
+        def forget_finished_thread(current=thread):
+            threads = getattr(self, "_detached_background_threads", [])
+            if current in threads:
+                threads.remove(current)
+
+        thread.finished.connect(forget_finished_thread)
+
     def _execute_tc_skinning_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         if command in {"skinning.export_weights", "skinning.import_weights"}:
             return self._execute_tc_skin_weight_file_command(command, payload)
@@ -483,12 +512,7 @@ class ThreeDMeshPainterViewportMixin02:
         self._skin_weight_io_context = {}
         if thread is None:
             return
-        try:
-            thread.requestInterruption()
-        except Exception as exc:
-            LOGGER.debug("Could not interrupt the USD composition worker during cleanup.", exc_info=True)
-        thread.quit()
-        thread.wait(5000)
+        self._release_background_thread(thread)
 
     def _execute_tc_usd_composition_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         from tech_connector.game_engine.scene.usd_composition_command_service import apply_usd_composition_command
@@ -794,8 +818,7 @@ class ThreeDMeshPainterViewportMixin02:
             except Exception:
                 pass
         if thread is not None and thread.isRunning():
-            thread.quit()
-            thread.wait(2000)
+            self._release_background_thread(thread)
 
     def _install_tc_scene_conversion_result(self, result: object, *, output_path: str = "") -> dict[str, Any]:
         """Atomically replace bridge state only after every conversion chunk validates."""
@@ -1337,6 +1360,7 @@ class ThreeDMeshPainterViewportMixin02:
                 host,
                 timeout=max(0.25, min(15.0, float(payload.get("timeout", 3.0)))),
                 max_sessions=max(1, min(100, int(payload.get("max_sessions", 16)))),
+                install_recovery_verified=bool(payload.get("install_recovery_verified", False)),
             )
             ledger = store_qualification_receipt(receipt, payload.get("ledger_path") or None)
             return {
@@ -1346,6 +1370,41 @@ class ThreeDMeshPainterViewportMixin02:
                     f"{host} qualification status: {receipt.status}. "
                     f"{len(receipt.responding_sessions)} live session(s) returned identity data; "
                     f"remaining gates: {', '.join(receipt.missing_gates) or 'none'}."
+                ),
+            }
+        if command == "engine.qualify_dcc_release":
+            from tech_connector.game_engine.integration.dcc_release_qualification_runner import (
+                qualify_dcc_release_host,
+            )
+
+            host = str(payload.get("host") or "").strip().lower()
+            workspace = str(payload.get("workspace") or "").strip()
+            if not workspace:
+                raise ValueError("A workspace is required for portable DCC qualification artifacts.")
+            release_events: list[dict[str, Any]] = []
+
+            def report_release_progress(event: dict[str, Any]) -> None:
+                row = dict(event or {})
+                release_events.append(row)
+                self._resolved_shaded_status = str(row.get("message") or "Qualifying DCC release evidence")
+                update = getattr(self, "update", None)
+                if callable(update):
+                    update()
+
+            result = qualify_dcc_release_host(
+                host,
+                workspace=workspace,
+                session_port=(int(payload["session_port"]) if payload.get("session_port") not in (None, "") else None),
+                confirm_mutating=bool(payload.get("confirm_mutating", False)),
+                install_recovery_verified=bool(payload.get("install_recovery_verified", False)),
+                progress_callback=report_release_progress,
+            )
+            return {
+                "dcc_release_qualification": result,
+                "dcc_release_events": release_events,
+                "message": (
+                    f"{host} release qualification: {result.get('status', 'unknown')}; "
+                    f"session {result.get('session_port') or 'selection required'}."
                 ),
             }
         if command == "engine.qualify_dcc_source_parity":
@@ -1495,6 +1554,18 @@ class ThreeDMeshPainterViewportMixin02:
                 workflow.host,
                 int(requested_port) if requested_port not in (None, "") else None,
             )
+            workflow_events: list[dict[str, Any]] = []
+
+            def report_workflow_progress(event: dict[str, Any]) -> None:
+                row = dict(event or {})
+                workflow_events.append(row)
+                label = str(row.get("label") or row.get("operation") or workflow.label)
+                percent = float(row.get("progress_percent") or 0.0)
+                self._resolved_shaded_status = f"{label} · {percent:.0f}%"
+                update = getattr(self, "update", None)
+                if callable(update):
+                    update()
+
             receipt = execute_dcc_workflow(
                 workflow_key,
                 workspace=workspace,
@@ -1502,6 +1573,7 @@ class ThreeDMeshPainterViewportMixin02:
                 session_port=session_port,
                 confirm_mutating=bool(payload.get("confirm_mutating", False)),
                 delegated_step_receipts=dict(payload.get("delegated_step_receipts") or {}),
+                progress_callback=report_workflow_progress,
             )
             source_path = str(payload.get("source_path") or "").strip()
             workflow_receipts = getattr(self, "_dcc_workflow_receipts", None)
@@ -1518,6 +1590,7 @@ class ThreeDMeshPainterViewportMixin02:
                 store_workflow_receipt(receipt, payload.get("ledger_path") or None)
             return {
                 "dcc_workflow_receipt": receipt.to_dict(),
+                "dcc_workflow_events": workflow_events,
                 "message": (
                     f"{workflow.label}: {receipt.status}; {len(receipt.steps)} step(s), "
                     f"{len(receipt.artifacts)} portable artifact receipt(s), session {receipt.session_port or 'automatic'}."
@@ -1647,8 +1720,7 @@ class ThreeDMeshPainterViewportMixin02:
                 worker.finished.disconnect(self._capture_mesh_lod_result)
             except Exception:
                 pass
-        thread.quit()
-        thread.wait(5000)
+        self._release_background_thread(thread)
 
     def _start_runtime_geometry_compile(self, kind: str, arguments: dict[str, Any]) -> None:
         thread = QThread(self)
@@ -1693,8 +1765,7 @@ class ThreeDMeshPainterViewportMixin02:
                 worker.finished.disconnect(self._capture_runtime_geometry_result)
             except Exception:
                 pass
-        thread.quit()
-        thread.wait(5000)
+        self._release_background_thread(thread)
 
     def _execute_tc_world_intelligence_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         from tech_connector.game_engine.integration.world_intelligence_command_service import (

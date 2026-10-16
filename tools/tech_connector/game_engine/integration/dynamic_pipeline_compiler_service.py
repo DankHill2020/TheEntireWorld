@@ -10,6 +10,7 @@ from reasoning_runtime.action.action_graph_service import ActionGraph, validate_
 from tech_connector.game_engine.integration.operation_contract_service import (
     OperationContract,
     operation_contracts,
+    resolve_operation_contract,
 )
 
 
@@ -21,10 +22,157 @@ _HOST_ALIASES = {
     "motionbuilder": "motionbuilder",
     "motion builder": "motionbuilder",
     "houdini": "houdini",
+    "3ds max": "3dsmax",
+    "3dsmax": "3dsmax",
+    "max": "3dsmax",
     "substance painter": "substance_painter",
     "substance_painter": "substance_painter",
     "unity": "unity",
+    "tech connector engine": "tech_connector",
+    "tech connector": "tech_connector",
+    "tc engine": "tech_connector",
+    "our engine": "tech_connector",
 }
+
+
+def extract_explicit_operation_mentions(
+    prompt: str,
+    hosts: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Resolve every explicitly named operation/callable and report unresolved names."""
+    text = str(prompt or "")
+    lower = text.casefold()
+    host_order = list(hosts or extract_ordered_hosts(text))
+    contracts = [
+        contract
+        for host in host_order
+        for contract in operation_contracts(host=host)
+    ]
+    matches: list[tuple[int, OperationContract, str]] = []
+    matched_tokens: set[str] = set()
+    for contract in contracts:
+        names = (contract.callable, contract.operation, f"{contract.host}.{contract.operation}")
+        found: list[tuple[int, str]] = []
+        for name in names:
+            candidate = str(name or "").casefold()
+            if "." not in candidate:
+                continue
+            position = lower.find(candidate)
+            if position >= 0:
+                found.append((position, name))
+        if found:
+            position, requested_name = min(found, key=lambda item: item[0])
+            matches.append((position, contract, requested_name))
+            matched_tokens.add(str(requested_name).casefold())
+
+    named_list_cue = bool(re.search(r"\b(?:functions?|operations?|calls?)\s*(?::|are|=)", lower))
+    quoted = {
+        value.casefold()
+        for value in re.findall(r"[`'\"]([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)[`'\"]", text)
+    }
+    dotted_values = {
+        value.casefold(): value
+        for value in re.findall(r"(?<![/\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)(?![/\w])", text)
+    }
+    dotted = set(dotted_values)
+    known_names = {
+        str(name).casefold()
+        for contract in contracts
+        for name in (contract.operation, contract.callable, f"{contract.host}.{contract.operation}")
+    }
+    ignored_suffixes = {"fbx", "usd", "usda", "usdc", "abc", "png", "jpg", "jpeg", "tga", "exr"}
+    for token in sorted(dotted - known_names):
+        if token.rsplit(".", 1)[-1] in ignored_suffixes:
+            continue
+        for host in host_order:
+            requested_token = dotted_values[token]
+            resolution = resolve_operation_contract(requested_token, host=host)
+            payload = dict(resolution.get("contract") or {}) if resolution.get("ok") else {}
+            if not payload:
+                continue
+            payload.pop("executable", None)
+            try:
+                contract = OperationContract(**payload)
+            except (TypeError, ValueError):
+                continue
+            matches.append((lower.find(token), contract, requested_token))
+            matched_tokens.add(token)
+            known_names.update(
+                {
+                    contract.operation.casefold(),
+                    contract.callable.casefold(),
+                    f"{contract.host}.{contract.operation}".casefold(),
+                }
+            )
+            break
+    resolved_keys = set()
+    resolved = []
+    for position, contract, requested_name in sorted(matches, key=lambda item: (item[0], item[1].key)):
+        if contract.key in resolved_keys:
+            continue
+        resolved_keys.add(contract.key)
+        resolved.append({"position": position, "requested_name": requested_name, "contract": contract})
+    unresolved = sorted(
+        token
+        for token in dotted
+        if token not in known_names
+        and token not in matched_tokens
+        and token.rsplit(".", 1)[-1] not in ignored_suffixes
+        and (named_list_cue or token in quoted)
+    )
+    return resolved, unresolved
+
+
+def _merge_explicit_contracts(
+    selected: list[OperationContract],
+    mentions: list[dict[str, Any]],
+    hosts: list[str],
+) -> list[OperationContract]:
+    if not mentions:
+        return selected
+    explicit = [row["contract"] for row in mentions]
+    explicit_keys = {contract.key for contract in explicit}
+    replaceable_roles = {"prepare", "import", "process", "export", "validate"}
+    explicit_host_roles = {
+        (contract.host, contract.role)
+        for contract in explicit
+        if contract.role in replaceable_roles
+    }
+    combined = [
+        contract
+        for contract in selected
+        if contract.key in explicit_keys
+        or (contract.host, contract.role) not in explicit_host_roles
+    ]
+    existing = {contract.key for contract in combined}
+    combined.extend(contract for contract in explicit if contract.key not in existing)
+    positions = {row["contract"].key: int(row["position"]) for row in mentions}
+    role_order = {
+        "prepare": 0, "resolve": 5, "import": 10, "process": 20,
+        "operate": 25, "export": 30, "author": 40, "post_import": 45,
+        "validate": 50,
+    }
+    host_positions = {host: index for index, host in enumerate(hosts)}
+    return sorted(
+        combined,
+        key=lambda contract: (
+            host_positions.get(contract.host, len(hosts)),
+            (
+                1
+                if contract.key in positions
+                else 0
+                if role_order.get(contract.role, 25) <= 20
+                else 2
+            ),
+            (
+                positions[contract.key]
+                if contract.key in positions
+                else role_order.get(contract.role, 25)
+            ),
+            contract.phase_order,
+            contract.key,
+        ),
+    )
 
 
 def extract_ordered_hosts(prompt: str) -> list[str]:
@@ -294,7 +442,42 @@ def _artifact_compatible(required: str, available: str, format_name: str) -> boo
     if required == available:
         return True
     path_names = {"transfer_path", "source_file", _path_artifact(format_name)}
-    return required in path_names and available in path_names
+    if required in path_names and available in path_names:
+        return True
+    object_sets = {
+        "export_objects", "objects", "selection", "meshes", "nodes",
+    }
+    return required in object_sets and available in object_sets
+
+
+def _best_available_artifact(
+    required: str,
+    available: dict[str, str],
+    format_name: str,
+) -> str:
+    compatible = [
+        artifact
+        for artifact in available
+        if _artifact_compatible(required, artifact, format_name)
+    ]
+    if not compatible:
+        return ""
+    object_priority = {
+        "export_objects": 0,
+        "objects": 1,
+        "selection": 2,
+        "nodes": 3,
+        "meshes": 4,
+    }
+    positions = {artifact: index for index, artifact in enumerate(available)}
+    return min(
+        compatible,
+        key=lambda artifact: (
+            0 if artifact == required else 1,
+            object_priority.get(artifact, 50),
+            -positions.get(artifact, 0),
+        ),
+    )
 
 
 def _input_parameter(contract: OperationContract, artifact: str, role: str) -> str:
@@ -318,6 +501,10 @@ def _input_parameter(contract: OperationContract, artifact: str, role: str) -> s
                 return candidate
     if artifact == "animation_paths" and "animation_paths" in contract.optional:
         return "animation_paths"
+    if artifact in {"export_objects", "objects", "selection", "meshes", "nodes"}:
+        for candidate in ("selection", "object_names", "objects", "nodes"):
+            if candidate in contract.required or candidate in contract.optional:
+                return candidate
     if role == "import":
         path_param = next(
             (
@@ -332,6 +519,47 @@ def _input_parameter(contract: OperationContract, artifact: str, role: str) -> s
     if artifact in contract.required or artifact in contract.optional:
         return artifact
     return ""
+
+
+def infer_dcc_export_scope(prompt: str, *, host: str, subject: str) -> dict[str, Any]:
+    """Describe the host objects a DCC stage should resolve at execution time."""
+
+    lower = str(prompt or "").lower()
+    explicit_scene = bool(re.search(
+        r"\b(?:whole|entire|full)\s+scene\b|\ball\s+(?:scene\s+)?objects\b",
+        lower,
+    ))
+    explicit_selected_only = bool(re.search(
+        r"\b(?:only\s+)?(?:the\s+)?selected\s+(?:objects?|items?)\b|"
+        r"\bexport\s+(?:only\s+)?(?:the\s+)?selection\b",
+        lower,
+    ))
+    rig_intent = subject in {"animation", "skeletal_mesh"} or bool(re.search(
+        r"\b(rig|rigged|character|armature|skeleton|skinned|animation|mocap)\b",
+        lower,
+    ))
+    if explicit_scene:
+        scope = "scene_contents"
+        label = "Whole scene contents"
+    elif explicit_selected_only:
+        scope = "current_selection"
+        label = "Current selection only"
+    elif rig_intent:
+        scope = "rig_contents"
+        label = "Rig, skinned meshes, and export children"
+    elif subject == "static_mesh":
+        scope = "selected_or_scene_meshes"
+        label = "Selected meshes, or scene meshes when nothing is selected"
+    else:
+        scope = "current_selection_or_subject"
+        label = "Current selection, with a subject-aware scene fallback"
+    return {
+        "$pipeline_context": "dcc_export_scope_v1",
+        "host": str(host or ""),
+        "scope": scope,
+        "subject": str(subject or "asset"),
+        "label": label,
+    }
 
 
 def _output_parameter(contract: OperationContract) -> str:
@@ -486,6 +714,7 @@ def compile_dynamic_pipeline(
         return {
             "success": False,
             "framework": "dynamic_typed_pipeline_v1",
+            "project_root": str(project_root or ""),
             "hosts": hosts,
             "format": format_name,
             "subject": subject,
@@ -498,7 +727,26 @@ def compile_dynamic_pipeline(
         }
 
     selected: list[OperationContract] = []
-    gaps: list[dict[str, Any]] = []
+    explicit_mentions, unresolved_function_names = extract_explicit_operation_mentions(prompt, hosts)
+    gaps: list[dict[str, Any]] = [
+        {
+            "kind": "unknown_requested_function",
+            "function": name,
+            "message": f"The explicitly requested function `{name}` is not registered for the named hosts.",
+            "execution_blocked": True,
+        }
+        for name in unresolved_function_names
+    ]
+    unavailable_explicit = [
+        row for row in explicit_mentions if not row["contract"].executable
+    ]
+    gaps.extend(
+        _operation_acquisition_gap(row["contract"], prompt)
+        for row in unavailable_explicit
+    )
+    executable_explicit_mentions = [
+        row for row in explicit_mentions if row["contract"].executable
+    ]
     prepare_requested = bool(
         re.search(
             r"\b(create|build|generate|make)\b.{0,48}\b(rig|rigged|proxy|fixture)\b",
@@ -675,6 +923,10 @@ def compile_dynamic_pipeline(
         if validator:
             selected.append(validator)
 
+    selected = _merge_explicit_contracts(selected, executable_explicit_mentions, hosts)
+    structural_gaps = [
+        gap for gap in gaps if gap.get("kind") != "operation_evidence_gap"
+    ]
     if structural_gaps:
         return {
             "success": False,
@@ -685,6 +937,16 @@ def compile_dynamic_pipeline(
             "selected_contracts": [item.to_dict() for item in selected],
             "gaps": structural_gaps,
             "capability_gaps": gaps,
+            "explicit_function_requests": [
+                {
+                    "requested_name": row["requested_name"],
+                    "host": row["contract"].host,
+                    "operation": row["contract"].operation,
+                    "resolved": row["contract"].executable,
+                }
+                for row in explicit_mentions
+            ],
+            "unresolved_function_requests": unresolved_function_names,
         }
 
     graph = ActionGraph(
@@ -697,6 +959,7 @@ def compile_dynamic_pipeline(
         ],
     )
     available: dict[str, str] = {}
+    artifact_literals: dict[str, Any] = {}
     implicit_source_artifacts = {
         f"{hosts[0]}_scene",
         "scene",
@@ -707,6 +970,8 @@ def compile_dynamic_pipeline(
         "substance_project",
         "houdini_geometry",
         "motionbuilder_scene",
+        "objects",
+        "export_objects",
     }
     data_edges: list[dict[str, str]] = []
     required_inputs: list[dict[str, str]] = []
@@ -725,6 +990,14 @@ def compile_dynamic_pipeline(
 
     for index, contract in enumerate(selected, start=1):
         action_id = _safe_stage_name(index, contract)
+        stage_produces = list(contract.produces)
+        if contract.role == "export":
+            stage_produces = [
+                path_artifact if produced == "transfer_path" else produced
+                for produced in stage_produces
+            ]
+            if path_artifact not in stage_produces:
+                stage_produces.append(path_artifact)
         def setting_for(parameter: str) -> Any:
             return settings.get(
                 f"{contract.host}.{contract.operation}.{parameter}",
@@ -733,20 +1006,37 @@ def compile_dynamic_pipeline(
 
         params = dict(contract.optional)
         _apply_prompt_parameters(contract, params, prompt)
+        for optional_parameter in contract.optional:
+            supplied = setting_for(optional_parameter)
+            if supplied in (None, "", [], {}):
+                continue
+            params[optional_parameter] = supplied
+            parameter_provenance.append(
+                {
+                    "stage": action_id,
+                    "parameter": optional_parameter,
+                    "value": supplied,
+                    "source": "user_setting",
+                    "resolution": (
+                        f"{contract.label} uses the explicit pipeline setting "
+                        f"for `{optional_parameter}`."
+                    ),
+                }
+            )
         consumed_bindings = {}
         for consumed in contract.consumes:
-            source_artifact = next(
-                (
-                    artifact
-                    for artifact in reversed(list(available))
-                    if _artifact_compatible(consumed, artifact, format_name)
-                ),
-                "",
+            source_artifact = _best_available_artifact(
+                consumed,
+                available,
+                format_name,
             )
             if source_artifact:
                 parameter = _input_parameter(contract, consumed, contract.role)
                 if parameter:
-                    params[parameter] = f"${source_artifact}"
+                    params[parameter] = {
+                        "from_action": available[source_artifact],
+                        "result_path": source_artifact,
+                    }
                     consumed_bindings[parameter] = source_artifact
                     data_edges.append(
                         {
@@ -754,6 +1044,15 @@ def compile_dynamic_pipeline(
                             "output": source_artifact,
                             "to": action_id,
                             "input": parameter,
+                        }
+                    )
+                    parameter_provenance.append(
+                        {
+                            "stage": action_id,
+                            "parameter": parameter,
+                            "value": params[parameter],
+                            "source": "upstream_result_reference",
+                            "resolution": "",
                         }
                     )
             elif literal_artifacts.get(consumed):
@@ -784,6 +1083,42 @@ def compile_dynamic_pipeline(
                         "question": f"What value should `{consumed}` use for {contract.label}?",
                     }
                 )
+
+        context_parameter = ""
+        if contract.role == "export":
+            context_parameter = next(
+                (
+                    candidate
+                    for candidate in ("selection", "object_names", "objects", "nodes")
+                    if candidate in contract.required or candidate in contract.optional
+                ),
+                "",
+            )
+        elif contract.role == "process" and "objects" in contract.optional:
+            context_parameter = "objects"
+        if (
+            context_parameter
+            and context_parameter not in consumed_bindings
+            and params.get(context_parameter) in (None, "", [], {})
+        ):
+            context_spec = infer_dcc_export_scope(
+                prompt,
+                host=contract.host,
+                subject=subject,
+            )
+            params[context_parameter] = context_spec
+            parameter_provenance.append(
+                {
+                    "stage": action_id,
+                    "parameter": context_parameter,
+                    "value": context_spec,
+                    "source": "runtime_host_context",
+                    "resolution": (
+                        f"{contract.label} resolves {context_spec['label'].lower()} "
+                        "from the live host when this pipeline runs."
+                    ),
+                }
+            )
 
         if contract.role == "export":
             output_parameter = _output_parameter(contract)
@@ -901,10 +1236,45 @@ def compile_dynamic_pipeline(
                 required_inputs[-1][
                     "question"
                 ] = "Which target Unreal Skeleton should receive the imported animation?"
+        if (
+            contract.host == "unreal"
+            and contract.role == "validate"
+            and "registry_readback" in f"{contract.operation} {contract.callable}"
+            and unreal_destination
+            and not params.get("destination_path")
+        ):
+            params["destination_path"] = unreal_destination
+            parameter_provenance.append(
+                {
+                    "stage": action_id,
+                    "parameter": "destination_path",
+                    "value": unreal_destination,
+                    "source": "user_prompt",
+                    "resolution": (
+                        "Registry validation inherits the explicit Unreal import destination "
+                        "so readback is scoped to the requested content folder."
+                    ),
+                }
+            )
+        if contract.host == "tech_connector" and contract.role == "import":
+            configured_root = str(project_root or setting_for("project_root") or "").strip()
+            params["project_root"] = configured_root
+            if not configured_root:
+                _required_setting(
+                    required_inputs,
+                    action_id=action_id,
+                    contract=contract,
+                    parameter="project_root",
+                )
 
         if not use_default_settings:
             for parameter, default_value in contract.optional.items():
                 if not _context_sensitive_parameter(parameter):
+                    continue
+                if any(
+                    row.get("stage") == action_id and row.get("parameter") == parameter
+                    for row in parameter_provenance
+                ):
                     continue
                 if isinstance(params.get(parameter), str) and params[parameter].startswith("$"):
                     parameter_provenance.append(
@@ -982,6 +1352,22 @@ def compile_dynamic_pipeline(
                 )
 
         for required_parameter in contract.required:
+            if params.get(required_parameter) in (None, "", [], {}):
+                supplied = setting_for(required_parameter)
+                if supplied not in (None, "", [], {}):
+                    params[required_parameter] = supplied
+                    parameter_provenance.append(
+                        {
+                            "stage": action_id,
+                            "parameter": required_parameter,
+                            "value": supplied,
+                            "source": "user_setting",
+                            "resolution": (
+                                f"{contract.label} uses the explicit pipeline setting "
+                                f"for required argument `{required_parameter}`."
+                            ),
+                        }
+                    )
             if params.get(required_parameter) not in (None, "", [], {}):
                 continue
             _required_setting(
@@ -999,7 +1385,7 @@ def compile_dynamic_pipeline(
                 "callable": contract.callable,
                 "params": params,
                 "operation_contract": contract.to_dict(),
-                "produces": list(contract.produces),
+                "produces": stage_produces,
                 "consumes": list(contract.consumes),
                 "validation": list(contract.validation),
                 "rollback": list(contract.rollback),
@@ -1010,10 +1396,15 @@ def compile_dynamic_pipeline(
             requires_approval=contract.mutates_project,
         )
         previous_action_id = action.id
-        for produced in contract.produces:
+        if contract.role == "export":
+            output_parameter = _output_parameter(contract)
+            output_value = params.get(output_parameter) if output_parameter else None
+            if output_value not in (None, "", [], {}):
+                for produced in stage_produces:
+                    if _artifact_compatible(produced, path_artifact, format_name):
+                        artifact_literals[produced] = output_value
+        for produced in stage_produces:
             available[produced] = action_id
-        if contract.role == "export" and path_artifact not in contract.produces:
-            available[path_artifact] = action_id
         stage_rows.append(
             {
                 "id": action_id,
@@ -1023,7 +1414,7 @@ def compile_dynamic_pipeline(
                 "callable": contract.callable,
                 "params": params,
                 "consumed_bindings": consumed_bindings,
-                "produces": list(contract.produces),
+                "produces": stage_produces,
                 "validation": list(contract.validation),
                 "rollback": list(contract.rollback),
                 "implementation_state": contract.implementation_state,
@@ -1071,6 +1462,7 @@ def compile_dynamic_pipeline(
             "hosts": hosts,
             "format": format_name,
             "subject": subject,
+            "project_root": str(project_root or ""),
             "stages": stage_rows,
             "data_edges": data_edges,
             "required_inputs": required_inputs,
@@ -1078,6 +1470,16 @@ def compile_dynamic_pipeline(
             "parameter_provenance": parameter_provenance,
             "assumptions": assumption_messages,
             "selected_contracts": [item.to_dict() for item in selected],
+            "explicit_function_requests": [
+                {
+                    "requested_name": row["requested_name"],
+                    "host": row["contract"].host,
+                    "operation": row["contract"].operation,
+                    "resolved": row["contract"].executable,
+                }
+                for row in explicit_mentions
+            ],
+            "unresolved_function_requests": unresolved_function_names,
             "evidence_summary": {
                 "stage_count": len(evidence_rows),
                 "live_validated_count": sum(

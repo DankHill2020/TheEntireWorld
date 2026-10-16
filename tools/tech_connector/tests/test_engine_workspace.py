@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -25,7 +26,7 @@ class FakeLevelViewport(QWidget):
         self.scene_left_panel = QWidget(self); layout = QVBoxLayout(self.scene_left_panel); layout.addWidget(self.scene_outliner); layout.addWidget(self.instance_details_panel)
         self._federated_scene_path = ""; self.simulating = False; self.tool = "select"; self.placed = []; self.sequence_commands = []; self.steps = 0
         self.undo_count = 0; self.redo_count = 0; self.focus_count = 0; self.orientation = "world"; self.snap = {}; self.placement = {}; self.wireframe = False
-        self.created = []; self.actor_ops = []
+        self.created = []; self.actor_ops = []; self.reset_count = 0
 
     def load_federated_scene_file(self, path: str, *, interactive: bool = True):
         self._federated_scene_path = str(path); return True, f"Loaded {Path(path).name}"
@@ -34,6 +35,7 @@ class FakeLevelViewport(QWidget):
     def save_federated_scene_dialog(self): return False
     def set_simulation_playing(self, playing: bool): self.simulating = bool(playing)
     def step_simulation(self): self.steps += 1
+    def reset_simulation(self): self.reset_count += 1
     def set_transform_tool(self, tool: str): self.tool = str(tool)
     def place_asset_from_browser(self, payload): self.placed.append(dict(payload)); return True
     def apply_level_sequence_command(self, payload): self.sequence_commands.append(dict(payload))
@@ -53,6 +55,10 @@ def test_engine_workspace_exposes_real_editor_surfaces_and_modes(tmp_path) -> No
     database = AssetDatabase(tmp_path / ".tech_connector" / "assets.sqlite3")
     workspace = EngineWorkspaceWindow(tmp_path, database=database, viewport_factory=FakeLevelViewport)
     assert workspace.centralWidget() is workspace.viewport
+    assert workspace.play_action.shortcut().toString() == "Alt+P"
+    assert workspace.quick_open_action.shortcut().toString() == "Ctrl+P"
+    assert workspace.simulate_action.shortcut().toString() == "Alt+S"
+    assert workspace.stop_action.shortcut().toString() == "F8"
     assert workspace.world_outliner_dock.widget() is workspace.viewport.scene_outliner
     assert workspace.details_dock.widget() is workspace.actor_details
     assert workspace.content_dock.widget() is workspace.asset_browser
@@ -61,12 +67,32 @@ def test_engine_workspace_exposes_real_editor_surfaces_and_modes(tmp_path) -> No
     assert workspace.world_settings_dock.widget() is workspace.world_settings
     assert workspace.console_dock.widget() is workspace.console_panel
     assert workspace.profiler_dock.widget() is workspace.profiler_panel
+    assert workspace.task_center_dock.widget() is workspace.task_center
+    assert workspace.asset_audit_dock.widget() is workspace.asset_audit
+    assert workspace.dependency_dock.widget() is workspace.dependency_explorer
+    assert workspace.recovery_dock.widget() is workspace.recovery_center
     assert workspace.build_dock.widget() is workspace.build_panel
     assert workspace.world_production_dock.widget() is workspace.world_production
+    assert workspace.launch_readiness.last_audit == {}
+    assert workspace.asset_browser.asset_tree.topLevelItem(0).text(0) == "Loading project assets…"
+    assert workspace.command_palette_action.shortcut().toString() == "Ctrl+Shift+P"
+    workspace.show_command_palette()
+    workspace.command_palette.search_edit.setText("focus selected")
+    assert workspace.command_palette.command_list.count() >= 1
+    assert workspace.command_palette.activate_current()
+    assert workspace.viewport.focus_count == 1
+    workspace.viewport._scene_lifecycle = SimpleNamespace(dirty=True)
+    workspace.asset_editor._specialized_dirty = True
+    workspace._sequence_dirty = True
+    assert workspace._update_document_state_indicators() == ("Level", "Asset", "Sequence")
+    assert workspace.windowTitle().endswith(" *")
+    assert workspace.asset_editor_dock.windowTitle().endswith(" *")
+    workspace.viewport._scene_lifecycle.dirty = False; workspace.asset_editor._specialized_dirty = False; workspace._sequence_dirty = False
+    assert workspace._update_document_state_indicators() == ()
 
     workspace.set_transform_tool("translate"); assert workspace.viewport.tool == "translate"
     workspace.undo(); workspace.redo(); assert (workspace.viewport.undo_count, workspace.viewport.redo_count) == (1, 1)
-    assert workspace.focus_selected(); assert workspace.viewport.focus_count == 1
+    assert workspace.focus_selected(); assert workspace.viewport.focus_count == 2
     workspace.coordinate_space.setCurrentIndex(1); assert workspace.viewport.orientation == "object"
     workspace.move_snap.setCurrentIndex(3); workspace.rotate_snap.setCurrentIndex(2); workspace.scale_snap.setCurrentIndex(2)
     assert workspace.viewport.snap == {"translation": 10.0, "rotation": 10.0, "scale": 0.05}
@@ -76,8 +102,11 @@ def test_engine_workspace_exposes_real_editor_surfaces_and_modes(tmp_path) -> No
     assert workspace.duplicate_selected_actor() and workspace.delete_selected_actor()
     assert workspace.viewport.actor_ops == ["duplicate", "delete"]
     assert workspace.set_mode("simulate"); assert workspace.viewport.simulating
-    workspace.pause(); assert not workspace.viewport.simulating
+    assert workspace.runtime_state_label.text().strip() == "SIMULATE"
+    workspace.pause(); assert not workspace.viewport.simulating; assert workspace.pause_action.text() == "Resume"
     workspace.step(); assert workspace.viewport.steps == 1
+    workspace.reset_runtime(); assert workspace.viewport.reset_count == 1; assert workspace.viewport.simulating
+    workspace.stop(); assert workspace.runtime_state_label.text().strip() == "EDIT"
     assert workspace.set_mode("edit")
     workspace.world_settings.time_of_day.setValue(19.5)
     assert workspace.viewport._engine_world_settings["time_of_day"] == 19.5
@@ -96,9 +125,26 @@ def test_engine_workspace_loads_levels_places_assets_and_opens_sequences(tmp_pat
 
     assert workspace.open_asset(level.destination_path, "tc.level", level.asset_id)
     assert workspace.current_level_path.endswith("Main.tcscene")
+    runtime_events = []
+    workspace.playRequested.connect(lambda path: runtime_events.append(("play", path)))
+    workspace.resetRequested.connect(lambda path: runtime_events.append(("reset", path)))
+    workspace.ejectRequested.connect(lambda: runtime_events.append(("eject", "")))
+    workspace.stopRequested.connect(lambda: runtime_events.append(("stop", "")))
+    assert workspace.set_mode("play")
+    workspace.reset_runtime()
+    workspace.eject()
+    assert [event[0] for event in runtime_events] == ["play", "reset", "eject"]
+    assert runtime_events[1][1].endswith("Main.tcscene")
+    assert workspace.runtime_state_label.text().strip() == "EDIT"
+    assert workspace.set_mode("play")
+    workspace.stop()
+    assert [event[0] for event in runtime_events[-2:]] == ["play", "stop"]
     assert workspace.place_asset(str(mesh.source_path), mesh.asset_type, mesh.asset_id)
     assert workspace.viewport.placed[0]["asset_id"] == mesh.asset_id
+    assert workspace.show_dependency_explorer(mesh.asset_id)
+    assert "crate.fbx" in workspace.dependency_explorer.heading.text().casefold()
     assert workspace.open_asset(sequence.destination_path, "tc.level_sequence", sequence.asset_id)
+    assert sequence.asset_id == workspace.editor_state.recent_assets[0]
     assert workspace.sequence_dock.isVisible() or not workspace.isVisible()
     assert workspace._sequence_asset_id == sequence.asset_id
     assert workspace.save_all()

@@ -527,6 +527,20 @@ for feature in manifest["features"]:
     )
 ```
 
+For an operation-level inventory of the high-level Python namespaces, use the
+separate public surface manifest:
+
+```python
+surface = api.surface()
+for operation in surface["operations"]:
+    print(operation["path"], operation["signature"])
+```
+
+The feature manifest describes modular capabilities and ownership. The surface
+manifest describes concrete Python methods. Dynamic DCC functions, Kingdom
+editor operations, runtime tools, and attached UI actions retain their own
+authoritative catalogs, which are linked in `surface["dynamic_surfaces"]`.
+
 ### Filter by Category
 
 ```python
@@ -611,6 +625,8 @@ Every feature provides:
 | `execution.python` | Call normal Python |
 | `execution.dcc` | Call a DCC function through a bridge |
 | `intelligence.dcc_catalog` | Discover DCC API functions and aliases |
+| `integrations.connected_services` | Connected-account status, smart references, targets, setup URLs, and approved dispatch |
+| `api.surface` | Complete supported Python operation and signature inventory |
 | `api.license` | Inspect entitlement state |
 
 ### Tech Connector Lifecycle Features
@@ -1020,6 +1036,7 @@ from tech_connector.api import (
     reasoning_capabilities,
     reasoning_snapshot,
     run_reasoning,
+    run_reasoning_chain,
 )
 ```
 
@@ -1043,6 +1060,24 @@ result = run_reasoning(
     project_root="C:/project",
     context={"current_file_path": "C:/project/tool.py"},
 )
+```
+
+For related requests, use `run_reasoning_chain` (or `api.reasoning.run_chain`).
+It carries the prior result's file/asset/operation workspace into each next
+request, keeps only the latest 12 transcript messages, and stops when a step
+needs clarification or fails. The returned `state` can be passed back as
+`context` to resume a later chain after supplying the missing detail.
+
+```python
+result = run_reasoning_chain(
+    ["Find the export function", "Explain that function", "List its callers"],
+    project_root="C:/project",
+)
+if result.ok:
+    for step in result.result["steps"]:
+        print(step["response"]["text"])
+else:
+    print(result.result["stop_reason"])
 ```
 
 ## Error Handling

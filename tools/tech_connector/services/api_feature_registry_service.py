@@ -100,6 +100,40 @@ class APIFeatureRegistry:
     def get(self, feature_id: str) -> APIFeatureDescriptor | None:
         return self._descriptors.get(str(feature_id or "").strip())
 
+    def search(
+        self, query: str, *, category: str = "", available_only: bool = True,
+    ) -> list[APIFeatureDescriptor]:
+        """Find features by ID, description, category, or operation name."""
+        terms = tuple(
+            term for term in str(query or "").strip().casefold().split() if term
+        )
+        candidates = self.list(category=category, available_only=available_only)
+        if not terms:
+            return candidates
+        matches = []
+        for descriptor in candidates:
+            haystack = " ".join((
+                descriptor.feature_id,
+                descriptor.category,
+                descriptor.description,
+                " ".join(descriptor.operations),
+                " ".join(descriptor.dependencies),
+                " ".join(descriptor.permissions),
+            )).casefold()
+            if all(
+                term in haystack or (len(term) >= 5 and term[:5] in haystack)
+                for term in terms
+            ):
+                matches.append(descriptor)
+        return matches
+
+    def handler(self, feature_id: str, operation: str) -> Callable[..., Any] | None:
+        """Return a registered handler for safe signature introspection."""
+        descriptor = self.get(feature_id)
+        if descriptor is None or str(operation or "").strip() not in descriptor.operations:
+            return None
+        return self._handlers.get(descriptor.feature_id, {}).get(str(operation).strip())
+
     def invoke(self, feature_id: str, operation: str, **kwargs: Any) -> Any:
         descriptor = self.get(feature_id)
         if descriptor is None:

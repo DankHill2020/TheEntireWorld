@@ -116,7 +116,7 @@ def _handle_client(conn):
             if not _tech_connector_bridge_authorized(payload):
                 response = {
                     "ok": False,
-                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "error": "A valid local Tech Connector bridge session is required.",
                     "code": "bridge_authorization_required",
                 }
                 conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
@@ -311,7 +311,7 @@ class SubstancePainterBridge(DCCBridgeDelegateMixin):
         default_port=7031,
         setup_script="bridges/substance_painter/substance_painter_bridge.py",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
     PORT_FILES = [
         str(APP_DIR / "substance_painter_port.txt"),

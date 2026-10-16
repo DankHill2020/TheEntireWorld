@@ -311,6 +311,12 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
 }
 
 BLENDER_OPERATIONS: dict[str, DccOperation] = {
+    "cinematics.sequence_ui": DccOperation(
+        key="cinematics.sequence_ui",
+        label="Blender Open Sequence Workspace",
+        function="blender_tools.Cinematics.SequenceUI.sequence_utils.show_sequence_manager",
+        description="Register and expose the native Blender Sequence Workspace for shot and animation export authoring.",
+    ),
     "script.run": DccOperation(
         key="script.run",
         label="Blender Run Script",
@@ -398,6 +404,7 @@ BLENDER_OPERATIONS: dict[str, DccOperation] = {
             "apply_unit_scale": True,
             "axis_forward": "-Z",
             "axis_up": "Y",
+            "object_names": [],
         },
         mutates_project=False,
         description="Export current scene or selection as FBX.",
@@ -751,6 +758,11 @@ UNITY_OPERATIONS: dict[str, DccOperation] = {
 
 
 MAX_OPERATIONS: dict[str, DccOperation] = {
+    "cinematics.sequence_ui": DccOperation(
+        "cinematics.sequence_ui", "3ds Max Open Sequence Workspace",
+        "max_tools.Cinematics.SequenceUI.sequence_utils.show_sequence_manager",
+        description="Open the 3ds Max Sequence Workspace for camera, rig, range, and FBX export authoring.",
+    ),
     "scene.list": DccOperation(
         "scene.list", "3ds Max List Scene", "max_tools.operations.scene_list",
         optional={"selected": False, "limit": 500},

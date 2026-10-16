@@ -33,7 +33,8 @@ from tech_connector.game_engine.integration.maya_version_qualification_service i
 )
 from tech_connector.packaging.release_gate import (
     publication_candidates, sensitive_artifacts, validate_github_root_surface, validate_legal_surface,
-    validate_production_configuration, validate_production_legal_approval, validate_production_source_access,
+    validate_production_configuration, validate_production_legal_approval, validate_production_readiness,
+    validate_production_source_access,
 )
 
 
@@ -232,7 +233,7 @@ def audit_launch_readiness(
 
     if production:
         production_failures = [*validate_production_configuration(root), *validate_production_legal_approval(root),
-                               *validate_production_source_access(root)]
+                               *validate_production_source_access(root), *validate_production_readiness(root)]
         gates.append(LaunchGate("production_controls", "passed" if not production_failures else "blocked", tuple(production_failures)))
     blocking = [gate.gate for gate in gates if gate.status != "passed"]
     return {"schema": LAUNCH_READINESS_SCHEMA, "status": "launch_ready" if not blocking else "blocked",

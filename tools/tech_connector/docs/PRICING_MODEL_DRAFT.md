@@ -127,8 +127,8 @@ Suggested immutable offer identifiers:
 - `community-success-micro-2026a`;
 - `community-success-small-2026a`;
 - `indie-annual-2026a`;
-- `indie-perpetual-v7-2026a`;
-- `indie-upgrade-v8-2026a`;
+- `indie-perpetual-v6-2026a` for the current v6.7 launch candidate;
+- `indie-upgrade-v7-2026a` when a customer elects to buy the next major version;
 - `enterprise-annual-2026a`; and
 - negotiated custom offer IDs generated per agreement.
 
@@ -151,3 +151,6 @@ even after the public catalog changes.
   preserve the list price and represent any discount in the backend offer.
 - Decide which launch offers include the complete Official Tools Bundle and the
   single add-on price, without introducing individual tool-pack SKUs.
+- Confirm the marketed launch major version before publishing perpetual offer
+  IDs. Every perpetual catalog entry must list its covered major version(s);
+  neither an offer name nor "free updates" text is sufficient entitlement data.

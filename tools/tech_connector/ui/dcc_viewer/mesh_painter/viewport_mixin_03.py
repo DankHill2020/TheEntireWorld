@@ -341,9 +341,10 @@ class ThreeDMeshPainterViewportMixin03:
         self.brush_softness = max(0, min(100, int(val)))
         self.canvas.update()
 
-    def schedule_paint_canvas_update(self, *, force: bool = False) -> None:
+    def schedule_paint_canvas_update(self, *, force: bool = False, interval_ms: int = 34) -> None:
+        interval_ms = max(1, int(interval_ms))
         now = time.perf_counter()
-        if force or now - float(getattr(self, "_last_paint_canvas_update_s", 0.0)) >= 1.0 / 30.0:
+        if force or now - float(getattr(self, "_last_paint_canvas_update_s", 0.0)) >= interval_ms / 1000.0:
             self._last_paint_canvas_update_s = now
             self._paint_canvas_update_pending = False
             self.canvas.update()
@@ -351,7 +352,7 @@ class ThreeDMeshPainterViewportMixin03:
         if bool(getattr(self, "_paint_canvas_update_pending", False)):
             return
         self._paint_canvas_update_pending = True
-        QTimer.singleShot(34, self._flush_paint_canvas_update)
+        QTimer.singleShot(interval_ms, self._flush_paint_canvas_update)
 
     def _flush_paint_canvas_update(self) -> None:
         self._paint_canvas_update_pending = False
@@ -493,6 +494,14 @@ class ThreeDMeshPainterViewportMixin03:
             self.transform_orientation_mode = "world"
         self.active_transform_axis = ""
         self.hover_transform_axis = ""
+        self.update_viewport_status()
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+
+    def change_transform_snap_target(self, text: str) -> None:
+        label = str(text or "off").casefold()
+        target = "point" if "point" in label else "grid" if "grid" in label else "increment" if "increment" in label else "off"
+        self.configure_transform_snapping(enabled=target != "off", target=target)
         self.update_viewport_status()
         if getattr(self, "canvas", None) is not None:
             self.canvas.update()
@@ -864,8 +873,16 @@ class ThreeDMeshPainterViewportMixin03:
         mesh = getattr(self, "mesh", None)
         selected_proxy = getattr(self, "_selected_scene_proxy", None)
         selected_key = ""
+        selected_entity_id = ""
         if isinstance(selected_proxy, (dict, SceneProxyInstance)):
             selected_key = str(selected_proxy.get("source_key") or "")
+            selected_entity_id = str(selected_proxy.get("entity_id") or selected_proxy.get("native_id") or "")
+        selected_provider = getattr(self, "selected_level_actor_proxies", None)
+        selected_entity_ids = [
+            str(proxy.get("entity_id") or proxy.get("native_id") or "")
+            for proxy in (selected_provider() if callable(selected_provider) else ())
+            if str(proxy.get("entity_id") or proxy.get("native_id") or "")
+        ]
         return {
             "label": label,
             "mesh_name": str(getattr(mesh, "name", "")),
@@ -887,6 +904,8 @@ class ThreeDMeshPainterViewportMixin03:
             "proxy_wire_color": QColor(getattr(mesh, "proxy_wire_color", QColor(185, 230, 255, 235))),
             "camera": copy.deepcopy(getattr(self, "viewport_camera", MayaViewportCamera())),
             "selected_key": selected_key,
+            "selected_entity_id": selected_entity_id,
+            "selected_entity_ids": selected_entity_ids,
             "syncsketch_markup_store": copy.deepcopy(getattr(self, "syncsketch_markup_store", None)),
             "syncsketch_markup_enabled": bool(getattr(self, "syncsketch_markup_enabled", False)),
             "editable_rig_graph": copy.deepcopy(getattr(self, "editable_rig_graph", EditableRigGraph())),
@@ -1037,6 +1056,12 @@ class ThreeDMeshPainterViewportMixin03:
                     self._selected_scene_proxy = proxy
                     break
         self.refresh_scene_outliner()
+        selection_setter = getattr(self, "set_selected_level_actor_ids", None)
+        if callable(selection_setter) and state.get("selected_entity_ids"):
+            selection_setter(
+                list(state.get("selected_entity_ids") or ()),
+                primary_id=str(state.get("selected_entity_id") or ""),
+            )
         self.update_viewport_status()
         if getattr(self, "canvas", None) is not None:
             self.canvas.update()
@@ -1327,6 +1352,7 @@ class ThreeDMeshPainterViewportMixin03:
                 self.mesh,
                 getattr(self, "_dcc_deformation_bindings", {}) or {},
                 topology_signature=topology_signature,
+                geometry_revision=int(getattr(self, "_paint_geometry_revision", 0)),
             )
         material = self._representative_gpu_material()
         gpu.set_lighting_profile(self.viewport_lighting_profile)
@@ -1435,7 +1461,7 @@ class ThreeDMeshPainterViewportMixin03:
         self._dcc_stream_frame = image
         self._dcc_stream_provider = str(provider or "").lower()
         if getattr(self, "canvas", None) is not None:
-            self.canvas.update()
+            self.schedule_paint_canvas_update(interval_ms=34)
 
     @Slot(str)
     def on_dcc_viewport_stream_status(self, message: str) -> None:

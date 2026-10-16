@@ -14,8 +14,9 @@ from PySide6.QtWidgets import (
 )
 
 from tech_connector.game_engine.assets.sequence_asset_service import (
-    RENDER_FORMATS, TRACK_DEFINITIONS, TRACK_TYPES, build_render_jobs, new_binding,
-    new_level_blend_section, new_section, new_track, sequence_defaults, track_preset, validate_sequence,
+    RENDER_FORMATS, TRACK_DEFINITIONS, TRACK_TYPES, build_render_jobs, evaluate_sequence, new_binding,
+    new_level_blend_section, new_section, new_sequence_folder, new_track, sequence_defaults,
+    track_preset, validate_sequence,
 )
 
 
@@ -174,6 +175,7 @@ class SequenceEditorWidget(QWidget):
 
         authoring = QHBoxLayout()
         self.search = QLineEdit(self); self.search.setPlaceholderText("Filter tracks and bindings…")
+        self.add_folder_button = QPushButton("+ Folder", self)
         self.add_binding_button = QPushButton("+ Binding", self)
         self.track_type = QComboBox(self)
         for value, definition in TRACK_DEFINITIONS.items(): self.track_type.addItem(f"{definition['category']} • {definition['label']}", value)
@@ -181,7 +183,11 @@ class SequenceEditorWidget(QWidget):
         self.add_section_button = QPushButton("+ Section", self)
         self.duplicate_button = QPushButton("Duplicate", self)
         self.delete_button = QPushButton("Delete", self)
-        for widget in (self.search, self.add_binding_button, self.track_type, self.add_track_button, self.add_section_button, self.duplicate_button, self.delete_button): authoring.addWidget(widget)
+        self.hierarchy_parent = QComboBox(self); self.hierarchy_parent.setMinimumWidth(130)
+        self.set_parent_button = QPushButton("Set Parent", self)
+        for widget in (self.search, self.add_folder_button, self.add_binding_button, self.track_type,
+                       self.add_track_button, self.add_section_button, self.hierarchy_parent,
+                       self.set_parent_button, self.duplicate_button, self.delete_button): authoring.addWidget(widget)
         root.addLayout(authoring)
 
         splitter = QSplitter(Qt.Horizontal, self)
@@ -236,7 +242,8 @@ class SequenceEditorWidget(QWidget):
         self.canvas.sectionSelected.connect(self._select_section)
         self.canvas.sectionEdited.connect(self._section_edited)
         self.search.textChanged.connect(self._filter)
-        self.add_binding_button.clicked.connect(self.add_binding); self.add_track_button.clicked.connect(self.add_track)
+        self.add_folder_button.clicked.connect(self.add_folder); self.add_binding_button.clicked.connect(self.add_binding)
+        self.add_track_button.clicked.connect(self.add_track); self.set_parent_button.clicked.connect(self.set_selected_parent)
         self.add_section_button.clicked.connect(self.add_section); self.duplicate_button.clicked.connect(self.duplicate_selected)
         self.delete_button.clicked.connect(self.delete_selected); self.outliner.itemChanged.connect(self._outliner_changed)
         self.outliner.itemClicked.connect(self._outliner_clicked)
@@ -273,11 +280,23 @@ class SequenceEditorWidget(QWidget):
         binding = new_binding(name, object_id=object_id); self._values.setdefault("bindings", []).append(binding)
         self._rebuild(); self._emit_changed(); return str(binding["id"])
 
+    def add_folder(self, name: str = "New Folder", parent_id: str = "") -> str:
+        if not parent_id:
+            selected = self.outliner.currentItem()
+            if selected is not None and selected.data(0, Qt.UserRole) == "folder":
+                parent_id = str(selected.data(0, Qt.UserRole + 1) or "")
+        folder = new_sequence_folder(name, parent_id=parent_id)
+        self._values.setdefault("folders", []).append(folder)
+        self._rebuild(); self._select_item("folder", str(folder["id"])); self._emit_changed()
+        return str(folder["id"])
+
     def add_track(self, track_type: str = "", name: str = "", binding_id: str = "") -> str:
         kind = str(track_type or self.track_type.currentData() or "animation").casefold().replace(" ", "_")
         selected = self.outliner.currentItem()
         if not binding_id and selected is not None and selected.data(0, Qt.UserRole) == "binding": binding_id = str(selected.data(0, Qt.UserRole + 1) or "")
         track = track_preset(kind, name, binding_id=binding_id); self._values.setdefault("tracks", []).append(track)
+        if selected is not None and selected.data(0, Qt.UserRole) in {"folder", "track"}:
+            track["parent_id"] = str(selected.data(0, Qt.UserRole + 1) or "")
         self._rebuild(); self._select_track(str(track["id"])); self._emit_changed(); return str(track["id"])
 
     def add_section(self, name: str = "", start_frame: int | None = None, end_frame: int | None = None, asset_id: str = "") -> str:
@@ -304,24 +323,77 @@ class SequenceEditorWidget(QWidget):
         item = self.outliner.currentItem()
         if item is None: return
         kind, identifier = item.data(0, Qt.UserRole), str(item.data(0, Qt.UserRole + 1) or "")
-        if kind == "track": self._values["tracks"] = [track for track in self._values.get("tracks") or () if track.get("id") != identifier]
+        if kind == "track":
+            self._values["tracks"] = [track for track in self._values.get("tracks") or () if track.get("id") != identifier]
+            for track in self._values.get("tracks") or ():
+                if track.get("parent_id") == identifier: track["parent_id"] = ""
+        elif kind == "folder":
+            self._values["folders"] = [folder for folder in self._values.get("folders") or () if folder.get("id") != identifier]
+            for folder in self._values.get("folders") or ():
+                if folder.get("parent_id") == identifier: folder["parent_id"] = ""
+            for track in self._values.get("tracks") or ():
+                if track.get("parent_id") == identifier: track["parent_id"] = ""
         elif kind == "binding":
             self._values["bindings"] = [binding for binding in self._values.get("bindings") or () if binding.get("id") != identifier]
             for track in self._values.get("tracks") or ():
                 if track.get("binding_id") == identifier: track["binding_id"] = ""
         self._rebuild(); self._emit_changed()
 
+    def set_selected_parent(self, parent_id: str | None = None) -> None:
+        item = self.outliner.currentItem()
+        if item is None: return
+        kind, identifier = str(item.data(0, Qt.UserRole) or ""), str(item.data(0, Qt.UserRole + 1) or "")
+        chosen = str(self.hierarchy_parent.currentData() if parent_id is None else parent_id or "")
+        if chosen == identifier: return
+        if kind == "track":
+            track = next((row for row in self._values.get("tracks") or () if str(row.get("id") or "") == identifier), None)
+            if track is not None: track["parent_id"] = chosen
+        elif kind == "folder":
+            folder = next((row for row in self._values.get("folders") or () if str(row.get("id") or "") == identifier), None)
+            if folder is not None: folder["parent_id"] = chosen
+        else:
+            return
+        if self.validation_issues():
+            if kind == "track": track["parent_id"] = ""
+            else: folder["parent_id"] = ""
+            self.status.setText("That parent would create an invalid hierarchy.")
+        self._rebuild(); self._select_item(kind, identifier); self._emit_changed()
+
     def _rebuild(self) -> None:
         self.outliner.blockSignals(True); self.outliner.clear()
+        self.hierarchy_parent.blockSignals(True); self.hierarchy_parent.clear(); self.hierarchy_parent.addItem("Top Level", "")
+        folder_items: dict[str, QTreeWidgetItem] = {}
+        for folder in self._values.get("folders") or ():
+            item = QTreeWidgetItem([str(folder.get("name") or "Folder"), "folder", "", "", ""])
+            item.setData(0, Qt.UserRole, "folder"); item.setData(0, Qt.UserRole + 1, str(folder.get("id") or ""))
+            item.setFlags(item.flags() | Qt.ItemIsEditable); folder_items[str(folder.get("id") or "")] = item
+            self.hierarchy_parent.addItem(f"Folder / {folder.get('name') or 'Folder'}", str(folder.get("id") or ""))
+        for folder in self._values.get("folders") or ():
+            item = folder_items[str(folder.get("id") or "")]
+            parent = folder_items.get(str(folder.get("parent_id") or ""))
+            (parent.addChild(item) if parent else self.outliner.addTopLevelItem(item))
         binding_items: dict[str, QTreeWidgetItem] = {}
         for binding in self._values.get("bindings") or ():
             item = QTreeWidgetItem([str(binding.get("name") or "Binding"), str(binding.get("type") or "possessable"), "", "", ""])
             item.setData(0, Qt.UserRole, "binding"); item.setData(0, Qt.UserRole + 1, str(binding.get("id") or "")); item.setFlags(item.flags() | Qt.ItemIsEditable)
-            self.outliner.addTopLevelItem(item); binding_items[str(binding.get("id") or "")] = item
+            binding_items[str(binding.get("id") or "")] = item
+        for binding in self._values.get("bindings") or ():
+            item = binding_items[str(binding.get("id") or "")]
+            parent = binding_items.get(str(binding.get("parent_binding_id") or ""))
+            (parent.addChild(item) if parent else self.outliner.addTopLevelItem(item))
+        track_items: dict[str, QTreeWidgetItem] = {}
         for track in self._values.get("tracks") or ():
             item = QTreeWidgetItem([str(track.get("name") or "Track"), str(track.get("type") or ""), "M" if track.get("muted") else "", "S" if track.get("solo") else "", "L" if track.get("locked") else ""])
             item.setData(0, Qt.UserRole, "track"); item.setData(0, Qt.UserRole + 1, str(track.get("id") or "")); item.setFlags(item.flags() | Qt.ItemIsEditable)
-            parent = binding_items.get(str(track.get("binding_id") or "")); (parent.addChild(item) if parent else self.outliner.addTopLevelItem(item))
+            track_items[str(track.get("id") or "")] = item
+            self.hierarchy_parent.addItem(f"Track / {track.get('name') or 'Track'}", str(track.get("id") or ""))
+        for track in self._values.get("tracks") or ():
+            item = track_items[str(track.get("id") or "")]
+            parent = (folder_items.get(str(track.get("parent_id") or ""))
+                      or track_items.get(str(track.get("parent_id") or ""))
+                      or binding_items.get(str(track.get("binding_id") or "")))
+            (parent.addChild(item) if parent else self.outliner.addTopLevelItem(item))
+        self.hierarchy_parent.blockSignals(False)
         self.outliner.expandAll(); self.outliner.blockSignals(False)
         self.canvas.load(list(self._values.get("tracks") or ()), self.start.value(), self.end.value(), self.frame.value())
         self.duration_label.setText(f"{self.end.value() - self.start.value()} frames • {(self.end.value() - self.start.value()) / max(1, self.fps.value()):.2f} sec")
@@ -333,11 +405,14 @@ class SequenceEditorWidget(QWidget):
         return next((track for track in self._values.get("tracks") or () if str(track.get("id") or "") == identifier), None)
 
     def _select_track(self, identifier: str) -> None:
+        self._select_item("track", identifier)
+
+    def _select_item(self, kind: str, identifier: str) -> None:
         iterator = self.outliner.invisibleRootItem()
         stack = [iterator.child(index) for index in range(iterator.childCount())]
         while stack:
             item = stack.pop(0)
-            if item.data(0, Qt.UserRole) == "track" and item.data(0, Qt.UserRole + 1) == identifier: self.outliner.setCurrentItem(item); return
+            if item.data(0, Qt.UserRole) == kind and item.data(0, Qt.UserRole + 1) == identifier: self.outliner.setCurrentItem(item); return
             stack.extend(item.child(index) for index in range(item.childCount()))
 
     def _select_section(self, track_id: str, section_id: str) -> None:
@@ -410,6 +485,12 @@ class SequenceEditorWidget(QWidget):
                 elif column == 2: track["muted"] = not bool(track.get("muted"))
                 elif column == 3: track["solo"] = not bool(track.get("solo"))
                 elif column == 4: track["locked"] = not bool(track.get("locked"))
+        elif item.data(0, Qt.UserRole) == "folder":
+            folder = next((value for value in self._values.get("folders") or () if value.get("id") == identifier), None)
+            if folder and column == 0: folder["name"] = item.text(0)
+        elif item.data(0, Qt.UserRole) == "binding":
+            binding = next((value for value in self._values.get("bindings") or () if value.get("id") == identifier), None)
+            if binding and column == 0: binding["name"] = item.text(0)
         self._rebuild(); self._emit_changed()
 
     def _outliner_clicked(self, item: QTreeWidgetItem, column: int) -> None:
@@ -418,12 +499,12 @@ class SequenceEditorWidget(QWidget):
 
     def _filter(self, text: str) -> None:
         query = text.strip().casefold()
+        def visit(item: QTreeWidgetItem) -> bool:
+            child_visible = any(visit(item.child(index)) for index in range(item.childCount()))
+            own_match = not query or query in (item.text(0) + " " + item.text(1)).casefold()
+            visible = own_match or child_visible; item.setHidden(not visible); return visible
         root = self.outliner.invisibleRootItem()
-        for index in range(root.childCount()):
-            item = root.child(index); child_visible = False
-            for child_index in range(item.childCount()):
-                child = item.child(child_index); match = not query or query in (child.text(0) + " " + child.text(1)).casefold(); child.setHidden(not match); child_visible |= match
-            own_match = not query or query in (item.text(0) + " " + item.text(1)).casefold(); item.setHidden(not (own_match or child_visible))
+        for index in range(root.childCount()): visit(root.child(index))
 
     def _toggle_play(self) -> None:
         if self._timer.isActive(): self._timer.stop(); self.play.setText("Play")
@@ -453,7 +534,7 @@ class SequenceEditorWidget(QWidget):
 
 
 class SequenceCurveEditorWidget(QWidget):
-    """Key table for any numeric sequence channel with lossless ID-based patching."""
+    """Tangent-aware key editor with snapping and batch manipulation."""
 
     changed = Signal()
 
@@ -466,14 +547,26 @@ class SequenceCurveEditorWidget(QWidget):
         add = QPushButton("+ Key at Playhead", self); remove = QPushButton("Delete Key", self)
         toolbar.addWidget(QLabel("Target")); toolbar.addWidget(self.target, 1); toolbar.addWidget(self.channel_name)
         toolbar.addWidget(add); toolbar.addWidget(remove); root.addLayout(toolbar)
-        self.table = QTableWidget(0, 6, self)
-        self.table.setHorizontalHeaderLabels(["Track", "Section", "Channel", "Frame", "Value", "Interpolation"])
+        tools = QHBoxLayout()
+        self.interpolation = QComboBox(self); self.interpolation.addItems(["linear", "constant", "smooth", "ease_in", "ease_out", "bezier"])
+        self.in_tangent = QDoubleSpinBox(self); self.in_tangent.setRange(-100000, 100000); self.in_tangent.setDecimals(4); self.in_tangent.setPrefix("In ")
+        self.out_tangent = QDoubleSpinBox(self); self.out_tangent.setRange(-100000, 100000); self.out_tangent.setDecimals(4); self.out_tangent.setPrefix("Out ")
+        self.snap_keys = QDoubleSpinBox(self); self.snap_keys.setRange(0, 10000); self.snap_keys.setDecimals(3); self.snap_keys.setValue(1); self.snap_keys.setPrefix("Snap ")
+        apply_style = QPushButton("Apply Key Style", self); left = QPushButton("Nudge Left", self); right = QPushButton("Nudge Right", self); snap = QPushButton("Snap Selected", self)
+        for widget in (QLabel("Interpolation"), self.interpolation, self.in_tangent, self.out_tangent, self.snap_keys, apply_style, left, right, snap): tools.addWidget(widget)
+        tools.addStretch(1); root.addLayout(tools)
+        self.table = QTableWidget(0, 8, self)
+        self.table.setHorizontalHeaderLabels(["Track", "Section", "Channel", "Frame", "Value", "Interpolation", "In Tangent", "Out Tangent"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         root.addWidget(self.table, 1)
         self._targets: list[dict[str, str]] = []; self._loading = False; self.playhead_frame = 0
         add.clicked.connect(self.add_key); remove.clicked.connect(self.delete_selected)
+        apply_style.clicked.connect(self.apply_selected_style)
+        left.clicked.connect(lambda: self.transform_selected(frame_offset=-self.snap_keys.value()))
+        right.clicked.connect(lambda: self.transform_selected(frame_offset=self.snap_keys.value()))
+        snap.clicked.connect(lambda: self.transform_selected(snap=True))
         self.table.itemChanged.connect(lambda _item: None if self._loading else self.changed.emit())
 
     def load_settings(self, values: dict[str, Any] | None) -> None:
@@ -491,16 +584,22 @@ class SequenceCurveEditorWidget(QWidget):
 
     def _append_key(self, target: dict[str, str], channel_id: str, channel_name: str, key: dict[str, Any]) -> None:
         row = self.table.rowCount(); self.table.insertRow(row)
-        values = (target["track"], target["section"], channel_name, str(key.get("frame", 0)), str(key.get("value", 0)), str(key.get("interpolation") or "linear"))
+        values = (target["track"], target["section"], channel_name, str(key.get("frame", 0)),
+                  str(key.get("value", 0)), str(key.get("interpolation") or "linear"),
+                  str(key.get("in_tangent", 0)), str(key.get("out_tangent", 0)))
         for column, value in enumerate(values): self.table.setItem(row, column, QTableWidgetItem(value))
         first = self.table.item(row, 0); first.setData(Qt.UserRole, target["track_id"]); first.setData(Qt.UserRole + 1, target["section_id"]); first.setData(Qt.UserRole + 2, channel_id)
 
-    def add_key(self, frame: int | None = None, value: float = 0.0, interpolation: str = "linear") -> None:
+    def add_key(self, frame: int | None = None, value: float = 0.0, interpolation: str = "linear",
+                in_tangent: float = 0.0, out_tangent: float = 0.0) -> None:
         index = self.target.currentIndex()
         if index < 0 or index >= len(self._targets): return
         target = self._targets[index]; channel_name = self.channel_name.text().strip() or "Value"
         self._loading = True
-        self._append_key(target, channel_name, channel_name, {"frame": self.playhead_frame if frame is None else frame, "value": value, "interpolation": interpolation})
+        self._append_key(target, channel_name, channel_name, {
+            "frame": self.playhead_frame if frame is None else frame, "value": value,
+            "interpolation": interpolation, "in_tangent": in_tangent, "out_tangent": out_tangent,
+        })
         self._loading = False; self.changed.emit()
 
     def delete_selected(self) -> None:
@@ -508,14 +607,43 @@ class SequenceCurveEditorWidget(QWidget):
         for row in rows: self.table.removeRow(row)
         if rows: self.changed.emit()
 
+    def apply_selected_style(self) -> None:
+        rows = {index.row() for index in self.table.selectedIndexes()}
+        if not rows: return
+        self._loading = True
+        for row in rows:
+            self.table.item(row, 5).setText(self.interpolation.currentText())
+            self.table.item(row, 6).setText(str(self.in_tangent.value()))
+            self.table.item(row, 7).setText(str(self.out_tangent.value()))
+        self._loading = False; self.changed.emit()
+
+    def transform_selected(self, *, frame_offset: float = 0.0, value_offset: float = 0.0, snap: bool = False) -> None:
+        rows = {index.row() for index in self.table.selectedIndexes()}
+        if not rows: return
+        interval = self.snap_keys.value()
+        self._loading = True
+        for row in rows:
+            try:
+                frame = float(self.table.item(row, 3).text()) + frame_offset
+                value = float(self.table.item(row, 4).text()) + value_offset
+            except (AttributeError, ValueError):
+                continue
+            if snap and interval > 0: frame = round(frame / interval) * interval
+            self.table.item(row, 3).setText(str(frame)); self.table.item(row, 4).setText(str(value))
+        self._loading = False; self.changed.emit()
+
     def apply_to(self, values: dict[str, Any]) -> None:
         channels: dict[tuple[str, str, str], dict[str, Any]] = {}
         for row in range(self.table.rowCount()):
             first = self.table.item(row, 0); track_id = str(first.data(Qt.UserRole) or ""); section_id = str(first.data(Qt.UserRole + 1) or ""); channel_id = str(first.data(Qt.UserRole + 2) or self.table.item(row, 2).text())
-            try: frame = float(self.table.item(row, 3).text()); value = float(self.table.item(row, 4).text())
+            try:
+                frame = float(self.table.item(row, 3).text()); value = float(self.table.item(row, 4).text())
+                in_tangent = float(self.table.item(row, 6).text()); out_tangent = float(self.table.item(row, 7).text())
             except (AttributeError, ValueError): continue
             entry = channels.setdefault((track_id, section_id, channel_id), {"id": channel_id, "name": self.table.item(row, 2).text(), "keys": []})
-            entry["keys"].append({"frame": frame, "value": value, "interpolation": self.table.item(row, 5).text() or "linear"})
+            entry["keys"].append({"frame": frame, "value": value, "interpolation": self.table.item(row, 5).text() or "linear",
+                                  "in_tangent": in_tangent, "out_tangent": out_tangent})
+        for payload in channels.values(): payload["keys"].sort(key=lambda key: float(key["frame"]))
         touched = {(key[0], key[1]) for key in channels}
         for track in values.get("tracks") or ():
             for section in track.get("sections") or ():
@@ -589,6 +717,42 @@ class SequenceBindingsEditorWidget(QWidget):
         return ["Bindings must have stable unique IDs."] if "" in identifiers or len(set(identifiers)) != len(identifiers) else []
 
 
+class SequenceShotPreviewCanvas(QWidget):
+    """Lightweight editorial preview showing the evaluated shot and camera."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); self.setMinimumSize(360, 190)
+        self.frame = 0; self.result: dict[str, Any] = {}; self.aspect = 16.0 / 9.0
+
+    def set_review(self, sequence: dict[str, Any], frame: int, aspect: float) -> None:
+        self.frame = int(frame); self.result = evaluate_sequence(sequence, self.frame)
+        self.aspect = max(0.1, float(aspect)); self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self); painter.fillRect(self.rect(), QColor("#05090d"))
+        margin = 18.0; available_w, available_h = self.width() - margin * 2, self.height() - margin * 2
+        width = min(available_w, available_h * self.aspect); height = width / self.aspect
+        frame = QRectF((self.width() - width) / 2, (self.height() - height) / 2, width, height)
+        painter.fillRect(frame, QColor("#101d27")); painter.setPen(QPen(QColor("#5d7f96"), 1)); painter.drawRect(frame)
+        third_x, third_y = frame.width() / 3.0, frame.height() / 3.0
+        painter.setPen(QPen(QColor(90, 125, 145, 65), 1))
+        for index in (1, 2):
+            painter.drawLine(QPoint(int(frame.left() + third_x * index), int(frame.top())),
+                             QPoint(int(frame.left() + third_x * index), int(frame.bottom())))
+            painter.drawLine(QPoint(int(frame.left()), int(frame.top() + third_y * index)),
+                             QPoint(int(frame.right()), int(frame.top() + third_y * index)))
+        cut = dict(self.result.get("camera_cut") or {})
+        camera = str(cut.get("asset_id") or "No active camera cut")
+        shot = str(cut.get("name") or "Sequence Preview")
+        painter.setPen(QColor("#e8f4fb")); painter.drawText(frame.adjusted(12, 10, -12, -10), Qt.AlignTop | Qt.AlignLeft, shot)
+        painter.setPen(QColor("#9db6c7")); painter.drawText(frame.adjusted(12, 10, -12, -10), Qt.AlignBottom | Qt.AlignLeft,
+                                                            f"Frame {self.frame}  |  Camera {camera}")
+        active = [str(row.get("track_type") or "") for row in self.result.get("active_sections") or ()]
+        if active:
+            painter.drawText(frame.adjusted(12, 10, -12, -10), Qt.AlignBottom | Qt.AlignRight, " + ".join(active))
+        painter.end()
+
+
 class SequenceRenderExportWidget(QWidget):
     """Validated render settings and deterministic camera-cut job preview."""
 
@@ -609,6 +773,10 @@ class SequenceRenderExportWidget(QWidget):
         form.addRow("Frame handles", self.handles); form.addRow("Temporal samples", self.temporal); form.addRow("Spatial samples", self.spatial)
         form.addRow("Shots", self.camera_cuts); form.addRow("", self.motion_blur); form.addRow("", self.audio); form.addRow("", self.burn_in); form.addRow("", self.overwrite)
         root.addLayout(form)
+        review = QHBoxLayout(); previous_shot = QPushButton("Previous Shot", self); next_shot = QPushButton("Next Shot", self)
+        self.review_frame = QSpinBox(self); self.review_frame.setRange(-1_000_000, 1_000_000); self.review_frame.setPrefix("Review Frame ")
+        review.addWidget(previous_shot); review.addWidget(next_shot); review.addWidget(self.review_frame); review.addStretch(1); root.addLayout(review)
+        self.preview = SequenceShotPreviewCanvas(self); root.addWidget(self.preview)
         buttons = QHBoxLayout(); refresh = QPushButton("Refresh Jobs", self); buttons.addWidget(refresh); buttons.addStretch(1); root.addLayout(buttons)
         self.jobs = QTableWidget(0, 5, self); self.jobs.setHorizontalHeaderLabels(["Job", "Start", "End", "Frames", "Camera"]); self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch); root.addWidget(self.jobs, 1)
         self._sequence: dict[str, Any] = sequence_defaults(); self._loading = False
@@ -616,11 +784,15 @@ class SequenceRenderExportWidget(QWidget):
             signal = widget.currentTextChanged if isinstance(widget, QComboBox) else widget.textChanged if isinstance(widget, QLineEdit) else widget.toggled if isinstance(widget, QCheckBox) else widget.valueChanged
             signal.connect(self._changed)
         refresh.clicked.connect(self.refresh_jobs)
+        self.review_frame.valueChanged.connect(self._refresh_preview)
+        previous_shot.clicked.connect(lambda: self._step_shot(-1)); next_shot.clicked.connect(lambda: self._step_shot(1))
 
     def load_settings(self, values: dict[str, Any] | None) -> None:
         defaults = sequence_defaults(); defaults.update(deepcopy(dict(values or {}))); self._sequence = defaults
         settings = dict(defaults.get("render_settings") or {}); resolution = list(settings.get("resolution") or [1920, 1080])
-        self._loading = True; self.width.setValue(int(resolution[0])); self.height.setValue(int(resolution[1])); self.format.setCurrentText(str(settings.get("format") or "png")); self.output.setText(str(settings.get("output_directory") or "Renders")); self.handles.setValue(int(settings.get("frame_handles") or 0)); self.temporal.setValue(int(settings.get("temporal_samples") or 1)); self.spatial.setValue(int(settings.get("spatial_samples") or 1)); self.camera_cuts.setChecked(bool(settings.get("use_camera_cuts", True))); self.motion_blur.setChecked(bool(settings.get("motion_blur", True))); self.audio.setChecked(bool(settings.get("include_audio", True))); self.burn_in.setChecked(bool(settings.get("burn_in", False))); self.overwrite.setChecked(bool(settings.get("overwrite_existing", False))); self._loading = False
+        self._loading = True; self.width.setValue(int(resolution[0])); self.height.setValue(int(resolution[1])); self.format.setCurrentText(str(settings.get("format") or "png")); self.output.setText(str(settings.get("output_directory") or "Renders")); self.handles.setValue(int(settings.get("frame_handles") or 0)); self.temporal.setValue(int(settings.get("temporal_samples") or 1)); self.spatial.setValue(int(settings.get("spatial_samples") or 1)); self.camera_cuts.setChecked(bool(settings.get("use_camera_cuts", True))); self.motion_blur.setChecked(bool(settings.get("motion_blur", True))); self.audio.setChecked(bool(settings.get("include_audio", True))); self.burn_in.setChecked(bool(settings.get("burn_in", False))); self.overwrite.setChecked(bool(settings.get("overwrite_existing", False)))
+        playback = dict(defaults.get("playback_range") or {}); start = int(playback.get("start") or 0); end = max(start + 1, int(playback.get("end") or 1))
+        self.review_frame.setRange(start, end - 1); self.review_frame.setValue(start); self._loading = False
         self.refresh_jobs()
 
     def render_settings(self) -> dict[str, Any]:
@@ -632,6 +804,18 @@ class SequenceRenderExportWidget(QWidget):
         for job in jobs:
             row = self.jobs.rowCount(); self.jobs.insertRow(row); start, end = int(job["start_frame"]), int(job["end_frame"])
             for column, value in enumerate((job["name"], start, end, max(0, end - start), job["camera_binding_id"])): self.jobs.setItem(row, column, QTableWidgetItem(str(value)))
+        self._refresh_preview()
+
+    def _refresh_preview(self, *_args) -> None:
+        values = deepcopy(self._sequence); values["render_settings"] = self.render_settings()
+        self.preview.set_review(values, self.review_frame.value(), self.width.value() / max(1, self.height.value()))
+
+    def _step_shot(self, direction: int) -> None:
+        handles = max(0, int(self.render_settings().get("frame_handles") or 0))
+        starts = sorted({int(job["start_frame"]) + handles for job in build_render_jobs(self._sequence)})
+        current = self.review_frame.value()
+        candidates = [frame for frame in starts if frame < current] if direction < 0 else [frame for frame in starts if frame > current]
+        if candidates: self.review_frame.setValue(max(candidates) if direction < 0 else min(candidates))
 
     def _changed(self, *_args) -> None:
         if self._loading: return

@@ -27,7 +27,8 @@ def import_animations_from_json(anim_dict_path):
 if __name__ == "__main__":
     # Load the args
     script_dir = os.path.dirname(__file__)
-    args_path = "C:/temp/gameplay_animation_args.json"
+    args_path = os.environ.get("TC_SEQUENCE_ARGS_PATH", "C:/temp/gameplay_animation_args.json")
+    result_path = os.environ.get("TC_SEQUENCE_RESULT_PATH", "")
 
     if not os.path.exists(args_path):
         raise ValueError("Missing sequence_args.json")
@@ -42,5 +43,8 @@ if __name__ == "__main__":
 
     unreal.log(f"Parsed anim_dict_path: {anim_dict_path}")
 
-    import_animations_from_json(anim_dict_path)
+    result = import_animations_from_json(anim_dict_path)
+    if result_path:
+        with open(result_path, "w", encoding="utf-8") as stream:
+            json.dump(result, stream, indent=2, default=str)
 

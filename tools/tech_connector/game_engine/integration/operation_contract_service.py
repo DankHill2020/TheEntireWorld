@@ -19,9 +19,11 @@ HOSTS = (
     "blender",
     "motionbuilder",
     "houdini",
+    "3dsmax",
     "substance_painter",
     "unity",
     "unreal",
+    "tech_connector",
 )
 
 
@@ -64,6 +66,32 @@ class OperationContract:
         return result
 
 
+_INTERNAL_CONTRACTS = (
+    OperationContract(
+        key="tech_connector.internal.asset.import_interchange",
+        host="tech_connector",
+        operation="asset.import_interchange",
+        label="Import Interchange Asset into Tech Connector",
+        callable="tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+        provider="tech_connector_engine",
+        role="import",
+        formats=("fbx", "usd", "abc", "textures"),
+        subjects=("asset", "animation", "static_mesh", "skeletal_mesh", "textures"),
+        consumes=("transfer_path",),
+        produces=(
+            "asset_id", "asset_path", "asset_type", "asset_ids", "asset_paths",
+            "asset_types", "asset_count", "imported_paths",
+        ),
+        required=("source_file", "project_root"),
+        optional={"folder": "Assets", "type_id": "", "importer_settings": {}},
+        validation=("asset UUID and project-relative imported path are returned",),
+        rollback=("delete the imported asset by returned UUID",),
+        mutates_project=True,
+        source="tech_connector.game_engine.integration.tech_connector_pipeline_adapter",
+    ),
+)
+
+
 # Artifact semantics are annotations on canonical operations, not another
 # callable registry. Adding an operation to a host registry makes it searchable
 # immediately; add an override only when it participates in typed composition.
@@ -97,7 +125,7 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "formats": ("fbx",),
         "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
         "consumes": ("fbx_path",),
-        "produces": ("blender_scene", "meshes", "armatures", "animations"),
+        "produces": ("blender_scene", "objects", "meshes", "armatures", "animations"),
         "validation": ("imported object count is reported",),
     },
     ("blender", "blender.clean_animation"): {
@@ -110,9 +138,10 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
     ("blender", "pipeline.process_meshes_for_transfer"): {
         "role": "process",
         "subjects": ("asset", "static_mesh", "skeletal_mesh"),
-        "consumes": ("blender_scene",),
+        "consumes": ("objects",),
         "produces": (
             "blender_scene",
+            "export_objects",
             "meshes",
             "materials",
             "collision",
@@ -127,7 +156,7 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "role": "export",
         "formats": ("fbx",),
         "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
-        "consumes": ("blender_scene",),
+        "consumes": ("export_objects",),
         "produces": ("fbx_path",),
         "validation": ("export file exists",),
     },
@@ -135,7 +164,7 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "role": "export",
         "formats": ("fbx",),
         "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
-        "consumes": ("blender_scene",),
+        "consumes": ("export_objects",),
         "produces": ("fbx_path",),
         "validation": ("export file exists",),
     },
@@ -177,6 +206,22 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "consumes": ("houdini_geometry",),
         "produces": ("usd_path",),
         "validation": ("USD file exists",),
+    },
+    ("3dsmax", "io.import"): {
+        "role": "import",
+        "formats": ("fbx",),
+        "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
+        "consumes": ("fbx_path",),
+        "produces": ("max_scene", "meshes", "animations"),
+        "validation": ("imported scene nodes are reported",),
+    },
+    ("3dsmax", "io.export"): {
+        "role": "export",
+        "formats": ("fbx",),
+        "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
+        "consumes": ("max_scene",),
+        "produces": ("fbx_path",),
+        "validation": ("export file exists",),
     },
     ("substance_painter", "textures.export"): {
         "role": "export",
@@ -425,6 +470,9 @@ def build_operation_contract_inventory(project_root: str | None = None) -> dict[
         for key, operation in registry.items():
             contract = _normalize_registered(host, key, operation)
             contracts[contract.key] = contract
+    for contract in _INTERNAL_CONTRACTS:
+        contracts[contract.key] = contract
+        host_counts[contract.host] = host_counts.get(contract.host, 0) + 1
 
     from tech_connector.services.unreal.unreal_capability_inventory_service import (
         build_unreal_capability_inventory,
@@ -457,6 +505,7 @@ def build_operation_contract_inventory(project_root: str | None = None) -> dict[
                 (unreal.get("counts") or {}).get("base_unreal_python_api") or 0
             )
         },
+        "lazy_provider_status": dict(unreal.get("lazy_provider_status") or {}),
     }
 
 

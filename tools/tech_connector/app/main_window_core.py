@@ -275,7 +275,7 @@ class MainWindowCoreMixin:
         except Exception:
             pass
         self.last_selected_model = self.settings.get(
-            "model", "ollama:qwen2.5-coder:7b"
+            "model", "ollama:qwen3.5:4b"
         )
         self._cached_discovered_symbols = []
         for env_key in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]:
@@ -518,6 +518,12 @@ class MainWindowCoreMixin:
         self._schedule_startup_step("vcs status", int(1500 * scale), self.update_vcs_status_card)
         QTimer.singleShot(int(1900 * scale), lambda: setattr(self, "_startup_defer_expensive_status", False))
         self._schedule_startup_step("symbol cache", 5000 if preload else 9000, self.start_async_symbol_indexing)
+        if self.settings.get("multi_root_index_pending", True):
+            self._schedule_startup_step(
+                "multi-folder index",
+                9000 if preload else 12000,
+                self.build_index,
+            )
         self.status.setText("Ready")
         try:
             from tech_connector.app.tos_dialog import TERMS_VERSION

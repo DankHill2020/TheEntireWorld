@@ -391,13 +391,20 @@ def build_windows_player(
     output_directory: str | Path,
     *,
     player_executable: str | Path | None = None,
+    compiled_receipt: PlayerBuildReceipt | None = None,
 ) -> PlayerBuildReceipt:
     """Create a self-contained Windows player folder from a ``.tcscene``."""
 
     output = Path(output_directory).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     executable = _resolve_player_executable(player_executable)
-    compiled = compile_tcscene_for_runtime(scene_path, output / "Content" / "main.tcruntime")
+    compiled = compiled_receipt or compile_tcscene_for_runtime(scene_path, output / "Content" / "main.tcruntime")
+    expected_manifest = (output / "Content" / "main.tcruntime").resolve()
+    expected_scene = Path(scene_path).expanduser().resolve()
+    if compiled.scene.resolve() != expected_scene:
+        raise ValueError("A resumed package checkpoint belongs to a different source scene.")
+    if compiled.runtime_manifest.resolve() != expected_manifest or not compiled.runtime_manifest.is_file():
+        raise ValueError("A resumed package requires the compiled runtime manifest in the selected build output.")
     _collect_player_assets(compiled.runtime_manifest, output)
     asset_validation = validate_packaged_assets(compiled.runtime_manifest, output)
     target_executable = output / "TCPlayer.exe"

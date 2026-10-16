@@ -37,6 +37,10 @@ def test_component_stylesheet_exposes_semantic_roles() -> None:
     assert 'uiRole="composer"' in stylesheet
     assert TOKENS.accent in stylesheet
     assert TOKENS.success in stylesheet
+    assert "min-height: 28px" in stylesheet
+    assert f"border: 2px solid {TOKENS.focus}" in stylesheet
+    assert 'accessibilityHighContrast="true"' in stylesheet
+    assert "border: 3px solid #ffd84d" in stylesheet
 
 
 def test_icon_registry_renders_every_declared_icon() -> None:

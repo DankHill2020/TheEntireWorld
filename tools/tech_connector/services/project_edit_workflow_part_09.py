@@ -868,6 +868,8 @@ def _causal_repair_reasoning_model(
 ) -> str:
     """Use a configurable non-thinking coder for focused causal repair."""
 
+    if str(settings.get("model_source_mode") or "") == "local_only" and selected_model:
+        return _strong_task_model(selected_model.removeprefix("ollama:"))
     configured = str(settings.get("causal_repair_model") or "").strip()
     if configured:
         return configured.removeprefix("ollama:")
@@ -880,11 +882,13 @@ def _causal_repair_escalation_model(
 ) -> str:
     """Escalate a failed causal analysis to the configured coding model."""
 
+    if str(settings.get("model_source_mode") or "") == "local_only" and selected_model:
+        return _strong_task_model(selected_model.removeprefix("ollama:"))
     configured = str(
         settings.get("router_local_code")
         or settings.get("fast_code_model")
         or settings.get("fallback_code_model")
-        or "qwen2.5-coder:7b"
+        or "qwen3.5:4b"
     ).strip()
     return configured.removeprefix("ollama:") or _strong_task_model(
         selected_model

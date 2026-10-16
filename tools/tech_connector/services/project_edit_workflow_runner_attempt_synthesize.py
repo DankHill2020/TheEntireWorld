@@ -9,6 +9,12 @@ from tech_connector.services.project_edit_workflow_runner_control import (
 )
 
 
+def _semantic_review_batch_limit(settings: dict[str, _deps.Any]) -> int:
+    """Keep local JSON reviews atomic; cloud reviewers may use larger batches."""
+
+    return 1 if str(settings.get("model_source_mode") or "") == "local_only" else 5
+
+
 def _review_finding_requires_disposable_test_repair(error: str) -> bool:
     """Return whether a semantic finding is owned by test proof.
 
@@ -77,6 +83,40 @@ def _semantic_review_finding_is_contradicted_by_source(
 
     evidence = text.split("Evidence:", 1)[-1].split("Smallest repair:", 1)[0]
     evidence_lower = evidence.casefold()
+    if _deps.re.search(
+        r"\bmethod\b(?:\s+`?[A-Za-z_]\w*`?)?\s+is\s+missing\s+from\b",
+        evidence_lower,
+    ):
+        return all(
+            owner.rsplit(".", 1)[-1].casefold() in evidence_lower
+            and any(
+                isinstance(node, _deps.ast.Return) and node.value is not None
+                for node in _deps.ast.walk(callable_nodes[owner])
+            )
+            for owner in requested_owners
+            if owner in callable_nodes
+        ) and all(owner in callable_nodes for owner in requested_owners)
+    if (
+        "does not implement the required methods" in evidence_lower
+        or _deps.re.search(r"does not contain the ['\"`]?\w+['\"`]? method", evidence_lower)
+    ):
+        requirement = text.split("unmet R", 1)[-1].split("Evidence:", 1)[0]
+        required_methods = set(
+            _deps.re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\([^)]*\)", requirement)
+        )
+        class_names = {owner.rsplit(".", 1)[0] for owner in requested_owners}
+        if not required_methods or any(name not in class_nodes for name in class_names):
+            return False
+        return all(
+            isinstance(method := callable_nodes.get(f"{class_name}.{name}"),
+                       (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+            and any(
+                isinstance(node, _deps.ast.Return) and node.value is not None
+                for node in _deps.ast.walk(method)
+            )
+            for class_name in class_names
+            for name in required_methods
+        )
     if "lacks type hints and docstrings" in evidence_lower:
         data_owners = [
             owner for owner in owners if isinstance(owner, _deps.ast.ClassDef)
@@ -281,8 +321,11 @@ class _ProjectEditAttemptSynthesizePhase:
                 if self.pending_semantic_ledger:
                     self.review_errors = []
                     self.review_protocol_failures: list[str] = []
+                    # Local JSON reviewers are more reliable with one source-
+                    # grounded obligation per response, regardless of size.
                     self.review_batches = _deps._final_requirement_review_batches(
-                        self.pending_semantic_ledger
+                        self.pending_semantic_ledger,
+                        max_rows=_semantic_review_batch_limit(self.settings or {}),
                     )
                     if self.status_callback:
                         self.status_callback(
@@ -1187,31 +1230,6 @@ class _ProjectEditAttemptSynthesizePhase:
                 != self.pre_deterministic_candidate_fingerprint
             ):
                 self.candidate = self.repaired_candidate
-                if self.backoff_tracker_repairs and (
-                    _deps._verify_backoff_tracker_contract(
-                        self.generated_files,
-                        request_prompt=self.prompt,
-                    )
-                ):
-                    for self.requirement_row in self.requirement_ledger:
-                        self.requirement_id = str(
-                            self.requirement_row.get("id")
-                            or self.requirement_row.get("requirement_id")
-                            or ""
-                        )
-                        if self.requirement_id:
-                            self.semantic_proof_cache[self.requirement_id] = (
-                                _deps._requirement_source_hash(
-                                    self.requirement_id,
-                                    implementation_plan=self.implementation_plan,
-                                    generated_files=self.generated_files,
-                                )
-                            )
-                    if self.status_callback:
-                        self.status_callback(
-                            "Recorded isolated executable proof for the complete "
-                            "compiled backoff contract."
-                        )
                 if self.status_callback:
                     self.status_callback(
                         "Applied deterministic contract-surface repair: "

@@ -180,7 +180,7 @@ DEFAULT_UNITY_PORT = 7071
 DEFAULT_MOTIONBUILDER_PORT = 7051
 
 DEFAULT_MCPHOST = os.path.join(os.path.expanduser("~"), "go", "bin", "mcphost.exe")
-DEFAULT_MODEL = "ollama:qwen2.5-coder:3b"
+DEFAULT_MODEL = "ollama:qwen3.5:4b"
 DEFAULT_CONFIGS = [
     str(APP_ROOT / "knowledge" / "mcp_unreal_maya_knowledge_config.json"),
 ]

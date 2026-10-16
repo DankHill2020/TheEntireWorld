@@ -50,6 +50,7 @@ class GameTemplateDialog(QDialog):
         self.api = api or TCEditorAPI(project_root)
         self.receipt: dict[str, Any] | None = None
         self._catalog = self.api.available_game_templates()
+        self._quality_profiles = self.api.available_game_quality_profiles()
         self._build_ui()
         self._populate_templates()
 
@@ -101,6 +102,15 @@ class GameTemplateDialog(QDialog):
         default_style = self.visual_style_combo.findData("stylized_pbr")
         self.visual_style_combo.setCurrentIndex(max(0, default_style))
         form.addRow("Visual Style", self.visual_style_combo)
+        self.quality_combo = QComboBox(form_host)
+        self.quality_combo.addItem("Automatic for visual style (Recommended)", "")
+        for profile in self._quality_profiles:
+            label = f"{profile['display_name']} — {profile['output_width']} × {profile['output_height']}"
+            self.quality_combo.addItem(label, profile["profile_id"])
+            self.quality_combo.setItemData(
+                self.quality_combo.count() - 1, str(profile["description"]), Qt.ToolTipRole,
+            )
+        form.addRow("Resolution / Quality", self.quality_combo)
         self.platform_combo = QComboBox(form_host)
         for label, value in (("Windows", "windows"), ("Linux", "linux"), ("macOS", "macos"), ("Web", "web"), ("Android", "android"), ("iOS", "ios")):
             self.platform_combo.addItem(label, value)
@@ -193,6 +203,7 @@ class GameTemplateDialog(QDialog):
             self.receipt = self.api.create_game_project_from_template(
                 template_id=str(row["template_id"]), variant_id=str(row["variant_id"]),
                 visual_style=str(self.visual_style_combo.currentData()), project_name=name,
+                quality_profile=str(self.quality_combo.currentData() or ""),
                 platform=str(self.platform_combo.currentData()),
             )
         except Exception as exc:

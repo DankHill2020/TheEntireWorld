@@ -9,6 +9,71 @@ from tech_connector.services.project_edit_workflow_runner_control import (
 )
 
 
+def _has_class_scoped_validation_error(error_blob: str, class_name: str) -> bool:
+    """Recognize an exact class owner even when diagnostics have scope tags."""
+
+    return bool(
+        _deps.re.search(
+            f"\\[owner:{_deps.re.escape(class_name)}\\]\\s*"
+            r"\[repair-scope:class\]",
+            error_blob,
+            flags=_deps.re.IGNORECASE,
+        )
+    )
+
+
+def _compact_local_class_repair_stage(stage: _deps.ProjectEditPromptStage) -> _deps.ProjectEditPromptStage:
+    """Give a local coder the exact owner and failures without plan noise."""
+
+    metadata = dict(stage.metadata or {})
+    targets = [str(value) for value in metadata.get("symbols") or []]
+    objective = str(metadata.get("full_objective") or "").strip()
+    owner_source = str(metadata.get("owner_source") or "").strip()
+    failures = [str(value) for value in metadata.get("all_validation_errors") or []]
+    if not targets or not objective or not owner_source or not failures:
+        return stage
+    signatures = _deps.re.findall(
+        r"^\s*(?:async\s+)?def\s+[A-Za-z_]\w*\s*\([^\n]*",
+        owner_source,
+        flags=_deps.re.MULTILINE,
+    )
+    reconstruct_state = (
+        len(targets) == 1
+        and len(signatures) <= 8
+        and any(
+            "executable implementation is unchanged" in failure
+            or "[repair-scope:class]" in failure
+            for failure in failures
+        )
+    )
+    source_context = (
+        "class " + targets[0] + ":\n"
+        + "\n".join("    " + signature.strip() for signature in signatures)
+        if reconstruct_state
+        else owner_source
+    )
+    prompt = "\n".join(
+        [
+            "Return only valid Python source for exactly these complete class declarations: "
+            + ", ".join(targets) + ".",
+            "Preserve every existing public method unless the request explicitly removes it.",
+            "The original request and the validation failures are authoritative; fix shared state "
+            "across writers and readers, not just one method.",
+            "Use imports only when needed. No Markdown, diffs, ellipses, or explanation.",
+            "",
+            "Original request:",
+            objective,
+            "",
+            "Current class source or public signature surface:",
+            source_context,
+            "",
+            "Failures to resolve:",
+            *["- " + failure for failure in failures],
+        ]
+    )
+    return _deps.replace(stage, user_prompt=prompt)
+
+
 class _ProjectEditAttemptValidatePhase:
     """Provide the attempt validate workflow phase."""
 
@@ -806,6 +871,10 @@ class _ProjectEditAttemptValidatePhase:
                         self.error_blob,
                         flags=_deps.re.IGNORECASE,
                     )
+                    or _has_class_scoped_validation_error(
+                        self.error_blob,
+                        self.class_node.name,
+                    )
                 )
                 self.approved_attribute_names = {
                     str(attribute.get("name") or "")
@@ -1302,6 +1371,8 @@ class _ProjectEditAttemptValidatePhase:
                     (self.class_repair_attempts[key] for key in self.class_targets)
                 ),
             )
+            if str((self.settings or {}).get("model_source_mode") or "") == "local_only":
+                self.class_stage = _compact_local_class_repair_stage(self.class_stage)
             if self.shared_state_assertion_failure and any(
                 (
                     not _deps.Path(path).name.startswith("test_")

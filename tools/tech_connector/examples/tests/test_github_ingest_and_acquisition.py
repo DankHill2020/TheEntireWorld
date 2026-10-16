@@ -2,6 +2,7 @@ import unittest
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from tech_connector.services.capability_acquisition_service import AcquisitionEngine, AcquisitionStrategy
 from tech_connector.services.ai_work_memory_service import _compact_entry
@@ -20,6 +21,7 @@ from tech_connector.services.notification_service import (
     build_pipeline_message,
     fetch_discord_channels_and_users,
     fetch_slack_channels_and_users,
+    parse_and_dispatch_inline_messaging,
     send_discord_webhook,
     send_email_smtp,
     send_pipeline_output,
@@ -337,6 +339,56 @@ class TestGithubIngestAndAcquisition(unittest.TestCase):
         self.assertTrue(ok, msg)
         self.assertEqual(msg, "ok")
         self.assertIn(b'"text": "hello"', calls[0][2])
+
+    def test_inline_slack_uses_configured_default_instead_of_docs_placeholder(self):
+        settings = {
+            "slack_webhook_url": "https://hooks.slack.invalid/default",
+            "slack_default_channel": "pipeline-alerts",
+        }
+        with patch(
+            "tech_connector.services.notification_service.send_slack_webhook",
+            return_value=(True, "ok"),
+        ) as send:
+            results = parse_and_dispatch_inline_messaging("@Slack deploy complete", settings)
+
+        self.assertTrue(results[0]["ok"])
+        self.assertEqual("pipeline-alerts", results[0]["target"])
+        self.assertIn("Target: #pipeline-alerts", send.call_args.args[1])
+
+    def test_inline_slack_refuses_to_substitute_default_for_unknown_explicit_target(self):
+        settings = {
+            "slack_webhook_url": "https://hooks.slack.invalid/default",
+            "slack_default_channel": "general",
+        }
+        with patch("tech_connector.services.notification_service.send_slack_webhook") as send:
+            results = parse_and_dispatch_inline_messaging(
+                "@Slack.pipeline-alerts deploy complete",
+                settings,
+            )
+
+        self.assertFalse(results[0]["ok"])
+        self.assertIn("Refusing to send to a different channel", results[0]["message"])
+        send.assert_not_called()
+
+    def test_inline_slack_explicit_target_uses_its_dedicated_webhook(self):
+        settings = {
+            "slack_webhook_url": "https://hooks.slack.invalid/default",
+            "slack_webhook_pipeline-alerts": "https://hooks.slack.invalid/pipeline",
+        }
+        with patch(
+            "tech_connector.services.notification_service.send_slack_webhook",
+            return_value=(True, "ok"),
+        ) as send:
+            results = parse_and_dispatch_inline_messaging(
+                "@Slack.pipeline-alerts deploy complete",
+                settings,
+            )
+
+        self.assertTrue(results[0]["ok"])
+        self.assertEqual(
+            "https://hooks.slack.invalid/pipeline",
+            send.call_args.args[0],
+        )
 
     def test_discord_webhook_posts_content_payload(self):
         calls = []

@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget, QMenu, QTabW
 from tech_connector.app.main_window_workflows import MainWindowWorkflowsMixin
 from tech_connector.ui.pipeline_node_view import PipelineGraphLink, PipelineNodeView
 from tech_connector.ui.pipeline_attribute_editor import PipelineAttributeEditor
+from tech_connector.ui.pipeline_utility_nodes import create_utility_step_data
+from tech_connector.services.workflow_codegen_service import generate_pipeline_code_from_graph
 
 
 class PipelineToolMenuTests(unittest.TestCase):
@@ -311,6 +313,61 @@ class PipelineToolMenuTests(unittest.TestCase):
 
         self.assertGreater(editor.form.rowCount(), plain_rows)
 
+    def test_select_file_path_node_supports_typed_and_browsed_paths(self):
+        step_data, params, outputs = create_utility_step_data("select_file_path")
+        self.assertEqual(step_data["symbol"]["name"], "Select File Path")
+        self.assertEqual(params[0]["semantic_type"], "filesystem.path.file")
+        self.assertEqual(outputs, [{
+            "name": "file_path",
+            "annotation": "str",
+            "python_type": "str",
+            "semantic_type": "filesystem.path.file",
+        }])
+
+        editor = PipelineAttributeEditor()
+        editor.set_node(step_data)
+        path_edit = editor.param_widgets["file_path"]
+        path_edit.setText("C:/project/input/typed.fbx")
+        self.assertEqual(
+            step_data["literal_values"]["file_path"],
+            "C:/project/input/typed.fbx",
+        )
+
+        with patch(
+            "tech_connector.ui.pipeline_attribute_editor.QFileDialog.getOpenFileName",
+            return_value=("C:/project/input/browsed.fbx", "All Files (*.*)"),
+        ) as browse:
+            editor._browse_file("file_path", path_edit)
+        browse.assert_called_once_with(
+            editor,
+            "Select file for file_path",
+            "C:/project/input/typed.fbx",
+            "All Files (*.*)",
+        )
+        self.assertEqual(path_edit.text(), "C:/project/input/browsed.fbx")
+        self.assertEqual(
+            step_data["literal_values"]["file_path"],
+            "C:/project/input/browsed.fbx",
+        )
+
+    def test_select_file_path_codegen_outputs_the_selected_path(self):
+        step_data, params, outputs = create_utility_step_data("select_file_path")
+        step_data["literal_values"]["file_path"] = "C:/project/input/hero.fbx"
+        view = PipelineNodeView()
+        view.add_pipeline_step(step_data, params, outputs)
+
+        code = generate_pipeline_code_from_graph(
+            "select_asset",
+            "Select an asset path.",
+            [step_data],
+            view,
+        )
+        namespace = {}
+        exec(code, namespace)
+        result = namespace["select_asset"]()
+
+        self.assertEqual(result, "C:/project/input/hero.fbx")
+
     def test_pipeline_source_open_activates_real_editor_workspace(self):
         host = MainWindowWorkflowsMixin()
         host.workspace_tabs = QTabWidget()
@@ -406,6 +463,9 @@ class PipelineToolMenuTests(unittest.TestCase):
             editor.param_widgets["mapping"].text(),
             "Connected: create_mapping.result",
         )
+        details = view.connected_input_details(target_step)["mapping"]
+        self.assertEqual("dict", details["target_type"])
+        self.assertTrue(details["compatible"])
 
         port = view.node_items[target_step["graph_step_id"]].input_ports["mapping"]
         with patch("tech_connector.ui.pipeline_node_view.QInputDialog.getText") as get_text:
@@ -421,6 +481,21 @@ class PipelineToolMenuTests(unittest.TestCase):
         editor.set_node(target_step)
         self.assertFalse(editor.param_widgets["mapping"].isReadOnly())
         self.assertEqual(editor.param_widgets["mapping"].text(), "stale literal")
+
+    def test_missing_required_argument_keeps_node_outline_orange_when_selected(self):
+        view = PipelineNodeView()
+        step = {
+            "symbol": {"name": "publish", "host": "blender"},
+            "params": [{"name": "output_path", "annotation": "str", "required": True}],
+            "literal_values": {"output_path": ""},
+            "literal_value_details": {"output_path": {"missing": True}},
+        }
+        view.add_pipeline_step(step, step["params"], [])
+        item = view.node_items[step["graph_step_id"]]
+        item.setSelected(True)
+        item._apply_visual_state()
+
+        self.assertEqual("#ff9f1c", item.pen().color().name())
 
 
 if __name__ == "__main__":

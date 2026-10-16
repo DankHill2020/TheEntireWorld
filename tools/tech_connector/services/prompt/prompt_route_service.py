@@ -104,6 +104,29 @@ def classify_prompt_route(
     hosts = _detect_hosts(text)
     no_execute = _has_no_execute_guard(lower)
 
+    # An explicit ordered function list is an execution contract, not a symbol
+    # lookup.  Route it before semantic code-search heuristics see dotted
+    # callable names such as ``maya.animation.export`` as project references.
+    # Requiring multiple recognized hosts keeps ordinary "Functions:" code
+    # questions on the project-search path.
+    if len(hosts) >= 2 and re.search(r"\bfunctions?\s*:", lower):
+        return _finalize_decision(PromptRouteDecision(
+            route="pipeline_graph",
+            provider="action_graph",
+            intent_category="workflow_pipeline",
+            host=hosts[0],
+            confidence=0.96,
+            operation_mode="compose_pipeline",
+            mutation_scope="dcc_mutation",
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=True,
+            required_context=["dcc_bridge_status", "operation_catalogs", "workflow_graph"],
+            reasons=[
+                "Prompt supplies an ordered cross-host function contract for pipeline composition."
+            ],
+            rejected_routes=["project_search", "target_discovery", "dcc_execute"],
+        ), lower)
+
     if (
         _is_unreal_animation_blueprint_feature_request(lower)
         and not _is_explicit_pipeline_build_request(lower)

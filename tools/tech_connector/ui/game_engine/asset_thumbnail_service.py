@@ -12,23 +12,54 @@ from tech_connector.game_engine.assets import AssetTypeDescriptor
 
 class AssetThumbnailService:
     def __init__(self) -> None:
-        self._cache: dict[tuple[str, int, int, str], QIcon] = {}
+        self._cache: dict[tuple[str, int, int, str, tuple[str, ...]], QIcon] = {}
 
-    def icon(self, path: str | Path, descriptor: AssetTypeDescriptor, *, size: int = 44) -> QIcon:
+    def icon(
+        self, path: str | Path, descriptor: AssetTypeDescriptor, *, size: int = 44,
+        badges: tuple[str, ...] = (),
+    ) -> QIcon:
         source = Path(path)
         try:
             modified = int(source.stat().st_mtime_ns)
         except OSError:
             modified = 0
-        key = (str(source).casefold(), modified, int(size), descriptor.type_id)
+        normalized_badges = tuple(str(value) for value in badges if str(value))
+        key = (str(source).casefold(), modified, int(size), descriptor.type_id, normalized_badges)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
         icon = self._image_icon(source, size) if descriptor.previewer_id in {"image", "video"} else QIcon()
         if icon.isNull():
             icon = self._type_icon(descriptor, size)
+        if normalized_badges:
+            icon = self._badge_icon(icon, normalized_badges, size)
         self._cache[key] = icon
         return icon
+
+    def invalidate(self, path: str | Path | None = None) -> None:
+        """Drop one source thumbnail or the complete cache after reimport/cook."""
+
+        if path is None:
+            self._cache.clear()
+            return
+        target = str(Path(path)).casefold()
+        self._cache = {key: value for key, value in self._cache.items() if key[0] != target}
+
+    @staticmethod
+    def _badge_icon(icon: QIcon, badges: tuple[str, ...], size: int) -> QIcon:
+        pixmap = icon.pixmap(size, size)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        state = badges[0] if badges else ""
+        cook = badges[1] if len(badges) > 1 else ""
+        color = {"authored": "#62d6ff", "imported": "#ffca63", "source": "#9aa7b3"}.get(state, "#9aa7b3")
+        painter.setBrush(QColor(color)); painter.setPen(QPen(QColor("#071018"), 1))
+        painter.drawEllipse(QRectF(2, size - 12, 10, 10))
+        if cook == "cooked":
+            painter.setBrush(QColor("#69f0ae"))
+            painter.drawEllipse(QRectF(size - 12, size - 12, 10, 10))
+        painter.end()
+        return QIcon(pixmap)
 
     @staticmethod
     def _image_icon(path: Path, size: int) -> QIcon:

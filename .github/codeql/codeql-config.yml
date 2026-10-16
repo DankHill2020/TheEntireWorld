@@ -1,0 +1,14 @@
+name: Tech Connector security analysis
+
+paths:
+  - tools
+
+paths-ignore:
+  - tools/external_tools
+  - tools/dist
+  - tools/knowledge
+  - tools/scratch
+  - tools/**/__pycache__
+
+queries:
+  - uses: security-extended

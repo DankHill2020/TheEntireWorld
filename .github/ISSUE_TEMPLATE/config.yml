@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Account, licensing, billing, privacy, or device support
+    url: https://license.theentireworld.net/ui/portal.html
+    about: Sign in and open a private structured support request.
+  - name: Security vulnerability report
+    url: https://license.theentireworld.net/ui/portal.html
+    about: Sign in, open Self-service support, and select Security report. Do not disclose vulnerabilities publicly.
+  - name: Security policy
+    url: https://github.com/DankHill2020/TheEntireWorld/security/policy
+    about: Read the supported-version, disclosure, and privacy rules before reporting.

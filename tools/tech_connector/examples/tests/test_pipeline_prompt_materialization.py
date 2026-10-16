@@ -128,6 +128,24 @@ def summarize_records(records: list[str]) -> dict[str, int]:
         self.assertEqual(["load_records", "normalize_records", "summarize_records"], result["execution_order"])
         self.assertIn("create_node", result["graph_action_types"])
 
+    def test_data_flow_accepts_structured_and_falsey_literal_values(self) -> None:
+        if PipelineNodeView is None:
+            self.skipTest("PySide6 is required for direct PipelineNodeView validation")
+        view = PipelineNodeView()
+
+        for value in ({}, [], False, 0, ""):
+            with self.subTest(value=value):
+                step = {"literal_values": {"payload": value}}
+                self.assertTrue(
+                    view._param_has_value_or_link("step1", step, "payload")
+                )
+
+        self.assertFalse(
+            view._param_has_value_or_link(
+                "step1", {"literal_values": {"payload": None}}, "payload"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

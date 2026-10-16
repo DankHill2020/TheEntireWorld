@@ -20,7 +20,7 @@ def test_public_landing_is_allowlisted_and_contains_no_application_source(tmp_pa
     output = stage_public_landing(tmp_path / "public")
 
     assert (output / "README.md").is_file()
-    assert (output / "LICENSE").is_file()
+    assert (output / "LICENSE.md").is_file()
     assert (output / "tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md").is_file()
     assert not any(path.suffix == ".py" for path in output.rglob("*"))
     assert all(

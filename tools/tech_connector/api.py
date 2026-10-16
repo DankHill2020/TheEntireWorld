@@ -132,15 +132,77 @@ class APIResult:
     error: str = ""
     entitlement: dict[str, Any] | None = None
     provenance: dict[str, Any] | None = None
+    error_detail: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.ok and self.error and not self.error_detail:
+            object.__setattr__(self, "error_detail", _classify_api_error(self.error))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "result": self.result,
             "error": self.error,
+            "error_detail": self.error_detail or {},
             "entitlement": self.entitlement or {},
             "provenance": self.provenance or {},
         }
+
+    def unwrap(self) -> Any:
+        """Return the result or raise a structured exception for simple scripts."""
+        if self.ok:
+            return self.result
+        detail = self.error_detail or _classify_api_error(self.error)
+        raise TechConnectorAPIError(
+            str(detail.get("message") or self.error or "Tech Connector API request failed."),
+            code=str(detail.get("code") or "api_error"),
+            retryable=bool(detail.get("retryable")),
+            suggestion=str(detail.get("suggestion") or ""),
+        )
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+class TechConnectorAPIError(RuntimeError):
+    """Exception raised by :meth:`APIResult.unwrap` with machine-readable context."""
+
+    def __init__(
+        self, message: str, *, code: str = "api_error", retryable: bool = False,
+        suggestion: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.code = str(code)
+        self.retryable = bool(retryable)
+        self.suggestion = str(suggestion)
+
+
+def _classify_api_error(message: str) -> dict[str, Any]:
+    text = str(message or "Tech Connector API request failed.").strip()
+    lowered = text.casefold()
+    code = "internal_error"
+    retryable = False
+    suggestion = "Review the error and retry with valid inputs."
+    if any(token in lowered for token in ("license", "permission", "approved=true", "not entitled")):
+        code = "permission_denied"
+        suggestion = "Verify entitlement or explicitly approve the requested mutation."
+    elif any(token in lowered for token in ("not found", "unknown api", "unknown reasoning", "unknown asset", "unknown kingdom", "unknown feature", "unknown operation")):
+        code = "not_found"
+        suggestion = "Use API discovery to confirm the feature, operation, tool, or asset identifier."
+    elif any(token in lowered for token in ("must not be empty", "required", "invalid", "unsupported", "choose one of")):
+        code = "invalid_argument"
+        suggestion = "Inspect the operation help and correct the supplied arguments."
+    elif any(token in lowered for token in ("offline", "unavailable", "timed out", "timeout", "connection")):
+        code = "temporarily_unavailable"
+        retryable = True
+        suggestion = "Check provider or bridge status, then retry the request."
+    return {
+        "schema": f"{API_SCHEMA}.error",
+        "code": code,
+        "message": text,
+        "retryable": retryable,
+        "suggestion": suggestion,
+    }
 
 
 def _serialize_public_value(value: Any) -> Any:
@@ -162,6 +224,199 @@ def _serialize_public_value(value: Any) -> Any:
         return value
     return str(value)
 
+
+class AIAPINamespace:
+    """Simple, provider-neutral model discovery, routing, and generation."""
+
+    def __init__(self, api: "TechConnectorHeadlessAPI") -> None:
+        self._api = api
+
+    def _resolve(self, model: str, depth: str):
+        from tech_connector.services.code_prompt_profile_service import (
+            PROMPT_DEPTHS, openai_execution_options, preferred_openai_model,
+        )
+        from tech_connector.services.llm_router_service import resolve_llm_provider_route
+        from tech_connector.services.model_provider_service import provider_for_model
+
+        depth = str(depth or "balanced").strip().lower()
+        if depth not in PROMPT_DEPTHS:
+            raise ValueError(
+                f"Unknown AI depth '{depth}'. Choose one of: {', '.join(PROMPT_DEPTHS)}."
+            )
+        selected = str(
+            model or self._api.settings.get("model")
+            or self._api.settings.get("cloud_provider_model")
+            or self._api.settings.get("general_model")
+            or "ollama:qwen3.5:4b"
+        ).strip()
+        selected_name = selected.partition(":")[2].lower()
+        if (
+            provider_for_model(selected) == "openai"
+            and bool(self._api.settings.get("auto_select_openai_model_by_depth", True))
+            and (
+                not selected_name
+                or selected_name.startswith(("gpt-6", "gpt-5.6", "gpt-5.3-codex"))
+            )
+        ):
+            selected = "openai:" + preferred_openai_model(depth)
+        route_settings = dict(self._api.settings)
+        route_settings["code_prompt_depth"] = depth
+        route = resolve_llm_provider_route(selected, route_settings)
+        options = openai_execution_options({"depth": depth})
+        options["store"] = bool(self._api.settings.get("openai_store_responses", True))
+        return selected, depth, route, options
+
+    @staticmethod
+    def _public_route(route: Any) -> dict[str, Any]:
+        return {
+            "provider": str(route.provider),
+            "model": str(route.model),
+            "cloud_active": bool(route.cloud_active),
+            "transport": str(
+                route.transport or ("local" if not route.cloud_active else "api_key")
+            ),
+        }
+
+    def models(self) -> APIResult:
+        """List safe provider metadata and available model identifiers."""
+        try:
+            from tech_connector.services.model_provider_service import (
+                PROVIDER_ORDER, PROVIDERS, models_for_provider, provider_api_key,
+                provider_has_credentials,
+            )
+            entitlement = self._api._require_unlocked()
+            cached = dict(self._api.settings.get("provider_model_catalog") or {})
+            providers = [
+                {
+                    "id": provider_id,
+                    "name": PROVIDERS[provider_id].display_name,
+                    "connected": bool(
+                        provider_has_credentials(provider_id, probe_account=False)
+                        or provider_api_key(provider_id, self._api.settings)
+                    ),
+                    "local": provider_id == "ollama",
+                    "models": list(models_for_provider(provider_id, cached)),
+                    "setup_url": PROVIDERS[provider_id].setup_url,
+                }
+                for provider_id in PROVIDER_ORDER
+            ]
+            return APIResult(True, {
+                "schema": f"{API_SCHEMA}.ai_models",
+                "providers": providers,
+                "depths": ["fast", "balanced", "deep", "maximum"],
+                "source_mode": self._api.settings.get(
+                    "model_source_mode", "auto_with_local_fallback"
+                ),
+            }, entitlement=entitlement.to_dict())
+        except Exception as exc:
+            return APIResult(False, error=str(exc))
+
+    def local_recommendation(self) -> APIResult:
+        """Describe the hardware-aware local model lanes without changing state."""
+        try:
+            from tech_connector.services.local_model_optimizer_service import (
+                recommend_local_models,
+            )
+            from tech_connector.services.ollama_service import installed_ollama_models
+
+            entitlement = self._api._require_unlocked()
+            recommendation = recommend_local_models(installed_ollama_models())
+            return APIResult(
+                True,
+                {
+                    "schema": f"{API_SCHEMA}.ai_local_recommendation",
+                    **recommendation,
+                },
+                entitlement=entitlement.to_dict(),
+            )
+        except Exception as exc:
+            return APIResult(False, error=str(exc))
+
+    def benchmark_local(
+        self,
+        *,
+        model: str = "",
+        prompt: str = "",
+        num_predict: int = 128,
+        num_ctx: int = 4096,
+        timeout: int = 300,
+    ) -> APIResult:
+        """Measure a local Ollama model with a small deterministic speed probe."""
+        try:
+            from tech_connector.services.local_model_optimizer_service import (
+                benchmark_local_model,
+                recommend_local_models,
+            )
+            from tech_connector.services.ollama_service import installed_ollama_models
+
+            entitlement = self._api._require_unlocked()
+            installed = installed_ollama_models()
+            recommendation = recommend_local_models(installed)
+            selected = str(model or recommendation["active"]["general"])
+            metrics = benchmark_local_model(
+                selected,
+                prompt=str(prompt or "Write a concise Python function that groups paths by extension."),
+                num_predict=num_predict,
+                num_ctx=num_ctx,
+                timeout=timeout,
+            )
+            return APIResult(
+                True,
+                {"schema": f"{API_SCHEMA}.ai_local_benchmark", **metrics},
+                entitlement=entitlement.to_dict(),
+                provenance=self._api._tag(
+                    entitlement, operation="ai.benchmark_local"
+                ),
+            )
+        except Exception as exc:
+            return APIResult(False, error=str(exc))
+
+    def route(self, *, model: str = "", depth: str = "balanced") -> APIResult:
+        """Preview the exact credential-free route used for generation."""
+        try:
+            entitlement = self._api._require_unlocked()
+            selected, depth, route, options = self._resolve(model, depth)
+            return APIResult(True, {
+                "schema": f"{API_SCHEMA}.ai_route",
+                "requested_model": selected,
+                "depth": depth,
+                "route": self._public_route(route),
+                "options": options if route.provider == "openai" else {},
+            }, entitlement=entitlement.to_dict())
+        except Exception as exc:
+            return APIResult(False, error=str(exc))
+
+    def generate(
+        self, prompt: str, *, system: str = "", model: str = "",
+        depth: str = "balanced", response_format: dict[str, Any] | str | None = None,
+        options: dict[str, Any] | None = None, timeout: int = 120,
+        allow_local_fallback: bool = False,
+    ) -> APIResult:
+        """Generate text with one stable, inspectable provider route."""
+        try:
+            from tech_connector.services.llm_router_service import generate_llm_response
+            if not str(prompt or "").strip():
+                raise ValueError("prompt must not be empty")
+            entitlement = self._api._require_unlocked()
+            selected, depth, route, defaults = self._resolve(model, depth)
+            effective_options = dict(defaults if route.provider == "openai" else {})
+            effective_options.update(dict(options or {}))
+            text = generate_llm_response(
+                route.model, str(prompt), system=str(system or ""),
+                response_format=response_format, options=effective_options,
+                timeout=max(1, int(timeout)), provider_route=route,
+                allow_cloud_fallback=bool(allow_local_fallback),
+            )
+            return APIResult(True, {
+                "schema": f"{API_SCHEMA}.ai_response",
+                "text": text,
+                "requested_model": selected,
+                "depth": depth,
+                "route": self._public_route(route),
+            }, entitlement=entitlement.to_dict(),
+                provenance=self._api._tag(entitlement, operation="ai.generate"))
+        except Exception as exc:
+            return APIResult(False, error=str(exc))
 
 class ReasoningRuntimeNamespace:
     """Public access to the shared Tech Connector reasoning runtime."""
@@ -395,6 +650,97 @@ class ReasoningRuntimeNamespace:
         except Exception as exc:
             return APIResult(ok=False, error=str(exc))
 
+    def run_chain(
+        self,
+        prompts: str | list[str] | tuple[str, ...],
+        *,
+        context: dict[str, Any] | None = None,
+        stop_on_error: bool = True,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        activity_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> APIResult:
+        """Run sequential requests with bounded history and reusable workspace state."""
+        from tech_connector.services.operation_memory_service import update_operation_memory
+
+        steps = _normalize_prompt_chain(prompts)
+        if not steps:
+            return APIResult(ok=False, error="Prompt chain is empty.")
+        base_context = dict(context or {})
+        memory = dict(base_context.pop("operation_memory", {}) or {})
+        workspace = dict(base_context.pop("conversation_workspace", {}) or {})
+        if workspace:
+            memory["conversation_workspace"] = workspace
+        prior_metadata = dict(base_context.pop("prior_result_metadata", {}) or {})
+        history = list(base_context.pop("thread", base_context.pop("messages", [])) or [])[-12:]
+        results: list[dict[str, Any]] = []
+        stopped = False
+        stop_reason = ""
+        entitlement: dict[str, Any] | None = None
+        provenance: dict[str, Any] | None = None
+        for index, prompt in enumerate(steps, start=1):
+            step_context = {
+                **base_context,
+                "operation_memory": memory,
+                "conversation_workspace": workspace,
+                "prior_result_metadata": prior_metadata,
+                "thread": history,
+            }
+
+            def step_progress(event: dict[str, Any]) -> None:
+                if progress_callback:
+                    progress_callback({"chain_index": index, "chain_count": len(steps), **event})
+
+            def step_activity(event: dict[str, Any]) -> None:
+                if activity_callback:
+                    activity_callback({"chain_index": index, "chain_count": len(steps), **event})
+
+            response = self.run(
+                prompt,
+                context=step_context,
+                progress_callback=step_progress,
+                activity_callback=step_activity,
+            )
+            entitlement = response.entitlement or entitlement
+            provenance = response.provenance or provenance
+            payload = dict(response.result or {}) if isinstance(response.result, dict) else {}
+            answer = dict(payload.get("response") or {})
+            action = str(answer.get("action") or "").lower()
+            results.append({"index": index, "prompt": prompt, "ok": response.ok, "response": answer, "error": response.error})
+            if response.ok:
+                metadata = dict(answer.get("metadata") or {})
+                prior_metadata = metadata
+                route = dict(metadata.get("route_decision") or {})
+                memory = update_operation_memory(memory, route_decision=route, result=metadata)
+                workspace = dict(memory.get("conversation_workspace") or workspace)
+                history.extend((
+                    {"role": "user", "content": prompt[:3000]},
+                    {"role": "assistant", "content": str(answer.get("text") or "")[:3000]},
+                ))
+                history = history[-12:]
+            if action == "clarify" or (not response.ok and stop_on_error):
+                stopped = True
+                stop_reason = (
+                    f"Step {index} needs clarification."
+                    if action == "clarify" else f"Step {index} failed: {response.error}"
+                )
+                break
+        complete = len(results) == len(steps) and all(row["ok"] for row in results)
+        return APIResult(
+            ok=complete and not stopped,
+            result={
+                "schema": f"{API_SCHEMA}.reasoning_chain",
+                "step_count": len(steps),
+                "completed_steps": len(results),
+                "stopped": stopped,
+                "stop_reason": stop_reason,
+                "steps": results,
+                "state": {"operation_memory": memory, "conversation_workspace": workspace},
+            },
+            error="" if complete and not stopped else stop_reason or "One or more prompts failed.",
+            entitlement=entitlement,
+            provenance=provenance,
+        )
+
     def tools(self) -> APIResult:
         try:
             entitlement = self._api._require_unlocked()
@@ -525,6 +871,80 @@ class APIFeatureNamespace:
         descriptor = self._registry.get(feature_id)
         return descriptor.to_dict() if descriptor is not None else {}
 
+    def search(
+        self, query: str, *, category: str = "", available_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search feature IDs, descriptions, categories, and operation names."""
+        self._api._require_unlocked()
+        self._ensure_populated()
+        return [
+            descriptor.to_dict()
+            for descriptor in self._registry.search(
+                query, category=category, available_only=available_only,
+            )
+        ]
+
+    def describe(self, feature_id: str, operation: str = "") -> dict[str, Any]:
+        """Return callable signatures, defaults, docs, and explicit schemas."""
+        self._api._require_unlocked()
+        self._ensure_populated()
+        descriptor = self._registry.get(feature_id)
+        if descriptor is None:
+            raise KeyError(f"Unknown API feature: {feature_id}")
+        requested = str(operation or "").strip()
+        if requested and requested not in descriptor.operations:
+            raise KeyError(
+                f"Feature '{feature_id}' does not declare operation '{requested}'."
+            )
+        operations = []
+        for operation_name in descriptor.operations:
+            if requested and operation_name != requested:
+                continue
+            handler = self._registry.handler(descriptor.feature_id, operation_name)
+            parameters = []
+            signature_text = ""
+            documentation = ""
+            if handler is not None:
+                signature = inspect.signature(handler)
+                signature_text = str(signature)
+                documentation = inspect.getdoc(handler) or ""
+                for parameter in signature.parameters.values():
+                    annotation = parameter.annotation
+                    annotation_name = (
+                        ""
+                        if annotation is inspect.Parameter.empty
+                        else getattr(annotation, "__name__", str(annotation))
+                    )
+                    has_default = parameter.default is not inspect.Parameter.empty
+                    parameters.append({
+                        "name": parameter.name,
+                        "kind": parameter.kind.name.lower(),
+                        "required": not has_default
+                        and parameter.kind not in {
+                            inspect.Parameter.VAR_POSITIONAL,
+                            inspect.Parameter.VAR_KEYWORD,
+                        },
+                        "annotation": annotation_name,
+                        "has_default": has_default,
+                        "default": (
+                            _serialize_public_value(parameter.default)
+                            if has_default else None
+                        ),
+                    })
+            operations.append({
+                "name": operation_name,
+                "callable": handler is not None,
+                "signature": signature_text,
+                "parameters": parameters,
+                "documentation": documentation,
+                "schema": dict(descriptor.operation_schemas.get(operation_name) or {}),
+            })
+        return {
+            "schema": f"{API_SCHEMA}.feature_help",
+            "feature": descriptor.to_dict(),
+            "operations": operations,
+        }
+
     def manifest(self) -> dict[str, Any]:
         self._api._require_unlocked()
         self._ensure_populated()
@@ -558,14 +978,23 @@ class APIFeatureNamespace:
 
 def _project_roots(project_root: str | Path | None, settings: dict[str, Any]) -> list[str]:
     roots: list[str] = []
-    if project_root:
-        roots.append(str(Path(project_root).expanduser().resolve()))
-    active = str(settings.get("active_project") or "").strip()
-    if active and active not in roots:
-        roots.append(active)
-    tools = str(APP_ROOT.parent)
-    if tools not in roots:
-        roots.append(tools)
+    seen: set[str] = set()
+
+    def add(value: str | Path | None) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        resolved = str(Path(text).expanduser().resolve())
+        key = resolved.casefold()
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+
+    add(project_root)
+    add(settings.get("active_project"))
+    for extra in settings.get("extra_dirs") or ():
+        add(extra)
+    add(APP_ROOT.parent)
     return roots
 
 
@@ -670,8 +1099,10 @@ class TechConnectorHeadlessAPI:
         self.image_editor = self.ophanim
         self.ui = UiAPINamespace(self, ui_window=self._ui_window)
         self.call_dcc_function = DccFunctionCaller(self)
+        self.ai = AIAPINamespace(self)
         self.reasoning = ReasoningRuntimeNamespace(self)
         self.runtime = self.reasoning
+        self.integrations = IntegrationsAPINamespace(self)
         self.features = APIFeatureNamespace(self)
 
     def entitlement(self) -> LicenseEntitlement:
@@ -752,6 +1183,122 @@ class TechConnectorHeadlessAPI:
     def capabilities(self) -> dict[str, Any]:
         return self.reasoning.capabilities()
 
+    def describe(self, feature_id: str = "", operation: str = "") -> dict[str, Any]:
+        """Describe the API or one discoverable feature operation."""
+        if feature_id:
+            return self.features.describe(feature_id, operation)
+        return {
+            "schema": f"{API_SCHEMA}.help",
+            "api_version": API_VERSION,
+            "app_version": str(APP_VERSION),
+            "namespaces": {
+                "ai": "Provider-neutral model discovery, routing, benchmarking, and generation.",
+                "reasoning": "Project-aware reasoning, runtime tools, and progress events.",
+                "features": "Searchable capability catalog and generic invocation.",
+                "integrations": "Connected-account status, smart references, target discovery, and approved dispatch.",
+                "dcc": "Maya, Blender, Unreal, Unity, Houdini, and other host operations.",
+                "kingdom": "Game-engine authoring and runtime operations.",
+                "garden": "DCC scene viewer and authoring operations.",
+                "ophanim": "Image editor operations.",
+                "ui": "Attached desktop UI actions.",
+            },
+            "aliases": {
+                "runtime": "reasoning",
+                "game_engine": "kingdom",
+                "scene_viewer": "garden",
+                "image_editor": "ophanim",
+            },
+            "discovery": {
+                "search": "api.features.search('material')",
+                "feature_help": "api.features.describe('ai.generate', 'generate')",
+                "invoke": "api.features.invoke(feature_id, operation, **kwargs)",
+            },
+            "result_contract": {
+                "check": "if result.ok",
+                "serialize": "result.to_dict()",
+                "raise_on_error": "result.unwrap()",
+                "structured_error": "result.error_detail",
+            },
+        }
+
+    def surface(self) -> dict[str, Any]:
+        """Return every supported public namespace operation and signature."""
+
+        self._require_unlocked()
+        namespaces = {
+            "ai": self.ai,
+            "reasoning": self.reasoning,
+            "features": self.features,
+            "integrations": self.integrations,
+            "dcc": self.dcc,
+            "kingdom": self.kingdom,
+            "garden": self.garden,
+            "ophanim": self.ophanim,
+            "ui": self.ui,
+        }
+        excluded = {
+            "attach_window",
+            "feature_handlers",
+            "active_viewer_payload",
+        }
+        operations: list[dict[str, Any]] = []
+        for namespace, instance in namespaces.items():
+            for name, member in inspect.getmembers(type(instance), predicate=callable):
+                if name.startswith("_") or name in excluded:
+                    continue
+                handler = getattr(instance, name, None)
+                if not callable(handler):
+                    continue
+                operations.append({
+                    "path": f"api.{namespace}.{name}",
+                    "namespace": namespace,
+                    "operation": name,
+                    "signature": str(inspect.signature(handler)),
+                    "documentation": inspect.getdoc(handler) or "",
+                })
+        core_methods = (
+            "verify_license",
+            "entitlement_status",
+            "capabilities",
+            "describe",
+            "surface",
+            "llm_queue_status",
+            "cancel_llm_request",
+            "plan_prompt",
+            "plan_prompt_chain",
+            "execute_action_graph",
+            "execute_prompt_chain",
+            "generate_pipeline_from_prompt",
+            "call_function",
+            "dry_run_prompt",
+        )
+        for name in core_methods:
+            handler = getattr(self, name)
+            operations.append({
+                "path": f"api.{name}",
+                "namespace": "core",
+                "operation": name,
+                "signature": str(inspect.signature(handler)),
+                "documentation": inspect.getdoc(handler) or "",
+            })
+        operations.sort(key=lambda item: item["path"])
+        by_namespace: dict[str, int] = {}
+        for item in operations:
+            by_namespace[item["namespace"]] = by_namespace.get(item["namespace"], 0) + 1
+        return {
+            "schema": f"{API_SCHEMA}.surface",
+            "api_version": API_VERSION,
+            "operation_count": len(operations),
+            "namespace_counts": by_namespace,
+            "operations": operations,
+            "dynamic_surfaces": {
+                "dcc_functions": "api.dcc.catalog()",
+                "kingdom_editor_operations": "api.kingdom.editor_capabilities()",
+                "ui_actions": "api.ui.catalog()",
+                "runtime_tools": "api.reasoning.tools()",
+            },
+        }
+
     def llm_queue_status(self) -> dict[str, Any]:
         """
             Returns process-wide LLM queue telemetry.
@@ -817,6 +1364,24 @@ class TechConnectorHeadlessAPI:
             return lines[0] if lines else f"Runtime adapter: {adapter_name}."
 
         add(
+            "api.discovery",
+            "api",
+            "Search features and inspect callable operation signatures before invocation.",
+            {
+                "search": self.features.search,
+                "describe": self.features.describe,
+                "manifest": self.features.manifest,
+            },
+            lifecycle_stage="discovery",
+        )
+        add(
+            "api.surface",
+            "api",
+            "List every supported public namespace operation and its signature.",
+            {"list": self.surface},
+            lifecycle_stage="discovery",
+        )
+        add(
             "reasoning.runtime",
             "reasoning",
             "Shared request preparation, reasoning, routing, and response runtime.",
@@ -824,9 +1389,24 @@ class TechConnectorHeadlessAPI:
                 "snapshot": self.reasoning.snapshot,
                 "prepare": self.reasoning.prepare,
                 "run": self.reasoning.run,
+                "run_chain": self.reasoning.run_chain,
             },
             dependencies=("runtime.context", "runtime.validation"),
             lifecycle_stage="orchestration",
+        )
+        add(
+            "ai.generate",
+            "models",
+            "List models, preview routing, and generate through one provider-neutral API.",
+            {
+                "models": self.ai.models,
+                "local_recommendation": self.ai.local_recommendation,
+                "benchmark_local": self.ai.benchmark_local,
+                "route": self.ai.route,
+                "generate": self.ai.generate,
+            },
+            dependencies=("reasoning.runtime",),
+            lifecycle_stage="generation",
         )
         add(
             "reasoning.tools",
@@ -900,6 +1480,9 @@ class TechConnectorHeadlessAPI:
             "Drive game-engine authoring, runtime setup, and graph execution in The Kingdom.",
             {
                 "access_contract": self.kingdom.access_contract,
+                "editor_capabilities": self.kingdom.editor_capabilities,
+                "editor_describe": self.kingdom.editor_describe,
+                "editor_call": self.kingdom.editor_call,
                 "configure_runtime": self.kingdom.configure_runtime,
                 "create_effect": self.kingdom.create_effect,
                 "update_running_game": self.kingdom.update_running_game,
@@ -970,6 +1553,23 @@ class TechConnectorHeadlessAPI:
                 "aliases": self.dcc.aliases,
             },
             lifecycle_stage="evidence",
+        )
+        add(
+            "integrations.connected_services",
+            "integrations",
+            "Inspect connected applications, resolve smart references, discover live targets, and dispatch approved integration actions.",
+            {
+                "status": self.integrations.status,
+                "applications": self.integrations.applications,
+                "suggest": self.integrations.suggest,
+                "resolve": self.integrations.resolve,
+                "targets": self.integrations.targets,
+                "oauth_url": self.integrations.oauth_url,
+                "dispatch": self.integrations.dispatch,
+            },
+            permissions=("official_api_access", "explicit_approval_for_mutation"),
+            lifecycle_stage="integration",
+            source="tech_connector.api.IntegrationsAPINamespace",
         )
         add(
             "api.license",
@@ -1352,6 +1952,7 @@ class TechConnectorHeadlessAPI:
             "official_api": True,
             "license_tier": entitlement.tier,
             "original_prompt": graph.get("goal") or graph.get("prompt") or "",
+            "pipeline_live_preflight": "required",
             **(policy or {}),
         }
         if self.project_root:
@@ -1568,6 +2169,237 @@ class TechConnectorHeadlessAPI:
         return self.execute_action_graph(graph, dry_run=True)
 
 
+class IntegrationsAPINamespace:
+    """Connected services and chat smart-function operations."""
+
+    def __init__(self, api: TechConnectorHeadlessAPI) -> None:
+        self._api = api
+
+    def _run(self, operation: str, action: Callable[[], Any]) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": f"{API_SCHEMA}.integrations",
+                    "operation": operation,
+                    "value": _serialize_public_value(action()),
+                },
+                entitlement=entitlement.to_dict(),
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def status(self, account_id: str = "") -> APIResult:
+        """Return sanitized configuration status for one account or every account."""
+
+        def _status() -> Any:
+            from tech_connector.services.connected_account_service import (
+                connected_account_status,
+                connected_account_status_rows,
+            )
+
+            if str(account_id or "").strip():
+                return connected_account_status(self._api.settings, account_id)
+            return connected_account_status_rows(self._api.settings)
+
+        return self._run("integrations.status", _status)
+
+    def applications(self) -> APIResult:
+        """Return combined DCC bridge, license, and connected-service status."""
+
+        from tech_connector.services.connected_account_service import connected_application_status
+
+        return self._run(
+            "integrations.applications",
+            lambda: connected_application_status(self._api.settings, self._api.command_router),
+        )
+
+    def suggest(
+        self,
+        query: str = "",
+        *,
+        active_hosts: Iterable[str] = (),
+        limit: int = 20,
+    ) -> APIResult:
+        """Return typed chat smart-function completions such as Slack and Maya targets."""
+
+        def _suggest() -> Any:
+            from tech_connector.game_engine.integration.dcc_smart_search_service import (
+                smart_search_suggestions,
+            )
+
+            return smart_search_suggestions(
+                query,
+                active_hosts=active_hosts,
+                limit=max(1, min(int(limit), 100)),
+                settings=self._api.settings,
+            )
+
+        return self._run("integrations.suggest", _suggest)
+
+    def resolve(self, text: str) -> APIResult:
+        """Resolve selected smart references into deterministic, setup-aware context."""
+
+        def _resolve() -> str:
+            from tech_connector.game_engine.integration.dcc_smart_search_service import (
+                smart_search_context_block,
+            )
+
+            return smart_search_context_block(text, settings=self._api.settings)
+
+        return self._run("integrations.resolve", _resolve)
+
+    def targets(self, provider: str, *, refresh: bool = False) -> APIResult:
+        """List cached or live Slack/Discord channels and users without returning tokens."""
+
+        provider_id = str(provider or "").strip().lower()
+
+        def _targets() -> dict[str, Any]:
+            if provider_id not in {"slack", "discord"}:
+                raise ValueError("provider must be 'slack' or 'discord'.")
+            channel_key = f"{provider_id}_channels"
+            user_key = f"{provider_id}_users"
+            if not refresh:
+                return {
+                    "provider": provider_id,
+                    "source": "cache",
+                    "channels": list(self._api.settings.get(channel_key) or []),
+                    "users": list(self._api.settings.get(user_key) or []),
+                }
+            from tech_connector.services.notification_service import (
+                fetch_discord_channels_and_users,
+                fetch_slack_channels_and_users,
+            )
+
+            fetch = (
+                fetch_slack_channels_and_users
+                if provider_id == "slack"
+                else fetch_discord_channels_and_users
+            )
+            ok, data, message = fetch(self._api.settings)
+            if not ok:
+                raise RuntimeError(message)
+            self._api.settings[channel_key] = list(data.get("channels") or [])
+            self._api.settings[user_key] = list(data.get("users") or [])
+            return {"provider": provider_id, "source": "live", **data, "message": message}
+
+        return self._run("integrations.targets", _targets)
+
+    def oauth_url(
+        self,
+        provider: str,
+        *,
+        client_id: str = "",
+        redirect_uri: str = "",
+    ) -> APIResult:
+        """Return the official setup or OAuth authorization URL for a provider."""
+
+        provider_id = str(provider or "").strip().lower()
+
+        def _url() -> dict[str, str]:
+            from tech_connector.services.connected_account_service import (
+                get_atlassian_oauth_authorize_url,
+                get_clickup_oauth_authorize_url,
+                get_discord_oauth_authorize_url,
+                get_slack_oauth_authorize_url,
+            )
+
+            handlers = {
+                "slack": get_slack_oauth_authorize_url,
+                "discord": get_discord_oauth_authorize_url,
+                "atlassian": get_atlassian_oauth_authorize_url,
+                "jira": get_atlassian_oauth_authorize_url,
+                "confluence": get_atlassian_oauth_authorize_url,
+                "clickup": get_clickup_oauth_authorize_url,
+            }
+            handler = handlers.get(provider_id)
+            if handler is None:
+                raise ValueError(f"Unsupported integration provider: {provider_id or '<empty>'}")
+            return {
+                "provider": provider_id,
+                "url": handler(client_id=client_id, redirect_uri=redirect_uri),
+            }
+
+        return self._run("integrations.oauth_url", _url)
+
+    def dispatch(
+        self,
+        text: str,
+        *,
+        default_title: str = "Tech Connector Output",
+        approved: bool = False,
+        dry_run: bool = False,
+    ) -> APIResult:
+        """Preview or execute inline Slack, Discord, Jira, Confluence, or ClickUp actions."""
+
+        references = [
+            {
+                "provider": match.group(1).lower(),
+                "target": str(match.group(2) or "").strip(),
+            }
+            for match in re.finditer(
+                r"(?<!\w)@(slack|discord|jira|confluence|clickup|docs)(?:\.([A-Za-z0-9_.-]+))?",
+                str(text or ""),
+                re.IGNORECASE,
+            )
+        ]
+        if not references:
+            return APIResult(ok=False, error="No supported inline integration reference was found.")
+        if dry_run:
+            return self._run(
+                "integrations.dispatch.preview",
+                lambda: {
+                    "dry_run": True,
+                    "approved": False,
+                    "references": references,
+                    "text": str(text or ""),
+                    "default_title": default_title,
+                },
+            )
+        if not approved:
+            return APIResult(
+                ok=False,
+                error="Integration dispatch requires approved=True; use dry_run=True to preview.",
+            )
+
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            from tech_connector.services.notification_service import parse_and_dispatch_inline_messaging
+
+            results = parse_and_dispatch_inline_messaging(
+                text,
+                self._api.settings,
+                default_title=default_title,
+            )
+            failures = [item for item in results if not item.get("ok")]
+            payload = {
+                "schema": f"{API_SCHEMA}.integrations",
+                "operation": "integrations.dispatch",
+                "value": {"references": references, "results": results},
+            }
+            if failures:
+                return APIResult(
+                    ok=False,
+                    result=payload,
+                    error="; ".join(str(item.get("message") or "Dispatch failed") for item in failures),
+                    entitlement=entitlement.to_dict(),
+                )
+            return APIResult(ok=True, result=payload, entitlement=entitlement.to_dict())
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+
 class DccHostAPINamespace:
     """Dynamic host namespace for official DCC API aliases."""
 
@@ -1666,6 +2498,7 @@ class GameEngineAPINamespace:
 
     def __init__(self, api: TechConnectorHeadlessAPI) -> None:
         self._api = api
+        self._editor_api_instance: Any | None = None
 
     def _run(self, operation: str, action: Callable[[], Any], *, schema: str) -> APIResult:
         entitlement = None
@@ -1701,6 +2534,80 @@ class GameEngineAPINamespace:
         from tech_connector.game_engine.runtime.tc_engine_api import engine_access_contract
 
         return engine_access_contract()
+
+    def _editor_api(self):
+        if not self._api.project_root:
+            raise ValueError("project_root is required for Kingdom editor operations.")
+        if self._editor_api_instance is None:
+            from tech_connector.game_engine.assets import open_editor_api
+
+            self._editor_api_instance = open_editor_api(self._api.project_root)
+        return self._editor_api_instance
+
+    @staticmethod
+    def _editor_operation_names(editor: Any) -> tuple[str, ...]:
+        contract = editor.capability_contract()
+        names = {
+            str(operation)
+            for key, operations in contract.items()
+            if key.endswith("_operations") and isinstance(operations, (list, tuple))
+            for operation in operations
+        }
+        return tuple(sorted(names))
+
+    def editor_capabilities(self) -> APIResult:
+        """List the complete asset, level, build, and production editor contract."""
+        return self._run(
+            "kingdom.editor_capabilities",
+            lambda: self._editor_api().capability_contract(),
+            schema=f"{API_SCHEMA}.game_engine.editor_capabilities",
+        )
+
+    def editor_describe(self, operation: str = "") -> APIResult:
+        """Inspect a Kingdom editor operation signature before calling it."""
+        def _describe() -> dict[str, Any]:
+            editor = self._editor_api()
+            names = self._editor_operation_names(editor)
+            requested = str(operation or "").strip()
+            if requested and requested not in names:
+                raise KeyError(f"Unknown Kingdom editor operation: {requested}")
+            selected = (requested,) if requested else names
+            rows = []
+            for name in selected:
+                handler = getattr(editor, name, None)
+                if not callable(handler):
+                    continue
+                rows.append({
+                    "name": name,
+                    "signature": str(inspect.signature(handler)),
+                    "documentation": inspect.getdoc(handler) or "",
+                })
+            return {"operation_count": len(rows), "operations": rows}
+
+        return self._run(
+            "kingdom.editor_describe",
+            _describe,
+            schema=f"{API_SCHEMA}.game_engine.editor_help",
+        )
+
+    def editor_call(self, operation: str, **kwargs: Any) -> APIResult:
+        """Invoke a declared Kingdom editor operation with keyword arguments."""
+        requested = str(operation or "").strip()
+
+        def _invoke() -> Any:
+            editor = self._editor_api()
+            if requested not in self._editor_operation_names(editor):
+                raise KeyError(f"Unknown Kingdom editor operation: {requested}")
+            handler = getattr(editor, requested, None)
+            if not callable(handler):
+                raise RuntimeError(f"Kingdom editor operation is unavailable: {requested}")
+            return handler(**dict(kwargs))
+
+        return self._run(
+            f"kingdom.editor_call:{requested or 'unknown'}",
+            _invoke,
+            schema=f"{API_SCHEMA}.game_engine.editor_result",
+        )
 
     def access_contract(self) -> APIResult:
         return self._run(
@@ -2392,6 +3299,35 @@ def call_dcc_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
     return TechConnectorHeadlessAPI(**api_kwargs).call_dcc_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
 
 
+def integration_status(account_id: str = "", **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for ``api.integrations.status``."""
+
+    return _reasoning_api_from_kwargs(kwargs).integrations.status(account_id)
+
+
+def integration_suggestions(query: str = "", **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for smart integration completions."""
+
+    api = _reasoning_api_from_kwargs(kwargs)
+    return api.integrations.suggest(
+        query,
+        active_hosts=kwargs.pop("active_hosts", ()),
+        limit=kwargs.pop("limit", 20),
+    )
+
+
+def dispatch_integration(text: str, **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for approval-aware integration dispatch."""
+
+    api = _reasoning_api_from_kwargs(kwargs)
+    return api.integrations.dispatch(
+        text,
+        default_title=kwargs.pop("default_title", "Tech Connector Output"),
+        approved=bool(kwargs.pop("approved", False)),
+        dry_run=bool(kwargs.pop("dry_run", False)),
+    )
+
+
 def _reasoning_api_from_kwargs(kwargs: dict[str, Any]) -> TechConnectorHeadlessAPI:
     kwargs = dict(kwargs)
     if "ui_window" not in kwargs:
@@ -2447,6 +3383,20 @@ def run_reasoning(prompt: str, **kwargs: Any) -> APIResult:
     return api.reasoning.run(
         prompt,
         context=kwargs.pop("context", None),
+        progress_callback=kwargs.pop("progress_callback", None),
+        activity_callback=kwargs.pop("activity_callback", None),
+    )
+
+
+def run_reasoning_chain(prompts: str | list[str] | tuple[str, ...], **kwargs: Any) -> APIResult:
+    if "ui_window" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["ui_window"] = get_default_ui_window()
+    api = _reasoning_api_from_kwargs(kwargs)
+    return api.reasoning.run_chain(
+        prompts,
+        context=kwargs.pop("context", None),
+        stop_on_error=kwargs.pop("stop_on_error", True),
         progress_callback=kwargs.pop("progress_callback", None),
         activity_callback=kwargs.pop("activity_callback", None),
     )

@@ -383,7 +383,7 @@ namespace TechConnector
             return JsonUtility.ToJson(new Response
             {
                 ok = false,
-                error = "Tech Connector activation is required for this DCC bridge.",
+                error = "A valid local Tech Connector bridge session is required.",
                 code = "bridge_authorization_required",
             });
         }

@@ -113,6 +113,18 @@ CAPABILITY_EVIDENCE: dict[str, CapabilityEvidence] = {
         recovery_tests=("test_dcc_production_workflow_service.py", "test_pipeline_operation_session_routing.py"),
         notes=("Mutation confirmation and endpoint pinning are enforced; native-host golden readbacks remain machine-specific.",),
     ),
+    "engine.qualify_dcc_release": CapabilityEvidence(
+        "engine.qualify_dcc_release",
+        local_executor=True,
+        deterministic_tests=("test_dcc_release_qualification_runner.py", "test_dcc_release_readiness_service.py"),
+        user_entry_points=("viewer", "python_api", "chat"),
+        persistence_tests=("host, source-parity, and workflow receipt ledgers",),
+        transfer_readback_tests=("exact-session aggregate readiness audit",),
+        native_backend="TC-native pinned-session DCC release qualification orchestrator",
+        performance_baselines=("bounded staged host, parity, workflow, and audit execution",),
+        recovery_tests=("selection-required, unavailable-session, and cooperative-cancellation receipts",),
+        notes=("Read-only evidence runs without mutation; production workflows remain explicitly approval-gated.",),
+    ),
     "simulation.step": CapabilityEvidence(
         "simulation.step",
         local_executor=True,

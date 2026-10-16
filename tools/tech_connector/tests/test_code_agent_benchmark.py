@@ -22,7 +22,227 @@ from tech_connector.benchmarks.code_agent.scoring import (
     score_attempt,
     snapshot_workspace,
 )
-from tech_connector.benchmarks.code_agent.tech_worker import _safe_change_path
+from tech_connector.benchmarks.code_agent.tech_worker import (
+    _is_explicit_cloud_model,
+    _safe_change_path,
+)
+
+
+def test_benchmark_distinguishes_explicit_cloud_models_from_local_models() -> None:
+    """Prevent cloud-labelled runs from silently exercising local inference."""
+
+    assert _is_explicit_cloud_model("openai:gpt-6.1-sol")
+    assert _is_explicit_cloud_model("  GEMINI:gemini-2.5-flash  ")
+    assert not _is_explicit_cloud_model("ollama:qwen3.5:4b")
+    assert not _is_explicit_cloud_model("qwen3.5:4b")
+
+
+def test_project_edit_query_respects_smaller_per_call_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The caller's model-call budget must not inherit a longer stage default."""
+
+    from tech_connector.services import project_edit_workflow_part_08 as workflow
+    from tech_connector.services.project_edit_agent_service import ProjectEditPromptStage
+
+    observed: dict[str, object] = {}
+
+    def fake_generate_llm_response(**kwargs: object) -> str:
+        observed.update(kwargs)
+        return "ready"
+
+    monkeypatch.setattr(workflow, "generate_llm_response", fake_generate_llm_response)
+    stage = ProjectEditPromptStage(
+        key="timeout_budget_probe",
+        label="Timeout budget probe",
+        system_prompt="Answer briefly.",
+        user_prompt="Say ready.",
+        timeout=120,
+    )
+    workflow._query_stage(
+        stage,
+        selected_model="qwen3.5:4b",
+        settings={},
+        timeout=45,
+    )
+
+    assert observed["timeout"] == 45
+    assert observed["max_wall_seconds"] == 45
+
+
+def test_small_local_model_emits_direct_focused_repair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Focused code repair must not exhaust its token cap in hidden reasoning."""
+
+    from tech_connector.services import project_edit_workflow_part_08 as workflow
+    from tech_connector.services.project_edit_agent_service import ProjectEditPromptStage
+
+    observed: dict[str, object] = {}
+
+    def fake_generate_llm_response(**kwargs: object) -> str:
+        observed.update(kwargs)
+        return "class Item:\n    pass\n"
+
+    monkeypatch.setattr(workflow, "generate_llm_response", fake_generate_llm_response)
+    stage = ProjectEditPromptStage(
+        key="class_set_repair",
+        label="Repairing coherent class chunks",
+        system_prompt="Return replacement code.",
+        user_prompt="Replace class Item.",
+    )
+    workflow._query_stage(
+        stage,
+        selected_model="qwen3.5:4b",
+        settings={},
+        timeout=60,
+    )
+
+    assert observed["options"]["think"] is False
+
+
+def test_chunk_ownership_recovers_only_unique_callable_owner() -> None:
+    """Class work may be recovered from module ownership only without ambiguity."""
+
+    from tech_connector.services.project_edit_workflow_runner_planning import (
+        _recover_unique_callable_owner_assignments,
+    )
+
+    assignments = [
+        {"requirement_id": "R1", "semantic_role": "behavior", "declaration_ids": ["module"]},
+    ]
+    declarations = [
+        {"declaration_id": "module", "path": "runtime/journal.py", "owner": "<module>"},
+        {"declaration_id": "class_a", "path": "runtime/journal.py", "owner": "EventJournal"},
+        {"declaration_id": "class_b", "path": "runtime/journal.py", "owner": "EventJournal"},
+    ]
+
+    assert _recover_unique_callable_owner_assignments(assignments, declarations) == ["R1"]
+    assert assignments[0]["declaration_ids"] == ["class_a", "class_b"]
+
+    assignments[0]["declaration_ids"] = ["module"]
+    declarations.append(
+        {"declaration_id": "other", "path": "runtime/journal.py", "owner": "OtherClass"}
+    )
+    assert _recover_unique_callable_owner_assignments(assignments, declarations) == []
+    assert assignments[0]["declaration_ids"] == ["module"]
+
+
+def test_recursive_mapping_repair_detaches_guarded_documents(tmp_path: Path) -> None:
+    """A guarded merge loop must clone mappings and accept scalar documents."""
+
+    from tech_connector.services.project_edit_workflow_runtime_repair import (
+        _repair_recursive_mapping_contracts,
+    )
+
+    path = str(tmp_path / "merge.py")
+    source = """from copy import deepcopy
+
+def merge(document, patch):
+    if isinstance(document, dict) and isinstance(patch, dict):
+        for key, value in patch.items():
+            if value is None:
+                document.pop(key, None)
+            elif isinstance(value, dict):
+                document[key] = merge(document.get(key, {}), value)
+            else:
+                document[key] = deepcopy(value)
+    else:
+        document = deepcopy(patch)
+    return document
+"""
+    errors = [
+        f"{path}:merge: mapping patches over non-mapping documents must start "
+        "from a new empty mapping before any `.get` or key access"
+    ]
+
+    repaired, notes = _repair_recursive_mapping_contracts([(path, source, source)], errors)
+    namespace: dict[str, object] = {}
+    exec(compile(repaired[0][2], path, "exec"), namespace)
+    document = {"nested": {"kept": []}}
+    result = namespace["merge"](document, {"nested": {"added": 1}})
+
+    assert notes
+    assert result == {"nested": {"kept": [], "added": 1}}
+    assert document == {"nested": {"kept": []}}
+    assert result["nested"]["kept"] is not document["nested"]["kept"]
+    assert namespace["merge"](7, {"created": True}) == {"created": True}
+
+    future_source = source.replace(
+        "from copy import deepcopy", '"""Merge values."""\nfrom __future__ import annotations'
+    )
+    repaired_future, future_notes = _repair_recursive_mapping_contracts(
+        [(path, future_source, future_source)], errors
+    )
+    assert future_notes
+    compile(repaired_future[0][2], path, "exec")
+    assert repaired_future[0][2].index("from __future__ import annotations") < (
+        repaired_future[0][2].index("from copy import deepcopy")
+    )
+
+
+def test_local_semantic_reviews_are_atomic_without_changing_cloud_batches() -> None:
+    """A local review protocol failure must not discard another valid row."""
+
+    from tech_connector.services.project_edit_workflow_runner_attempt_synthesize import (
+        _semantic_review_batch_limit,
+    )
+
+    assert _semantic_review_batch_limit({"model_source_mode": "local_only"}) == 1
+    assert _semantic_review_batch_limit({"model_source_mode": "cloud_only"}) == 5
+
+
+def test_class_scope_tag_preserves_coherent_repair_ownership() -> None:
+    """A tagged shared-state failure must not fall through to leaf repairs."""
+
+    from tech_connector.services.project_edit_workflow_runner_attempt_validate import (
+        _has_class_scoped_validation_error,
+    )
+
+    finding = (
+        "[owner:EventJournal] [repair-scope:class] "
+        "runtime/journal.py:EventJournal: sequence state is inconsistent"
+    )
+    assert _has_class_scoped_validation_error(finding, "EventJournal")
+    assert not _has_class_scoped_validation_error(finding, "OtherJournal")
+
+
+def test_local_class_repair_keeps_source_and_failures_without_plan_noise() -> None:
+    """Compact class repair retains the facts needed for a coherent edit."""
+
+    from tech_connector.services.project_edit_agent_service import ProjectEditPromptStage
+    from tech_connector.services.project_edit_workflow_runner_attempt_validate import (
+        _compact_local_class_repair_stage,
+    )
+
+    stage = ProjectEditPromptStage(
+        key="class_set_repair",
+        label="Repair class",
+        system_prompt="Return Python.",
+        user_prompt="irrelevant lengthy plan",
+        metadata={
+            "symbols": ["EventJournal"],
+            "full_objective": "Keep sequence IDs after clear().",
+            "owner_source": "class EventJournal:\n    def clear(self): ...",
+            "all_validation_errors": ["append() reuses a sequence after eviction"],
+        },
+    )
+    compact = _compact_local_class_repair_stage(stage)
+
+    assert "class EventJournal" in compact.user_prompt
+    assert "Keep sequence IDs after clear()." in compact.user_prompt
+    assert "append() reuses a sequence" in compact.user_prompt
+    assert "irrelevant lengthy plan" not in compact.user_prompt
+
+    stage.metadata["owner_source"] = (
+        "class EventJournal:\n"
+        "    def append(self, topic, payload):\n"
+        "        return len(self.events)\n"
+    )
+    stage.metadata["all_validation_errors"] = [
+        "[repair-scope:class] monotonic event identity is coupled to retention"
+    ]
+    rebuilt = _compact_local_class_repair_stage(stage)
+    assert "def append(self, topic, payload):" in rebuilt.user_prompt
+    assert "return len(self.events)" not in rebuilt.user_prompt
+
+
 from tech_connector.services.project_edit_agent_service import (
     _incomplete_generated_type_hints,
     apply_project_edit_generated_class_set_repair,
@@ -1248,6 +1468,50 @@ def test_deterministic_repairs_handle_bool_and_pre_mutation_counter_guard() -> N
     assert repaired_source.index("if self.items.get(key, 0) >= self.max_attempts") < repaired_source.index("self.items[key] = attempt")
 
 
+def test_pre_mutation_guard_moves_direct_counter_store() -> None:
+    """Rejecting a computed next count must leave the stored count intact."""
+
+    from tech_connector.services.project_edit_workflow_runner_dependencies import (
+        _repair_pre_mutation_rejection_guards,
+    )
+
+    source = """class Tracker:
+    def __init__(self):
+        self.items = {}
+        self.max_attempts = 1
+
+    def record_failure(self, key):
+        if key not in self.items:
+            self.items[key] = 0
+        attempt = self.items[key] + 1
+        self.items[key] = attempt
+        if attempt > self.max_attempts:
+            raise RuntimeError("limit")
+        return attempt
+"""
+    errors = [
+        "tracker.py:Tracker.record_failure: approved rejection must leave state "
+        "unchanged, but instance state is mutated before a valid raising guard."
+    ]
+    repaired, notes = _repair_pre_mutation_rejection_guards(
+        [("tracker.py", source, source)], errors
+    )
+    namespace: dict[str, object] = {}
+    exec(compile(repaired[0][2], "tracker.py", "exec"), namespace)
+    tracker = namespace["Tracker"]()
+
+    assert notes
+    assert tracker.record_failure("key") == 1
+    with pytest.raises(RuntimeError):
+        tracker.record_failure("key")
+    assert tracker.items == {"key": 1}
+
+    tracker.max_attempts = 0
+    with pytest.raises(RuntimeError):
+        tracker.record_failure("new")
+    assert "new" not in tracker.items
+
+
 def test_limit_reached_semantics_repair_premature_next_count_rejection(
     tmp_path: Path,
 ) -> None:
@@ -1347,6 +1611,78 @@ def test_semantic_review_cannot_claim_present_state_methods_are_unimplemented() 
     )
     assert _semantic_review_finding_is_contradicted_by_source(signed_owner_error, files)
     assert _semantic_review_finding_is_contradicted_by_source(return_error, files)
+    absent_methods_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.can_retry(key): "
+        "unmet R7 'remaining(key) returns available attempts and can_retry(key) "
+        "reports whether another failure may be recorded'. Evidence: The Tracker "
+        "class does not implement the required methods.. Smallest repair: Add them."
+    )
+    absent_reset_error = (
+        "Final requirement review [api] tracker.py:Tracker.reset: "
+        "unmet R8 'reset(key) removes a key and returns whether it existed'. "
+        "Evidence: The Tracker class does not contain the 'reset' method.. "
+        "Smallest repair: Add it."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(absent_methods_error, files)
+    assert not _semantic_review_finding_is_contradicted_by_source(absent_reset_error, files)
+    with_reset = source + "\n    def reset(self, key):\n        return self.items.pop(key, None) is not None\n"
+    assert _semantic_review_finding_is_contradicted_by_source(
+        absent_reset_error, [("tracker.py", with_reset, with_reset)]
+    )
+    missing_reset_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.reset: "
+        "unmet R8 'reset(key) removes a key'. Evidence: The method `reset` is "
+        "missing from the provided code.. Smallest repair: Add reset."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(
+        missing_reset_error, [("tracker.py", with_reset, with_reset)]
+    )
+    assert not _semantic_review_finding_is_contradicted_by_source(
+        missing_reset_error, files
+    )
+    with_length = with_reset + "\n    def __len__(self):\n        return len(self.items)\n"
+    missing_length_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.__len__: "
+        "unmet R9 'len(tracker) reports tracked keys'. Evidence: The __len__ method "
+        "is missing from the Tracker class.. Smallest repair: Add it."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(
+        missing_length_error, [("tracker.py", with_length, with_length)]
+    )
+
+
+def test_local_causal_repair_respects_selected_coder_model() -> None:
+    """A 7B local code run must not fall back to the default 4B repair model."""
+
+    from tech_connector.services.project_edit_workflow_part_09 import (
+        _causal_repair_escalation_model,
+        _causal_repair_reasoning_model,
+    )
+
+    settings = {
+        "model_source_mode": "local_only",
+        "causal_repair_model": "qwen3.5:4b",
+        "router_local_code": "qwen3.5:4b",
+    }
+    assert _causal_repair_reasoning_model(settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    assert _causal_repair_escalation_model(settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    assert _causal_repair_reasoning_model(settings, "qwen3.5:4b") == "qwen3.5:4b"
+
+
+def test_local_behavior_harness_uses_selected_coder_model() -> None:
+    """A weaker default model should not author proof for a chosen local coder."""
+
+    from tech_connector.services.project_edit_workflow_runner_attempt_prepare import (
+        _behavior_harness_generation_model,
+    )
+
+    local_settings = {
+        "model_source_mode": "local_only",
+        "local_small_code_model": "qwen3.5:4b",
+    }
+    assert _behavior_harness_generation_model(local_settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    cloud_settings = {**local_settings, "model_source_mode": "auto_with_local_fallback"}
+    assert _behavior_harness_generation_model(cloud_settings, "qwen2.5-coder:7b") == "qwen3.5:4b"
 
 
 def test_missing_symbol_splicer_adds_one_wrapped_class_member() -> None:

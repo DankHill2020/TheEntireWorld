@@ -9,7 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from tech_connector.game_engine.assets import AssetDatabase, AssetOperationsService, PrefabService, read_asset_metadata
+from tech_connector.game_engine.assets import AssetDatabase, AssetOperationsService, PrefabService, evaluate_animation_controller, read_asset_metadata
+from tech_connector.game_engine.assets.editor_python_api import TCEditorAPI
 from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor
 from tech_connector.ui.game_engine.asset_specialized_editors import (
     AssetCurveEditorWidget, AssetNodeGraphWidget, AudioWaveformEditorWidget,
@@ -18,7 +19,8 @@ from tech_connector.ui.game_engine.asset_specialized_editors import (
     ProjectSettingsEditorWidget,
     CollisionGenerationEditorWidget, DopesheetEditorWidget, EmitterStackEditorWidget,
     ClothSetupEditorWidget, FabricMaterialEditorWidget, MaterialPreviewEditorWidget,
-    MeshLodEditorWidget, ProceduralIKEditorWidget,
+    AnimationControllerDebuggerWidget, AnimationControllerTransitionsEditorWidget, AnimationStateMachineEditorWidget,
+    MeshInspectionEditorWidget, MeshLodEditorWidget, ProceduralIKEditorWidget,
     PrefabHierarchyEditorWidget,
     VehicleRigEditorWidget,
 )
@@ -85,6 +87,23 @@ def test_node_graph_palette_search_copy_paste_and_frame() -> None:
     graph.frame_all()
 
 
+def test_material_graph_reports_node_specific_platform_and_function_diagnostics() -> None:
+    graph = AssetNodeGraphWidget("material")
+    graph.load_graph({
+        "nodes": [
+            {"id": "vt", "title": "Virtual Texture", "opcode": "virtual_texture"},
+            {"id": "fn", "title": "Material Function", "opcode": "material_function", "parameters": {}},
+            {"id": "out", "title": "Surface Output", "opcode": "surface_output"},
+        ],
+        "connections": [{"source": "vt", "target": "out"}, {"source": "fn", "target": "out"}],
+    })
+    graph.target_platform.setCurrentText("web")
+    diagnostics = graph.compile_diagnostics()
+    assert any(item["code"] == "platform_preview_fallback" and item["subject"] == "vt" for item in diagnostics)
+    assert any(item["code"] == "missing_function" and item["subject"] == "fn" for item in diagnostics)
+    assert "WARNING [vt]" in graph.compile_feedback.text()
+
+
 def test_procedural_geometry_graph_preserves_runtime_schema() -> None:
     source = {
         "schema": "tc.procedural_graph.v1", "name": "Rocks", "graph_id": "rocks", "seed": 42,
@@ -106,6 +125,43 @@ def test_procedural_geometry_graph_preserves_runtime_schema() -> None:
     assert restored["metadata"] == {"author": "test"}
     output = next(node for node in restored["nodes"] if node["node_id"] == "output")
     assert output["inputs"] == ["sphere"]
+
+
+def test_animation_state_machine_authoring_and_debug_preview(tmp_path) -> None:
+    project = tmp_path / "Project"; project.mkdir(); database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    values = {
+        "parameters": {"Speed": {"type": "float", "default": 0.0}},
+        "layers": [{
+            "id": "base", "name": "Base Layer", "weight": 1.0, "blend_mode": "override", "mask_asset_id": "",
+            "state_machine": {
+                "entry_state": "idle",
+                "states": [
+                    {"id": "idle", "name": "Idle", "motion": {"type": "clip", "asset_id": ""}, "speed": 1.0, "loop": True},
+                    {"id": "run", "name": "Run", "motion": {"type": "blend_space", "asset_id": ""}, "speed": 1.0, "loop": True},
+                ],
+                "transitions": [{"id": "start_running", "from": "idle", "to": "run", "conditions": [{"parameter": "Speed", "operator": ">", "value": 0.5}], "blend_seconds": 0.15}],
+            },
+        }],
+        "root_motion": {"mode": "extract", "consume_translation": True},
+    }
+    preview = evaluate_animation_controller(values, parameter_values={"Speed": 1.0}, current_state="idle")
+    assert preview["transitioned"] and preview["current_state"] == "run"
+    api = TCEditorAPI(project, database=database); controller = api.create_animation_controller("AC_Test", properties=values)
+    assert api.evaluate_animation_controller(controller.asset_id, parameter_values={"Speed": 1.0}, current_state="idle")["current_state"] == "run"
+    assert "evaluate_animation_controller" in api.capability_contract()["animation_operations"]
+
+    states = AnimationStateMachineEditorWidget(project, database); states.load_settings(values)
+    assert states.states.rowCount() == 2
+    authored = states.settings()
+    transitions = AnimationControllerTransitionsEditorWidget(); transitions.load_settings(values); transitions.apply_to(authored)
+    assert [row["id"] for row in authored["layers"][0]["state_machine"]["states"]] == ["idle", "run"]
+    assert authored["layers"][0]["state_machine"]["transitions"][0]["id"] == "start_running"
+
+    debugger = AnimationControllerDebuggerWidget(); debugger.load_settings(values)
+    debugger.parameters.item(0, 1).setText("1.0")
+    assert debugger.preview_state()["state"] == "run"
+    assert debugger.preview_state()["trace_count"] == 1
+    assert debugger.canvas.root_motion["mode"] == "extract"
 
 
 def test_cloth_and_fabric_editors_preserve_skinning_and_offer_direct_setup() -> None:
@@ -142,6 +198,22 @@ def test_prefab_hierarchy_editor_exposes_inheritance_and_override_state(tmp_path
     assert editor.hierarchy.topLevelItem(0).text(2) == "Inherited"
     assert editor.overrides.item(0, 0).text() == "Door_0.open"
     assert editor.settings()["variant_overrides"]["Door_0.open"] is True
+
+
+def test_prefab_hierarchy_editor_expands_nested_prefab_contents(tmp_path) -> None:
+    project = tmp_path / "Project"; project.mkdir()
+    database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    prefabs = PrefabService(project, database)
+    wheel = prefabs.create_from_entities("Wheel", [{"name": "WheelMesh", "components": {"mesh": {"asset_id": "wheel"}}}])
+    car = prefabs.create_from_entities("Car", [{"name": "FrontWheel", "prefab_asset_id": wheel.asset_id, "prefab_overrides": {"WheelMesh_0.transform.scale": [1.2, 1.2, 1.2]}}])
+    values = json.loads(database.asset(car.asset_id).source_path.read_text(encoding="utf-8"))["properties"]
+
+    editor = PrefabHierarchyEditorWidget(project, database, car.asset_id); editor.load_settings(values)
+    root = editor.hierarchy.topLevelItem(0); link = root.child(0)
+    assert link.text(0) == "Nested Prefab" and link.text(2) == "Linked"
+    assert link.child(0).text(0) == "WheelMesh"
+    assert link.child(0).text(2) == "Overridden"
+    assert link.child(0).child(0).text(0) == "mesh"
 
 
 def test_waveform_emitter_and_collision_controls_export_runtime_values(tmp_path) -> None:
@@ -273,6 +345,30 @@ def test_material_preview_and_mesh_lod_authoring_models() -> None:
     assert "decrease" in lods.validation_issues()[0]
 
 
+def test_mesh_inspection_reports_obj_geometry_lods_and_visualization(tmp_path) -> None:
+    source = tmp_path / "Panel.obj"
+    source.write_text(
+        "v -1 0 -2\nv 3 0 -2\nv 3 4 5\nv -1 4 5\n"
+        "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n"
+        "vn 0 1 0\nusemtl M_Panel\nf 1/1/1 2/2/1 3/3/1 4/4/1\n",
+        encoding="utf-8",
+    )
+    inspector = MeshInspectionEditorWidget(source, "tc.static_mesh")
+    inspector.load_settings({"lods": [{"triangle_percent": 100.0}, {"triangle_percent": 50.0}]})
+    assert inspector.lod.count() == 2
+    inspector.lod.setCurrentIndex(1)
+    inspector.mode.setCurrentIndex(inspector.mode.findData("uv_checker"))
+    report = inspector.report()
+    assert report["vertices"] == 4 and report["triangles"] == 2
+    assert report["visible_triangles"] == 1 and report["uv_channels"] == 1 and report["has_normals"]
+    assert report["material_slots"] == 1
+    assert report["bounds"] == {"minimum": [-1.0, 0.0, -2.0], "maximum": [3.0, 4.0, 5.0]}
+    assert inspector.canvas.mode == "uv_checker"
+    inspector.canvas.resize(480, 280)
+    assert not inspector.canvas.grab().isNull()
+    assert inspector.settings()["mesh_preview"]["lod"] == 1
+
+
 def test_procedural_ik_and_vehicle_rig_presets_are_editable() -> None:
     procedural = ProceduralIKEditorWidget()
     procedural.create_humanoid_legs()
@@ -348,12 +444,16 @@ def test_material_preview_and_imported_mesh_lods_persist_through_editor(tmp_path
     assert material_payload["properties"]["metalness"] == pytest.approx(0.625)
 
     assert editor.open_asset(mesh.asset_id)
+    inspection = next(widget for key, widget in editor._specialized_widgets if key == "__mesh_inspection__")
+    inspection.mode.setCurrentIndex(inspection.mode.findData("normals"))
     lod_editor = next(widget for key, widget in editor._specialized_widgets if key == "lods")
     lod_editor.generate_recommended()
+    assert inspection.lod.count() == 4
     assert editor.save(compile_after=False)
     metadata = read_asset_metadata(database.asset(mesh.asset_id).source_path)
     assert len(metadata["importer_settings"]["lods"]) == 4
     assert metadata["importer_settings"]["lods"][-1]["triangle_percent"] == pytest.approx(12.5)
+    assert metadata["importer_settings"]["mesh_preview"]["visualization"] == "normals"
 
 
 def test_procedural_animation_and_vehicle_presets_persist_through_editor(tmp_path) -> None:

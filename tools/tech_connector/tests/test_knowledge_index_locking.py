@@ -60,6 +60,39 @@ def test_virtual_environments_are_excluded_from_index_scan(tmp_path) -> None:
     assert builder.should_skip(tmp_path / ".venv" / "Lib" / "site-packages" / "library.py")
 
 
+def test_generated_test_and_distribution_trees_are_pruned_before_scan(tmp_path) -> None:
+    keep = tmp_path / "source"
+    pytest_output = tmp_path / ".pytest_demo_run"
+    temporary_output = tmp_path / "test_tmp_index_run"
+    distribution = tmp_path / "dist"
+    for folder in (keep, pytest_output, temporary_output, distribution):
+        folder.mkdir()
+        (folder / "module.py").write_text("value = 1\n", encoding="utf-8")
+
+    found = [path for _root, path in builder.iter_files([tmp_path])]
+
+    assert found == [keep / "module.py"]
+
+
+def test_bulk_clear_removes_files_and_dependent_rows(tmp_path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    first = root / "first.py"
+    second = root / "second.py"
+    first.write_text("def first():\n    return 1\n", encoding="utf-8")
+    second.write_text("def second():\n    return 2\n", encoding="utf-8")
+    connection = sqlite3.connect(":memory:")
+    builder.init_db(connection)
+    assert builder.index_file(connection, root, first)
+    assert builder.index_file(connection, root, second)
+
+    assert builder.clear_files(connection, [first, second]) == 2
+    assert connection.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM symbol_lookup").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+
+
 def test_unchanged_content_refreshes_perforce_modified_time(tmp_path, monkeypatch) -> None:
     source = tmp_path / "module.py"
     source.write_text("value = 1\n", encoding="utf-8")

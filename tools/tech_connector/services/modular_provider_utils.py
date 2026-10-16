@@ -211,6 +211,7 @@ class DCCBridgeDelegateMixin:
     """Mixin to delegate all bridge calls to a custom provider if configured in settings."""
 
     def init_delegate(self, dcc_name: str) -> None:
+        self._dcc_name = str(dcc_name or "").strip().lower()
         self._custom_delegate = None
         try:
             from tech_connector.services.settings_service import load_settings
@@ -227,6 +228,18 @@ class DCCBridgeDelegateMixin:
                         self._custom_delegate = cls_obj()
         except Exception as e:
             print(f"[DCCBridgeDelegateMixin] Error loading custom bridge for {dcc_name}: {e}", file=sys.stderr, flush=True)
+
+    def session_registry(self, host: str = "127.0.0.1") -> dict[str, Any]:
+        """Return the shared, source-attributed port diagnostics contract."""
+
+        from tech_connector.bridges.session_discovery import bridge_session_diagnostics
+
+        provider = str(
+            getattr(getattr(self, "info", None), "id", "")
+            or getattr(self, "_dcc_name", "")
+            or ""
+        )
+        return bridge_session_diagnostics(provider, self, host=host)
 
     def __getattribute__(self, name: str) -> Any:
         if name in ("_custom_delegate", "init_delegate", "__dict__", "__class__"):

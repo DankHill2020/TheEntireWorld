@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from tech_connector.game_engine.assets import AssetDatabase, AssetOperationsService
 from tech_connector.ui.game_engine.asset_editor_session import AssetEditorSession
 from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor
+from tech_connector.ui.game_engine import asset_editor_session as session_module
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -48,6 +49,29 @@ def test_recovery_is_not_applied_to_a_changed_source(tmp_path) -> None:
     reopened = AssetEditorSession(tmp_path)
     assert reopened.begin("asset-1", "new-hash", {"value": 3}) is None
     assert not reopened.dirty
+
+
+def test_recovery_replace_retries_transient_windows_file_lock(monkeypatch, tmp_path) -> None:
+    session = AssetEditorSession(tmp_path)
+    session.begin("asset-1", "hash-1", {"value": 1})
+    session.record({"value": 2}, "Edit")
+    real_replace = session_module.os.replace
+    attempts = []
+
+    def briefly_locked(source, destination):
+        attempts.append((source, destination))
+        if len(attempts) < 3:
+            raise PermissionError(5, "simulated scanner lock")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(session_module.os, "replace", briefly_locked)
+    monkeypatch.setattr(session_module.time, "sleep", lambda _seconds: None)
+
+    path = session.write_recovery({"value": 2})
+
+    assert path is not None and path.is_file()
+    assert len(attempts) == 3
+    assert list(path.parent.glob(f".{path.name}.*.tmp")) == []
 
 
 def test_dedicated_editor_undo_redo_and_save_state(tmp_path) -> None:

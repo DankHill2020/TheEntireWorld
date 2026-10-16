@@ -7,8 +7,9 @@ import re
 from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QAbstractButton, QAbstractItemView, QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QPushButton, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 
@@ -253,6 +254,8 @@ def apply_main_window_ux_polish(window: QWidget) -> None:
     _install_getting_started(window)
     apply_widget_discoverability(window)
     _polish_primary_workspace_controls(window)
+    _install_accessibility_controls(window)
+    _install_landmark_navigation(window)
 
 
 def apply_widget_discoverability(root: QWidget) -> None:
@@ -269,9 +272,142 @@ def apply_widget_discoverability(root: QWidget) -> None:
             control.setStatusTip(guidance.summary)
         elif control.toolTip() and not control.accessibleDescription():
             control.setAccessibleDescription(control.toolTip())
+        if isinstance(control, QAbstractItemView) and not control.accessibleName():
+            control.setAccessibleName(_view_accessible_name(control))
+        if control.objectName() and hasattr(control, "accessibleIdentifier"):
+            if not control.accessibleIdentifier():
+                control.setAccessibleIdentifier(control.objectName())
         if isinstance(control, (QComboBox, QLineEdit)) and not control.toolTip():
             description = label or "this value"
             control.setToolTip(f"Choose or enter {description.lower()}. Changes apply to the current workspace context.")
+
+
+def _install_accessibility_controls(window: QWidget) -> None:
+    """Expose text scaling and high contrast without requiring OS-level configuration."""
+    if getattr(window, "_tc_accessibility_controls_installed", False):
+        return
+    window._tc_accessibility_controls_installed = True
+    app = QApplication.instance()
+    if app is None:
+        return
+    window._tc_accessibility_base_point_size = max(8.0, float(app.font().pointSizeF()))
+
+    def persist(key: str, value: object) -> None:
+        settings = getattr(window, "settings", None)
+        if isinstance(settings, dict):
+            settings[key] = value
+            try:
+                window.service.save_settings(settings)
+            except Exception:
+                pass
+
+    def apply_scale(percent: int) -> None:
+        percent = max(80, min(180, int(percent)))
+        font = app.font()
+        font.setPointSizeF(window._tc_accessibility_base_point_size * percent / 100.0)
+        app.setFont(font)
+        window._tc_ui_scale_percent = percent
+        persist("ui_scale_percent", percent)
+
+    def adjust_scale(delta: int) -> None:
+        apply_scale(int(getattr(window, "_tc_ui_scale_percent", 100)) + int(delta))
+
+    def set_high_contrast(enabled: bool) -> None:
+        window.setProperty("accessibilityHighContrast", bool(enabled))
+        window.style().unpolish(window)
+        window.style().polish(window)
+        window.update()
+        persist("high_contrast", bool(enabled))
+
+    settings = getattr(window, "settings", {}) or {}
+    window._tc_ui_scale_percent = int(settings.get("ui_scale_percent", 100) or 100)
+    if window._tc_ui_scale_percent != 100:
+        apply_scale(window._tc_ui_scale_percent)
+    set_high_contrast(bool(settings.get("high_contrast", False)))
+
+    menu_bar_getter = getattr(window, "menuBar", None)
+    menu = None
+    if callable(menu_bar_getter):
+        menu_bar = menu_bar_getter()
+        menu = next((action.menu() for action in menu_bar.actions() if action.text().replace("&", "") == "Accessibility"), None)
+        if menu is None:
+            menu = menu_bar.addMenu("&Accessibility")
+        window.accessibility_menu = menu
+        larger = QAction("Increase text size", window)
+        larger.setShortcut(QKeySequence("Ctrl+Shift+="))
+        larger.setStatusTip("Increase text and control size across Tech Connector.")
+        larger.triggered.connect(lambda: adjust_scale(10))
+        menu.addAction(larger)
+        smaller = QAction("Decrease text size", window)
+        smaller.setShortcut(QKeySequence("Ctrl+Shift+-"))
+        smaller.setStatusTip("Decrease text and control size across Tech Connector.")
+        smaller.triggered.connect(lambda: adjust_scale(-10))
+        menu.addAction(smaller)
+        reset = QAction("Reset text size", window)
+        reset.setShortcut(QKeySequence("Ctrl+Shift+0"))
+        reset.triggered.connect(lambda: apply_scale(100))
+        menu.addAction(reset)
+        menu.addSeparator()
+        contrast = QAction("High contrast", window)
+        contrast.setCheckable(True)
+        contrast.setChecked(bool(settings.get("high_contrast", False)))
+        contrast.setStatusTip("Use brighter text and a stronger yellow keyboard focus indicator.")
+        contrast.toggled.connect(set_high_contrast)
+        menu.addAction(contrast)
+        window.accessibility_high_contrast_action = contrast
+        window._tc_accessibility_actions = (larger, smaller, reset, contrast)
+    window.adjust_ui_scale = adjust_scale
+    window.set_high_contrast = set_high_contrast
+
+
+def _install_landmark_navigation(window: QWidget) -> None:
+    """Use F6 and Shift+F6 to move between the application's major panes."""
+    if getattr(window, "_tc_landmark_shortcuts_installed", False):
+        return
+    window._tc_landmark_shortcuts_installed = True
+
+    def landmarks() -> list[QWidget]:
+        values = []
+        for name in ("project_tree", "workspace_tabs", "input", "history", "code_list"):
+            widget = getattr(window, name, None)
+            if isinstance(widget, QTabWidget):
+                widget = widget.tabBar()
+            if isinstance(widget, QWidget) and widget.isVisible() and widget.isEnabled():
+                values.append(widget)
+        return values
+
+    def move(reverse: bool = False) -> None:
+        candidates = landmarks()
+        if not candidates:
+            return
+        focused = QApplication.focusWidget()
+        current = -1
+        for index, candidate in enumerate(candidates):
+            if focused is candidate or (focused is not None and candidate.isAncestorOf(focused)):
+                current = index
+                break
+        step = -1 if reverse else 1
+        candidates[(current + step) % len(candidates)].setFocus(Qt.ShortcutFocusReason)
+
+    forward = QShortcut(QKeySequence("F6"), window)
+    forward.setContext(Qt.WindowShortcut)
+    forward.activated.connect(lambda: move(False))
+    backward = QShortcut(QKeySequence("Shift+F6"), window)
+    backward.setContext(Qt.WindowShortcut)
+    backward.activated.connect(lambda: move(True))
+    window._tc_landmark_shortcuts = (forward, backward)
+
+
+def _view_accessible_name(control: QAbstractItemView) -> str:
+    name = str(control.objectName() or "").replace("_", " ").strip()
+    if name:
+        return name.title()
+    if isinstance(control, QTreeWidget):
+        labels = [control.headerItem().text(index) for index in range(control.columnCount())]
+        labels = [label for label in labels if label]
+        if labels:
+            return f"{' and '.join(labels[:2])} tree"
+    return control.metaObject().className().removeprefix("Q").replace("Widget", "").strip() or "Item view"
 
 
 def apply_3d_viewer_ux_polish(viewer: QWidget) -> None:
@@ -326,7 +462,7 @@ def _install_getting_started(window: QWidget) -> None:
         return
     root = window.layout()
     top = getattr(window, "top_section_widget", None)
-    if root is None or top is None:
+    if root is None or top is None or not hasattr(root, "insertWidget"):
         return
     card = GettingStartedCard(window)
     card.setVisible(not bool(getattr(window, "settings", {}).get("getting_started_dismissed", False)))

@@ -25,6 +25,13 @@ class _FakeMultiSessionBridge:
     def health_check(self, *, timeout: float):
         return {"connected": True, "project": "qualification", "timeout": timeout}
 
+    def session_registry(self):
+        return {
+            "registry_path": "C:/Users/test/.tech_connector/dcc_sessions.json",
+            "live_ports": [7011, 7012],
+            "stale_ports": [],
+        }
+
 
 def test_motionbuilder_is_qualified_against_its_animation_role() -> None:
     receipt = qualification.probe_dcc_host(
@@ -52,6 +59,8 @@ def test_motionbuilder_is_qualified_against_its_animation_role() -> None:
     assert "native constraints/control rigs" in receipt.role
     assert receipt.receipt_id
     assert receipt.integrity["status"] == "qualified"
+    assert receipt.discovery_evidence["live_ports"] == [7011, 7012]
+    assert receipt.integrity["discovery_evidence"] == receipt.discovery_evidence
 
 
 def test_host_qualification_receipt_validates_and_rejects_tampering() -> None:
@@ -84,6 +93,25 @@ def test_qualification_does_not_claim_live_status_without_identity_readback() ->
     assert not receipt.live_readback
     assert "live_identity_readback" in receipt.missing_gates
     assert "install_recovery_readback" in receipt.missing_gates
+
+
+def test_explicit_session_port_is_probed_even_when_discovery_misses_it() -> None:
+    class ExplicitBridge(_FakeMultiSessionBridge):
+        def find_ports(self):
+            return []
+
+    receipt = qualification.probe_dcc_host(
+        "motionbuilder",
+        bridge=ExplicitBridge(),
+        requested_ports=(7441,),
+        install_recovery_verified=True,
+    )
+
+    assert receipt.status == "qualified"
+    assert receipt.discovered_ports == (7441,)
+    assert receipt.responding_sessions[0]["port"] == 7441
+    assert receipt.discovery_evidence["requested_ports"] == [7441]
+    assert receipt.discovery_evidence["port_sources"]["7441"][0] == "explicit_selection"
 
 
 def test_qualification_fails_closed_when_identity_latency_exceeds_budget() -> None:

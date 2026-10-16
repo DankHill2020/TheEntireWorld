@@ -1,51 +1,115 @@
 {
-  "version": "5.0",
+  "version": "6.0",
   "plugins": {
     "maya": {
       "enabled": true,
       "display_name": "Maya",
-      "server": "maya_mcp_server_quiet.py",
+      "server": "bridges/host_mcp_server.py --host maya",
       "domain": "maya",
       "tool_domain": "maya_tools",
-      "default_port": 7001
+      "protocol": "socket-json",
+      "default_port": 7001,
+      "supports_direct_execute": true,
+      "supports_mcp": true
     },
     "unreal": {
       "enabled": true,
       "display_name": "Unreal",
-      "server": "existing_config",
+      "server": "bridges/unreal/unreal_mcp_server.py",
       "domain": "unreal",
       "tool_domain": "unreal_tools",
-      "default_port": 9889
+      "protocol": "http-json",
+      "default_port": 12347,
+      "supports_direct_execute": true,
+      "supports_mcp": true
     },
     "blender": {
       "enabled": true,
       "display_name": "Blender",
-      "server": "blender_command_port_setup.py",
+      "server": "bridges/host_mcp_server.py --host blender",
       "domain": "blender",
       "tool_domain": "blender_tools",
       "protocol": "socket-json",
       "default_port": 7021,
       "supports_direct_execute": true,
-      "supports_mcp": false
+      "supports_mcp": true
     },
     "substance_painter": {
       "enabled": true,
       "display_name": "Substance Painter",
-      "server": "substance_painter_ai_studio_bridge.py",
+      "server": "bridges/host_mcp_server.py --host substance_painter",
       "domain": "substance_painter",
       "tool_domain": "substance_painter_tools",
       "protocol": "socket-json",
       "default_port": 7031,
       "supports_direct_execute": true,
-      "supports_mcp": false
+      "supports_mcp": true
     },
     "motionbuilder": {
       "enabled": true,
       "display_name": "MotionBuilder",
-      "server": "bridges/motionbuilder/motionbuilder_mcp_server.py",
+      "server": "bridges/host_mcp_server.py --host motionbuilder",
       "domain": "motionbuilder",
       "tool_domain": "motionbuilder_tools",
-      "default_port": 7011
+      "protocol": "socket-json",
+      "default_port": 7011,
+      "supports_direct_execute": true,
+      "supports_mcp": true
+    },
+    "houdini": {
+      "enabled": true,
+      "display_name": "Houdini",
+      "server": "bridges/host_mcp_server.py --host houdini",
+      "domain": "houdini",
+      "tool_domain": "houdini_tools",
+      "protocol": "socket-json",
+      "default_port": 7051,
+      "supports_direct_execute": true,
+      "supports_mcp": true
+    },
+    "unity": {
+      "enabled": true,
+      "display_name": "Unity",
+      "server": "bridges/host_mcp_server.py --host unity",
+      "domain": "unity",
+      "tool_domain": "unity_tools",
+      "protocol": "socket-json",
+      "default_port": 7041,
+      "supports_direct_execute": true,
+      "supports_mcp": true
+    },
+    "3dsmax": {
+      "enabled": true,
+      "display_name": "3ds Max",
+      "server": "bridges/host_mcp_server.py --host 3dsmax",
+      "domain": "3dsmax",
+      "tool_domain": "max_tools",
+      "protocol": "socket-json",
+      "default_port": 7091,
+      "supports_direct_execute": true,
+      "supports_mcp": true
+    },
+    "photoshop": {
+      "enabled": true,
+      "display_name": "Adobe Photoshop",
+      "server": "bridges/host_mcp_server.py --host photoshop",
+      "domain": "photoshop",
+      "tool_domain": "photoshop_tools",
+      "protocol": "http-json",
+      "default_port": 7061,
+      "supports_direct_execute": false,
+      "supports_mcp": true
+    },
+    "gimp": {
+      "enabled": true,
+      "display_name": "GIMP",
+      "server": "bridges/host_mcp_server.py --host gimp",
+      "domain": "gimp",
+      "tool_domain": "gimp_tools",
+      "protocol": "socket-json",
+      "default_port": 7081,
+      "supports_direct_execute": true,
+      "supports_mcp": true
     }
   }
 }

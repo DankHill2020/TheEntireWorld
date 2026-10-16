@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 class LicenseType(str, Enum):
     COMMUNITY = "community"
+    ANNUAL = "annual"
     PERPETUAL = "perpetual"
     CUSTOM = "custom"
 

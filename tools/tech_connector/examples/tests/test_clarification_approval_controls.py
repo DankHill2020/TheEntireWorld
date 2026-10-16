@@ -63,7 +63,10 @@ class TestClarificationApprovalControls(unittest.TestCase):
         )
         with patch.dict(
             "os.environ",
-            {"TECH_CONNECTOR_LICENSE_VERIFY_SECRET": secret},
+            {
+                "TECH_CONNECTOR_LICENSE_VERIFY_SECRET": secret,
+                "TECH_CONNECTOR_ALLOW_LEGACY_ENTITLEMENT": "1",
+            },
             clear=False,
         ):
             policy = proposed_input_approval_policy(context)

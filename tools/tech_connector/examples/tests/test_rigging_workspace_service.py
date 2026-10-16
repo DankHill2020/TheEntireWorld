@@ -53,7 +53,8 @@ def _humanoid_graph() -> tuple[EditableRigGraph, CharacterDefinition]:
 def test_capability_contract_covers_create_rig_and_retarget_workflows() -> None:
     required = {
         "definition.auto_map", "definition.assign_slot", "definition.set_reference_pose",
-        "rig.build_full", "rig.build_module", "rig.remove_module", "rig.rebuild_module",
+        "rig.build_full", "rig.place_joints", "rig.set_t_pose",
+        "rig.build_module", "rig.remove_module", "rig.rebuild_module",
         "rig.create_ik_fk_limb", "rig.create_reverse_foot", "rig.create_ribbon",
         "rig.create_twist", "rig.create_curve_joints", "rig.create_space_switch", "rig.create_mesh_attachment",
         "rig.create_face_module", "rig.store_connections", "rig.restore_connections",
@@ -100,9 +101,13 @@ def test_tc_adapter_builds_and_rebuilds_portable_modules() -> None:
     )
 
     assert result.ok, result.message
+    assert result.data["t_pose"]["ok"]
+    assert result.data["behavior_revision"] == 6
     assert "left_arm_ik_solver" in graph.constraints
     assert "right_leg_ik_solver" in graph.constraints
     assert any((node.get("attributes") or {}).get("rig_module") == "spine" for node in graph.nodes.values())
+    ik_matrix = graph.nodes["left_arm_ik_ctrl"]["attributes"]["matrix"]
+    assert ik_matrix[:12] == pytest.approx(IDENTITY_MATRIX[:12])
 
     rebuilt = controller.run(
         "rig.rebuild_module", module="left_arm", definition=definition.to_dict(), options={}
@@ -110,6 +115,66 @@ def test_tc_adapter_builds_and_rebuilds_portable_modules() -> None:
     assert rebuilt.ok, rebuilt.message
     assert rebuilt.removed_ids
     assert "left_arm_ik_solver" in graph.constraints
+
+
+def test_tc_joint_placement_and_t_pose_are_portable_operations() -> None:
+    graph, definition = _humanoid_graph()
+    controller = RiggingWorkspaceController(create_rigging_adapter("tc", graph=graph))
+
+    placed = controller.run(
+        "rig.place_joints",
+        definition=definition.to_dict(),
+        positions={"LeftArm": [6.0, 15.0, 2.0], "RightArm": [-6.0, 15.0, 2.0]},
+    )
+    assert placed.ok, placed.message
+    assert set(placed.changed_ids) == {"l_upperarm", "r_upperarm"}
+
+    posed = controller.run("rig.set_t_pose", definition=definition.to_dict())
+    assert posed.ok, posed.message
+    evaluated = evaluate_rig_graph(graph)
+    assert evaluated.errors == []
+
+    left_arm = evaluated.world_matrices["l_upperarm"][12:15]
+    left_elbow = evaluated.world_matrices["l_forearm"][12:15]
+    right_arm = evaluated.world_matrices["r_upperarm"][12:15]
+    right_elbow = evaluated.world_matrices["r_forearm"][12:15]
+    assert left_elbow[0] > left_arm[0]
+    assert left_elbow[1:] == pytest.approx(left_arm[1:])
+    assert right_elbow[0] < right_arm[0]
+    assert right_elbow[1:] == pytest.approx(right_arm[1:])
+
+    for prefix in ("l", "r"):
+        thigh = evaluated.world_matrices[f"{prefix}_thigh"][12:15]
+        knee = evaluated.world_matrices[f"{prefix}_knee"][12:15]
+        ankle = evaluated.world_matrices[f"{prefix}_ankle"][12:15]
+        assert knee[0] == pytest.approx(thigh[0])
+        assert ankle[0] == pytest.approx(thigh[0])
+        assert knee[2] == pytest.approx(thigh[2])
+        assert ankle[2] == pytest.approx(thigh[2])
+        assert thigh[1] > knee[1] > ankle[1]
+
+
+def test_tc_joint_placement_can_preview_selected_mesh_bounds() -> None:
+    graph, definition = _humanoid_graph()
+    mesh = graph.add_node(
+        "CharacterMesh",
+        "mesh",
+        node_id="character_mesh",
+        attributes={"bounds": {"min": [-8.0, 0.0, -3.0], "max": [8.0, 24.0, 3.0]}},
+    )
+    controller = RiggingWorkspaceController(
+        create_rigging_adapter("tc", graph=graph, selected_ids=[mesh])
+    )
+
+    preview = controller.run(
+        "rig.place_joints",
+        definition=definition.to_dict(),
+        preview=True,
+    )
+
+    assert preview.ok and not preview.data["applied"]
+    assert preview.data["behavior_revision"] == 6
+    assert set(("LeftArm", "RightArm", "LeftFoot", "RightFoot")) <= set(preview.data["positions"])
 
 
 def test_tc_space_switch_updates_constraint_weights() -> None:
@@ -195,6 +260,8 @@ def test_blender_uses_the_shared_controller_and_native_rigging_backend() -> None
     assert controller.adapter.host_id == "blender"
     assert controller.adapter._backend_module == "blender_tools.Rigging.rigging_host_adapter"
     assert controller.capability_status()["rig.build_full"] == "translated"
+    assert controller.capability_status()["rig.place_joints"] == "translated"
+    assert controller.capability_status()["rig.set_t_pose"] == "translated"
     assert controller.capability_status()["rig.create_ik_fk_limb"] == "translated"
     assert controller.capability_status()["rig.create_ribbon"] == "translated"
     assert controller.capability_status()["rig.create_curve_joints"] == "translated"
@@ -208,6 +275,8 @@ def test_3dsmax_uses_the_shared_controller_and_native_rigging_backend() -> None:
     assert controller.adapter.host_id == "3dsmax"
     assert controller.adapter._backend_module == "max_tools.Rigging.rigging_host_adapter"
     assert controller.capability_status()["rig.build_full"] == "translated"
+    assert controller.capability_status()["rig.place_joints"] == "translated"
+    assert controller.capability_status()["rig.set_t_pose"] == "translated"
     assert controller.capability_status()["rig.create_ik_fk_limb"] == "translated"
     assert controller.capability_status()["rig.create_ribbon"] == "translated"
     assert controller.capability_status()["rig.create_twist"] == "translated"

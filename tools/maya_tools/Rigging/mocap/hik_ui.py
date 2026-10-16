@@ -4,6 +4,7 @@ import traceback
 import re
 import importlib
 import sys
+import time
 
 try:
     import maya.cmds as cmds
@@ -30,13 +31,21 @@ if MAYA_HOST:
     from maya_tools.Rigging import create_rig_core
     from maya_tools.Rigging import create_rig_modules
     from maya_tools.Rigging import create_rig
+    from maya_tools.Rigging import joint_placer
+    from maya_tools.Rigging import joint_placement_regression
     from maya_tools.Rigging import rig_template
+    from maya_tools.Rigging import vehicle_rig
     from maya_tools.Rigging import skinning_utils
+    from maya_tools.Rigging import unreal_skeletal_export
     from maya_tools.Utilities import joints, dag
 else:
     from tech_connector.services.dcc.tc_hik_ui_host import (
         cmds, create_rig, dag, joints, omui, rig_template, setup_hik, skinning_utils,
     )
+    joint_placer = None
+    joint_placement_regression = None
+    vehicle_rig = None
+    unreal_skeletal_export = None
 from unreal_tools import unreal_subprocess as usp
 from utilities import p4_utils
 importlib.reload(p4_utils)
@@ -47,10 +56,47 @@ importlib.reload(usp)
 importlib.reload(upd)
 
 
-def reload_rig_function_stack():
-    """Reload the complete Maya rig builder stack in dependency order."""
+_RIG_STACK_SIGNATURE = None
+
+
+def _rig_stack_source_signature():
+    """Return a cheap signature that changes when a rig module changes on disk."""
+    if not MAYA_HOST:
+        return ()
+    rows = []
+    for module in (
+            enum_attrs,
+            skinning_utils,
+            unreal_skeletal_export,
+            joints,
+            dag,
+            rig_template,
+            vehicle_rig,
+            joint_placer,
+            joint_placement_regression,
+            setup_hik,
+            create_rig_core,
+            create_rig_modules,
+            create_rig,
+    ):
+        path = os.path.abspath(str(getattr(module, "__file__", "") or ""))
+        try:
+            stat = os.stat(path)
+            rows.append((path, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            rows.append((path, 0, 0))
+    return tuple(rows)
+
+
+def reload_rig_function_stack(force=False):
+    """Reload changed Maya rig modules; skip the expensive no-change path."""
+    global _RIG_STACK_SIGNATURE
     if not MAYA_HOST:
         return "non-maya-host"
+
+    current_signature = _rig_stack_source_signature()
+    if not force and _RIG_STACK_SIGNATURE == current_signature:
+        return getattr(create_rig_core, "RIG_BUILD_REVISION", "unknown")
 
     importlib.invalidate_caches()
 
@@ -63,6 +109,10 @@ def reload_rig_function_stack():
             joints,
             dag,
             rig_template,
+            vehicle_rig,
+            joint_placer,
+            joint_placement_regression,
+            unreal_skeletal_export,
             setup_hik,
             create_rig_core,
     ):
@@ -83,7 +133,7 @@ def reload_rig_function_stack():
         importlib.reload(create_rig_modules)
 
     importlib.reload(create_rig)
-
+    _RIG_STACK_SIGNATURE = _rig_stack_source_signature()
     return getattr(create_rig_core, "RIG_BUILD_REVISION", "unknown")
 
 
@@ -181,6 +231,10 @@ class ControlRigPopup(QtWidgets.QDialog):
         self.create_button.setToolTip("Initiate the Control Rig generation process in Unreal.")
         self.create_button.clicked.connect(self.create_control_rig)
         layout.addWidget(self.create_button)
+        self.status_label = QtWidgets.QLabel("")
+        self.status_label.setWordWrap(True)
+        self.status_label.hide()
+        layout.addWidget(self.status_label)
 
     def filter_meshes(self, text):
         self.mesh_input.clear()
@@ -194,7 +248,208 @@ class ControlRigPopup(QtWidgets.QDialog):
             usp.run_create_modular_control_rig(selected_mesh, rig_name, self.joint_map, self.uproject, self.log_path,
                                              self.cmd_path)
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "Control Rig creation failed", str(exc))
+            self.status_label.setText("Control Rig creation failed: {}".format(exc))
+            self.status_label.setStyleSheet("color: #ff9a9a; font-weight: bold;")
+            self.status_label.show()
+
+
+class UnrealSkeletalExportDialog(QtWidgets.QDialog):
+    """Collect explicit Unreal update/create choices before destructive export."""
+
+    CREATE_NEW_MESH = "Create New Skeletal Mesh"
+
+    def __init__(self, rig_name, output_directory, asset_data, maya_meshes=None, selected_meshes=None, parent=None):
+        super(UnrealSkeletalExportDialog, self).__init__(parent)
+        self.setWindowTitle("Remove Rig and Send Skeletal Mesh to Unreal")
+        self.resize(720, 430)
+        self.asset_data = dict(asset_data or {})
+        self.mesh_rows = list(self.asset_data.get("skeletal_meshes") or [])
+        self.skeleton_rows = list(self.asset_data.get("skeletons") or [])
+        self.maya_meshes = list(maya_meshes or [])
+        selected_meshes = set(selected_meshes or [])
+
+        layout = QtWidgets.QVBoxLayout(self)
+        warning = QtWidgets.QLabel(
+            "This removes the generated control rig, restores the checked skinned meshes to bind pose, "
+            "exports FBX, and imports it into the connected Unreal Editor."
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #f1d37b; font-weight: bold;")
+        layout.addWidget(warning)
+
+        form = QtWidgets.QFormLayout()
+        self.rig_name = QtWidgets.QLineEdit(str(rig_name or "Character"))
+        form.addRow("Rig Name:", self.rig_name)
+
+        output_row = QtWidgets.QHBoxLayout()
+        self.output_directory = QtWidgets.QLineEdit(str(output_directory or ""))
+        browse = QtWidgets.QPushButton("Browse")
+        browse.clicked.connect(self._browse_output)
+        output_row.addWidget(self.output_directory)
+        output_row.addWidget(browse)
+        form.addRow("FBX Folder:", output_row)
+
+        self.destination = QtWidgets.QLineEdit("/Game/Characters")
+        self.destination.setToolTip("Used only when creating a new Skeletal Mesh.")
+        form.addRow("Unreal Folder:", self.destination)
+
+        self.mesh_combo = QtWidgets.QComboBox()
+        self.mesh_combo.addItem(self.CREATE_NEW_MESH, "")
+        for row in self.mesh_rows:
+            path = str(row.get("path") or "")
+            self.mesh_combo.addItem("Overwrite Existing: " + (path or str(row.get("name"))), path)
+        self.mesh_combo.currentIndexChanged.connect(self._mesh_changed)
+        self.mesh_combo.currentIndexChanged.connect(self._update_preview)
+        form.addRow("Skeletal Mesh:", self.mesh_combo)
+
+        skeleton_mode = QtWidgets.QWidget()
+        skeleton_mode_layout = QtWidgets.QHBoxLayout(skeleton_mode)
+        skeleton_mode_layout.setContentsMargins(0, 0, 0, 0)
+        self.new_skeleton = QtWidgets.QRadioButton("Create New Skeleton")
+        self.existing_skeleton = QtWidgets.QRadioButton("Use Existing Skeleton")
+        self.new_skeleton.setChecked(True)
+        skeleton_mode_layout.addWidget(self.new_skeleton)
+        skeleton_mode_layout.addWidget(self.existing_skeleton)
+        skeleton_mode_layout.addStretch()
+        form.addRow("Skeleton Policy:", skeleton_mode)
+
+        self.skeleton_combo = QtWidgets.QComboBox()
+        for row in self.skeleton_rows:
+            self.skeleton_combo.addItem(str(row.get("path") or row.get("name")), str(row.get("path") or ""))
+        self.skeleton_combo.setEnabled(False)
+        self.existing_skeleton.toggled.connect(self.skeleton_combo.setEnabled)
+        self.existing_skeleton.toggled.connect(self._update_preview)
+        self.skeleton_combo.currentIndexChanged.connect(self._update_preview)
+        form.addRow("Existing Skeleton:", self.skeleton_combo)
+
+        self.create_physics = QtWidgets.QCheckBox("Create/retain Physics Asset")
+        self.create_physics.setChecked(True)
+        form.addRow("Physics:", self.create_physics)
+
+        mesh_set = QtWidgets.QWidget()
+        mesh_set_layout = QtWidgets.QVBoxLayout(mesh_set)
+        mesh_set_layout.setContentsMargins(0, 0, 0, 0)
+        self.export_meshes = QtWidgets.QListWidget()
+        self.export_meshes.setMinimumHeight(110)
+        check_all = not selected_meshes
+        for mesh in self.maya_meshes:
+            item = QtWidgets.QListWidgetItem(mesh)
+            item.setData(QtCore.Qt.UserRole, mesh)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if check_all or mesh in selected_meshes else QtCore.Qt.Unchecked)
+            self.export_meshes.addItem(item)
+        mesh_buttons = QtWidgets.QHBoxLayout()
+        select_all_meshes = QtWidgets.QPushButton("Select All")
+        clear_meshes = QtWidgets.QPushButton("Clear")
+        select_all_meshes.clicked.connect(lambda: self._set_all_export_meshes(True))
+        clear_meshes.clicked.connect(lambda: self._set_all_export_meshes(False))
+        mesh_buttons.addWidget(select_all_meshes)
+        mesh_buttons.addWidget(clear_meshes)
+        mesh_buttons.addStretch()
+        mesh_set_layout.addWidget(self.export_meshes)
+        mesh_set_layout.addLayout(mesh_buttons)
+        form.addRow("Maya Meshes to Export:", mesh_set)
+        layout.addLayout(form)
+
+        self.naming_preview = QtWidgets.QLabel()
+        self.naming_preview.setWordWrap(True)
+        layout.addWidget(self.naming_preview)
+        self.rig_name.textChanged.connect(self._update_preview)
+        self.destination.textChanged.connect(self._update_preview)
+        self._update_preview()
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.Ok).setText("Confirm Export and Import")
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _browse_output(self):
+        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Select FBX Export Folder", self.output_directory.text())
+        if directory:
+            self.output_directory.setText(directory.replace("\\", "/"))
+
+    def _set_all_export_meshes(self, checked):
+        state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
+        for index in range(self.export_meshes.count()):
+            self.export_meshes.item(index).setCheckState(state)
+
+    def _checked_export_meshes(self):
+        return [
+            str(self.export_meshes.item(index).data(QtCore.Qt.UserRole) or "")
+            for index in range(self.export_meshes.count())
+            if self.export_meshes.item(index).checkState() == QtCore.Qt.Checked
+        ]
+
+    def _mesh_changed(self, *_args):
+        path = str(self.mesh_combo.currentData() or "")
+        updating = bool(path)
+        self.destination.setEnabled(not updating)
+        self.new_skeleton.setEnabled(not updating)
+        if updating:
+            self.existing_skeleton.setChecked(True)
+            row = next((item for item in self.mesh_rows if str(item.get("path") or "") == path), {})
+            skeleton_path = str(row.get("skeleton") or "")
+            index = self.skeleton_combo.findData(skeleton_path)
+            if index >= 0:
+                self.skeleton_combo.setCurrentIndex(index)
+            self.skeleton_combo.setEnabled(False)
+            self.mesh_combo.setToolTip("The selected Unreal Skeletal Mesh will be overwritten in place.")
+        else:
+            self.skeleton_combo.setEnabled(self.existing_skeleton.isChecked())
+            self.mesh_combo.setToolTip("Create a new Unreal Skeletal Mesh using SKM_<RigName>.")
+
+    def _update_preview(self, *_args):
+        try:
+            clean = unreal_skeletal_export.sanitize_rig_name(self.rig_name.text())
+            destination = self.destination.text().strip().rstrip("/") or "/Game/Characters"
+            character_folder = self._character_folder(destination, clean)
+            mesh = str(self.mesh_combo.currentData() or "") or f"{character_folder}/SKM_{clean}"
+            skeleton = (
+                str(self.skeleton_combo.currentData() or "<Select Existing Skeleton>")
+                if self.existing_skeleton.isChecked()
+                else f"{character_folder}/SK_{clean}"
+            )
+            action = "OVERWRITE EXISTING" if self.mesh_combo.currentData() else "CREATE NEW"
+            text = "{}\nMesh: {}\nSkeleton: {}\nPhysics: {}/PHYS_{}".format(
+                action, mesh, skeleton, character_folder, clean
+            )
+        except ValueError:
+            text = "Enter a valid rig name."
+        self.naming_preview.setText(text)
+
+    @staticmethod
+    def _character_folder(parent, clean_name):
+        parent = "/" + str(parent or "/Game/Characters").strip("/")
+        return parent if parent.rsplit("/", 1)[-1].lower() == clean_name.lower() else parent + "/" + clean_name
+
+    def _validate_and_accept(self):
+        try:
+            unreal_skeletal_export.sanitize_rig_name(self.rig_name.text())
+            if not self.output_directory.text().strip():
+                raise ValueError("Choose an FBX output folder.")
+            if self.existing_skeleton.isChecked() and not self.skeleton_combo.currentData():
+                raise ValueError("Choose an existing Skeleton or select Create New Skeleton.")
+            if not self._checked_export_meshes():
+                raise ValueError("Choose at least one Maya mesh to export.")
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Incomplete Unreal Export Settings", str(exc))
+            return
+        self.accept()
+
+    def values(self):
+        return {
+            "rig_name": self.rig_name.text().strip(),
+            "output_directory": self.output_directory.text().strip(),
+            "destination_path": self.destination.text().strip(),
+            "existing_skeletal_mesh_path": str(self.mesh_combo.currentData() or ""),
+            "skeleton_mode": "use_existing" if self.existing_skeleton.isChecked() else "create_new",
+            "existing_skeleton_path": str(self.skeleton_combo.currentData() or ""),
+            "create_physics_asset": self.create_physics.isChecked(),
+            "meshes": self._checked_export_meshes(),
+        }
 
 
 class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
@@ -229,6 +484,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.populate_default_face_map_from_scene()
         self.current_slot = None
         self._module_detail_widgets = {}  # {module_id: {"container", "status_lbl", "parent_btn", "spaces_widget"}}
+        self._additional_systems_layout = None
         self.face_lists = {}
         self._slot_edit_widgets = {}
         self._session_parent_override = None
@@ -245,6 +501,30 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         self._build_hik_tab()
         self._build_rigging_tab()
+        self._build_skinning_tab()
+        self._build_mesh_tab()
+        self._build_vehicle_tab()
+
+        # Maya can defer scriptJob updates until a manipulator releases. This
+        # heartbeat keeps registered vehicle rigs evaluating while the mouse is
+        # down as well as during normal animation playback.
+        self._vehicle_live_timer = QtCore.QTimer(self)
+        self._vehicle_live_timer.setInterval(16)
+        self._vehicle_live_timer.setTimerType(QtCore.Qt.PreciseTimer)
+        self._vehicle_live_timer.timeout.connect(self._vehicle_live_tick)
+        if MAYA_HOST:
+            self._vehicle_live_timer.start()
+
+        # One persistent result surface replaces one-button Maya/Qt dialogs.
+        # Updating a child label does not create a native window or force Maya
+        # to flush the post-operation DAG again when the user dismisses it.
+        self.operation_status_label = QtWidgets.QLabel("")
+        self.operation_status_label.setWordWrap(True)
+        self.operation_status_label.setTextInteractionFlags(
+            QtCore.Qt.TextSelectableByMouse
+        )
+        self.operation_status_label.hide()
+        self.layout().addWidget(self.operation_status_label)
 
         # Refresh detail widgets when the Rigging tab becomes active
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -252,6 +532,44 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         # Auto-populate module states from scene metadata without showing
         # stale saved-joint warnings when the UI first opens.
         self._load_module_metadata_from_scene(report_missing=False)
+
+    def _notify_operation(self, title, message, severity="info"):
+        """Report an operation result without creating a top-level window."""
+        severity = str(severity or "info").lower()
+        styles = {
+            "info": ("#20344a", "#a9d5ff", "#477da8", "ℹ"),
+            "success": ("#203b29", "#9ee6ad", "#3b825c", "✓"),
+            "warning": ("#493d1d", "#f1d37b", "#9d7d2d", "⚠"),
+            "error": ("#4a2424", "#ffaaaa", "#a84c4c", "✕"),
+        }
+        background, foreground, border, icon = styles.get(
+            severity, styles["info"]
+        )
+        full_message = str(message or "")
+        compact = " ".join(full_message.split())
+        if len(compact) > 320:
+            compact = compact[:317].rstrip() + "..."
+        label = self.operation_status_label
+        label.setText("{} {}: {}".format(icon, title, compact))
+        label.setToolTip(full_message)
+        label.setStyleSheet(
+            "background-color: {}; color: {}; border: 1px solid {}; "
+            "border-radius: 3px; padding: 5px; font-weight: bold;".format(
+                background, foreground, border
+            )
+        )
+        label.show()
+        print("[HIK UI][{}] {}: {}".format(severity, title, full_message))
+
+    def _vehicle_live_tick(self):
+        if vehicle_rig is None:
+            return
+        try:
+            vehicle_rig.update_registered_live_rigs(refresh_viewport=True)
+        except Exception:
+            # Scene changes can invalidate a DAG path between timer ticks. The
+            # callbacks are reinstalled when a rig is built or Live is enabled.
+            pass
 
     def _build_hik_tab(self):
         hik_tab = QtWidgets.QWidget()
@@ -471,6 +789,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         ctrl_group = QtWidgets.QGroupBox("Create Control")
         ctrl_layout = QtWidgets.QVBoxLayout(ctrl_group)
 
+        self.ctrl_module_name_field = QtWidgets.QLineEdit()
+        self.ctrl_module_name_field.setPlaceholderText("Auto: Controls - first selected joint")
+        self.ctrl_module_name_field.setToolTip(
+            "Persistent module name used to remove and rebuild these controls with the full rig."
+        )
+        ctrl_name_row = QtWidgets.QHBoxLayout()
+        ctrl_name_row.addWidget(QtWidgets.QLabel("Module Name:"))
+        ctrl_name_row.addWidget(self.ctrl_module_name_field)
+        ctrl_layout.addLayout(ctrl_name_row)
+
         self.ctrl_parent_field = QtWidgets.QLineEdit()
         self.ctrl_parent_field.setToolTip("Optional: Parent node/control for the new control.")
         parent_btn = QtWidgets.QPushButton("Select Parent")
@@ -508,6 +836,48 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         ctrl_layout.addWidget(create_ctrl_btn)
 
         self.rig_layout.addWidget(ctrl_group)
+
+        # ------------------------------------------------------------
+        # Additional Limb Modules
+        # ------------------------------------------------------------
+        limb_group = QtWidgets.QGroupBox("Additional Arm / Leg Module")
+        limb_layout = QtWidgets.QVBoxLayout(limb_group)
+
+        self.extra_limb_name_field = QtWidgets.QLineEdit()
+        self.extra_limb_name_field.setPlaceholderText("Required unique module name")
+        limb_name_row = QtWidgets.QHBoxLayout()
+        limb_name_row.addWidget(QtWidgets.QLabel("Module Name:"))
+        limb_name_row.addWidget(self.extra_limb_name_field)
+        limb_layout.addLayout(limb_name_row)
+
+        self.extra_limb_parent_field = QtWidgets.QLineEdit()
+        self.extra_limb_parent_field.setPlaceholderText("Parent control")
+        extra_limb_parent_btn = QtWidgets.QPushButton("Select Parent")
+        extra_limb_parent_btn.clicked.connect(
+            lambda: self._pick_parent(self.extra_limb_parent_field)
+        )
+        limb_parent_row = QtWidgets.QHBoxLayout()
+        limb_parent_row.addWidget(QtWidgets.QLabel("Parent:"))
+        limb_parent_row.addWidget(self.extra_limb_parent_field)
+        limb_parent_row.addWidget(extra_limb_parent_btn)
+        limb_layout.addLayout(limb_parent_row)
+
+        limb_help = QtWidgets.QLabel(
+            "Select an ordered, contiguous joint chain: 3 joints for an arm; "
+            "4–5 joints for a leg."
+        )
+        limb_help.setWordWrap(True)
+        limb_layout.addWidget(limb_help)
+
+        limb_buttons = QtWidgets.QHBoxLayout()
+        add_arm_btn = QtWidgets.QPushButton("Add Arm Module")
+        add_arm_btn.clicked.connect(lambda: self.create_additional_limb_module("arm"))
+        add_leg_btn = QtWidgets.QPushButton("Add Leg Module")
+        add_leg_btn.clicked.connect(lambda: self.create_additional_limb_module("leg"))
+        limb_buttons.addWidget(add_arm_btn)
+        limb_buttons.addWidget(add_leg_btn)
+        limb_layout.addLayout(limb_buttons)
+        self.rig_layout.addWidget(limb_group)
 
         # ------------------------------------------------------------
         # Joints Along Curve Section
@@ -564,6 +934,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         name_row.addWidget(QtWidgets.QLabel("Loft Name:"))
         name_row.addWidget(self.surf_name_field)
         surf_layout.addLayout(name_row)
+
+        self.surf_module_name_field = QtWidgets.QLineEdit()
+        self.surf_module_name_field.setPlaceholderText("Auto: Surface Rig - loft name")
+        self.surf_module_name_field.setToolTip(
+            "Persistent module name used to remove and rebuild this surface rig."
+        )
+        surf_module_row = QtWidgets.QHBoxLayout()
+        surf_module_row.addWidget(QtWidgets.QLabel("Module Name:"))
+        surf_module_row.addWidget(self.surf_module_name_field)
+        surf_layout.addLayout(surf_module_row)
 
         self.surf_region_combo = QtWidgets.QComboBox()
         self.surf_region_combo.addItems(["eyelid", "center_eyelid", "mouth", "brow", "other"])
@@ -649,13 +1029,15 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         # ------------------------------------------------------------
         self.rig_layout.addSpacing(20)
 
-        skin_group = QtWidgets.QGroupBox("Skinning")
-        skin_layout = QtWidgets.QVBoxLayout(skin_group)
+        self.skin_group = QtWidgets.QGroupBox("Skinning Tools")
+        skin_layout = QtWidgets.QVBoxLayout(self.skin_group)
 
         export_skin_btn = QtWidgets.QPushButton("Export Skin Weights")
         export_skin_btn.setToolTip("Export the skin weights of all selected skinned meshes to JSON files.")
         import_skin_btn = QtWidgets.QPushButton("Import Skin Weights")
-        import_skin_btn.setToolTip("Import skin weights from JSON files to matching meshes in the scene.")
+        import_skin_btn.setToolTip(
+            "Import skin weights to matching meshes without moving reverse-foot helpers."
+        )
         transfer_skin_btn = QtWidgets.QPushButton("Transfer Skin Weights")
         transfer_skin_btn.setToolTip(
             "Transfer skin weights from selected source mesh(es) to the last selected target mesh. The target must not already have a skinCluster.")
@@ -670,39 +1052,39 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.spatial_smooth_radius.setRange(0.001, 1000000.0)
         self.spatial_smooth_radius.setValue(1.0)
         self.spatial_smooth_radius.setToolTip(
-            "World-space search radius. Increase it to spread weights farther across the visible surface."
+            "World-space radius for the optional paint brush. Automatic whole-mesh smoothing chooses its own radius."
         )
         self.spatial_smooth_iterations = QtWidgets.QSpinBox()
         self.spatial_smooth_iterations.setRange(1, 50)
-        self.spatial_smooth_iterations.setValue(8)
+        self.spatial_smooth_iterations.setValue(4)
         self.spatial_smooth_strength = QtWidgets.QDoubleSpinBox()
         self.spatial_smooth_strength.setRange(0.01, 1.0)
         self.spatial_smooth_strength.setSingleStep(0.05)
-        self.spatial_smooth_strength.setValue(0.65)
+        self.spatial_smooth_strength.setValue(0.45)
         self.spatial_smooth_max_influences = QtWidgets.QSpinBox()
         self.spatial_smooth_max_influences.setRange(1, 32)
         self.spatial_smooth_max_influences.setValue(8)
         self.spatial_smooth_normal_angle = QtWidgets.QDoubleSpinBox()
         self.spatial_smooth_normal_angle.setRange(0.0, 180.0)
-        self.spatial_smooth_normal_angle.setValue(120.0)
+        self.spatial_smooth_normal_angle.setValue(75.0)
         self.spatial_smooth_normal_angle.setSuffix("°")
         self.spatial_smooth_normal_angle.setToolTip(
             "Maximum normal difference for sharing weights; lower values prevent bleeding across folded surfaces."
         )
         self.spatial_smooth_max_neighbors = QtWidgets.QSpinBox()
         self.spatial_smooth_max_neighbors.setRange(2, 256)
-        self.spatial_smooth_max_neighbors.setValue(96)
+        self.spatial_smooth_max_neighbors.setValue(64)
         self.spatial_smooth_max_neighbors.setToolTip(
             "Maximum nearby surface samples per vertex. This keeps very dense meshes responsive."
         )
         self.spatial_smooth_cross_region = QtWidgets.QDoubleSpinBox()
-        self.spatial_smooth_cross_region.setRange(0.05, 0.49)
+        self.spatial_smooth_cross_region.setRange(0.0, 0.49)
         self.spatial_smooth_cross_region.setSingleStep(0.05)
-        self.spatial_smooth_cross_region.setValue(0.45)
+        self.spatial_smooth_cross_region.setValue(0.10)
         self.spatial_smooth_cross_region.setToolTip(
             "Minimum share reserved for nearby different weight regions. Increase for a stronger visible blend."
         )
-        spatial_settings.addWidget(QtWidgets.QLabel("Surface Radius:"), 0, 0)
+        spatial_settings.addWidget(QtWidgets.QLabel("Brush Radius:"), 0, 0)
         spatial_settings.addWidget(self.spatial_smooth_radius, 0, 1)
         spatial_settings.addWidget(QtWidgets.QLabel("Iterations:"), 0, 2)
         spatial_settings.addWidget(self.spatial_smooth_iterations, 0, 3)
@@ -717,11 +1099,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         spatial_settings.addWidget(QtWidgets.QLabel("Cross-Region Mix:"), 3, 0)
         spatial_settings.addWidget(self.spatial_smooth_cross_region, 3, 1)
 
-        spatial_smooth_btn = QtWidgets.QPushButton("Surface-Spatial Smooth Skin Weights")
+        spatial_smooth_btn = QtWidgets.QPushButton("Auto Hammer Weight Spikes")
         spatial_smooth_btn.setToolTip(
-            "Smooth a selected skinned mesh or selected vertices by 3D surface proximity, ignoring edge topology."
+            "Find isolated weight discontinuities and repair only those vertices using connected-neighbor consensus. Preserves coherent gradients to avoid noodle-like deformation."
         )
-        spatial_smooth_btn.clicked.connect(self.smooth_skin_weights_spatially)
+        spatial_smooth_btn.clicked.connect(self.auto_hammer_weight_spikes)
+        spatial_full_smooth_btn = QtWidgets.QPushButton("Auto Smooth Whole Mesh / Selected Verts")
+        spatial_full_smooth_btn.setToolTip(
+            "Smooth the entire selected mesh, or only the selected vertices when component vertices are selected. Uses connected surface flow with spatial gap bridging."
+        )
+        spatial_full_smooth_btn.clicked.connect(self.smooth_skin_weights_spatially)
         brush_row = QtWidgets.QHBoxLayout()
         spatial_brush_btn = QtWidgets.QPushButton("Activate Surface Smooth Brush")
         spatial_brush_btn.setToolTip(
@@ -739,17 +1126,24 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         skin_layout.addSpacing(8)
         skin_layout.addLayout(spatial_settings)
         skin_layout.addWidget(spatial_smooth_btn)
+        skin_layout.addWidget(spatial_full_smooth_btn)
         skin_layout.addLayout(brush_row)
 
         if self.host_mode != "maya":
             spatial_smooth_btn.setEnabled(False)
+            spatial_full_smooth_btn.setEnabled(False)
             spatial_brush_btn.setEnabled(False)
             spatial_brush_exit_btn.setEnabled(False)
             spatial_smooth_btn.setToolTip(
                 "Surface-spatial smoothing currently requires live Maya mesh vertex and skinCluster data."
             )
+            spatial_full_smooth_btn.setToolTip(
+                "Skin-weight smoothing currently requires live Maya mesh vertex and skinCluster data."
+            )
 
-        self.rig_layout.addWidget(skin_group)
+        # Constructed here to keep the existing callbacks/settings together;
+        # _build_skinning_tab reparents the complete panel into its own tab.
+        self.rig_layout.addWidget(self.skin_group)
 
         # ------------------------------------------------------------
         # Full Rig Actions Section
@@ -784,6 +1178,42 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         template_btn_row.addWidget(import_template_btn)
         template_btn_row.addWidget(reference_template_btn)
         actions_layout.addLayout(template_btn_row)
+
+        placement_btn_row = QtWidgets.QHBoxLayout()
+        preview_placement_btn = QtWidgets.QPushButton("Preview Joint Placement")
+        preview_placement_btn.setToolTip(
+            "Analyze the selected mesh and create color-coded placement guides without creating joints."
+        )
+        preview_placement_btn.clicked.connect(self.preview_selected_joint_placement)
+        fit_template_btn = QtWidgets.QPushButton("Fit Mapped Skeleton / Default Template")
+        fit_template_btn.setToolTip(
+            "Fit the active Rig Mapping hierarchy when mapped joints exist; otherwise load and fit the 280-joint studio template."
+        )
+        fit_template_btn.clicked.connect(self.fit_template_to_selected_mesh)
+        placement_btn_row.addWidget(preview_placement_btn)
+        placement_btn_row.addWidget(fit_template_btn)
+        actions_layout.addLayout(placement_btn_row)
+
+        regression_btn_row = QtWidgets.QHBoxLayout()
+        capture_baseline_btn = QtWidgets.QPushButton("Capture Approved Baseline")
+        capture_baseline_btn.setToolTip(
+            "Save normalized golden joint positions from the selected mesh and approved fitted skeleton."
+        )
+        capture_baseline_btn.clicked.connect(self.capture_joint_placement_baseline)
+        validate_baseline_btn = QtWidgets.QPushButton("Validate Selected Placement")
+        validate_baseline_btn.setToolTip(
+            "Compare the selected mesh's proposed placement with a golden baseline without changing the skeleton."
+        )
+        validate_baseline_btn.clicked.connect(self.validate_joint_placement_baseline)
+        run_regression_btn = QtWidgets.QPushButton("Run Placement Regression Suite")
+        run_regression_btn.setToolTip(
+            "Run every manifest case in a separate Maya batch process and write a JSON report."
+        )
+        run_regression_btn.clicked.connect(self.run_joint_placement_regression_suite)
+        regression_btn_row.addWidget(capture_baseline_btn)
+        regression_btn_row.addWidget(validate_baseline_btn)
+        regression_btn_row.addWidget(run_regression_btn)
+        actions_layout.addLayout(regression_btn_row)
         if self.host_mode != "maya":
             import_template_btn.setText("Load TC Biped Template")
             import_template_btn.setToolTip("Instantiate the selected TC-native skeleton template in this scene.")
@@ -791,6 +1221,13 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             template_path_btn.setToolTip("Choose a TC .tcrig.json skeleton template file.")
             self.rig_template_path_field.setToolTip("Versioned TC-native skeleton template asset.")
             self.rig_template_namespace_field.setToolTip("Optional namespace for loading another template instance.")
+            preview_placement_btn.setEnabled(False)
+            fit_template_btn.setEnabled(False)
+            capture_baseline_btn.setEnabled(False)
+            validate_baseline_btn.setEnabled(False)
+            run_regression_btn.setEnabled(False)
+            preview_placement_btn.setToolTip("Mesh-volume placement currently requires Maya geometry queries.")
+            fit_template_btn.setToolTip("Studio Maya template fitting currently requires Maya.")
 
         # 1. Create Rig Mapping & Build Full Rig Buttons
         mapping_btn = QtWidgets.QPushButton("Create Rig Mapping")
@@ -799,6 +1236,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             "background-color: #3b825c; color: white; font-weight: bold; font-size: 11pt; height: 28px;")
         mapping_btn.clicked.connect(self.create_rig_mapping)
         actions_layout.addWidget(mapping_btn)
+
+        t_pose_btn = QtWidgets.QPushButton("Set T-Pose")
+        t_pose_btn.setToolTip(
+            "Align mapped arms, straighten and ground mapped legs, then snap RFL joints."
+        )
+        t_pose_btn.clicked.connect(self.set_t_pose_from_mapping)
+        actions_layout.addWidget(t_pose_btn)
+        if self.host_mode != "maya":
+            t_pose_btn.setEnabled(False)
+            t_pose_btn.setToolTip("Setting the deformation skeleton T-pose requires Maya.")
 
         body_btn = QtWidgets.QPushButton("Build Full Rig")
         body_btn.setToolTip("Construct the complete animation control rig for all mapped body and face modules.")
@@ -939,6 +1386,20 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             body_grid.addWidget(detail_widget, row + 1, 0, 1, 3)
 
         body_modules_layout.addLayout(body_grid)
+
+        additional_header = QtWidgets.QLabel("<b>Additional Rig Systems</b>")
+        additional_header.setToolTip(
+            "Tool-authored added modules and user-authored systems retained across full rig rebuilds."
+        )
+        body_modules_layout.addSpacing(8)
+        body_modules_layout.addWidget(additional_header)
+        self._additional_systems_container = QtWidgets.QWidget()
+        self._additional_systems_layout = QtWidgets.QVBoxLayout(
+            self._additional_systems_container
+        )
+        self._additional_systems_layout.setContentsMargins(16, 0, 0, 0)
+        self._additional_systems_layout.setSpacing(3)
+        body_modules_layout.addWidget(self._additional_systems_container)
         self.rig_layout.addWidget(body_modules_group)
 
         # ------------------------------------------------------------
@@ -1064,6 +1525,581 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.rig_layout.addSpacing(15)
         self.tabs.addTab(scroll_area, "Rigging")
 
+    def _build_skinning_tab(self):
+        """Move all skinning tools into a dedicated, scrollable tab."""
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        skin_container = QtWidgets.QWidget()
+        self.skinning_layout = QtWidgets.QVBoxLayout(skin_container)
+        self.skinning_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.rig_layout.removeWidget(self.skin_group)
+        self.skin_group.setParent(skin_container)
+        self.skinning_layout.addWidget(self.skin_group)
+        self.skinning_layout.addStretch()
+
+        scroll_area.setWidget(skin_container)
+        self.tabs.addTab(scroll_area, "Skinning")
+
+    def _build_mesh_tab(self):
+        """Build the persistent Maya-to-Unreal mesh definition surface."""
+        self._mesh_export_asset_data = {}
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(container)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        intro = QtWidgets.QLabel(
+            "Define exactly which Maya skinned meshes belong to this export, then choose whether Unreal "
+            "creates a new Skeletal Mesh or overwrites an existing one. Export removes the generated rig "
+            "and restores the checked meshes to bind pose."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        maya_group = QtWidgets.QGroupBox("Maya Mesh Export Set")
+        maya_layout = QtWidgets.QVBoxLayout(maya_group)
+        self.mesh_export_mesh_list = QtWidgets.QListWidget()
+        self.mesh_export_mesh_list.setMinimumHeight(150)
+        maya_layout.addWidget(self.mesh_export_mesh_list)
+        maya_buttons = QtWidgets.QHBoxLayout()
+        refresh_scene = QtWidgets.QPushButton("Refresh Scene Meshes")
+        use_selected = QtWidgets.QPushButton("Use Selected Meshes")
+        select_all = QtWidgets.QPushButton("Select All")
+        clear_all = QtWidgets.QPushButton("Clear")
+        refresh_scene.clicked.connect(self.refresh_mesh_export_scene_meshes)
+        use_selected.clicked.connect(self.use_selected_meshes_for_export)
+        select_all.clicked.connect(lambda: self._set_all_mesh_export_items(True))
+        clear_all.clicked.connect(lambda: self._set_all_mesh_export_items(False))
+        for button in (refresh_scene, use_selected, select_all, clear_all):
+            maya_buttons.addWidget(button)
+        maya_buttons.addStretch()
+        maya_layout.addLayout(maya_buttons)
+        layout.addWidget(maya_group)
+
+        unreal_group = QtWidgets.QGroupBox("Unreal Skeletal Mesh Definition")
+        form = QtWidgets.QFormLayout(unreal_group)
+        self.mesh_export_rig_name = QtWidgets.QLineEdit(self.char_name.text().strip() or "Character")
+        self.mesh_export_rig_name.setToolTip("Used for SKM_, SK_, and PHYS_ names when creating new assets.")
+        form.addRow("Rig / Asset Name:", self.mesh_export_rig_name)
+
+        output_row = QtWidgets.QHBoxLayout()
+        default_folder = os.path.dirname(self.export_path.text().strip()) or os.path.dirname(get_default_export_path())
+        self.mesh_export_output_directory = QtWidgets.QLineEdit(default_folder.replace("\\", "/"))
+        output_browse = QtWidgets.QPushButton("Browse")
+        output_browse.clicked.connect(self.browse_mesh_export_directory)
+        output_row.addWidget(self.mesh_export_output_directory)
+        output_row.addWidget(output_browse)
+        form.addRow("FBX Folder:", output_row)
+
+        self.mesh_export_destination = QtWidgets.QLineEdit("/Game/Characters")
+        self.mesh_export_destination.setToolTip(
+            "Parent folder. A child folder named from Rig / Asset Name is created automatically."
+        )
+        form.addRow("New Asset Parent Folder:", self.mesh_export_destination)
+
+        target_row = QtWidgets.QHBoxLayout()
+        self.mesh_export_target = QtWidgets.QComboBox()
+        self.mesh_export_target.addItem("Create New Skeletal Mesh", "")
+        refresh_unreal = QtWidgets.QPushButton("Refresh Unreal Assets")
+        refresh_unreal.clicked.connect(self.refresh_mesh_export_unreal_assets)
+        target_row.addWidget(self.mesh_export_target, 1)
+        target_row.addWidget(refresh_unreal)
+        form.addRow("Skeletal Mesh:", target_row)
+
+        skeleton_policy = QtWidgets.QWidget()
+        skeleton_policy_layout = QtWidgets.QHBoxLayout(skeleton_policy)
+        skeleton_policy_layout.setContentsMargins(0, 0, 0, 0)
+        self.mesh_export_new_skeleton = QtWidgets.QRadioButton("Create New Skeleton")
+        self.mesh_export_existing_skeleton = QtWidgets.QRadioButton("Use Existing Skeleton")
+        self.mesh_export_new_skeleton.setChecked(True)
+        skeleton_policy_layout.addWidget(self.mesh_export_new_skeleton)
+        skeleton_policy_layout.addWidget(self.mesh_export_existing_skeleton)
+        skeleton_policy_layout.addStretch()
+        form.addRow("Skeleton Policy:", skeleton_policy)
+
+        self.mesh_export_skeleton = QtWidgets.QComboBox()
+        self.mesh_export_skeleton.setEnabled(False)
+        form.addRow("Existing Skeleton:", self.mesh_export_skeleton)
+
+        self.mesh_export_create_physics = QtWidgets.QCheckBox("Create new or retain existing Physics Asset")
+        self.mesh_export_create_physics.setChecked(True)
+        form.addRow("Physics:", self.mesh_export_create_physics)
+        layout.addWidget(unreal_group)
+
+        self.mesh_export_preview = QtWidgets.QLabel()
+        self.mesh_export_preview.setWordWrap(True)
+        self.mesh_export_preview.setStyleSheet(
+            "background-color: #292929; border: 1px solid #555; padding: 8px;"
+        )
+        layout.addWidget(self.mesh_export_preview)
+
+        send_unreal = QtWidgets.QPushButton("Remove Rig, Export Defined Meshes && Import to Unreal")
+        send_unreal.setStyleSheet(
+            "background-color: #46356f; color: white; font-weight: bold; font-size: 11pt; height: 34px;"
+        )
+        send_unreal.clicked.connect(self.send_skeletal_mesh_to_unreal)
+        if self.host_mode != "maya":
+            send_unreal.setEnabled(False)
+            send_unreal.setToolTip("Skeletal FBX preparation currently requires Maya.")
+        layout.addWidget(send_unreal)
+        layout.addStretch()
+
+        self.mesh_export_target.currentIndexChanged.connect(self._mesh_export_target_changed)
+        self.mesh_export_new_skeleton.toggled.connect(self._update_mesh_export_preview)
+        self.mesh_export_existing_skeleton.toggled.connect(self._mesh_export_skeleton_policy_changed)
+        self.mesh_export_skeleton.currentIndexChanged.connect(self._update_mesh_export_preview)
+        self.mesh_export_rig_name.textChanged.connect(self._update_mesh_export_preview)
+        self.mesh_export_destination.textChanged.connect(self._update_mesh_export_preview)
+        self.mesh_export_create_physics.toggled.connect(self._update_mesh_export_preview)
+        self.mesh_export_mesh_list.itemChanged.connect(self._update_mesh_export_preview)
+        self.char_name.textChanged.connect(self._sync_mesh_export_rig_name)
+
+        scroll_area.setWidget(container)
+        self.tabs.addTab(scroll_area, "Mesh")
+        if self.host_mode == "maya" and unreal_skeletal_export is not None:
+            self.refresh_mesh_export_scene_meshes()
+        self._update_mesh_export_preview()
+
+    def _sync_mesh_export_rig_name(self, value):
+        if not self.mesh_export_rig_name.hasFocus():
+            self.mesh_export_rig_name.setText(str(value or ""))
+
+    def browse_mesh_export_directory(self):
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select FBX Export Folder", self.mesh_export_output_directory.text()
+        )
+        if directory:
+            self.mesh_export_output_directory.setText(directory.replace("\\", "/"))
+
+    def _set_all_mesh_export_items(self, checked):
+        state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
+        for index in range(self.mesh_export_mesh_list.count()):
+            self.mesh_export_mesh_list.item(index).setCheckState(state)
+
+    def _checked_mesh_export_items(self):
+        return [
+            str(self.mesh_export_mesh_list.item(index).data(QtCore.Qt.UserRole) or "")
+            for index in range(self.mesh_export_mesh_list.count())
+            if self.mesh_export_mesh_list.item(index).checkState() == QtCore.Qt.Checked
+        ]
+
+    def refresh_mesh_export_scene_meshes(self, *_args):
+        if self.host_mode != "maya" or unreal_skeletal_export is None:
+            return
+        previous = set(self._checked_mesh_export_items())
+        selected = set(cmds.ls(selection=True, long=True) or [])
+        meshes = unreal_skeletal_export.list_skinned_meshes()
+        selected_meshes = set()
+        for mesh in meshes:
+            shapes = cmds.listRelatives(mesh, shapes=True, noIntermediate=True, fullPath=True) or []
+            if mesh in selected or any(shape in selected for shape in shapes):
+                selected_meshes.add(mesh)
+        checked = previous or selected_meshes or set(meshes)
+        self.mesh_export_mesh_list.clear()
+        for mesh in meshes:
+            item = QtWidgets.QListWidgetItem(mesh)
+            item.setData(QtCore.Qt.UserRole, mesh)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if mesh in checked else QtCore.Qt.Unchecked)
+            self.mesh_export_mesh_list.addItem(item)
+        self._update_mesh_export_preview()
+
+    def use_selected_meshes_for_export(self):
+        selected = set(cmds.ls(selection=True, long=True) or []) if self.host_mode == "maya" else set()
+        matched = 0
+        for index in range(self.mesh_export_mesh_list.count()):
+            item = self.mesh_export_mesh_list.item(index)
+            mesh = str(item.data(QtCore.Qt.UserRole) or "")
+            shapes = cmds.listRelatives(mesh, shapes=True, noIntermediate=True, fullPath=True) or []
+            checked = mesh in selected or any(shape in selected for shape in shapes)
+            item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+            matched += int(checked)
+        if not matched:
+            self._notify_operation("No Export Meshes Selected", "Select one or more skinned meshes in Maya.", "warning")
+
+    def refresh_mesh_export_unreal_assets(self):
+        try:
+            assets = usp.run_list_skeletal_import_targets("/Game")
+        except Exception as exc:
+            self._notify_operation(
+                "Unreal Asset Discovery Failed",
+                "Connect the Unreal Tech Connector bridge, then retry.\n\n{}".format(exc),
+                "error",
+            )
+            return
+        previous_mesh = str(self.mesh_export_target.currentData() or "")
+        previous_skeleton = str(self.mesh_export_skeleton.currentData() or "")
+        self._mesh_export_asset_data = dict(assets or {})
+        self.mesh_export_target.clear()
+        self.mesh_export_target.addItem("Create New Skeletal Mesh", "")
+        for row in self._mesh_export_asset_data.get("skeletal_meshes") or []:
+            path = str(row.get("path") or "")
+            self.mesh_export_target.addItem("Overwrite Existing: " + (path or str(row.get("name") or "")), path)
+        self.mesh_export_skeleton.clear()
+        for row in self._mesh_export_asset_data.get("skeletons") or []:
+            path = str(row.get("path") or "")
+            self.mesh_export_skeleton.addItem(path or str(row.get("name") or ""), path)
+        mesh_index = self.mesh_export_target.findData(previous_mesh)
+        self.mesh_export_target.setCurrentIndex(mesh_index if mesh_index >= 0 else 0)
+        skeleton_index = self.mesh_export_skeleton.findData(previous_skeleton)
+        if skeleton_index >= 0:
+            self.mesh_export_skeleton.setCurrentIndex(skeleton_index)
+        self._mesh_export_target_changed()
+        self._notify_operation(
+            "Unreal Assets Refreshed",
+            "Found {} Skeletal Meshes and {} Skeletons.".format(
+                len(self._mesh_export_asset_data.get("skeletal_meshes") or []),
+                len(self._mesh_export_asset_data.get("skeletons") or []),
+            ),
+            "success",
+        )
+
+    def _mesh_export_target_changed(self, *_args):
+        path = str(self.mesh_export_target.currentData() or "")
+        overwriting = bool(path)
+        self.mesh_export_destination.setEnabled(not overwriting)
+        self.mesh_export_new_skeleton.setEnabled(not overwriting)
+        if overwriting:
+            self.mesh_export_existing_skeleton.setChecked(True)
+            rows = getattr(self, "_mesh_export_asset_data", {}).get("skeletal_meshes") or []
+            row = next((item for item in rows if str(item.get("path") or "") == path), {})
+            skeleton_path = str(row.get("skeleton") or "")
+            index = self.mesh_export_skeleton.findData(skeleton_path)
+            if index >= 0:
+                self.mesh_export_skeleton.setCurrentIndex(index)
+            self.mesh_export_skeleton.setEnabled(False)
+        else:
+            self.mesh_export_skeleton.setEnabled(self.mesh_export_existing_skeleton.isChecked())
+        self._update_mesh_export_preview()
+
+    def _mesh_export_skeleton_policy_changed(self, *_args):
+        overwriting = bool(self.mesh_export_target.currentData())
+        self.mesh_export_skeleton.setEnabled(self.mesh_export_existing_skeleton.isChecked() and not overwriting)
+        self._update_mesh_export_preview()
+
+    def _update_mesh_export_preview(self, *_args):
+        try:
+            clean = unreal_skeletal_export.sanitize_rig_name(self.mesh_export_rig_name.text())
+            destination = self.mesh_export_destination.text().strip().rstrip("/") or "/Game/Characters"
+            character_folder = self._mesh_export_character_folder(destination, clean)
+            existing_mesh = str(self.mesh_export_target.currentData() or "")
+            mesh = existing_mesh or "{}/SKM_{}".format(character_folder, clean)
+            skeleton = (
+                str(self.mesh_export_skeleton.currentData() or "<Select Existing Skeleton>")
+                if self.mesh_export_existing_skeleton.isChecked()
+                else "{}/SK_{}".format(character_folder, clean)
+            )
+            action = "OVERWRITE EXISTING" if existing_mesh else "CREATE NEW"
+            count = len(self._checked_mesh_export_items())
+            physics = (
+                "Retain existing assignment"
+                if existing_mesh and self.mesh_export_create_physics.isChecked()
+                else "{}/PHYS_{}".format(character_folder, clean)
+                if self.mesh_export_create_physics.isChecked()
+                else "Do not create"
+            )
+            self.mesh_export_preview.setText(
+                "{} | {} Maya mesh(es)\nSkeletal Mesh: {}\nSkeleton: {}\nPhysics: {}".format(
+                    action,
+                    count,
+                    mesh,
+                    skeleton,
+                    physics,
+                )
+            )
+        except (AttributeError, ValueError):
+            self.mesh_export_preview.setText("Enter a valid Rig / Asset Name.")
+
+    @staticmethod
+    def _mesh_export_character_folder(parent, clean_name):
+        parent = "/" + str(parent or "/Game/Characters").strip("/")
+        return parent if parent.rsplit("/", 1)[-1].lower() == clean_name.lower() else parent + "/" + clean_name
+
+    def _mesh_export_settings(self):
+        clean = unreal_skeletal_export.sanitize_rig_name(self.mesh_export_rig_name.text())
+        meshes = self._checked_mesh_export_items()
+        if not meshes:
+            raise ValueError("Choose at least one Maya skinned mesh to export.")
+        output_directory = self.mesh_export_output_directory.text().strip()
+        if not output_directory:
+            raise ValueError("Choose an FBX output folder.")
+        existing_mesh = str(self.mesh_export_target.currentData() or "")
+        existing_skeleton = str(self.mesh_export_skeleton.currentData() or "")
+        skeleton_mode = "use_existing" if self.mesh_export_existing_skeleton.isChecked() else "create_new"
+        if skeleton_mode == "use_existing" and not existing_skeleton:
+            raise ValueError("Refresh Unreal assets and choose an existing Skeleton.")
+        return {
+            "rig_name": clean,
+            "output_directory": output_directory,
+            "destination_path": self.mesh_export_destination.text().strip(),
+            "existing_skeletal_mesh_path": existing_mesh,
+            "skeleton_mode": skeleton_mode,
+            "existing_skeleton_path": existing_skeleton,
+            "create_physics_asset": self.mesh_export_create_physics.isChecked(),
+            "meshes": meshes,
+        }
+
+    def _build_vehicle_tab(self):
+        vehicle_tab = QtWidgets.QWidget()
+        outer_layout = QtWidgets.QVBoxLayout(vehicle_tab)
+
+        intro = QtWidgets.QLabel(
+            "Build a Maya vehicle control rig from the joint-only vehicle template. "
+            "Ground meshes are raycast live in Maya. Wheel roll is accumulated from each wheel's "
+            "signed travel using degrees = (distance / radius) × 180/π."
+        )
+        intro.setWordWrap(True)
+        outer_layout.addWidget(intro)
+
+        template_group = QtWidgets.QGroupBox("Vehicle Joint Template")
+        template_layout = QtWidgets.QFormLayout(template_group)
+        self.vehicle_template_path_field = QtWidgets.QLineEdit(
+            rig_template.DEFAULT_VEHICLE_RIG_TEMPLATE
+        )
+        vehicle_template_browse = QtWidgets.QPushButton("Select")
+        vehicle_template_browse.clicked.connect(self.pick_vehicle_template_path)
+        template_path_row = QtWidgets.QHBoxLayout()
+        template_path_row.addWidget(self.vehicle_template_path_field)
+        template_path_row.addWidget(vehicle_template_browse)
+        template_layout.addRow("Template:", template_path_row)
+        load_template_btn = QtWidgets.QPushButton("Load Vehicle Joint Template")
+        load_template_btn.clicked.connect(self.load_vehicle_joint_template)
+        template_layout.addRow(load_template_btn)
+        outer_layout.addWidget(template_group)
+
+        build_group = QtWidgets.QGroupBox("Vehicle Rig")
+        build_layout = QtWidgets.QVBoxLayout(build_group)
+        self.vehicle_preview_geometry_checkbox = QtWidgets.QCheckBox("Create preview chassis and wheels")
+        self.vehicle_preview_geometry_checkbox.setChecked(True)
+        build_layout.addWidget(self.vehicle_preview_geometry_checkbox)
+        build_btn = QtWidgets.QPushButton("Build Vehicle Rig")
+        build_btn.setStyleSheet(
+            "background-color: #1a4d1a; color: white; font-weight: bold; font-size: 12pt; height: 30px;"
+        )
+        build_btn.clicked.connect(self.build_vehicle_rig_from_template)
+        build_layout.addWidget(build_btn)
+
+        ground_row = QtWidgets.QHBoxLayout()
+        assign_ground_btn = QtWidgets.QPushButton("Assign Selected Ground Meshes")
+        assign_ground_btn.clicked.connect(self.assign_vehicle_ground)
+        update_ground_btn = QtWidgets.QPushButton("Update Ground Now")
+        update_ground_btn.clicked.connect(self.update_vehicle_ground)
+        ground_row.addWidget(assign_ground_btn)
+        ground_row.addWidget(update_ground_btn)
+        build_layout.addLayout(ground_row)
+
+        evaluation_row = QtWidgets.QHBoxLayout()
+        enable_live_btn = QtWidgets.QPushButton("Enable Live Ground")
+        enable_live_btn.clicked.connect(self.enable_vehicle_live_ground)
+        reset_roll_btn = QtWidgets.QPushButton("Reset Wheel Roll")
+        reset_roll_btn.clicked.connect(self.reset_vehicle_wheel_roll)
+        bake_ground_btn = QtWidgets.QPushButton("Bake Playback Range")
+        bake_ground_btn.clicked.connect(self.bake_vehicle_ground)
+        evaluation_row.addWidget(enable_live_btn)
+        evaluation_row.addWidget(reset_roll_btn)
+        evaluation_row.addWidget(bake_ground_btn)
+        build_layout.addLayout(evaluation_row)
+
+        self.vehicle_auto_steering_checkbox = QtWidgets.QCheckBox(
+            "Automatic steering from chassis yaw and path curvature"
+        )
+        self.vehicle_auto_steering_checkbox.setChecked(True)
+        self.vehicle_auto_steering_checkbox.setToolTip(
+            "Turn the front wheels from direct chassis yaw or mathematically "
+            "derived path curvature. The Steering channel remains a manual offset."
+        )
+        self.vehicle_auto_steering_checkbox.toggled.connect(
+            self.set_vehicle_auto_steering
+        )
+        build_layout.addWidget(self.vehicle_auto_steering_checkbox)
+
+        self.vehicle_steering_drive_checkbox = QtWidgets.QCheckBox(
+            "Steering drives forward/reverse vehicle path"
+        )
+        self.vehicle_steering_drive_checkbox.setChecked(True)
+        self.vehicle_steering_drive_checkbox.setToolTip(
+            "Use a no-slip bicycle model: moving the global control forward or "
+            "backward follows the front-wheel steering angle and wheelbase."
+        )
+        self.vehicle_steering_drive_checkbox.toggled.connect(
+            self.set_vehicle_steering_drive
+        )
+        build_layout.addWidget(self.vehicle_steering_drive_checkbox)
+
+        save_btn = QtWidgets.QPushButton("Save Vehicle Rig As...")
+        save_btn.clicked.connect(self.save_vehicle_rig_file)
+        build_layout.addWidget(save_btn)
+        outer_layout.addWidget(build_group)
+        outer_layout.addStretch()
+
+        if self.host_mode != "maya" or vehicle_rig is None:
+            vehicle_tab.setEnabled(False)
+            intro.setText("Vehicle rig construction and Maya mesh raycasts require a live Maya session.")
+        else:
+            try:
+                vehicle_rig.install_ground_callbacks()
+            except Exception:
+                pass
+        self.tabs.addTab(vehicle_tab, "Vehicle")
+
+    def pick_vehicle_template_path(self):
+        path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select Vehicle Joint Template",
+            self.vehicle_template_path_field.text().strip() or rig_template.DEFAULT_VEHICLE_RIG_TEMPLATE,
+            "Maya ASCII/Binary (*.ma *.mb);;All Files (*.*)",
+        )
+        if path:
+            self.vehicle_template_path_field.setText(path.replace("\\", "/"))
+
+    def load_vehicle_joint_template(self):
+        try:
+            result = rig_template.load_vehicle_rig_template(
+                self.vehicle_template_path_field.text().strip() or rig_template.DEFAULT_VEHICLE_RIG_TEMPLATE
+            )
+            self._notify_operation(
+                "Vehicle Template Loaded",
+                "Loaded {} joints with {} wheel mounts.".format(
+                    sum(len(nodes) for nodes in result["roles"].values()),
+                    len(result["wheel_mounts"]),
+                ),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Vehicle Template Failed", str(exc), "error")
+
+    def build_vehicle_rig_from_template(self):
+        try:
+            reload_rig_function_stack()
+            roots = vehicle_rig.find_template_roots()
+            if not roots:
+                loaded = rig_template.load_vehicle_rig_template(
+                    self.vehicle_template_path_field.text().strip() or rig_template.DEFAULT_VEHICLE_RIG_TEMPLATE
+                )
+                roots = loaded["root_joints"]
+            result = vehicle_rig.build_vehicle_rig(
+                roots[-1],
+                create_preview_geometry=self.vehicle_preview_geometry_checkbox.isChecked(),
+            )
+            self._notify_operation(
+                "Vehicle Rig Built",
+                "Created {} with {} wheel controls.".format(result["rig_root"], len(result["wheels"])),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Vehicle Rig Failed", str(exc), "error")
+
+    def assign_vehicle_ground(self):
+        try:
+            result = vehicle_rig.attach_selected_ground()
+            self._notify_operation(
+                "Vehicle Ground Assigned",
+                "Assigned {} polygon ground mesh(es).".format(len(result["ground_meshes"])),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Ground Assignment Failed", str(exc), "error")
+
+    def update_vehicle_ground(self):
+        try:
+            result = vehicle_rig.update_ground()
+            self._notify_operation(
+                "Vehicle Ground Updated",
+                "Updated {} wheels; {} grounded.".format(result["updated"], result["grounded"]),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Ground Update Failed", str(exc), "error")
+
+    def enable_vehicle_live_ground(self):
+        try:
+            callbacks = vehicle_rig.install_ground_callback()
+            self._notify_operation(
+                "Live Ground Enabled",
+                "Installed {} real-time Maya evaluation callbacks (drag + playback).".format(
+                    len(callbacks)
+                ),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Live Ground Failed", str(exc), "error")
+
+    def reset_vehicle_wheel_roll(self):
+        try:
+            result = vehicle_rig.reset_wheel_roll()
+            self._notify_operation(
+                "Wheel Roll Reset", "Reset {} wheel accumulators.".format(result["reset"]), "success"
+            )
+        except Exception as exc:
+            self._notify_operation("Wheel Roll Reset Failed", str(exc), "error")
+
+    def set_vehicle_auto_steering(self, enabled):
+        try:
+            rig_root = vehicle_rig._find_rig_root()
+            chassis_control = str(cmds.getAttr(rig_root + ".tcChassisControl") or "")
+            vehicle_rig._ensure_auto_steer_attributes(rig_root, chassis_control)
+            cmds.setAttr(chassis_control + ".autoSteering", bool(enabled))
+            vehicle_rig.install_ground_callback(rig_root)
+            vehicle_rig.update_ground(rig_root)
+            self._notify_operation(
+                "Automatic Steering",
+                "Automatic chassis/path steering {}.".format(
+                    "enabled" if enabled else "disabled"
+                ),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Automatic Steering Failed", str(exc), "error")
+
+    def set_vehicle_steering_drive(self, enabled):
+        try:
+            rig_root = vehicle_rig._find_rig_root()
+            chassis_control = str(cmds.getAttr(rig_root + ".tcChassisControl") or "")
+            vehicle_rig._ensure_auto_steer_attributes(rig_root, chassis_control)
+            cmds.setAttr(chassis_control + ".steeringDrivesMotion", bool(enabled))
+            cmds.setAttr(rig_root + ".tcDriveInitialized", False)
+            vehicle_rig.install_ground_callback(rig_root)
+            vehicle_rig.update_ground(rig_root)
+            self._notify_operation(
+                "Steering Drive",
+                "Steering-driven vehicle motion {}.".format(
+                    "enabled" if enabled else "disabled"
+                ),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Steering Drive Failed", str(exc), "error")
+
+    def bake_vehicle_ground(self):
+        try:
+            result = vehicle_rig.bake_ground()
+            self._notify_operation(
+                "Vehicle Ground Baked",
+                "Baked {} samples across frames {} to {}.".format(
+                    result["samples"], result["range"][0], result["range"][1]
+                ),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation("Vehicle Bake Failed", str(exc), "error")
+
+    def save_vehicle_rig_file(self):
+        path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Vehicle Rig",
+            vehicle_rig.DEFAULT_RIG_PATH,
+            "Maya ASCII (*.ma);;Maya Binary (*.mb)",
+        )
+        if not path:
+            return
+        try:
+            saved = vehicle_rig.save_vehicle_rig(path)
+            self._notify_operation("Vehicle Rig Saved", saved, "success")
+        except Exception as exc:
+            self._notify_operation("Vehicle Save Failed", str(exc), "error")
+
     def get_space_switch_mode(self):
         return "orient" if self.space_switch_orient_rb.isChecked() else "parent"
 
@@ -1170,17 +2206,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 keep_attached=self.curve_joint_keep_attached.isChecked(),
             )
             created = result.get("joints", []) if isinstance(result, dict) else []
-            cmds.confirmDialog(
-                title="Joints Along Curve",
-                message=f"Created {len(created)} evenly spaced joints.",
-                button=["OK"],
+            self._notify_operation(
+                "Joints Along Curve",
+                f"Created {len(created)} evenly spaced joints.",
+                "success",
             )
         except Exception as exc:
-            cmds.confirmDialog(
-                title="Error",
-                message=f"Failed to create joints along the curve:\n{exc}",
-                button=["OK"],
-                icon="critical",
+            self._notify_operation(
+                "Joints Along Curve Failed",
+                f"Failed to create joints along the curve:\n{exc}",
+                "error",
             )
 
     def populate_default_face_map_from_scene(self):
@@ -1243,19 +2278,19 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             self.create_rig_mapping()
             self._load_module_metadata_from_scene(report_missing=False)
             self._refresh_all_module_details()
-            QtWidgets.QMessageBox.information(
-                self,
+            self._notify_operation(
                 "TC Biped Template Loaded" if self.host_mode != "maya" else "Biped Template Loaded",
                 ("Loaded TC-native biped skeleton template.\n\n" if self.host_mode != "maya" else "Loaded biped rig template.\n\n")
                 +
                 f"Root joints: {len(result.get('root_joints') or [])}\n"
                 f"RFL joints: {result.get('rfl_joint_count', 0)}\n"
                 f"New nodes: {result.get('new_node_count', 0)}",
+                "success",
             )
             return result
         except Exception as e:
             traceback.print_exc()
-            QtWidgets.QMessageBox.critical(self, "Biped Template Load Failed", str(e))
+            self._notify_operation("Biped Template Load Failed", str(e), "error")
             raise
         finally:
             try:
@@ -1263,7 +2298,301 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             except Exception:
                 pass
 
-    def create_rig_mapping(self):
+    def preview_selected_joint_placement(self):
+        """Create confidence-colored guides without modifying the skeleton."""
+        # Development hot reload: placement changes should be testable from an
+        # already-open UI without closing the window or restarting Maya.
+        reload_rig_function_stack(force=True)
+        template_path = self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE
+        try:
+            self.create_rig_mapping(refresh_details=False)
+            studio_namespace = joint_placer.mapped_studio_template_namespace(
+                self.default_map
+            )
+            placement_map = None if studio_namespace is not None else self.default_map
+            cmds.undoInfo(openChunk=True, chunkName="Preview Joint Placement")
+            preview = joint_placer.preview_selected_mesh_joint_placement(
+                solver="production",
+                template_path=template_path,
+                create_guides=True,
+                joint_map=placement_map,
+            )
+            details = []
+            if preview.outside_joints:
+                details.append("Outside/unverified: {0}".format(", ".join(preview.outside_joints)))
+            if preview.anatomical_issues:
+                details.append("Anatomy issues: {0}".format("; ".join(preview.anatomical_issues)))
+            message = (
+                "Created {0} placement guides.\nPlacement source: {1}\nReview required: {2}".format(
+                    len(preview.guides),
+                    "Active Rig Mapping" if joint_placer.mapped_hierarchy_requested(placement_map) else preview.template_path,
+                    preview.requires_review,
+                )
+            )
+            if details:
+                message += "\n\n" + "\n".join(details)
+            self._notify_operation(
+                "Joint Placement Preview",
+                message,
+                "warning" if preview.requires_review else "success",
+            )
+            return preview
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation("Joint Placement Preview Failed", str(exc), "error")
+            raise
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def fit_template_to_selected_mesh(self):
+        """Fit the active mapped hierarchy, or the studio template as fallback."""
+        action_started = time.perf_counter()
+        # Development hot reload: always execute the current on-disk placer.
+        # Remove ``force=True`` when the rig stack returns to release mode.
+        reload_rig_function_stack(force=True)
+        reload_elapsed = time.perf_counter() - action_started
+        selection = cmds.ls(selection=True, long=False) or []
+        if not selection:
+            self._notify_operation("Fit Template", "Select a mesh transform first.", "warning")
+            return None
+        template_path = self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE
+        namespace = self.rig_template_namespace_field.text().strip()
+        fit_started = time.perf_counter()
+        try:
+            self.create_rig_mapping(refresh_details=False)
+            studio_namespace = joint_placer.mapped_studio_template_namespace(
+                self.default_map
+            )
+            placement_map = None if studio_namespace is not None else self.default_map
+            if studio_namespace is not None:
+                namespace = studio_namespace
+            use_mapping = joint_placer.mapped_hierarchy_requested(placement_map)
+            cmds.undoInfo(openChunk=True, chunkName="Fit Mapped Skeleton Or Studio Template")
+            result = joint_placer.build_basic_biped_skeleton(
+                mesh=selection[0],
+                solver="production",
+                template_path=template_path,
+                template_namespace=namespace,
+                create_guides=True,
+                # Match direct production placement: uncertain containment is
+                # reported for review, not promoted to a UI-only hard failure.
+                require_interior=False,
+                joint_map=placement_map,
+                import_skin_weights=False,
+            )
+            solve_elapsed = time.perf_counter() - fit_started
+            refresh_started = time.perf_counter()
+            updates_enabled = self.updatesEnabled()
+            if updates_enabled:
+                self.setUpdatesEnabled(False)
+            try:
+                for slot, row in result.body_joint_map.items():
+                    joint = str((row or {}).get("joint") or "")
+                    if slot in self.fields and joint:
+                        self.fields[slot] = joint
+                        self.update_button_color(slot)
+                self.create_rig_mapping(refresh_details=False)
+                self._load_module_metadata_from_scene(report_missing=False)
+            finally:
+                if updates_enabled:
+                    self.setUpdatesEnabled(True)
+            refresh_elapsed = time.perf_counter() - refresh_started
+            print(
+                "[HIK UI][timing] Reload={0:.3f}s, solve={1:.3f}s, "
+                "UI refresh={2:.3f}s, dialog ready={3:.3f}s".format(
+                    reload_elapsed,
+                    solve_elapsed,
+                    refresh_elapsed,
+                    time.perf_counter() - action_started,
+                )
+            )
+            detail_report = result.detail_placement_report or {}
+            detail_message = ""
+            if detail_report.get("metahuman_style"):
+                skipped_count = len(detail_report.get("skipped_driven_or_locked") or [])
+                detail_message = (
+                    "\nMetaHuman detail placement: {0} twists, {1} corrective roots, "
+                    "{2} twist correctives, {3} surface correctives; "
+                    "{4}/{5} detected correctives verified; "
+                    "{6} facial DNA joints protected; {7} driven/locked joints skipped."
+                ).format(
+                    detail_report.get("twist_joints_placed", 0),
+                    detail_report.get("corrective_roots_placed", 0),
+                    detail_report.get("twist_correctives_placed", 0),
+                    detail_report.get("surface_correctives_placed", 0),
+                    detail_report.get("verified_corrective_joint_count", 0),
+                    detail_report.get("detected_corrective_joint_count", 0),
+                    detail_report.get("protected_facial_joints", 0),
+                    skipped_count,
+                )
+                unverified = detail_report.get("skipped_unverified") or []
+                validation_errors = detail_report.get("corrective_validation_errors") or []
+                twist_errors = detail_report.get("twist_validation_errors") or []
+                unclassified = detail_report.get("unclassified_corrective_joints") or []
+                if unverified or validation_errors or twist_errors or unclassified:
+                    detail_message += (
+                        "\nDisable or remove RigLogic/RBF drivers in neutral-pose editing mode, "
+                        "then run the fit again for any unverified corrective or twist joints."
+                    )
+            self._notify_operation(
+                "Mapped Skeleton Fitted" if use_mapping else "Studio Template Fitted",
+                "Fitted {0} {1} skeleton joints using {2} verified anchors.\n"
+                "Reverse-foot helpers: {3}\nReview required: {4}{5}".format(
+                    result.template_joint_count,
+                    "mapped" if use_mapping else "high-resolution template",
+                    len(result.points) - len(result.outside_joints),
+                    result.reverse_foot_joint_count,
+                    result.requires_review,
+                    detail_message,
+                ),
+                "warning" if result.requires_review else "success",
+            )
+            return result
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation("Template Fit Failed", str(exc), "error")
+            raise
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def capture_joint_placement_baseline(self):
+        """Save the selected approved mesh/skeleton pair as normalized golden data."""
+        default_dir = os.path.join(
+            os.path.dirname(joint_placement_regression.__file__),
+            "joint_placement_regression_cases",
+            "baselines",
+        ).replace("\\", "/")
+        path, _filter = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Capture Approved Joint Placement Baseline",
+            default_dir,
+            "Joint Placement Baseline (*.json)",
+        )
+        if not path:
+            return None
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        try:
+            data = joint_placement_regression.capture_selected_baseline(
+                path,
+                case_id=os.path.splitext(os.path.basename(path))[0],
+                namespace=self.rig_template_namespace_field.text().strip(),
+            )
+            self._notify_operation(
+                "Placement Baseline Captured",
+                "Captured {0} approved anchors.\n{1}".format(
+                    len(data["skeleton"]["anchors"]), path
+                ),
+                "success",
+            )
+            return data
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation("Baseline Capture Failed", str(exc), "error")
+            raise
+
+    def validate_joint_placement_baseline(self):
+        """Run non-destructive placement QA against one approved baseline."""
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select Joint Placement Baseline",
+            os.path.join(
+                os.path.dirname(joint_placement_regression.__file__),
+                "joint_placement_regression_cases",
+                "baselines",
+            ).replace("\\", "/"),
+            "Joint Placement Baseline (*.json)",
+        )
+        if not path:
+            return None
+        template_path = self.rig_template_path_field.text().strip() or rig_template.DEFAULT_BIPED_RIG_TEMPLATE
+        try:
+            report = joint_placement_regression.evaluate_selected_mesh(path, template_path)
+            metrics = report["metrics"]
+            message = (
+                "{0}\nMean anchor error: {1:.5f}\nMax anchor error: {2:.5f}\n"
+                "Max plane deviation: {3:.8f}".format(
+                    "PASS" if report["passed"] else "FAIL",
+                    metrics["mean_anchor_error"],
+                    metrics["max_anchor_error"],
+                    metrics["max_plane_deviation"],
+                )
+            )
+            if report["failures"]:
+                message += "\n\n" + "\n".join(report["failures"])
+            self._notify_operation(
+                "Joint Placement Validation",
+                message,
+                "success" if report["passed"] else "warning",
+            )
+            return report
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation("Placement Validation Failed", str(exc), "error")
+            raise
+
+    def run_joint_placement_regression_suite(self):
+        """Launch the manifest suite in mayapy so the artist scene is untouched."""
+        default_manifest = os.path.join(
+            os.path.dirname(joint_placement_regression.__file__),
+            "joint_placement_regression_cases",
+            "manifest.json",
+        ).replace("\\", "/")
+        manifest, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select Joint Placement Regression Manifest",
+            default_manifest,
+            "Regression Manifest (*.json)",
+        )
+        if not manifest:
+            return None
+        report_path = os.path.join(os.path.dirname(manifest), "latest_report.json").replace("\\", "/")
+        runner = os.path.join(
+            os.path.dirname(joint_placement_regression.__file__),
+            "joint_placement_regression_runner.py",
+        ).replace("\\", "/")
+        executable_dir = os.path.dirname(sys.executable)
+        mayapy = os.path.join(executable_dir, "mayapy.exe")
+        if not os.path.exists(mayapy):
+            mayapy = sys.executable
+
+        process = QtCore.QProcess(self)
+        self._joint_regression_process = process
+        process.setProgram(mayapy)
+        process.setArguments([runner, "--manifest", manifest, "--report", report_path])
+
+        def finished(exit_code, _exit_status):
+            stdout = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace").strip()
+            stderr = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
+            message = "Report: {0}".format(report_path)
+            if stdout:
+                message += "\n\n" + stdout[-1200:]
+            if stderr and exit_code:
+                message += "\n\n" + stderr[-1200:]
+            self._notify_operation(
+                "Placement Regression Suite",
+                message,
+                "success" if exit_code == 0 else "warning",
+            )
+            process.deleteLater()
+            self._joint_regression_process = None
+
+        process.finished.connect(finished)
+        process.start()
+        self._notify_operation(
+            "Placement Regression Suite",
+            "Regression suite started in Maya batch mode. Your current scene will not be modified.",
+            "info",
+        )
+        return report_path
+
+    def create_rig_mapping(self, refresh_details=True):
         # Check if there are empty slots in HIK fields
         empty_slots = [slot for slot in self.default_map if not self.fields.get(slot)]
 
@@ -1299,13 +2628,94 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         new_map = create_rig.hik_map_to_rig_args(self.default_map, self.default_face_map)
 
-        self._refresh_all_module_details()
+        if refresh_details:
+            self._refresh_all_module_details()
 
         return True
 
-    def build_full_rig(self):
+    def set_t_pose_from_mapping(self):
+        """Set the mapped deformation skeleton to T-pose as one undoable action."""
+        if self.host_mode != "maya":
+            self._notify_operation(
+                "Set T-Pose", "Setting the deformation skeleton T-pose requires Maya.", "warning"
+            )
+            return None
+
         reload_rig_function_stack()
         self.create_rig_mapping()
+        mapped_joints = [
+            value.get("joint")
+            for value in self.default_map.values()
+            if isinstance(value, dict) and value.get("joint")
+            and cmds.objExists(value.get("joint"))
+        ]
+        if not mapped_joints:
+            self._notify_operation(
+                "Set T-Pose",
+                "No valid mapped joints were found. Create or auto-detect the rig mapping first.",
+                "warning",
+            )
+            return None
+
+        cmds.undoInfo(openChunk=True, chunkName="Set T-Pose")
+        try:
+            result = setup_hik.set_t_pose(joint_map=self.default_map)
+        except Exception as exc:
+            traceback.print_exc()
+            cmds.undoInfo(closeChunk=True)
+            cmds.undo()
+            self._notify_operation(
+                "Set T-Pose Failed",
+                "The skeleton was restored.\n\n{0}".format(exc),
+                "error",
+            )
+            return None
+        cmds.undoInfo(closeChunk=True)
+
+        if (result or {}).get("skipped"):
+            self._notify_operation(
+                "Set T-Pose Complete",
+                "The mapped skeleton already matches the stored T-pose. No joint transforms were changed.",
+                "success",
+            )
+            return result
+
+        leg_report = dict((result or {}).get("legs") or {})
+        side_count = len(leg_report.get("sides") or {})
+        rfl_report = dict((result or {}).get("rfl_snap") or {})
+        snapped_sides = sum(
+            len(report.get("snapped_sides") or [])
+            for report in rfl_report.get("reports") or []
+        )
+        rotated_count = len(leg_report.get("rotated_joints") or [])
+        translates_preserved = bool(leg_report.get("translation_preserved", False))
+        message = (
+            "T-pose applied to the current mapping.\n"
+            "Leg sides aligned: {0}.\n"
+            "Leg joints rotated: {1}.\n"
+            "Deformation translations preserved: {2}.\n"
+            "Reverse-foot sides snapped: {3}."
+        ).format(side_count, rotated_count, translates_preserved, snapped_sides)
+        if rfl_report.get("error"):
+            message += "\n\nRFL warning: {0}".format(rfl_report["error"])
+        self._notify_operation("Set T-Pose Complete", message, "success")
+        return result
+
+    def build_full_rig(self):
+        build_started = time.perf_counter()
+        reload_rig_function_stack()
+        self.create_rig_mapping(refresh_details=False)
+        repaired_slots = create_rig.repair_preserved_extension_body_mapping(
+            self.default_map
+        )
+        for slot, joint in repaired_slots.items():
+            self.fields[slot] = joint
+            self.update_button_color(slot)
+        if repaired_slots:
+            print(
+                "[HIK UI] Restored standard mappings excluded from preserved "
+                "extensions: {}".format(repaired_slots)
+            )
 
         # Reset session overrides.
         self._session_parent_override = None
@@ -1381,14 +2791,13 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         skipped_modules = []
         build_error = None
         build_traceback = ""
+        success_summary = ""
 
         try:
-            # 1. Run T-pose alignment on mapped arm joints
-            if hasattr(self, "default_map") and self.default_map:
-                try:
-                    setup_hik.set_t_pose(joint_map=self.default_map)
-                except Exception as e:
-                    print(f"[Warning] Failed to run set_t_pose before building rig: {e}")
+            # Full-rig construction always normalizes the deformation skeleton
+            # first.  setup_hik.set_t_pose is idempotent, so a skeleton that is
+            # already in the recorded T-pose is left byte-for-byte unchanged.
+            setup_hik.set_t_pose(joint_map=self.default_map)
 
             for module in all_modules:
                 if module in face_modules:
@@ -1421,6 +2830,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
             create_rig.delete_unused_scaffold_nodes()
             self.store_all_face_connections(silent=True)
+            create_rig.restore_all_control_cv_positions()
+            dynamic_restore = create_rig.rebuild_dynamic_rig_modules()
+            create_rig.record_rig_owned_nodes()
+            extension_restore = create_rig.restore_post_build_extensions()
+            create_rig.hide_post_build_face_nodes()
+            for ikh in cmds.ls(type="ikHandle") or []:
+                try:
+                    cmds.setAttr(f"{ikh}.visibility", 0)
+                except Exception:
+                    pass
 
             if cmds.objExists("Do_Not_Touch"):
                 cmds.setAttr("Do_Not_Touch.visibility", 0)
@@ -1438,6 +2857,28 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         + ", ".join(skipped_modules)
                 )
 
+            if dynamic_restore.get("rebuilt"):
+                summary += (
+                    "\n\nRebuilt Additional Modules:\n"
+                    + ", ".join(dynamic_restore["rebuilt"])
+                )
+            if dynamic_restore.get("failed"):
+                summary += (
+                    "\n\nAdditional Modules Needing Attention:\n"
+                    + ", ".join(
+                        item.get("module_id", "Unnamed")
+                        for item in dynamic_restore["failed"]
+                    )
+                )
+
+            restored_extensions = extension_restore.get("roots", [])
+            if restored_extensions:
+                summary += (
+                    "\n\nRestored Post-Build Systems ({0}):\n{1}".format(
+                        len(restored_extensions), ", ".join(restored_extensions)
+                    )
+                )
+
             if self._pending_module_discrepancies:
                 summary += (
                     f"\n\nIgnored Missing Saved Joint References "
@@ -1449,11 +2890,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     in sorted(self._pending_module_discrepancies)
                 )
 
-            cmds.confirmDialog(
-                title="Success",
-                message=summary,
-                button=["OK"]
-            )
+            success_summary = summary
 
         except Exception as e:
             build_error = e
@@ -1471,16 +2908,6 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 except Exception as undo_error:
                     cmds.warning(f"Failed to roll back the incomplete full rig: {undo_error}")
 
-                cmds.confirmDialog(
-                    title="Error",
-                    message=(
-                        f"Full Rig build failed and was rolled back:\n{build_error}\n\n"
-                        + "\n".join(build_traceback.strip().splitlines()[-4:])
-                    ),
-                    button=["OK"]
-                )
-                cmds.warning(f"Failed to create full rig: {build_error}")
-
             # Failed/partial Maya operations can leave evaluation or the global
             # IK solver disabled. Always restore both before returning control
             # to the animator.
@@ -1492,11 +2919,40 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
             # Keep warning deferral enabled for the final metadata refresh so it
             # cannot reopen the same discrepancy dialog after the summary.
-            self._load_module_metadata_from_scene()
-            self._refresh_all_module_details()
+            updates_enabled = self.updatesEnabled()
+            if updates_enabled:
+                self.setUpdatesEnabled(False)
+            try:
+                # This method already performs one complete detail refresh.
+                self._load_module_metadata_from_scene()
+            finally:
+                if updates_enabled:
+                    self.setUpdatesEnabled(True)
 
             self._defer_module_discrepancy_warnings = False
             self._pending_module_discrepancies.clear()
+
+        print(
+            "[HIK UI][timing] Full rig ready in {0:.3f}s".format(
+                time.perf_counter() - build_started
+            )
+        )
+        if build_error is not None:
+            self._notify_operation(
+                "Full Rig Build Failed",
+                f"Full Rig build failed and was rolled back:\n{build_error}\n\n"
+                + "\n".join(build_traceback.strip().splitlines()[-4:]),
+                "error",
+            )
+            cmds.warning(f"Failed to create full rig: {build_error}")
+            return None
+
+        # Never create a completion popup here. Even a non-modal QMessageBox
+        # has a native show/close lifecycle that can make Maya flush a large
+        # post-build DAG twice. Keep the detailed result as a tooltip and show
+        # a compact, persistent status directly beside the build action.
+        self._notify_operation("Full Rig Built", success_summary, "success")
+        return built_modules
 
     def remove_full_rig(self):
         reload_rig_function_stack()
@@ -1522,15 +2978,90 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
             create_rig.store_all_control_cv_positions()
             create_rig.remove_full_rig(self.default_map, self.default_face_map)
-            cmds.confirmDialog(title="Success", message="Full Rig removed successfully!", button=["OK"])
+            self._notify_operation("Full Rig Removed", "Full Rig removed successfully!", "success")
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to remove full rig:\n{e}", button=["OK"])
+            self._notify_operation("Remove Full Rig Failed", f"Failed to remove full rig:\n{e}", "error")
             cmds.warning(f"Failed to remove full rig: {e}")
         finally:
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
             self._refresh_all_module_details()
             dag.enable_evaluation()
+
+    def _sync_export_joint_maps(self):
+        for slot in self.default_map:
+            self.default_map[slot]["joint"] = self.fields.get(slot, "")
+        for key_path, list_widget in self.face_lists.items():
+            items = [list_widget.item(i).text().split(" ")[0] for i in range(list_widget.count())]
+            data = self.default_face_map
+            for key in key_path[:-1]:
+                data = data[key]
+            final_key = key_path[-1]
+            data[final_key] = items if isinstance(data[final_key], list) else (items[0] if items else "")
+        return self.default_map, self.default_face_map
+
+    def send_skeletal_mesh_to_unreal(self):
+        """Run the Maya-to-Unreal workflow from the persistent Mesh tab definition."""
+        if self.host_mode != "maya" or unreal_skeletal_export is None:
+            self._notify_operation("Unreal Export Unavailable", "This workflow requires Maya.", "warning")
+            return
+        try:
+            settings = self._mesh_export_settings()
+        except ValueError as exc:
+            self._notify_operation("Incomplete Mesh Export Definition", str(exc), "warning")
+            return
+        clean_name = settings["rig_name"]
+        existing_mesh_path = settings["existing_skeletal_mesh_path"]
+        export_mesh_name = (
+            existing_mesh_path.rstrip("/").rsplit("/", 1)[-1]
+            if existing_mesh_path else "SKM_" + clean_name
+        )
+
+        body_map, face_map = self._sync_export_joint_maps()
+        dag.disable_evaluation()
+        cmds.undoInfo(openChunk=True, chunkName="Remove Rig and Send to Unreal")
+        try:
+            export_result = unreal_skeletal_export.remove_rig_restore_bind_pose_and_export(
+                body_map,
+                face_map,
+                clean_name,
+                settings["output_directory"],
+                meshes=settings["meshes"],
+                skeletal_mesh_name=export_mesh_name,
+            )
+            import_result = usp.run_import_skeletal_mesh_fbx(
+                export_result["fbx_path"],
+                clean_name,
+                settings["destination_path"],
+                settings["existing_skeletal_mesh_path"],
+                settings["skeleton_mode"],
+                settings["existing_skeleton_path"],
+                settings["create_physics_asset"],
+            )
+            warnings = list(import_result.get("warnings") or []) if isinstance(import_result, dict) else []
+            message = (
+                "FBX: {0}\nSkeletal Mesh: {1}\nSkeleton: {2}\nPhysics Asset: {3}".format(
+                    export_result["fbx_path"],
+                    import_result.get("skeletal_mesh_path", ""),
+                    import_result.get("skeleton_path", ""),
+                    import_result.get("physics_asset_path", "") or "Not created",
+                )
+            )
+            if warnings:
+                message += "\n\nWarnings:\n" + "\n".join(warnings)
+            self._notify_operation("Skeletal Mesh Sent to Unreal", message, "warning" if warnings else "success")
+        except Exception as exc:
+            self._notify_operation(
+                "Skeletal Mesh Export Failed",
+                "The Maya scene may already have its control rig removed. Undo in Maya if needed.\n\n{}".format(exc),
+                "error",
+            )
+            cmds.warning("Skeletal Mesh export/import failed: {}".format(exc))
+        finally:
+            cmds.undoInfo(closeChunk=True)
+            dag.enable_evaluation()
+            self._load_module_metadata_from_scene()
+            self._refresh_all_module_details()
 
     def auto_detect_face_joints(self, key_path, list_widget):
         slot = key_path[0]
@@ -1585,26 +3116,82 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             shape = "arrow"
 
         try:
-            create_rig.create_joint_controls(
-                joint_list=sel,
+            module_id = self.ctrl_module_name_field.text().strip()
+            if not module_id:
+                module_id = "Controls - {}".format(sel[0].split("|")[-1])
+            spec = create_rig.dynamic_module_spec(
+                sel,
+                parent=parent,
                 control_shape=shape,
-                root_parent=parent,
                 sub_ctrls=False,
-                keep_constraint=True
+                keep_constraint=True,
             )
-            cmds.confirmDialog(title="Success", message="Control(s) created successfully!", button=["OK"])
+            create_rig.register_dynamic_rig_module(
+                module_id, "controls", spec, build_now=True
+            )
+            self._notify_operation(
+                "Controls Created",
+                "Control module '{}' created and registered for rebuild.".format(module_id),
+                "success",
+            )
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to create control(s):\n{e}", button=["OK"])
+            self._notify_operation("Control Creation Failed", f"Failed to create control(s):\n{e}", "error")
             cmds.warning(f"Failed to create control(s): {e}")
+
+    def create_additional_limb_module(self, module_type):
+        """Build and register an arbitrary additional arm or leg chain."""
+        reload_rig_function_stack()
+        joints = cmds.ls(selection=True, type="joint", long=True) or []
+        module_id = self.extra_limb_name_field.text().strip()
+        parent = self.extra_limb_parent_field.text().strip() or None
+        required = 3 if module_type == "arm" else 4
+        maximum = 3 if module_type == "arm" else 5
+        if not module_id:
+            cmds.warning("Enter a unique module name for the additional limb.")
+            return
+        if len(joints) < required or len(joints) > maximum:
+            cmds.warning(
+                "Select {} ordered joints for an arm or 4–5 for a leg; received {}.".format(
+                    required if module_type == "arm" else "4–5", len(joints)
+                )
+            )
+            return
+        for parent_joint, child_joint in zip(joints[:-1], joints[1:]):
+            actual = cmds.listRelatives(child_joint, parent=True, type="joint", fullPath=True) or []
+            expected = (cmds.ls(parent_joint, long=True) or [parent_joint])[0]
+            if not actual or actual[0] != expected:
+                cmds.warning("Selected limb joints must be a direct parent-to-child chain.")
+                return
+        if not parent or not cmds.objExists(parent):
+            cmds.warning("Choose an existing parent control for the additional limb.")
+            return
+        try:
+            spec = create_rig.dynamic_module_spec(joints, parent=parent)
+            create_rig.register_dynamic_rig_module(
+                module_id, module_type, spec, build_now=True
+            )
+            self._notify_operation(
+                "Additional Limb Created",
+                "{} module '{}' created and registered for full-rig rebuild.".format(
+                    module_type.title(), module_id
+                ),
+                "success",
+            )
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation(
+                "Additional Limb Failed",
+                "Failed to create '{}':\n{}".format(module_id, exc),
+                "error",
+            )
 
     def export_skin_weights(self):
         meshes = cmds.ls(selection=True) or []
         if not meshes:
-            cmds.confirmDialog(
-                title="Export Skin Weights",
-                message="Select one or more skinned meshes to export.",
-                button=["OK"],
-                icon="warning",
+            self._notify_operation(
+                "Export Skin Weights",
+                "Select one or more skinned meshes to export.",
+                "warning",
             )
             return
         export_dir = QtWidgets.QFileDialog.getExistingDirectory(
@@ -1614,15 +3201,187 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             return skinning_utils.export_skin_weights(meshes, export_dir)
 
     def import_skin_weights(self):
+        reload_rig_function_stack()
         meshes = cmds.ls(selection=True) or []
+        if not meshes:
+            self._notify_operation(
+                "Import Skin Weights",
+                "Select one or more meshes to receive the saved skin weights.",
+                "warning",
+            )
+            return None
         import_dir = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Import Skin Weights", "C:/temp/weights"
         )
-        if import_dir:
-            return skinning_utils.import_skin_weights(meshes, import_dir)
+        if not import_dir:
+            return None
+        result = skinning_utils.import_skin_weights(
+            meshes,
+            import_dir,
+            missing_influence_resolver=self._confirm_skin_influence_renames,
+        )
+        if self.host_mode == "maya" and isinstance(result, dict):
+            imported = list(result.get("imported_meshes") or [])
+            influence_reports = list(result.get("influence_reports") or [])
+            failure_reports = list(result.get("failure_reports") or [])
+            preserved_count = sum(
+                len(report.get("preserved_influences") or [])
+                for report in influence_reports
+            )
+            added_count = sum(
+                len(report.get("added_influences") or [])
+                for report in influence_reports
+            )
+            renamed_count = sum(
+                len(report.get("renamed_influences") or [])
+                for report in influence_reports
+            )
+            summary = (
+                "Imported skin weights for {0} mesh(es).\n"
+                "Existing bind influences preserved: {1}.\n"
+                "Missing imported influences added: {2}.\n"
+                "Scene joints renamed to match the weight map: {3}."
+            ).format(len(imported), preserved_count, added_count, renamed_count)
+            if failure_reports:
+                details = []
+                for report in failure_reports:
+                    if report.get("reason") != "missing_influences":
+                        details.append(
+                            "{}: {}".format(
+                                report.get("mesh", "Unknown mesh"),
+                                report.get("message", "Import failed."),
+                            )
+                        )
+                        continue
+                    details.append(
+                        "{} was skipped; these required influences were not "
+                        "found:".format(report.get("mesh", "Unknown mesh"))
+                    )
+                    suggestions = report.get("similar_influences") or {}
+                    for influence in report.get("missing_influences") or []:
+                        matches = suggestions.get(influence) or []
+                        match_text = (
+                            " Possible match{}: {}".format(
+                                "es" if len(matches) != 1 else "",
+                                ", ".join(matches),
+                            )
+                            if matches else " No similar scene joint was found."
+                        )
+                        details.append("  - {}.{}".format(influence, match_text))
+                message = "{}\nSkipped meshes: {}.\n{}".format(
+                    summary,
+                    len(failure_reports),
+                    "\n".join(details),
+                )
+                title = (
+                    "Skin Import Partially Complete"
+                    if imported else "Skin Import Failed"
+                )
+                severity = "warning" if imported else "error"
+                self._notify_operation(title, message, severity)
+            else:
+                message = (
+                    "{}\nReverse-foot joints were left unchanged; they snap after T-pose."
+                ).format(summary)
+                self._notify_operation("Skin Import Complete", message, "success")
+        return result
 
-    def smooth_skin_weights_spatially(self):
-        """Run topology-independent weight diffusion on the active mesh/vertices."""
+    def _confirm_skin_influence_renames(
+            self, mesh, missing_influences, suggestions, suggestion_nodes):
+        """Ask before renaming likely joint matches for a skin-weight import."""
+        rename_requests = {}
+        mapping_lines = []
+        unmatched = []
+        used_nodes = set()
+        for missing in missing_influences:
+            nodes = suggestion_nodes.get(missing) or []
+            names = suggestions.get(missing) or []
+            if not nodes or not names:
+                unmatched.append(skinning_utils._influence_leaf_name(missing))
+                continue
+            scene_joint = nodes[0]
+            if scene_joint in used_nodes:
+                unmatched.append(skinning_utils._influence_leaf_name(missing))
+                continue
+            used_nodes.add(scene_joint)
+            rename_requests[missing] = scene_joint
+            mapping_lines.append(
+                "{}  →  {}".format(names[0], skinning_utils._influence_leaf_name(missing))
+            )
+
+        if unmatched:
+            self._show_skin_import_rename_dialog(
+                "Skin Import Needs Joint Matches",
+                "Not all missing influences have a unique suggested joint. "
+                "Automatic rename is unavailable because the import would "
+                "still fail. Fix or create these joints, then import again.",
+                ["{}  →  no similar scene joint".format(name) for name in unmatched],
+                allow_rename=False,
+            )
+            return {}
+
+        if not rename_requests:
+            return {}
+
+        confirmed = self._show_skin_import_rename_dialog(
+            "Rename Joints for Skin Import?",
+            "{} joint name(s) do not match the skin-weight map for '{}'. "
+            "Review the proposed short-name changes. Renaming modifies the "
+            "scene; Cancel leaves the joints unchanged and the affected skin "
+            "weights will not import.".format(len(rename_requests), mesh),
+            mapping_lines,
+            allow_rename=True,
+        )
+        if not confirmed:
+            return {}
+        return rename_requests
+
+    def _show_skin_import_rename_dialog(
+            self, title, summary, mapping_lines, allow_rename):
+        """Show a compact, selectable in-app popup for influence recovery."""
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog.resize(560, 420)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+        heading = QtWidgets.QLabel(summary)
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+
+        mapping_label = QtWidgets.QLabel("Scene joint  →  Weight-map influence")
+        mapping_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(mapping_label)
+
+        mapping_view = QtWidgets.QPlainTextEdit(dialog)
+        mapping_view.setReadOnly(True)
+        mapping_view.setPlainText("\n".join(mapping_lines))
+        mapping_view.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        layout.addWidget(mapping_view, 1)
+
+        buttons = QtWidgets.QDialogButtonBox(dialog)
+        if allow_rename:
+            rename_button = buttons.addButton(
+                "Rename Matches and Import",
+                QtWidgets.QDialogButtonBox.AcceptRole,
+            )
+            rename_button.setDefault(True)
+            buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+        else:
+            buttons.addButton(QtWidgets.QDialogButtonBox.Close)
+            buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if hasattr(dialog, "exec"):
+            result = dialog.exec()
+        else:
+            result = dialog.exec_()
+        return bool(allow_rename and result == QtWidgets.QDialog.Accepted)
+
+    def auto_hammer_weight_spikes(self):
+        """Repair isolated whole-mesh weight outliers without softening valid gradients."""
         reload_rig_function_stack()
         try:
             result = skinning_utils.smooth_skin_weights_spatial_from_selection(
@@ -1633,14 +3392,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 normal_angle=self.spatial_smooth_normal_angle.value(),
                 max_neighbors=self.spatial_smooth_max_neighbors.value(),
                 cross_region_share=self.spatial_smooth_cross_region.value(),
+                entire_mesh=True,
+                automatic_radius=True,
+                artifact_only=True,
             )
         except Exception as exc:
             traceback.print_exc()
-            cmds.confirmDialog(
-                title="Surface-Spatial Skin Smoothing",
-                message="Failed to smooth skin weights:\n{}".format(exc),
-                button=["OK"],
-                icon="critical",
+            self._notify_operation(
+                "Surface-Spatial Skin Smoothing",
+                "Failed to smooth skin weights:\n{}".format(exc),
+                "error",
             )
             return
 
@@ -1648,33 +3409,80 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             cmds.warning("Surface-spatial skin smoothing was cancelled before weights were changed.")
             return
         if not result.get("changedVertices") or result.get("maxDelta", 0.0) <= 1.0e-6:
-            cmds.confirmDialog(
-                title="Surface-Spatial Skin Smoothing",
-                message=(
-                    "No skin weights changed.\n\n"
-                    "The selected skin has {weightRegions} dominant weight region(s), and the "
-                    "effective search radius was {radius:g}. If this is unexpected, verify that "
-                    "the displayed skinCluster is the active deformer for this mesh."
+            self._notify_operation(
+                "Surface-Spatial Skin Smoothing",
+                (
+                    "No isolated weight spikes were found among {inspectedVertices} vertices.\n\n"
+                    "Coherent gradients and boundary vertices are intentionally preserved."
                 ).format(**result),
-                button=["OK"],
-                icon="warning",
+                "warning",
             )
             return
-        cmds.confirmDialog(
-            title="Surface-Spatial Skin Smoothing",
-            message=(
-                "Changed {changedVertices} of {vertices} vertices on {mesh}.\n"
+        self._notify_operation(
+            "Surface-Spatial Skin Smoothing",
+            (
+                "Hammered {changedVertices} detected weight spikes on {mesh}.\n"
+                "Detected from weights: {weightArtifactVertices}; posed deformation: {deformationArtifactVertices}.\n"
+                "Inspected {inspectedVertices} vertices without changing coherent gradients.\n"
                 "Completed {iterations} iteration(s) with radius {radius:g}.\n"
                 "Largest weight change: {maxDelta:.4f}."
                 "{radius_note}"
             ).format(
                 radius_note=(
-                    "\nRadius auto-expanded from {requestedRadius:g} to {radius:g} with a blending margin.".format(**result)
-                    if result.get("autoExpandedRadius") else ""
+                    "\nAutomatic surface radius: {radius:g}.".format(**result)
+                    if result.get("automaticRadius") else (
+                        "\nRadius auto-expanded from {requestedRadius:g} to {radius:g} with a blending margin.".format(**result)
+                        if result.get("autoExpandedRadius") else ""
+                    )
                 ),
                 **result
             ),
-            button=["OK"],
+            "success",
+        )
+
+    def smooth_skin_weights_spatially(self):
+        """Smooth a selected mesh, or restrict diffusion to selected vertices."""
+        reload_rig_function_stack()
+        try:
+            result = skinning_utils.smooth_skin_weights_spatial_from_selection(
+                radius=self.spatial_smooth_radius.value(),
+                iterations=self.spatial_smooth_iterations.value(),
+                strength=self.spatial_smooth_strength.value(),
+                max_influences=self.spatial_smooth_max_influences.value(),
+                normal_angle=self.spatial_smooth_normal_angle.value(),
+                max_neighbors=self.spatial_smooth_max_neighbors.value(),
+                cross_region_share=self.spatial_smooth_cross_region.value(),
+                entire_mesh=False,
+                automatic_radius=True,
+                artifact_only=False,
+            )
+        except Exception as exc:
+            traceback.print_exc()
+            self._notify_operation(
+                "Smooth Skin Weights",
+                "Failed to smooth skin weights:\n{}".format(exc),
+                "error",
+            )
+            return
+
+        if result.get("cancelled") and not result.get("iterations"):
+            cmds.warning("Skin-weight smoothing was cancelled before weights were changed.")
+            return
+        if not result.get("changedVertices") or result.get("maxDelta", 0.0) <= 1.0e-6:
+            self._notify_operation(
+                "Smooth Skin Weights",
+                "No skin weights changed on the requested vertices.",
+                "warning",
+            )
+            return
+        self._notify_operation(
+            "Smooth Skin Weights",
+            (
+                "Smoothed {changedVertices} of {vertices} requested vertices on {mesh}.\n"
+                "Completed {iterations} iteration(s) with automatic radius {radius:g}.\n"
+                "Largest weight change: {maxDelta:.4f}."
+            ).format(**result),
+            "success",
         )
 
     def activate_spatial_skin_smooth_brush(self):
@@ -1693,11 +3501,10 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 result.get("mesh")))
         except Exception as exc:
             traceback.print_exc()
-            cmds.confirmDialog(
-                title="Surface Smooth Brush",
-                message="Could not activate the brush:\n{}".format(exc),
-                button=["OK"],
-                icon="critical",
+            self._notify_operation(
+                "Surface Smooth Brush",
+                "Could not activate the brush:\n{}".format(exc),
+                "error",
             )
 
     def deactivate_spatial_skin_smooth_brush(self):
@@ -1707,31 +3514,29 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
     def transfer_skin_weights_from_selection(self):
         selection = cmds.ls(selection=True) or []
         if len(selection) < 2:
-            cmds.confirmDialog(
-                title="Transfer Skin Weights",
-                message="Select one or more skinned source meshes, then select the target mesh last.",
-                button=["OK"],
-                icon="warning"
+            self._notify_operation(
+                "Transfer Skin Weights",
+                "Select one or more skinned source meshes, then select the target mesh last.",
+                "warning",
             )
             return
 
         result = skinning_utils.transfer_skin_weights_from_selection()
         if not result:
-            cmds.confirmDialog(
-                title="Transfer Skin Weights",
-                message="Skin weight transfer failed. Check the Script Editor for details.",
-                button=["OK"],
-                icon="warning"
+            self._notify_operation(
+                "Transfer Skin Weights",
+                "Skin weight transfer failed. Check the Script Editor for details.",
+                "warning",
             )
             return
 
-        cmds.confirmDialog(
-            title="Transfer Skin Weights",
-            message=(
+        self._notify_operation(
+            "Transfer Skin Weights",
+            (
                 f"Transferred skin weights to '{selection[-1]}'.\n"
                 f"Created skinCluster: {result.get('skinCluster')}"
             ),
-            button=["OK"]
+            "success",
         )
 
     def create_surface_rig_with_drivers(self):
@@ -1756,19 +3561,29 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 cmds.warning("Invalid driver indices format. Using None.")
 
         try:
-            create_rig.setup_surface_rig_with_drivers(
-                joint_list=sel,
+            module_id = self.surf_module_name_field.text().strip()
+            if not module_id:
+                module_id = "Surface Rig - {}".format(loft_name)
+            spec = create_rig.dynamic_module_spec(
+                sel,
+                parent=parent,
                 loft_name=loft_name,
                 offset=offset,
                 driver_follicle_indices=driver_indices,
                 side=side,
                 region=region,
-                root_parent=parent
             )
-            cmds.confirmDialog(title="Success", message="Surface Rig created successfully!", button=["OK"])
+            create_rig.register_dynamic_rig_module(
+                module_id, "surface_rig", spec, build_now=True
+            )
+            self._notify_operation(
+                "Surface Rig Created",
+                "Surface module '{}' created and registered for rebuild.".format(module_id),
+                "success",
+            )
         except Exception as e:
             traceback.print_exc()
-            cmds.confirmDialog(title="Error", message=f"Failed to create surface rig:\n{e}", button=["OK"])
+            self._notify_operation("Surface Rig Failed", f"Failed to create surface rig:\n{e}", "error")
             cmds.warning(f"Failed to create surface rig: {e}")
 
     def sort_joints_by_bounding_box(self, joints):
@@ -2030,18 +3845,21 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         uproject, log_path, cmd_path, "SkeletalMesh"
                     )
                 except Exception as exc:
-                    QtWidgets.QMessageBox.warning(self, "Unreal asset discovery failed", str(exc))
+                    self._notify_operation("Unreal Asset Discovery Failed", str(exc), "error")
                     return
                 if not skel_meshes:
-                    QtWidgets.QMessageBox.information(
-                        self, "No skeletal meshes", "No SkeletalMesh assets were found under /Game in Unreal.")
+                    self._notify_operation(
+                        "No Skeletal Meshes",
+                        "No SkeletalMesh assets were found under /Game in Unreal.",
+                        "warning",
+                    )
                     return
 
                 self.popup = ControlRigPopup(skel_meshes, joint_map, uproject)
                 self.popup.exec_()
 
     def store_all_face_connections(self, silent=False):
-        self.create_rig_mapping()
+        self.create_rig_mapping(refresh_details=not silent)
 
         stored_modules = []
         for name in self._get_registered_module_ids():
@@ -2064,7 +3882,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             else:
                 message += "\n(No active space switches or custom external connections were found in the scene)."
 
-            cmds.confirmDialog(title="Global Store", message=message, button=["OK"])
+            self._notify_operation("Global Store", message, "success")
 
     def _get_module_joints(self, module):
         if module == "Left Arm":
@@ -2156,13 +3974,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                                 edit_info["parent_edit"].setText(parent)
                             break
                         else:
-                            cmds.confirmDialog(title="Error",
-                                               message="Nothing selected. Please select a node in the scene.",
-                                               button=["OK"])
+                            self._notify_operation(
+                                "Parent Selection",
+                                "Nothing selected. Please select a node in the scene.",
+                                "warning",
+                            )
                     else:
                         return
 
-        self.create_rig_mapping()
+        if not silent:
+            self.create_rig_mapping()
         owns_undo_chunk = not silent
         if owns_undo_chunk:
             cmds.undoInfo(openChunk=True, chunkName=f"Build Body Module: {module}")
@@ -2209,48 +4030,56 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
             module_func(*module_args)
 
-            # Recreate only the relevant module's space switches (and composite spaces)
-            if module == "Left Arm":
-                create_rig.create_arm_space_switches("l")
-            elif module == "Right Arm":
-                create_rig.create_arm_space_switches("r")
-            elif module == "Left Leg":
-                create_rig.create_leg_space_switches("l")
-            elif module == "Right Leg":
-                create_rig.create_leg_space_switches("r")
-            elif module in ("Pelvis & Hips", "Root / Origin", "Spine", "Left Clavicle", "Right Clavicle"):
-                # Update any existing limb space switches to connect to the new core controls
-                for s in ("l", "r"):
-                    create_rig.create_arm_space_switches(s)
-                    create_rig.create_leg_space_switches(s)
+            # Batch builds recreate all limb spaces once after every module.
+            if not silent:
+                if module == "Left Arm":
+                    create_rig.create_arm_space_switches("l")
+                elif module == "Right Arm":
+                    create_rig.create_arm_space_switches("r")
+                elif module == "Left Leg":
+                    create_rig.create_leg_space_switches("l")
+                elif module == "Right Leg":
+                    create_rig.create_leg_space_switches("r")
+                elif module in ("Pelvis & Hips", "Root / Origin", "Spine", "Left Clavicle", "Right Clavicle"):
+                    # Update existing limb spaces for an individually rebuilt core module.
+                    for s in ("l", "r"):
+                        create_rig.create_arm_space_switches(s)
+                        create_rig.create_leg_space_switches(s)
 
             restored = create_rig.restore_rig_connections(module)
 
-            # Auto-store the module's current connections so they survive rebuilds
-            self.store_all_face_connections(silent=silent)
+            # The full build stores connections once after all modules exist.
+            if not silent:
+                self.store_all_face_connections(silent=False)
 
             if not silent:
                 msg = f"Body Module '{module}' created successfully!"
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
-                cmds.confirmDialog(title="Success", message=msg, button=["OK"])
-            create_rig.restore_all_control_cv_positions()
-            for ikh in cmds.ls(type="ikHandle") or []:
-                try:
-                    cmds.setAttr(f"{ikh}.visibility", 0)
-                except Exception:
-                    pass
+                self._notify_operation("Body Module Created", msg, "success")
+            if not silent:
+                create_rig.restore_all_control_cv_positions()
+                create_rig.hide_post_build_face_nodes()
+                for ikh in cmds.ls(type="ikHandle") or []:
+                    try:
+                        cmds.setAttr(f"{ikh}.visibility", 0)
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[ERROR] create_body_module_setup failed for module={module} parent={parent}: {e}")
             traceback.print_exc()
             if silent:
                 raise
-            cmds.confirmDialog(title="Error", message=f"Failed to create body module setup:\n{e}", button=["OK"])
+            self._notify_operation(
+                "Body Module Creation Failed",
+                f"Failed to create body module setup:\n{e}",
+                "error",
+            )
         finally:
             if owns_undo_chunk:
                 cmds.undoInfo(closeChunk=True)
-            self._load_module_metadata_from_scene()
-            self._refresh_all_module_details()
+            if not silent:
+                self._load_module_metadata_from_scene()
 
     def remove_body_module_setup(self, module):
         reload_rig_function_stack()
@@ -2286,11 +4115,17 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             # Cleanup orphaned main/temp nodes
             create_rig.delete_unused_scaffold_nodes()
 
-            cmds.confirmDialog(title="Success",
-                               message=f"Body Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
-                               button=["OK"])
+            self._notify_operation(
+                "Body Module Removed",
+                f"Body Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
+                "success",
+            )
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to remove body module setup:\n{e}", button=["OK"])
+            self._notify_operation(
+                "Body Module Removal Failed",
+                f"Failed to remove body module setup:\n{e}",
+                "error",
+            )
         finally:
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
@@ -2338,9 +4173,11 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                                 edit_info["parent_edit"].setText(parent)
                             break
                         else:
-                            cmds.confirmDialog(title="Error",
-                                               message="Nothing selected. Please select a node in the scene.",
-                                               button=["OK"])
+                            self._notify_operation(
+                                "Parent Selection",
+                                "Nothing selected. Please select a node in the scene.",
+                                "warning",
+                            )
                     else:
                         return
 
@@ -2356,7 +4193,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         if not jaw_jnt:
             jaw_jnt = self.module_jaw_jnt_field.text().strip() or None
 
-        self.create_rig_mapping()
+        if not silent:
+            self.create_rig_mapping()
 
         # Remove missing scene joints from this module's active mapping before
         # the builder or metadata store sees them.
@@ -2367,13 +4205,13 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         if not face_joints:
             if not silent:
-                cmds.confirmDialog(
-                    title="Skipped",
-                    message=(
+                self._notify_operation(
+                    "Face Module Skipped",
+                    (
                         f"Face Module '{module}' was not built because none of "
                         "its mapped joints exist in the current scene."
                     ),
-                    button=["OK"]
+                    "warning",
                 )
             return
 
@@ -2413,15 +4251,18 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 "built": True
             })
 
-            # Auto-store the module's current connections so they survive rebuilds
-            self.store_all_face_connections(silent=silent)
+            # The full build stores connections once after all modules exist.
+            if not silent:
+                self.store_all_face_connections(silent=False)
 
             if not silent:
                 msg = f"Face Module '{module}' created successfully!"
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
-                cmds.confirmDialog(title="Success", message=msg, button=["OK"])
-            create_rig.restore_all_control_cv_positions()
+                self._notify_operation("Face Module Created", msg, "success")
+            if not silent:
+                create_rig.restore_all_control_cv_positions()
+                create_rig.hide_post_build_face_nodes()
         except Exception as e:
             build_traceback = traceback.format_exc()
             print(build_traceback)
@@ -2454,22 +4295,22 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         undo_error,
                     )
                 )
-            cmds.confirmDialog(
-                title="Error",
-                message=(
+            self._notify_operation(
+                "Face Module Creation Failed",
+                (
                     f"Failed to create face module setup:\n{build_error}\n\n"
                     f"Rig source: {getattr(create_rig_core, '__file__', 'unknown')}\n"
                     f"Revision: {getattr(create_rig_core, 'RIG_BUILD_REVISION', 'unknown')}\n\n"
                     + "\n".join(build_traceback.strip().splitlines()[-4:])
                 ),
-                button=["OK"],
+                "error",
             )
 
-        try:
-            self._load_module_metadata_from_scene()
-            self._refresh_all_module_details()
-        except Exception as refresh_error:
-            cmds.warning("Failed to refresh face module details: {}".format(refresh_error))
+        if not silent:
+            try:
+                self._load_module_metadata_from_scene()
+            except Exception as refresh_error:
+                cmds.warning("Failed to refresh face module details: {}".format(refresh_error))
 
     def remove_face_module_setup(self, module):
         reload_rig_function_stack()
@@ -2504,11 +4345,17 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             # Cleanup orphaned main/temp nodes
             create_rig.delete_unused_scaffold_nodes()
 
-            cmds.confirmDialog(title="Success",
-                               message=f"Face Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
-                               button=["OK"])
+            self._notify_operation(
+                "Face Module Removed",
+                f"Face Module '{module}' removed successfully!\nDeleted {deleted_count} rig nodes.",
+                "success",
+            )
         except Exception as e:
-            cmds.confirmDialog(title="Error", message=f"Failed to remove face module setup:\n{e}", button=["OK"])
+            self._notify_operation(
+                "Face Module Removal Failed",
+                f"Failed to remove face module setup:\n{e}",
+                "error",
+            )
         finally:
             cmds.undoInfo(closeChunk=True)
             self._load_module_metadata_from_scene()
@@ -2518,8 +4365,11 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
     def load_settings_from_selection(self):
         sel = cmds.ls(sl=True)
         if not sel:
-            cmds.confirmDialog(title="Info", message="Please select a control or joint in the scene first.",
-                               button=["OK"])
+            self._notify_operation(
+                "Load Settings",
+                "Please select a control or joint in the scene first.",
+                "warning",
+            )
             return
 
         node = sel[0]
@@ -2596,7 +4446,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         if not is_body:
             if jaw_ctrl: msg += f"\n• Jaw Control: {jaw_ctrl}"
             if jaw_jnt: msg += f"\n• Jaw Joint: {jaw_jnt}"
-        cmds.confirmDialog(title="Settings Loaded", message=msg, button=["OK"])
+        self._notify_operation("Settings Loaded", msg, "success")
         self._refresh_all_module_details()
 
     # ------------------------------------------------------------------
@@ -3464,6 +5314,171 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 self._refresh_module_detail_widget(module_id)
             except Exception as e:
                 cmds.warning(f"[HIK UI] Could not refresh detail for '{module_id}': {e}")
+        self._refresh_additional_systems()
+
+    def _refresh_additional_systems(self):
+        """Render registered and external additions below the body modules."""
+        layout = self._additional_systems_layout
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        systems = []
+        try:
+            for record in create_rig.get_dynamic_rig_modules():
+                parent_ref = (record.get("build_spec") or {}).get("parent") or {}
+                parent_name = (
+                    parent_ref.get("name", "")
+                    if isinstance(parent_ref, dict)
+                    else str(parent_ref)
+                )
+                inspection = create_rig.inspect_dynamic_rig_module(record)
+                systems.append({
+                    "system_id": record.get("module_id"),
+                    "label": record.get("module_id") or "Unnamed Module",
+                    "kind": (record.get("module_type") or "Module").replace("_", " ").title(),
+                    "state": "built" if record.get("built") else "recipe saved",
+                    "root": "",
+                    "parent": parent_name,
+                    "managed": True,
+                    "node_count": inspection["node_count"],
+                    "constraints": inspection["constraints"],
+                    "connections": inspection["connections"],
+                })
+            systems.extend(create_rig.get_external_rig_systems(discover_live=True))
+        except Exception as exc:
+            cmds.warning("[HIK UI] Could not refresh additional rig systems: {}".format(exc))
+
+        if not systems:
+            empty = QtWidgets.QLabel("No additional systems detected")
+            empty.setStyleSheet("color: #777777; font-style: italic;")
+            layout.addWidget(empty)
+            return
+
+        for system in systems:
+            system_container = QtWidgets.QWidget()
+            system_layout = QtWidgets.QVBoxLayout(system_container)
+            system_layout.setContentsMargins(0, 0, 0, 0)
+            system_layout.setSpacing(2)
+            row = QtWidgets.QWidget()
+            row_layout = QtWidgets.QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(7)
+
+            toggle_btn = QtWidgets.QToolButton()
+            toggle_btn.setText("▶")
+            toggle_btn.setFixedSize(16, 16)
+            toggle_btn.setStyleSheet("border: none; color: #aaaaaa;")
+
+            select_btn = QtWidgets.QPushButton("⌖")
+            select_btn.setFixedSize(20, 20)
+            root = system.get("root", "")
+            select_btn.setEnabled(bool(root and cmds.objExists(root)))
+            select_btn.setToolTip("Select {}".format(root or system.get("label", "system")))
+            if root:
+                select_btn.clicked.connect(
+                    lambda checked=False, node=root: self._select_node(node)
+                )
+
+            state = system.get("state", "")
+            status = QtWidgets.QLabel("●")
+            status.setFixedWidth(12)
+            status.setStyleSheet(
+                "color: {}; font-size: 10pt;".format(
+                    "#43b35b" if state in {"built", "attached"} else
+                    "#d6a83c" if state in {"preserved", "recipe saved"} else
+                    "#777777"
+                )
+            )
+            name = QtWidgets.QLabel("<b>{}</b>".format(system.get("label", "System")))
+            kind = QtWidgets.QLabel(system.get("kind", ""))
+            kind.setMinimumWidth(80)
+            kind.setStyleSheet("color: #aaaaaa;")
+            parent = system.get("parent") or "World"
+            details = QtWidgets.QLabel("{} · parent: {}".format(state, parent))
+            details.setStyleSheet("color: #888888;")
+
+            add_btn = QtWidgets.QPushButton("Add")
+            add_btn.setFixedWidth(58)
+            add_btn.setStyleSheet("background-color: #2e6930; color: white; font-weight: bold;")
+            add_btn.setEnabled(state in {"preserved", "recipe saved"})
+            remove_btn = QtWidgets.QPushButton("Remove")
+            remove_btn.setFixedWidth(64)
+            remove_btn.setStyleSheet("background-color: #7d2a2a; color: white; font-weight: bold;")
+            remove_btn.setEnabled(state in {"attached", "built"})
+            system_id = system.get("system_id", "")
+            managed = bool(system.get("managed"))
+            add_btn.clicked.connect(
+                lambda checked=False, sid=system_id, is_managed=managed:
+                self._set_additional_system_active(sid, is_managed, True)
+            )
+            remove_btn.clicked.connect(
+                lambda checked=False, sid=system_id, is_managed=managed:
+                self._set_additional_system_active(sid, is_managed, False)
+            )
+
+            row_layout.addWidget(toggle_btn)
+            row_layout.addWidget(select_btn)
+            row_layout.addWidget(status)
+            row_layout.addWidget(name)
+            row_layout.addStretch(1)
+            row_layout.addWidget(kind)
+            row_layout.addWidget(details)
+            row_layout.addWidget(add_btn)
+            row_layout.addWidget(remove_btn)
+            system_layout.addWidget(row)
+
+            detail_view = QtWidgets.QPlainTextEdit()
+            detail_view.setReadOnly(True)
+            detail_view.setMaximumHeight(150)
+            detail_view.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+            constraints = system.get("constraints", [])
+            connections = system.get("connections", [])
+            lines = [
+                "Root: {}".format(root or "Generated from saved recipe"),
+                "Parent: {}".format(parent),
+                "Nodes: {}".format(system.get("node_count", "managed by recipe")),
+                "Constraints ({}):".format(len(constraints)),
+            ]
+            lines.extend("  " + item for item in constraints)
+            lines.append("Connections ({}):".format(len(connections)))
+            lines.extend("  " + item for item in connections)
+            detail_view.setPlainText("\n".join(lines))
+            detail_view.hide()
+            toggle_btn.clicked.connect(
+                lambda checked=False, view=detail_view, button=toggle_btn:
+                (view.setVisible(not view.isVisible()),
+                 button.setText("▼" if view.isVisible() else "▶"))
+            )
+            system_layout.addWidget(detail_view)
+            layout.addWidget(system_container)
+
+    def _set_additional_system_active(self, system_id, managed, active):
+        """Add/remove an extra system, preserving its recipe or live graph."""
+        action = "Add" if active else "Remove"
+        try:
+            if managed:
+                create_rig.set_dynamic_rig_module_active(system_id, active)
+            else:
+                root = str(system_id or "").split("external:", 1)[-1]
+                create_rig.set_external_rig_system_active(root, active)
+            self._notify_operation(
+                "{} Additional System".format(action),
+                "{} completed for {}.".format(action, system_id),
+                "success",
+            )
+        except Exception as exc:
+            self._notify_operation(
+                "{} Additional System Failed".format(action), str(exc), "error"
+            )
+            cmds.warning(
+                "[HIK UI] {} failed for '{}': {}".format(action, system_id, exc)
+            )
+        self._refresh_additional_systems()
 
     def _get_registered_module_ids(self):
         module_ids = []
@@ -3763,9 +5778,14 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             cmds.select(node, replace=True)
 
     def _on_tab_changed(self, index):
-        """Refresh module details whenever the Rigging tab becomes active."""
-        if self.tabs.tabText(index) == "Rigging":
-            self._refresh_all_module_details()
+        """Handle lightweight tab activation without rescanning the scene.
+
+        Module status already refreshes after build/remove operations and via
+        the explicit Refresh Module Details button. A tab click must remain a
+        pure UI operation; live extension discovery walks the Maya graph and
+        is intentionally not run here.
+        """
+        return None
 
     def _load_module_metadata_from_scene(self, report_missing=True):
         """
@@ -3840,11 +5860,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         + "\n\nThese missing references will be ignored."
                 )
                 cmds.warning("[HIK UI] Module discrepancy detected.")
-                cmds.confirmDialog(
-                    title="Module Discrepancy Warning",
-                    message=msg,
-                    button=["OK"],
-                    icon="warning"
+                self._notify_operation(
+                    "Module Discrepancy Warning", msg, "warning"
                 )
 
         # Refresh all live detail widgets from the scene

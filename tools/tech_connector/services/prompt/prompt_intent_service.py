@@ -1516,7 +1516,7 @@ def _model_understanding(
         OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
         def semantic_intent_model():
-            return "qwen3:4b-instruct"
+            return "qwen3.5:4b"
 
         def build_semantic_understanding_options(settings=None):
             return {

@@ -39,9 +39,9 @@ class ModelTiers:
     `active` is whatever model the user currently has selected in the UI.
     """
     embed: str      = "nomic-embed-text"
-    local_code: str = "qwen2.5-coder:3b"
-    local_plan: str = "qwen3:4b-instruct"
-    local_deep: str = "qwen3:4b-instruct"
+    local_code: str = "qwen3.5:4b"
+    local_plan: str = "qwen3.5:4b"
+    local_deep: str = "qwen3.5:9b"
     active: str     = ""             # set at runtime to the UI-selected model
 
     def __post_init__(self):
@@ -52,6 +52,17 @@ class ModelTiers:
             self.local_code = settings.get("router_local_code", self.local_code)
             self.local_plan = settings.get("router_local_plan", self.local_plan)
             self.local_deep = settings.get("router_local_deep", self.local_deep)
+            if str(settings.get("local_model_policy") or "").lower() == "hardware_aware":
+                from tech_connector.services.local_model_optimizer_service import (
+                    recommend_local_models,
+                )
+                from tech_connector.services.ollama_service import installed_ollama_models
+
+                active = recommend_local_models(installed_ollama_models())["active"]
+                self.local_code = active["code"]
+                self.local_plan = active["general"]
+                self.local_deep = active["deep"]
+                self.embed = settings.get("router_embed", self.embed)
         except Exception:
             pass
 

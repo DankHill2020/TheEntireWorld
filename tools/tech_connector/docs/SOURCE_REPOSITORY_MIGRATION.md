@@ -53,7 +53,7 @@ a commercial entitlement.
    asset, plugin, and sample.
 5. Run the complete automated suite plus available native DCC/runtime
    qualification.
-6. Verify root `README.md` and `LICENSE` identify the project as source
+6. Verify root `README.md` and `LICENSE.md` identify the project as source
    available—not unrestricted open source—and explain activation.
 7. Verify `config/source_access.json` records the public monorepo model and the
    exclusion of private services.

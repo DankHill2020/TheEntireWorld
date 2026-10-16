@@ -37,6 +37,9 @@ class GraphDebugSnapshot:
     watches: dict[str, Any] = field(default_factory=dict)
     runtime_state: dict[str, Any] = field(default_factory=dict)
     error: dict[str, Any] | None = None
+    execution_mode: str = "editor_simulation"
+    selected_entity_id: str = ""
+    hot_reload: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +49,9 @@ class GraphDebugSnapshot:
             "watches": deepcopy(self.watches),
             "runtime_state": deepcopy(self.runtime_state),
             "error": deepcopy(self.error),
+            "execution_mode": self.execution_mode,
+            "selected_entity_id": self.selected_entity_id,
+            "hot_reload": deepcopy(self.hot_reload),
         }
 
 
@@ -55,6 +61,7 @@ class GraphDebugSession:
     def __init__(
         self, session_id: str, instance_id: str, manifest: Mapping[str, Any],
         context: GraphExecutionContext | Mapping[str, Any], *, registry: GraphOperationRegistry | None = None,
+        execution_mode: str = "editor_simulation", selected_entity_id: str = "",
     ) -> None:
         _validate_manifest(manifest)
         self.session_id = str(session_id)
@@ -73,6 +80,9 @@ class GraphDebugSession:
         self.pause_reason = ""
         self.error: dict[str, Any] | None = None
         self.revision = 1
+        self.execution_mode = str(execution_mode or "editor_simulation")
+        self.selected_entity_id = str(selected_entity_id)
+        self.last_hot_reload: dict[str, Any] = {}
         self._lock = RLock()
 
     @property
@@ -147,17 +157,44 @@ class GraphDebugSession:
 
     def hot_swap(self, manifest: Mapping[str, Any]) -> GraphDebugSnapshot:
         with self._lock:
-            _validate_manifest(manifest)
-            incoming = str(manifest.get("program_id") or "")
-            if incoming != self.program_id:
-                raise ValueError(f"Hot swap expected program '{self.program_id}', not '{incoming}'.")
-            last_node = self.traces[-1].node_id if self.traces else ""
-            self.manifest = deepcopy(dict(manifest))
-            order = self.execution_order
-            self.index = order.index(last_node) + 1 if last_node in order else min(self.index, len(order))
-            self.breakpoints.intersection_update(order)
-            self.status = "paused" if self.index < len(order) else "complete"
-            self.pause_reason = "hot_swap"; self.error = None; self.revision += 1
+            checkpoint = (deepcopy(self.manifest), self.index, self.status, self.pause_reason, deepcopy(self.error), self.revision, set(self.breakpoints))
+            try:
+                _validate_manifest(manifest)
+                incoming = str(manifest.get("program_id") or "")
+                if incoming != self.program_id:
+                    raise ValueError(f"Hot swap expected program '{self.program_id}', not '{incoming}'.")
+                last_node = self.traces[-1].node_id if self.traces else ""
+                self.manifest = deepcopy(dict(manifest))
+                order = self.execution_order
+                self.index = order.index(last_node) + 1 if last_node in order else min(self.index, len(order))
+                self.breakpoints.intersection_update(order)
+                self.status = "paused" if self.index < len(order) else "complete"
+                self.pause_reason = "hot_swap"; self.error = None; self.revision += 1
+                self.last_hot_reload = {"applied": True, "rolled_back": False, "message": "Compatible graph applied.", "revision": self.revision}
+            except Exception as exc:
+                self.manifest, self.index, self.status, self.pause_reason, self.error, self.revision, self.breakpoints = checkpoint
+                self.last_hot_reload = {"applied": False, "rolled_back": True, "message": str(exc), "revision": self.revision}
+                raise
+            return self.snapshot()
+
+    def reject_hot_swap(self, message: str) -> GraphDebugSnapshot:
+        """Record a compile/validation rejection while preserving the running manifest and state."""
+        with self._lock:
+            self.last_hot_reload = {"applied": False, "rolled_back": True, "message": str(message), "revision": self.revision}
+            return self.snapshot()
+
+    def select_entity(self, entity_id: str) -> GraphDebugSnapshot:
+        with self._lock:
+            selected = str(entity_id)
+            if selected == "Self" and selected not in self.context.actors:
+                self.context.actors[selected] = {}
+            if selected and selected not in self.context.actors:
+                raise KeyError(f"Unknown debug entity: {selected}")
+            self.selected_entity_id = selected
+            self.context.metadata["selected_entity_id"] = selected
+            if selected:
+                self.context.actors["Selected"] = deepcopy(self.context.actors[selected])
+            self._publish_external_context(); self.revision += 1
             return self.snapshot()
 
     def snapshot(self) -> GraphDebugSnapshot:
@@ -168,6 +205,7 @@ class GraphDebugSession:
             deepcopy(self.outputs), {path: _watch_value(path, self.context, self.outputs) for path in self.watch_paths},
             {"actors": deepcopy(self.context.actors), "events": deepcopy(self.context.events), "metadata": deepcopy(self.context.metadata)},
             deepcopy(self.error),
+            self.execution_mode, self.selected_entity_id, deepcopy(self.last_hot_reload),
         )
 
     def _run_until_pause(self, *, skip_breakpoint: str = "") -> GraphDebugSnapshot:
@@ -228,8 +266,8 @@ class GraphDebugSessionManager:
         self._sessions: dict[str, GraphDebugSession] = {}
         self._lock = RLock()
 
-    def attach(self, session_id: str, instance_id: str, manifest: Mapping[str, Any], context: Mapping[str, Any] | GraphExecutionContext) -> GraphDebugSession:
-        session = GraphDebugSession(session_id, instance_id, manifest, context)
+    def attach(self, session_id: str, instance_id: str, manifest: Mapping[str, Any], context: Mapping[str, Any] | GraphExecutionContext, *, execution_mode: str = "editor_simulation", selected_entity_id: str = "") -> GraphDebugSession:
+        session = GraphDebugSession(session_id, instance_id, manifest, context, execution_mode=execution_mode, selected_entity_id=selected_entity_id)
         with self._lock:
             self._sessions[str(session_id)] = session
         return session

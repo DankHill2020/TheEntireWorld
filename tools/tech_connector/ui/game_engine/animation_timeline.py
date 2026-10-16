@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -154,6 +154,7 @@ class AnimationTimelineBar(QFrame):
         self.setStyleSheet(component_stylesheet())
         set_ui_role(self, "panel")
         self._build_ui()
+        self._install_standard_shortcuts()
 
     def _build_ui(self):
         outer_layout = QVBoxLayout(self)
@@ -176,17 +177,17 @@ class AnimationTimelineBar(QFrame):
 
         # Playback Controls
         self.play_btn = QPushButton("Play")
-        configure_button(self.play_btn, "play", text="Play", tooltip="Play or pause the timeline.", role="primary")
+        configure_button(self.play_btn, "play", text="Play", tooltip="Play or pause the timeline (Space).", role="primary")
         self.play_btn.clicked.connect(self.toggle_playback)
         layout.addWidget(self.play_btn)
 
         prev_btn = QPushButton("Previous")
-        configure_button(prev_btn, "skip_back", text="Previous", tooltip="Go to the previous frame.", icon_only=True)
+        configure_button(prev_btn, "skip_back", text="Previous", tooltip="Go to the previous frame (Left Arrow).", icon_only=True)
         prev_btn.clicked.connect(self._step_prev_frame)
         layout.addWidget(prev_btn)
 
         next_btn = QPushButton("Next")
-        configure_button(next_btn, "skip_forward", text="Next", tooltip="Go to the next frame.", icon_only=True)
+        configure_button(next_btn, "skip_forward", text="Next", tooltip="Go to the next frame (Right Arrow).", icon_only=True)
         next_btn.clicked.connect(self._step_next_frame)
         layout.addWidget(next_btn)
 
@@ -207,12 +208,12 @@ class AnimationTimelineBar(QFrame):
         layout.addWidget(add_frame_btn)
 
         dup_frame_btn = QPushButton("Duplicate")
-        configure_button(dup_frame_btn, "copy", text="Duplicate", tooltip="Duplicate the current frame.")
+        configure_button(dup_frame_btn, "copy", text="Duplicate", tooltip="Duplicate the current frame (Ctrl+D).")
         dup_frame_btn.clicked.connect(self.dup_frame)
         layout.addWidget(dup_frame_btn)
 
         del_frame_btn = QPushButton("Delete")
-        configure_button(del_frame_btn, "trash", text="Delete", tooltip="Delete the current frame.", role="danger")
+        configure_button(del_frame_btn, "trash", text="Delete", tooltip="Delete the current frame (Delete).", role="danger")
         del_frame_btn.clicked.connect(self.del_frame)
         layout.addWidget(del_frame_btn)
 
@@ -262,6 +263,24 @@ class AnimationTimelineBar(QFrame):
                                 safe_start="Use a preset unless the delivery format requires a specific rate.",
                                 consequence="Changing FPS changes timing, not the number of frames.")
         apply_widget_discoverability(self)
+
+    def _install_standard_shortcuts(self) -> None:
+        self._timeline_shortcuts = []
+
+        def bind(sequence: str | QKeySequence, callback) -> None:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(callback)
+            self._timeline_shortcuts.append(shortcut)
+
+        bind("Space", self.toggle_playback)
+        bind("Left", self._step_prev_frame)
+        bind("Right", self._step_next_frame)
+        bind("Home", lambda: self._scrub_to_frame(0))
+        bind("End", lambda: self._scrub_to_frame(max(0, len(self.sequence.frames) - 1)))
+        bind("Ctrl+D", self.dup_frame)
+        bind("Insert", self.add_frame)
+        bind(QKeySequence.Delete, self.del_frame)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(320, super().minimumSizeHint().height())

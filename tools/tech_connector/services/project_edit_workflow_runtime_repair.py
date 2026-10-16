@@ -84,6 +84,47 @@ def _repair_recursive_mapping_contracts(
             class Repair(ast.NodeTransformer):
                 """Apply only validator-proven mapping transformations."""
 
+                def visit_If(self, node: ast.If) -> ast.AST:
+                    """Detach a mapping document before entering a patch loop."""
+
+                    self.generic_visit(node)
+                    if not needs_mapping or not isinstance(node.test, ast.BoolOp):
+                        return node
+                    if not isinstance(node.test.op, ast.And) or len(node.test.values) != 2:
+                        return node
+                    guards: dict[str, ast.Call] = {}
+                    for guard in node.test.values:
+                        if not (
+                            isinstance(guard, ast.Call)
+                            and isinstance(guard.func, ast.Name)
+                            and guard.func.id == "isinstance"
+                            and len(guard.args) == 2
+                            and isinstance(guard.args[0], ast.Name)
+                            and isinstance(guard.args[1], ast.Name)
+                            and guard.args[1].id == "dict"
+                        ):
+                            return node
+                        guards[guard.args[0].id] = guard
+                    if set(guards) != {document_name, patch_name}:
+                        return node
+                    node.test = guards[patch_name]
+                    node.body.insert(
+                        0,
+                        ast.Assign(
+                            targets=[ast.Name(id=document_name, ctx=ast.Store())],
+                            value=ast.IfExp(
+                                test=guards[document_name],
+                                body=ast.Call(
+                                    func=ast.Name(id="deepcopy", ctx=ast.Load()),
+                                    args=[ast.Name(id=document_name, ctx=ast.Load())],
+                                    keywords=[],
+                                ),
+                                orelse=ast.Dict(keys=[], values=[]),
+                            ),
+                        ),
+                    )
+                    return node
+
                 def visit_Assign(self, node: ast.Assign) -> ast.AST:
                     """Repair unsafe mapping initialization and member aliases."""
 
@@ -168,10 +209,35 @@ def _repair_recursive_mapping_contracts(
                     return node
 
             Repair().visit(function)
+            ast.fix_missing_locations(function)
             if ast.unparse(function) != function_text:
                 changed.add(function.name)
         if not changed:
             continue
+        if any(
+            isinstance(node, ast.Name) and node.id == "deepcopy" and isinstance(node.ctx, ast.Load)
+            for node in ast.walk(tree)
+        ) and not any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "copy"
+            and any(alias.name == "deepcopy" for alias in node.names)
+            for node in tree.body
+        ):
+            import_index = 0
+            if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(
+                tree.body[0].value, ast.Constant
+            ) and isinstance(tree.body[0].value.value, str):
+                import_index = 1
+            while (
+                import_index < len(tree.body)
+                and isinstance(tree.body[import_index], ast.ImportFrom)
+                and tree.body[import_index].module == "__future__"
+            ):
+                import_index += 1
+            tree.body.insert(
+                import_index,
+                ast.ImportFrom(module="copy", names=[ast.alias(name="deepcopy")], level=0),
+            )
         ast.fix_missing_locations(tree)
         corrected = ast.unparse(tree).rstrip() + "\n"
         try:

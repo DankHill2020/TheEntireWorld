@@ -154,7 +154,7 @@ def build_unreal_task_sequence(
 def verify_unreal_task_sequence(
     task_sequence: dict[str, Any],
     *,
-    model: str = "qwen3:4b-instruct",
+    model: str = "qwen3.5:4b",
     batch_size: int = 4,
     timeout: int = 12,
     event: TaskEventCallback | None = None,

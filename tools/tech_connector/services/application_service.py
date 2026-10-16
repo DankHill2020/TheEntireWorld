@@ -20,7 +20,13 @@ from tech_connector.services.settings_service import (
     update_mcp_config,
 )
 from tech_connector.models.constants import APP_DIR, set_active_project_root
-from tech_connector.models.project import all_roots, project_roots, recent_projects, set_active_project
+from tech_connector.models.project import (
+    all_roots,
+    normalize_project_path,
+    project_roots,
+    recent_projects,
+    set_active_project,
+)
 from tech_connector.services.source_policy import apply_source_policy, live_sources_enabled
 from tech_connector.services.application_command_service import ApplicationCommandService
 from tech_connector.services.project_directory_service import (
@@ -342,6 +348,45 @@ class ApplicationService:
         set_active_project_root(res)
         self.save_settings()
         return res
+
+    def add_project_folder(self, path: str) -> str:
+        """Add a secondary project root without changing the primary root."""
+        normalized = normalize_project_path(path)
+        if not normalized:
+            return ""
+        from tech_connector.models.constants import TOOLS_ROOT
+
+        protected = {
+            normalize_project_path(self.settings.get("active_project", "")).casefold(),
+            normalize_project_path(str(TOOLS_ROOT)).casefold(),
+        }
+        extras = [normalize_project_path(value) for value in self.settings.get("extra_dirs", [])]
+        if normalized.casefold() not in protected and normalized.casefold() not in {
+            value.casefold() for value in extras
+        }:
+            extras.append(normalized)
+            self.settings["extra_dirs"] = extras
+            self.save_settings()
+        return normalized
+
+    def remove_project_folder(self, path: str) -> bool:
+        """Remove a secondary root; primary and installed roots are immutable."""
+        normalized = normalize_project_path(path)
+        from tech_connector.models.constants import TOOLS_ROOT
+
+        protected = {
+            normalize_project_path(self.settings.get("active_project", "")).casefold(),
+            normalize_project_path(str(TOOLS_ROOT)).casefold(),
+        }
+        if not normalized or normalized.casefold() in protected:
+            return False
+        existing = [normalize_project_path(value) for value in self.settings.get("extra_dirs", [])]
+        remaining = [value for value in existing if value.casefold() != normalized.casefold()]
+        if len(remaining) == len(existing):
+            return False
+        self.settings["extra_dirs"] = remaining
+        self.save_settings()
+        return True
 
     def install_components(self) -> str:
         self._install_components_fn()

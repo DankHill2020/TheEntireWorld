@@ -258,10 +258,10 @@ class MayaViewportCamera:
         offset = _vec_sub(self.eye, self.target)
         radius = max(0.001, _vec_length(offset))
         world_up = (0.0, 1.0, 0.0)
-        # Drag follows the content under the pointer: right turns right and up
-        # raises the view.  The old signs made both axes feel inverted.
-        yaw = math.radians(float(delta_x) * 0.45)
-        pitch = math.radians(float(-delta_y) * 0.45)
+        # Treat drag as camera rotation: dragging right/down turns the camera
+        # right/down, so projected scene content moves in the opposite direction.
+        yaw = math.radians(float(delta_x) * -0.45)
+        pitch = math.radians(float(delta_y) * -0.45)
 
         yawed_offset = _rotate_vec_around_axis(offset, world_up, yaw)
         forward_after_yaw = _vec_normalize(_vec_scale(yawed_offset, -1.0), (0.0, 0.0, 1.0))
@@ -369,6 +369,8 @@ def _stable_right_axis(forward: tuple[float, float, float]) -> tuple[float, floa
 
 class FBXMeshModel:
     """3D Mesh Container supporting FBX, OBJ, glTF, and USD geometry."""
+
+    _sample_albedo_cache: QImage | None = None
 
     def __init__(self, name: str = "Sphere_Primitive_Demo"):
         self.name = name
@@ -1523,6 +1525,14 @@ class FBXMeshModel:
 
     def _build_sample_pbr_textures(self):
         """Generate rich mock PBR sample texture files (Checkered Albedo, Normal Map, Roughness) for testing."""
+        sample_dir = Path(tempfile.gettempdir()) / "tech_connector_mesh_painter"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        self.sample_albedo_path = str(sample_dir / "Sphere_Demo_Albedo.png")
+        self.sample_normal_path = str(sample_dir / "Sphere_Demo_Normal.png")
+        cached = FBXMeshModel._sample_albedo_cache
+        if cached is not None and not cached.isNull():
+            self.albedo_texture = QImage(cached)
+            return
         w, h = 1024, 1024
         self.albedo_texture = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
         self.albedo_texture.fill(QColor(40, 52, 68))
@@ -1550,11 +1560,9 @@ class FBXMeshModel:
         painter.end()
 
         # Save Sample Texture Files to Disk
-        sample_dir = Path(tempfile.gettempdir()) / "tech_connector_mesh_painter"
-        sample_dir.mkdir(parents=True, exist_ok=True)
-        self.sample_albedo_path = str(sample_dir / "Sphere_Demo_Albedo.png")
-        self.sample_normal_path = str(sample_dir / "Sphere_Demo_Normal.png")
-        self.albedo_texture.save(self.sample_albedo_path)
+        FBXMeshModel._sample_albedo_cache = QImage(self.albedo_texture)
+        if not Path(self.sample_albedo_path).is_file():
+            self.albedo_texture.save(self.sample_albedo_path)
 
 
     def paint_stroke_in_3d_space(
@@ -1684,9 +1692,22 @@ class ThreeDMeshCanvas(QWidget):
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-tech-connector-asset"):
+            try:
+                payload = json.loads(bytes(event.mimeData().data("application/x-tech-connector-asset")).decode("utf-8"))
+                if self.owner is not None and hasattr(self.owner, "preview_asset_placement"):
+                    self.owner.preview_asset_placement(
+                        payload, event.position(), float(self.width()), float(self.height())
+                    )
+            except Exception:
+                pass
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event):
+        if self.owner is not None and hasattr(self.owner, "clear_asset_placement_preview"):
+            self.owner.clear_asset_placement_preview()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         mime = event.mimeData()
@@ -1713,6 +1734,8 @@ class ThreeDMeshCanvas(QWidget):
             event.acceptProposedAction()
         else:
             event.ignore()
+        if self.owner is not None and hasattr(self.owner, "clear_asset_placement_preview"):
+            self.owner.clear_asset_placement_preview()
 
     def enterEvent(self, event):
         self.setFocus()
@@ -1816,7 +1839,18 @@ class ThreeDMeshCanvas(QWidget):
                     for vertex_index in range(vertex_start, end):
                         screen_verts[vertex_index] = projected_vertex(self.owner.mesh.vertices[vertex_index])
         else:
-            screen_verts = [projected_vertex(vertex) for vertex in self.owner.mesh.vertices]
+            projection_key = (
+                id(self.owner.mesh), id(self.owner.mesh.vertices), len(self.owner.mesh.vertices),
+                int(getattr(self.owner, "_paint_geometry_revision", 0)), self.width(), self.height(),
+                tuple(camera.eye), tuple(camera.target), tuple(camera.up), float(camera.fov_degrees),
+                float(camera.aspect_ratio), str(getattr(self.owner, "viewer_coord_space", "")), visual_style,
+            )
+            if projection_key == getattr(self, "_screen_vertex_cache_key", None):
+                screen_verts = self._screen_vertex_cache
+            else:
+                screen_verts = [projected_vertex(vertex) for vertex in self.owner.mesh.vertices]
+                self._screen_vertex_cache_key = projection_key
+                self._screen_vertex_cache = screen_verts
 
         # Render 3D polygons with solid shading plus optional wireframe.
         shader_mode = str(getattr(self.owner, "viewport_shading_mode", "Highlight") or "Highlight").lower() == "shader"
@@ -2347,7 +2381,8 @@ class ThreeDMeshCanvas(QWidget):
                 point = self.owner.shared_local_to_display_local((float(cx), float(cy), float(cz)))
                 sx, sy, _depth = project_display_point(point)
                 name = str(proxy.get("name") or "maya_object")
-                selected = proxy is getattr(self.owner, "_selected_scene_proxy", None)
+                selection_query = getattr(self.owner, "is_scene_proxy_selected", None)
+                selected = bool(selection_query(proxy)) if callable(selection_query) else proxy is getattr(self.owner, "_selected_scene_proxy", None)
                 if selected:
                     painter.setPen(QPen(QColor(255, 245, 110, 230), 2))
                     painter.setBrush(QBrush(QColor(255, 245, 110, 22 if shader_mode else 35)))
@@ -2421,6 +2456,21 @@ class ThreeDMeshCanvas(QWidget):
         self._draw_world_production_overlay(painter, w, h)
         self._draw_viewport_hud(painter, w, h)
         self._draw_component_marquee(painter)
+        placement = getattr(self.owner, "_asset_placement_preview", None)
+        if isinstance(placement, dict) and len(placement.get("screen") or ()) >= 2:
+            px, py = (float(value) for value in placement["screen"][:2])
+            painter.setPen(QPen(QColor(105, 240, 174, 235), 2, Qt.DashLine))
+            painter.setBrush(QColor(70, 201, 150, 48))
+            painter.drawRoundedRect(QRectF(px - 34, py - 34, 68, 68), 7, 7)
+            painter.setPen(QColor(225, 255, 240))
+            painter.setFont(QFont("Segoe UI", 9, QFont.DemiBold))
+            world = placement.get("world") or (0.0, 0.0, 0.0)
+            snap = f" · snap {placement.get('grid_size'):g}" if placement.get("grid_snap") else ""
+            painter.drawText(
+                QRectF(px - 110, py + 39, 220, 38), Qt.AlignHCenter | Qt.AlignTop,
+                f"{placement.get('name') or 'Asset'}{snap}\n"
+                f"{world[0]:.2f}, {world[1]:.2f}, {world[2]:.2f}",
+            )
         painter.end()
         self.owner._last_viewport_paint_ms = (time.perf_counter() - paint_started) * 1000.0
         request_started = float(getattr(self.owner, "_frame_render_request_started_s", 0.0) or 0.0)
@@ -2482,8 +2532,12 @@ class ThreeDMeshCanvas(QWidget):
 
     def _draw_gpu_interaction_overlay(self, painter: QPainter, w: int, h: int) -> None:
         camera = getattr(self.owner, "viewport_camera", MayaViewportCamera())
-        selected = getattr(self.owner, "_selected_scene_proxy", None)
-        if isinstance(selected, (dict, SceneProxyInstance)) and bool(selected.get("visible", True)):
+        primary = getattr(self.owner, "_selected_scene_proxy", None)
+        selection_provider = getattr(self.owner, "selected_level_actor_proxies", None)
+        selected_items = list(selection_provider()) if callable(selection_provider) else []
+        if not selected_items and isinstance(primary, (dict, SceneProxyInstance)): selected_items = [primary]
+        for selected in selected_items:
+            if not isinstance(selected, (dict, SceneProxyInstance)) or not bool(selected.get("visible", True)): continue
             cx, cy, cz = selected.get("center") or (0.0, 0.0, 0.0)
             point = self.owner.shared_local_to_display_local((float(cx), float(cy), float(cz)))
             sx, sy, depth = camera.project_world_to_screen(point, float(w), float(h))
@@ -2491,7 +2545,7 @@ class ThreeDMeshCanvas(QWidget):
                 painter.setPen(QPen(QColor(255, 245, 110, 230), 2))
                 painter.setBrush(QBrush(QColor(255, 245, 110, 22)))
                 painter.drawEllipse(QRectF(sx - 13, sy - 13, 26, 26))
-                if getattr(self.owner, "viewport_mode", "Paint") in {"Translate", "Rotate", "Scale"}:
+                if selected is primary and getattr(self.owner, "viewport_mode", "Paint") in {"Translate", "Rotate", "Scale"}:
                     TransformManipulatorGizmo(
                         getattr(self.owner, "viewport_mode", "Translate"),
                         getattr(self.owner, "active_transform_axis", ""),
@@ -3329,9 +3383,15 @@ class ThreeDMeshCanvas(QWidget):
         if isinstance(selected, (dict, SceneProxyInstance)):
             selected_name = str(selected.get("name") or selected.get("native_id") or "object")[:42]
             selected_provider = str(selected.get("provider_id") or "")
+            selection_provider = getattr(self.owner, "selected_level_actor_proxies", None)
+            selection_count = len(selection_provider()) if callable(selection_provider) else 1
+            if selection_count > 1: selected_name = f"{selected_name} +{selection_count - 1}"
         orientation = str(getattr(self.owner, "transform_orientation_mode", "world") or "world").title()
         active_axis = str(getattr(self.owner, "active_transform_axis", "") or "free").upper()
-        transform_suffix = f"  |  {orientation} {active_axis}" if mode in {"Translate", "Rotate", "Scale"} else ""
+        pivot_mode = str(getattr(self.owner, "transform_pivot_mode", "object") or "object").replace("_", " ").title()
+        snap_target = str(getattr(self.owner, "_transient_snap_target", "") or (getattr(self.owner, "_transform_snap_settings", {}) or {}).get("target", "off")).title()
+        pivot_edit = "  |  EDIT PIVOT" if bool(getattr(self.owner, "pivot_edit_mode", False)) else ""
+        transform_suffix = f"  |  {orientation} {active_axis}  |  Pivot: {pivot_mode}  |  Snap: {snap_target}{pivot_edit}" if mode in {"Translate", "Rotate", "Scale"} else ""
         self._draw_pill(painter, 16, 14, f"{mode} / {shading}{transform_suffix}  |  frame {frame}  |  {providers}", QColor(8, 15, 22, 215), QColor(145, 215, 235))
         if selected_name != "none":
             color = provider_view_colors(selected_provider)[1]
@@ -3517,6 +3577,18 @@ class ThreeDMeshCanvas(QWidget):
             if hasattr(self.owner, "toggle_syncsketch_markup_mode"):
                 self.owner.toggle_syncsketch_markup_mode()
             return
+        if key == Qt.Key_H and (event.modifiers() & Qt.ControlModifier):
+            if hasattr(self.owner, "show_all_level_actors"):
+                self.owner.show_all_level_actors()
+            return
+        if key == Qt.Key_H and (event.modifiers() & Qt.ShiftModifier):
+            if hasattr(self.owner, "isolate_selected_level_actors"):
+                self.owner.isolate_selected_level_actors()
+            return
+        if key == Qt.Key_H and not event.modifiers():
+            if hasattr(self.owner, "hide_selected_level_actors"):
+                self.owner.hide_selected_level_actors()
+            return
         if key == Qt.Key_B:
             self.owner.is_b_key_held = True
             self.is_b_key_held = True
@@ -3548,13 +3620,25 @@ class ThreeDMeshCanvas(QWidget):
                 self.owner.viewport_mode = "Rotate"
                 self.setCursor(Qt.ArrowCursor)
             self.update()
-        elif key == Qt.Key_R or key == Qt.Key_S:
-            # Maya R/S Key = Scale Mode
+        elif key == Qt.Key_R:
+            # Maya R Key = Scale Mode
             if hasattr(self.owner, "set_viewport_interaction_mode"):
                 self.owner.set_viewport_interaction_mode("Scale")
             else:
                 self.owner.viewport_mode = "Scale"
                 self.setCursor(Qt.ArrowCursor)
+            self.update()
+        elif key in (Qt.Key_D, Qt.Key_Insert):
+            if hasattr(self.owner, "toggle_transform_pivot_edit"):
+                self.owner.toggle_transform_pivot_edit()
+            self.update()
+        elif key == Qt.Key_X:
+            self.owner._transient_snap_target = "grid"
+            if hasattr(self.owner, "update_viewport_status"): self.owner.update_viewport_status()
+            self.update()
+        elif key == Qt.Key_V:
+            self.owner._transient_snap_target = "point"
+            if hasattr(self.owner, "update_viewport_status"): self.owner.update_viewport_status()
             self.update()
         elif key == Qt.Key_P:
             # Maya P Key = Paint Mode
@@ -3563,15 +3647,6 @@ class ThreeDMeshCanvas(QWidget):
             else:
                 self.owner.viewport_mode = "Paint"
                 self.setCursor(Qt.CrossCursor)
-            self.update()
-        elif key == Qt.Key_F8:
-            self.owner.set_viewport_interaction_mode("Vertex")
-            self.update()
-        elif key == Qt.Key_F9:
-            self.owner.set_viewport_interaction_mode("Edge")
-            self.update()
-        elif key == Qt.Key_F10:
-            self.owner.set_viewport_interaction_mode("Face")
             self.update()
         elif key == Qt.Key_F8:
             self.owner.set_viewport_interaction_mode("Vertex")
@@ -3626,6 +3701,10 @@ class ThreeDMeshCanvas(QWidget):
                 self.owner.refresh_viewport_cursor()
             else:
                 self.setCursor(Qt.CrossCursor)
+            self.update()
+        elif event.key() in (Qt.Key_X, Qt.Key_V):
+            self.owner._transient_snap_target = ""
+            if hasattr(self.owner, "update_viewport_status"): self.owner.update_viewport_status()
             self.update()
         else:
             super().keyReleaseEvent(event)
@@ -3759,6 +3838,12 @@ class ThreeDMeshCanvas(QWidget):
             if mode in {"Translate", "Rotate", "Scale"}:
                 axis = self.owner.hit_test_transform_gizmo_axis(event.position())
                 if axis:
+                    selected_proxy = getattr(self.owner, "_selected_scene_proxy", None)
+                    entity_lookup = getattr(self.owner, "_runtime_entity_for_proxy", None)
+                    selected_entity = entity_lookup(selected_proxy) if callable(entity_lookup) else None
+                    if isinstance(selected_entity, dict) and bool(selected_entity.get("editor_locked", False)):
+                        self.owner._resolved_shaded_status = "Selected actor is locked. Unlock it before transforming."
+                        self.owner.update_viewport_status(); self.update(); return
                     self.owner.push_viewer_undo_state(f"{mode} {axis}")
                     self.owner.active_transform_axis = axis
                     self.owner.hover_transform_axis = axis
@@ -3773,7 +3858,9 @@ class ThreeDMeshCanvas(QWidget):
                     return
                 proxy = self.owner.proxy_at_viewport_position(event.position(), max_distance_px=28.0)
                 if proxy:
-                    self.owner._selected_scene_proxy = proxy
+                    selector = getattr(self.owner, "select_level_actor_proxy", None)
+                    if callable(selector): selector(proxy, additive=bool(mods & Qt.ShiftModifier), toggle=bool(mods & Qt.ControlModifier))
+                    else: self.owner._selected_scene_proxy = proxy
                     self.owner.active_transform_axis = ""
                     self.owner.hover_transform_axis = ""
                     self.owner.update_instance_details_panel()
@@ -3789,14 +3876,18 @@ class ThreeDMeshCanvas(QWidget):
             if mode == "Selection":
                 proxy = self.owner.proxy_at_viewport_position(event.position(), max_distance_px=28.0)
                 if proxy:
-                    self.owner._selected_scene_proxy = proxy
+                    selector = getattr(self.owner, "select_level_actor_proxy", None)
+                    if callable(selector): selector(proxy, additive=bool(mods & Qt.ShiftModifier), toggle=bool(mods & Qt.ControlModifier))
+                    else: self.owner._selected_scene_proxy = proxy
                     self.owner.active_transform_axis = ""
                     self.owner.hover_transform_axis = ""
                     self.owner.update_instance_details_panel()
                     self.owner.update_viewport_status()
                     QTimer.singleShot(0, self.owner.select_selected_proxy_in_source)
                 else:
-                    self.owner._selected_scene_proxy = None
+                    selector = getattr(self.owner, "select_level_actor_proxy", None)
+                    if callable(selector) and not (mods & (Qt.ShiftModifier | Qt.ControlModifier)): selector(None)
+                    elif not callable(selector): self.owner._selected_scene_proxy = None
                     self.owner.active_transform_axis = ""
                     self.owner.hover_transform_axis = ""
                     self.owner.update_instance_details_panel()
@@ -3850,21 +3941,21 @@ class ThreeDMeshCanvas(QWidget):
             if hasattr(self.owner, 'size_spin'):
                 self.owner.size_spin.setValue(new_size)
             self.owner.last_mouse_pos = event.position()
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, 'is_panning', False):
             # Maya Pan Track
             delta = event.position() - self.owner.last_mouse_pos
             self.owner.last_mouse_pos = event.position()
             self.owner.viewport_camera.track(delta.x(), delta.y(), float(self.width()), float(self.height()))
             self.owner.schedule_dcc_camera_drive("pan")
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, 'is_zooming', False):
             # Maya Zoom Dolly
             delta = event.position() - self.owner.last_mouse_pos
             self.owner.last_mouse_pos = event.position()
             self.owner.dolly_camera(delta.y())
             self.owner.schedule_dcc_camera_drive("dolly")
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, 'is_orbiting', False):
             # Maya Orbit Tumble
             delta = event.position() - self.owner.last_mouse_pos
@@ -3882,12 +3973,19 @@ class ThreeDMeshCanvas(QWidget):
                 dy = -dy
             self.owner.viewport_camera.tumble(dx, dy)
             self.owner.schedule_dcc_camera_drive("orbit")
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, 'is_transform_dragging', False):
+            ctrl_snap = bool(event.modifiers() & Qt.ControlModifier)
+            if ctrl_snap and not str(getattr(self.owner, "_transient_snap_target", "") or ""):
+                self.owner._transient_snap_target = "increment"
+                self.owner._ctrl_transform_snap_active = True
+            elif not ctrl_snap and bool(getattr(self.owner, "_ctrl_transform_snap_active", False)):
+                self.owner._transient_snap_target = ""
+                self.owner._ctrl_transform_snap_active = False
             delta = event.position() - self.owner._transform_drag_last_pos
             self.owner._transform_drag_last_pos = event.position()
             self.owner.preview_selected_proxy_transform_from_screen_delta(delta.x(), delta.y())
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, "_active_shot_guide_handle", ""):
             self.owner.move_shot_guide_handle(
                 str(self.owner._active_shot_guide_handle),
@@ -3895,7 +3993,7 @@ class ThreeDMeshCanvas(QWidget):
                 float(self.width()),
                 float(self.height()),
             )
-            self.update()
+            self.owner.schedule_paint_canvas_update(interval_ms=16)
         elif getattr(self.owner, 'is_painting', False):
             # Surface Paint Stroke
             self.owner._paint_at_viewport_position(event.position())
@@ -3977,6 +4075,9 @@ class ThreeDMeshCanvas(QWidget):
         self.owner._active_shot_guide_handle = ""
         self.owner.is_transform_dragging = False
         self.owner.active_transform_axis = ""
+        if bool(getattr(self.owner, "_ctrl_transform_snap_active", False)):
+            self.owner._transient_snap_target = ""
+            self.owner._ctrl_transform_snap_active = False
         self.owner.is_resizing_brush = False
         self.owner._last_paint_hit = None
         self.owner._last_paint_screen_pos = None
@@ -3999,13 +4100,16 @@ class ThreeDMeshCanvas(QWidget):
         super().wheelEvent(event)
 
     def contextMenuEvent(self, event):
-        """Right-click context menu on 3D mesh face for 1-click transfer to Image Editor."""
+        """Mode-aware polygon marking menu plus texture/material utilities."""
         if (event.modifiers() & Qt.AltModifier) or getattr(self.owner, "_suppress_next_context_menu", False):
             self.owner._suppress_next_context_menu = False
             event.ignore()
             return
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { background:#080d14; color:#ddffe9; border:1px solid #12324a; } QMenu::item:selected { background:#12324a; color:#16f26a; }")
+
+        self._populate_polygon_marking_menu(menu)
+        menu.addSeparator()
 
         action_show_in_editor = menu.addAction("Show Face / UV Island in Image Editor")
         action_paint_face = menu.addAction("Paint Active Color on Selected Face")
@@ -4026,3 +4130,68 @@ class ThreeDMeshCanvas(QWidget):
             QMessageBox.information(self, "Polygon UV Inspection", f"Selected 3D Face UV Coordinates: U={u:.4f}, V={v:.4f}")
         elif chosen == action_sync_dcc:
             self.owner.bake_and_sync_textures()
+
+    def _populate_polygon_marking_menu(self, menu: QMenu) -> None:
+        """Add Maya-style component modes and context-sensitive modeling actions."""
+        owner = self.owner
+        mode = str(getattr(owner, "viewport_mode", "Selection") or "Selection")
+        mode_menu = menu.addMenu("Component Mode")
+        for label in ("Selection", "Vertex", "Edge", "Face"):
+            action = mode_menu.addAction(("✓  " if mode == label else "") + label)
+            action.triggered.connect(
+                lambda _checked=False, value=label: owner.set_viewport_interaction_mode(value)
+            )
+
+        if mode not in {"Vertex", "Edge", "Face"}:
+            menu.addAction("Vertex Mode", lambda: owner.set_viewport_interaction_mode("Vertex"))
+            menu.addAction("Edge Mode", lambda: owner.set_viewport_interaction_mode("Edge"))
+            menu.addAction("Face Mode", lambda: owner.set_viewport_interaction_mode("Face"))
+            return
+
+        header = menu.addAction(f"— {mode.upper()} MARKING —")
+        header.setEnabled(False)
+        selection = owner._component_selection_for_mode(mode)
+
+        select_all = menu.addAction("Select All Components")
+        select_all.triggered.connect(lambda: owner.select_all_mesh_components(mode))
+        clear = menu.addAction("Clear Selection")
+        clear.setEnabled(bool(selection))
+        clear.triggered.connect(owner.clear_mesh_component_selection)
+        grow = menu.addAction("Grow Selection")
+        grow.setEnabled(bool(selection))
+        grow.triggered.connect(owner.grow_mesh_component_selection)
+        shrink = menu.addAction("Shrink Selection")
+        shrink.setEnabled(bool(selection))
+        shrink.triggered.connect(owner.shrink_mesh_component_selection)
+        menu.addSeparator()
+
+        if mode == "Face":
+            extrude = menu.addAction("Extrude Faces…")
+            extrude.setEnabled(bool(selection))
+            extrude.triggered.connect(owner.prompt_extrude_selected_faces)
+            delete = menu.addAction("Delete Faces")
+            delete.setEnabled(bool(selection))
+            delete.triggered.connect(
+                lambda: owner.run_modeling_command_from_ui("modeling.delete_faces")
+            )
+            triangulate = menu.addAction("Triangulate Faces")
+            triangulate.setEnabled(bool(selection))
+            triangulate.triggered.connect(
+                lambda: owner.run_modeling_command_from_ui("modeling.triangulate_faces")
+            )
+        elif mode == "Edge":
+            bevel = menu.addAction("Bevel Edges…")
+            bevel.setEnabled(bool(selection))
+            bevel.triggered.connect(owner.prompt_bevel_selected_edges)
+            loop = menu.addAction("Insert Edge Loop…")
+            loop.setEnabled(len(selection) == 1)
+            loop.triggered.connect(owner.prompt_split_selected_edge_loop)
+            bridge = menu.addAction("Bridge Two Edge Loops")
+            bridge.setEnabled(len(selection) >= 6)
+            bridge.triggered.connect(owner.prompt_bridge_selected_edge_loops)
+        else:
+            merge = menu.addAction("Merge Vertices")
+            merge.setEnabled(len(selection) >= 2)
+            merge.triggered.connect(
+                lambda: owner.run_modeling_command_from_ui("modeling.merge_vertices")
+            )

@@ -32,6 +32,7 @@ def process_meshes_for_transfer(
     materials = []
     collisions = []
     lods = []
+    armatures = []
     for obj in meshes:
         if clean_names:
             old_name = obj.name
@@ -66,9 +67,19 @@ def process_meshes_for_transfer(
             bpy.context.collection.objects.link(collision)
             collisions.append(collision.name)
 
+        armature = obj.find_armature()
+        if armature is not None and armature.name not in armatures:
+            armatures.append(armature.name)
+
+    export_objects = list(dict.fromkeys(
+        [obj.name for obj in meshes] + armatures + lods + collisions
+    ))
+
     return {
         "blender_scene": True,
+        "export_objects": export_objects,
         "meshes": [obj.name for obj in meshes],
+        "armatures": armatures,
         "renamed": renamed,
         "transformed": transformed,
         "materials": materials,

@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -21,6 +22,13 @@ SUMMARY_RE = re.compile(
     r"^(Scanned files|Updated files|Indexed files|Chunks|Symbols|Calls|Imports|File dependencies):\s*(\d+)",
     re.IGNORECASE,
 )
+
+PHASE_TIMEOUT_SECONDS = {
+    "bootstrap_symbols": 300.0,
+    "quick_index": 900.0,
+    "dependency_graph": 1200.0,
+    "full_rebuild": 3600.0,
+}
 
 
 class KnowledgeBuildPhase:
@@ -41,36 +49,74 @@ class KnowledgeBuildWorker(QThread):
     def __init__(
         self,
         project_root: str | None = None,
+        project_roots: list[str] | tuple[str, ...] | None = None,
         phase: str = KnowledgeBuildPhase.QUICK_INDEX,
         python_exe: str | None = None,
         verbose_output: bool = False,
+        max_runtime_seconds: float | None = None,
         parent=None,
     ):
         super().__init__(parent)
-        self.project_root = str(project_root or "").strip()
+        roots = [str(value or "").strip() for value in (project_roots or ())]
+        if project_root and str(project_root).strip() not in roots:
+            roots.insert(0, str(project_root).strip())
+        self.project_roots = list(dict.fromkeys(value for value in roots if value))
+        self.project_root = self.project_roots[0] if self.project_roots else ""
         self.phase = phase
         self.python_exe = python_exe or sys.executable
         self.verbose_output = bool(verbose_output)
+        configured_timeout = (
+            PHASE_TIMEOUT_SECONDS.get(str(phase), 900.0)
+            if max_runtime_seconds is None
+            else float(max_runtime_seconds)
+        )
+        self.max_runtime_seconds = max(0.1, min(86400.0, configured_timeout))
         self._stop_requested = False
+        self._timed_out = False
         self._proc: subprocess.Popen | None = None
         self.last_output_tail: list[str] = []
         self.summary_metrics: dict[str, int] = {}
 
     def stop(self):
         self._stop_requested = True
-        if self._proc and self._proc.poll() is None:
+        self._terminate_process()
+
+    def _terminate_process(self, process: subprocess.Popen | None = None):
+        """Request child shutdown and escalate without blocking the Qt thread."""
+
+        process = process or self._proc
+        if process and process.poll() is None:
             try:
-                self._proc.terminate()
+                process.terminate()
             except Exception:
-                pass
+                return
+
+            def force_kill() -> None:
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+
+            killer = threading.Timer(2.0, force_kill)
+            killer.daemon = True
+            killer.start()
+
+    def _timeout_process(self, process: subprocess.Popen) -> None:
+        if self._proc is not process or process.poll() is not None:
+            return
+        self._timed_out = True
+        self._terminate_process(process)
 
     def _creationflags(self):
         return getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
     def _base_cmd(self) -> list[str]:
         cmd = [self.python_exe, "-X", "faulthandler", "-u", "-m", "tech_connector.knowledge.build_knowledge_index_v2"]
-        if self.project_root:
-            cmd.extend(["--root", self.project_root])
+        for root in self.project_roots:
+            cmd.extend(["--root", root])
+        if self.project_roots:
+            cmd.append("--prune-detached-roots")
         return cmd
 
     def _subprocess_context(self) -> tuple[Path, dict[str, str]]:
@@ -84,6 +130,8 @@ class KnowledgeBuildWorker(QThread):
         env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(python_paths))
         if self.project_root:
             env["TECH_CONNECTOR_PROJECT_ROOT"] = self.project_root
+        if self.project_roots:
+            env["AI_KNOWLEDGE_ROOTS"] = os.pathsep.join(self.project_roots)
         return package_parent, env
 
     def _phase_cmds(self) -> list[tuple[str, list[str]]]:
@@ -139,37 +187,61 @@ class KnowledgeBuildWorker(QThread):
                     bufsize=1,
                     creationflags=self._creationflags(),
                 )
+                self._timed_out = False
+                timeout_timer = threading.Timer(
+                    self.max_runtime_seconds,
+                    self._timeout_process,
+                    args=(self._proc,),
+                )
+                timeout_timer.daemon = True
+                timeout_timer.start()
 
-                assert self._proc.stdout is not None
-                for line in self._proc.stdout:
-                    if self._stop_requested:
-                        self.stop()
-                        self.finished_ok.emit(False, "Knowledge build cancelled.")
-                        return
+                try:
+                    assert self._proc.stdout is not None
+                    for line in self._proc.stdout:
+                        if self._stop_requested:
+                            self.stop()
+                            self.finished_ok.emit(False, "Knowledge build cancelled.")
+                            return
 
-                    self._record_output(line)
-                    clean = line.strip()
+                        self._record_output(line)
+                        clean = line.strip()
 
-                    m = UPDATED_RE.search(clean)
-                    if m:
-                        self.progress.emit(int(m.group(1)), 0, label)
+                        m = UPDATED_RE.search(clean)
+                        if m:
+                            self.progress.emit(int(m.group(1)), 0, label)
 
-                    if "Rebuilding dependency graph" in clean:
-                        self.status.emit("Dependency graph")
-                        self.progress.emit(0, 0, "Dependency graph")
-                    elif "Rebuilding FTS tables" in clean:
-                        self.status.emit("Search tables")
-                        self.progress.emit(0, 0, "Search tables")
-                    elif "FTS rebuild complete" in clean:
-                        self.progress.emit(1, 1, "Search tables")
+                        if "Rebuilding dependency graph" in clean:
+                            self.status.emit("Dependency graph")
+                            self.progress.emit(0, 0, "Dependency graph")
+                        elif "Rebuilding FTS tables" in clean:
+                            self.status.emit("Search tables")
+                            self.progress.emit(0, 0, "Search tables")
+                        elif "FTS rebuild complete" in clean:
+                            self.progress.emit(1, 1, "Search tables")
 
-                    sm = SUMMARY_RE.search(clean)
-                    if sm:
-                        key = sm.group(1)
-                        value = int(sm.group(2))
-                        self.summary_metrics[key] = value
+                        sm = SUMMARY_RE.search(clean)
+                        if sm:
+                            key = sm.group(1)
+                            value = int(sm.group(2))
+                            self.summary_metrics[key] = value
 
-                code = self._proc.wait()
+                    code = self._proc.wait()
+                finally:
+                    timeout_timer.cancel()
+                if self._timed_out:
+                    tail = "\n".join(self.last_output_tail[-40:]).strip()
+                    message = (
+                        f"{label} exceeded the {self.max_runtime_seconds:g}s safety limit and was stopped. "
+                        "Retry the phase or inspect the last output below."
+                    )
+                    if tail:
+                        message += f"\n\nLast output:\n{tail}"
+                    self.finished_ok.emit(
+                        False,
+                        message,
+                    )
+                    return
                 if code != 0:
                     self.finished_ok.emit(False, self._failure_message(label, code))
                     return

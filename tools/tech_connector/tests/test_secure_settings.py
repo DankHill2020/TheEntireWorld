@@ -69,3 +69,20 @@ def test_windows_dpapi_store_round_trip(tmp_path) -> None:
     assert b"protected-value" not in credential_file.read_bytes()
     store.delete("provider_token")
     assert store.load("provider_token") == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI test")
+def test_windows_dpapi_store_fails_closed_for_unreadable_secret(
+    tmp_path, monkeypatch
+) -> None:
+    store = WindowsDpapiCredentialStore(tmp_path)
+    path = store._path("provider_token")
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"stale-dpapi-payload")
+    monkeypatch.setattr(
+        store,
+        "_unprotect",
+        lambda _value: (_ for _ in ()).throw(OSError("invalid DPAPI state")),
+    )
+
+    assert store.load("provider_token") == ""

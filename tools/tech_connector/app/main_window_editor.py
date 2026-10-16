@@ -303,6 +303,13 @@ class MainWindowEditorMixin:
         self._set_kingdom_session_state("ready", "Playtest stopped. Editing state is preserved in Garden.")
         return True
 
+    def restart_tc_play_in_editor(self, scene: str) -> bool:
+        """Restart PIE from the same saved level used by the engine workspace."""
+        active = getattr(self, "_tc_pie_session", None)
+        if active is not None and active.process.poll() is None:
+            self.stop_tc_play_in_editor()
+        return self.play_tc_scene_path(scene)
+
     def _tc_play_started(self, session) -> None:
         self.engine_play_btn.setEnabled(True)
         self._tc_player_worker = None
@@ -1201,6 +1208,18 @@ class MainWindowEditorMixin:
                 )
             except Exception:
                 self.project_directories_label.setText("Game and Art paths unavailable")
+        if hasattr(self, "project_scope_label"):
+            roots = self.project_roots()
+            secondary_count = len(
+                [value for value in self.settings.get("extra_dirs", []) if str(value).strip()]
+            )
+            folder_word = "folder" if len(roots) == 1 else "folders"
+            self.project_scope_label.setText(
+                f"{len(roots)} indexed {folder_word} • {secondary_count} added • Tech Connector included"
+            )
+            self.project_scope_label.setToolTip(
+                "Project search and AI context use these folders:\n\n" + "\n".join(roots)
+            )
         if not check_vcs or getattr(self, "_startup_defer_expensive_status", False):
             self.set_card("vcs", "unknown", "Checking later")
             return
@@ -2988,7 +3007,52 @@ class MainWindowEditorMixin:
         self.refresh_recent_projects()
         self.load_project_tree_lazy()
         self.start_async_symbol_indexing()
+        QTimer.singleShot(50, self.build_index)
         self.append(f"\n[Project] Loaded: {active}\n")
+
+    def add_project_folder(self):
+        start = self.settings.get("active_project") or str(Path.cwd())
+        path = QFileDialog.getExistingDirectory(self, "Add Project Folder", start)
+        if not path:
+            return
+        if not self.authorize_project_path(path):
+            return
+        normalized = self.service.add_project_folder(path)
+        self.settings = self.service.settings
+        self.update_project_header(check_vcs=False)
+        self.load_project_tree_lazy()
+        self.start_async_symbol_indexing()
+        QTimer.singleShot(50, self.build_index)
+        self.append(f"\n[Project] Added folder: {normalized}\n")
+
+    def remove_project_folder(self):
+        extras = [str(value) for value in self.settings.get("extra_dirs", []) if str(value).strip()]
+        if not extras:
+            QMessageBox.information(
+                self,
+                "No Added Folders",
+                "There are no secondary folders to remove. The primary project and Tech Connector folder stay included.",
+            )
+            return
+        labels = [f"{Path(path).name or path} — {path}" for path in extras]
+        label, accepted = QInputDialog.getItem(
+            self,
+            "Remove Project Folder",
+            "Remove from project search and AI context (files stay on disk):",
+            labels,
+            0,
+            False,
+        )
+        if not accepted:
+            return
+        selected = extras[labels.index(label)]
+        if self.service.remove_project_folder(selected):
+            self.settings = self.service.settings
+            self.update_project_header(check_vcs=False)
+            self.load_project_tree_lazy()
+            self.start_async_symbol_indexing()
+            QTimer.singleShot(50, self.build_index)
+            self.append(f"\n[Project] Removed folder from scope: {selected}\n")
 
     def load_recent_project(self, *_args):
         if not hasattr(self, "recent_project_box"):
@@ -3004,6 +3068,7 @@ class MainWindowEditorMixin:
         self.refresh_recent_projects()
         self.load_project_tree_lazy()
         self.start_async_symbol_indexing()
+        QTimer.singleShot(50, self.build_index)
         self.append(f"\n[Project] Loaded recent: {active}\n")
 
     def on_project_tree_expanded(self, item):

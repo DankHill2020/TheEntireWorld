@@ -23,7 +23,11 @@ if str(_TOOLS_ROOT) not in sys.path:
 from tech_connector.models.constants import project_index_db_path
 
 try:
-    from tech_connector.project_analysis.capability_registry import register_from_symbol
+    from tech_connector.project_analysis.capability_registry import (
+        begin_capability_batch,
+        end_capability_batch,
+        register_from_symbol,
+    )
 
     _CAP_REGISTRY_AVAILABLE = True
 except Exception:
@@ -31,6 +35,12 @@ except Exception:
 
 
     def register_from_symbol(_sym):  # noqa: F811
+        return None
+
+    def begin_capability_batch():
+        return None
+
+    def end_capability_batch():
         return None
 
 KNOWLEDGE_ROOT = Path(__file__).resolve().parent
@@ -80,8 +90,14 @@ SKIP_DIRS = {
     "Build", ".pytest_cache", ".venv", "venv", "node_modules", ".ai_studio",
     ".codex",
     ".continue",
-    ".agents"
+    ".agents",
+    "dist",
 }
+
+SKIP_DIR_PREFIXES = (
+    ".pytest_",
+    "test_tmp_",
+)
 
 MAX_FILE_CHARS = 350_000
 CHUNK_SIZE = 4500
@@ -244,7 +260,20 @@ def root_dirs(cli_roots: list[str] | None = None) -> list[Path]:
 
 def should_skip(path: Path) -> bool:
     parts = {p.lower() for p in path.parts}
-    return any(skip.lower() in parts for skip in SKIP_DIRS)
+    if any(skip.lower() in parts for skip in SKIP_DIRS):
+        return True
+    return any(
+        part.startswith(prefix)
+        for part in parts
+        for prefix in SKIP_DIR_PREFIXES
+    )
+
+
+def should_skip_directory_name(name: str) -> bool:
+    lowered = str(name or "").casefold()
+    return lowered in {value.casefold() for value in SKIP_DIRS} or any(
+        lowered.startswith(prefix) for prefix in SKIP_DIR_PREFIXES
+    )
 
 
 SOURCE_PROJECT = "project"
@@ -298,14 +327,19 @@ def classify_source_scope(root: Path, path: Path) -> str:
 
 def iter_files(roots: list[Path] | None = None):
     for root in (roots or root_dirs()):
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            if should_skip(path):
-                continue
-            if path.suffix.lower() not in TEXT_EXTS and path.suffix.lower() not in ASSET_EXTS:
-                continue
-            yield root, path
+        for folder, dirnames, filenames in os.walk(root):
+            # Prune generated trees before traversing them. Filtering only at
+            # file yield time still walks hundreds of thousands of test/build
+            # artifacts and makes multi-folder indexing appear hung.
+            dirnames[:] = [
+                name for name in dirnames if not should_skip_directory_name(name)
+            ]
+            folder_path = Path(folder)
+            for filename in filenames:
+                path = folder_path / filename
+                if path.suffix.lower() not in TEXT_EXTS and path.suffix.lower() not in ASSET_EXTS:
+                    continue
+                yield root, path
 
 
 def _root_for_path(path: Path, roots: list[Path]) -> Path:
@@ -326,7 +360,12 @@ def _root_for_path(path: Path, roots: list[Path]) -> Path:
     return roots[0] if roots else resolved.parent
 
 
-def stale_file_plan(conn: sqlite3.Connection, roots: list[Path]) -> tuple[list[tuple[Path, Path]], list[Path], dict[str, int]]:
+def stale_file_plan(
+    conn: sqlite3.Connection,
+    roots: list[Path],
+    *,
+    prune_detached_roots: bool = False,
+) -> tuple[list[tuple[Path, Path]], list[Path], dict[str, int]]:
     """Return changed/new files plus missing indexed files without parsing unchanged files."""
     cur = conn.cursor()
     all_indexed_rows = cur.execute(
@@ -338,13 +377,22 @@ def stale_file_plan(conn: sqlite3.Connection, roots: list[Path]) -> tuple[list[t
     ).fetchall()
     resolved_roots = [root.expanduser().resolve() for root in roots]
     indexed_rows = []
+    detached_paths: list[Path] = []
     for row in all_indexed_rows:
         try:
             indexed_path = Path(row[1]).expanduser().resolve()
         except Exception:
             continue
-        if any(_path_is_within(indexed_path, root) for root in resolved_roots):
+        if (
+            any(_path_is_within(indexed_path, root) for root in resolved_roots)
+            and not should_skip(indexed_path)
+        ):
             indexed_rows.append(row)
+        elif prune_detached_roots:
+            # A user may remove a secondary project folder while the files
+            # remain on disk. Purge those rows so search cannot leak stale
+            # results from a folder that is no longer in the project scope.
+            detached_paths.append(indexed_path)
     indexed_by_path = {str(row[1]): row for row in indexed_rows}
     indexed_norm = set()
     for row in indexed_rows:
@@ -354,7 +402,7 @@ def stale_file_plan(conn: sqlite3.Connection, roots: list[Path]) -> tuple[list[t
             indexed_norm.add(str(row[1]).lower())
 
     changed: list[tuple[Path, Path]] = []
-    missing: list[Path] = []
+    missing: list[Path] = list(detached_paths)
     seen_changed: set[str] = set()
 
     for row in indexed_rows:
@@ -390,12 +438,15 @@ def stale_file_plan(conn: sqlite3.Connection, roots: list[Path]) -> tuple[list[t
         if key not in indexed_norm:
             new_files.append((root, path))
 
-    return changed + new_files, missing, {
+    counts = {
         "indexed": len(indexed_rows),
         "changed": len(changed),
         "new": len(new_files),
         "missing": len(missing),
     }
+    if prune_detached_roots:
+        counts["detached"] = len(detached_paths)
+    return changed + new_files, missing, counts
 
 
 def read_text(path: Path) -> str:
@@ -1026,7 +1077,7 @@ def init_db(conn: sqlite3.Connection):
     conn.commit()
 
 
-def clear_file(conn: sqlite3.Connection, path: Path):
+def clear_file(conn: sqlite3.Connection, path: Path, *, commit: bool = True):
     """
     Remove indexed source-of-truth rows for a changed file.
 
@@ -1049,7 +1100,78 @@ def clear_file(conn: sqlite3.Connection, path: Path):
     cur.execute("DELETE FROM symbol_lookup WHERE symbol_id IN (SELECT id FROM symbols WHERE file_id = ?)", (file_id,))
     cur.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
     cur.execute("DELETE FROM files WHERE id = ?", (file_id,))
+    if commit:
+        conn.commit()
+
+
+def clear_files(conn: sqlite3.Connection, paths: list[Path]) -> int:
+    """Bulk-remove indexed files and all dependent rows in one transaction."""
+    values = [(str(path),) for path in dict.fromkeys(paths)]
+    if not values:
+        return 0
+    cur = conn.cursor()
+    cur.execute("CREATE TEMP TABLE IF NOT EXISTS stale_file_ids(id INTEGER PRIMARY KEY)")
+    cur.execute("DELETE FROM stale_file_ids")
+    cur.executemany(
+        "INSERT OR IGNORE INTO stale_file_ids SELECT id FROM files WHERE path = ?",
+        values,
+    )
+    count = int(cur.execute("SELECT COUNT(*) FROM stale_file_ids").fetchone()[0])
+    cur.execute(
+        "DELETE FROM symbol_calls WHERE symbol_id IN "
+        "(SELECT id FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids))"
+    )
+    cur.execute("DELETE FROM imports WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute(
+        "DELETE FROM file_dependencies WHERE source_file_id IN (SELECT id FROM stale_file_ids) "
+        "OR target_file_id IN (SELECT id FROM stale_file_ids)"
+    )
+    cur.execute("DELETE FROM module_resolution_errors WHERE source_file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM chunks WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute(
+        "DELETE FROM symbol_lookup WHERE symbol_id IN "
+        "(SELECT id FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids))"
+    )
+    cur.execute("DELETE FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM files WHERE id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM stale_file_ids")
     conn.commit()
+    return count
+
+
+def clear_files(conn: sqlite3.Connection, paths: list[Path]) -> int:
+    """Bulk-remove indexed files and all dependent rows in one transaction."""
+    values = [(str(path),) for path in dict.fromkeys(paths)]
+    if not values:
+        return 0
+    cur = conn.cursor()
+    cur.execute("CREATE TEMP TABLE IF NOT EXISTS stale_file_ids(id INTEGER PRIMARY KEY)")
+    cur.execute("DELETE FROM stale_file_ids")
+    cur.executemany(
+        "INSERT OR IGNORE INTO stale_file_ids SELECT id FROM files WHERE path = ?",
+        values,
+    )
+    count = int(cur.execute("SELECT COUNT(*) FROM stale_file_ids").fetchone()[0])
+    cur.execute(
+        "DELETE FROM symbol_calls WHERE symbol_id IN "
+        "(SELECT id FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids))"
+    )
+    cur.execute("DELETE FROM imports WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute(
+        "DELETE FROM file_dependencies WHERE source_file_id IN (SELECT id FROM stale_file_ids) "
+        "OR target_file_id IN (SELECT id FROM stale_file_ids)"
+    )
+    cur.execute("DELETE FROM module_resolution_errors WHERE source_file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM chunks WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute(
+        "DELETE FROM symbol_lookup WHERE symbol_id IN "
+        "(SELECT id FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids))"
+    )
+    cur.execute("DELETE FROM symbols WHERE file_id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM files WHERE id IN (SELECT id FROM stale_file_ids)")
+    cur.execute("DELETE FROM stale_file_ids")
+    conn.commit()
+    return count
 
 
 def module_from_rel_path(rel_path: str, ext: str) -> str:
@@ -1676,6 +1798,11 @@ def parse_args(argv: list[str] | None = None):
         action="store_true",
         help="Bootstrap mode: index file metadata and Python symbols/imports, but skip chunks, FTS, assets, calls, and graph.",
     )
+    parser.add_argument(
+        "--prune-detached-roots",
+        action="store_true",
+        help="Remove indexed rows that no longer belong to the supplied multi-folder project scope.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1723,6 +1850,7 @@ def main(argv: list[str] | None = None):
     try:
         conn = connect_index_db()
         init_db(conn)
+        begin_capability_batch()
 
         print(f"Index DB: {DB_PATH}")
         print("Roots:")
@@ -1760,30 +1888,30 @@ def main(argv: list[str] | None = None):
             print("Index mode: exact changed files (no project scan).")
             print(f"Changed files queued: {len(file_plan)}")
             print(f"Missing files queued: {len(missing_paths)}")
-            for missing_path in missing_paths:
-                try:
-                    clear_file(conn, missing_path)
-                    removed += 1
-                except Exception as exc:
-                    print(f"[ERROR] {missing_path}: could not remove stale index rows: {exc}")
+            try:
+                removed += clear_files(conn, missing_paths)
+            except Exception as exc:
+                print(f"[ERROR] Could not remove stale index rows: {exc}")
         elif args.full:
             file_plan = list(iter_files(roots))
             print("")
             print("Index mode: full scan (--full).")
         else:
-            file_plan, missing_paths, stale_counts = stale_file_plan(conn, roots)
+            file_plan, missing_paths, stale_counts = stale_file_plan(
+                conn,
+                roots,
+                prune_detached_roots=args.prune_detached_roots,
+            )
             print("")
             print("Index mode: stale-only (default). Use --full for a full project scan.")
             print(f"Indexed files checked: {stale_counts.get('indexed', 0)}")
             print(f"Changed files: {stale_counts.get('changed', 0)}")
             print(f"New files: {stale_counts.get('new', 0)}")
             print(f"Missing files: {stale_counts.get('missing', 0)}")
-            for missing_path in missing_paths:
-                try:
-                    clear_file(conn, missing_path)
-                    removed += 1
-                except Exception as exc:
-                    print(f"[ERROR] {missing_path}: could not remove stale index rows: {exc}")
+            try:
+                removed += clear_files(conn, missing_paths)
+            except Exception as exc:
+                print(f"[ERROR] Could not remove stale index rows: {exc}")
 
         for root, path in file_plan:
             total += 1
@@ -1834,6 +1962,7 @@ def main(argv: list[str] | None = None):
 
         print_summary(conn, total, updated)
     finally:
+        end_capability_batch()
         close_index_db(conn)
         release_build_lock()
 

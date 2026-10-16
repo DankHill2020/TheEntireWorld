@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import tempfile
+import time
 import uuid
 from typing import Any
 
@@ -58,9 +60,27 @@ def write_asset_metadata(
         "previous_paths": list(dict.fromkeys(str(value) for value in previous_paths if value)),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        for attempt in range(6):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt >= 5:
+                    raise
+                time.sleep(0.01 * (2**attempt))
+    finally:
+        temporary.unlink(missing_ok=True)
     return path
 
 
@@ -98,4 +118,3 @@ def ensure_asset_metadata(
         importer_settings=importer_settings,
     )
     return read_asset_metadata(source_path)
-
