@@ -293,7 +293,7 @@ def parse_and_dispatch_inline_messaging(
 ) -> list[dict[str, Any]]:
     import re
     settings = settings or {}
-    pattern = r"@(?P<platform>slack|discord|jira|confluence|clickup|docs)(?:\.(?P<target>[a-zA-Z0-9_\-\.]+))?(?:\s+(?P<content>.*?))(?=(?:@(?:slack|discord|jira|confluence|clickup|docs)|$))"
+    pattern = r"@(?P<platform>slack|discord|jira|confluence|clickup|docs)(?:\.(?P<target>[a-zA-Z0-9_\-\.]+))?(?:\s+(?P<content>.*?))(?=(?:@(?:slack|discord|jira|confluence|clickup|docs)\b|$))"
     matches = list(re.finditer(pattern, text, re.DOTALL | re.IGNORECASE))
     
     if not matches:
@@ -302,8 +302,36 @@ def parse_and_dispatch_inline_messaging(
     results = []
     for match in matches:
         platform = match.group("platform").lower()
-        target = (match.group("target") or ("KAN" if platform == "jira" else "DOCS")).strip()
-        raw_content = (match.group("content") or "").strip() or text
+        explicit_target = (match.group("target") or "").strip()
+        default_targets = {
+            "slack": settings.get("slack_default_channel") or "here",
+            "discord": settings.get("discord_default_channel") or "here",
+            "jira": settings.get("jira_project_key") or settings.get("atlassian_project_key") or "",
+            "confluence": settings.get("confluence_space_id") or "",
+            "docs": settings.get("confluence_space_id") or "",
+            "clickup": settings.get("clickup_list_id") or "",
+        }
+        target = (explicit_target or str(default_targets.get(platform) or "")).strip().lstrip("#@")
+        raw_content = (match.group("content") or "").strip()
+
+        if not raw_content:
+            results.append({
+                "platform": platform,
+                "target": target,
+                "ok": False,
+                "message": "No message content followed the inline integration reference.",
+                "content": "",
+            })
+            continue
+        if not target:
+            results.append({
+                "platform": "confluence" if platform == "docs" else platform,
+                "target": "",
+                "ok": False,
+                "message": f"No target was provided and no default {platform} target is configured.",
+                "content": raw_content,
+            })
+            continue
         
         parts = target.split(".")
         main_target = parts[0]
@@ -312,11 +340,45 @@ def parse_and_dispatch_inline_messaging(
         formatted_msg = f"[{default_title}] Target: #{target}\n\n{raw_content}"
         
         if platform == "slack":
-            url = settings.get(f"slack_webhook_{main_target}") or settings.get("slack_webhook_url", "")
+            default_target = str(settings.get("slack_default_channel") or "").strip().lstrip("#@")
+            target_url = settings.get(f"slack_webhook_{main_target}")
+            may_use_default = not explicit_target or main_target.lower() == "here" or (
+                default_target and main_target.casefold() == default_target.casefold()
+            )
+            url = target_url or (settings.get("slack_webhook_url", "") if may_use_default else "")
+            if explicit_target and not url:
+                results.append({
+                    "platform": "slack",
+                    "target": target,
+                    "ok": False,
+                    "message": (
+                        f"Slack target '{target}' has no dedicated webhook and is not the configured default. "
+                        "Refusing to send to a different channel."
+                    ),
+                    "content": raw_content,
+                })
+                continue
             ok, msg = send_slack_webhook(url, formatted_msg)
             results.append({"platform": "slack", "target": target, "ok": ok, "message": msg, "content": raw_content})
         elif platform == "discord":
-            url = settings.get(f"discord_webhook_{main_target}") or settings.get("discord_webhook_url", "")
+            default_target = str(settings.get("discord_default_channel") or "").strip().lstrip("#@")
+            target_url = settings.get(f"discord_webhook_{main_target}")
+            may_use_default = not explicit_target or main_target.lower() == "here" or (
+                default_target and main_target.casefold() == default_target.casefold()
+            )
+            url = target_url or (settings.get("discord_webhook_url", "") if may_use_default else "")
+            if explicit_target and not url:
+                results.append({
+                    "platform": "discord",
+                    "target": target,
+                    "ok": False,
+                    "message": (
+                        f"Discord target '{target}' has no dedicated webhook and is not the configured default. "
+                        "Refusing to send to a different channel."
+                    ),
+                    "content": raw_content,
+                })
+                continue
             username = settings.get("discord_username", "Tech Connector")
             ok, msg = send_discord_webhook(url, formatted_msg, username=username)
             results.append({"platform": "discord", "target": target, "ok": ok, "message": msg, "content": raw_content})

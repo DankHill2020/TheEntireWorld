@@ -10,7 +10,7 @@ from maya_tools.Rigging import enum_attrs
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
-RIG_BUILD_REVISION = "rig-centered-curve-frame-v15"
+RIG_BUILD_REVISION = "rig-spine-sub-shape-x90-face-joints-hidden-v25"
 
 
 def _get_joint(body_joint_map, slot, default=None):
@@ -337,7 +337,7 @@ def _ensure_stretch_attr(control, attr_name="stretch"):
         cmds.addAttr(
             control,
             longName=attr_name,
-            niceName="Stretch",
+            niceName="Volume Stretch" if attr_name == "volumeStretch" else "Stretch",
             attributeType="float",
             minValue=0.0,
             maxValue=1.0,
@@ -347,6 +347,43 @@ def _ensure_stretch_attr(control, attr_name="stretch"):
     else:
         cmds.setAttr(plug, edit=True, keyable=True)
     return plug
+
+
+def _create_volume_stretch_network(
+        prefix,
+        ratio_attr,
+        volume_attr,
+        driven_node,
+        length_axis,
+):
+    """Preserve approximate volume by scaling axes perpendicular to length.
+
+    Constant volume requires cross-sectional area to change by the inverse of
+    the length ratio. Applying ``ratio ** -0.5`` to both perpendicular axes
+    produces that area change. ``volume_attr`` blends the compensation from
+    one (off) to the constant-volume result (on).
+    """
+    token = _stretch_node_token(prefix)
+    clamp = cmds.createNode("clamp", name=f"{token}_volume_ratio_clamp")
+    power = cmds.createNode("multiplyDivide", name=f"{token}_volume_power_md")
+    blend = cmds.createNode("blendColors", name=f"{token}_volume_blend")
+
+    cmds.setAttr(f"{clamp}.minR", 0.0001)
+    cmds.setAttr(f"{clamp}.maxR", 10000.0)
+    _connect_attr_once(ratio_attr, f"{clamp}.inputR", force=True)
+    cmds.setAttr(f"{power}.operation", 3)
+    _connect_attr_once(f"{clamp}.outputR", f"{power}.input1X", force=True)
+    cmds.setAttr(f"{power}.input2X", -0.5)
+
+    _connect_attr_once(f"{power}.outputX", f"{blend}.color1R", force=True)
+    cmds.setAttr(f"{blend}.color2R", 1.0)
+    _connect_attr_once(volume_attr, f"{blend}.blender", force=True)
+    for axis in "XYZ":
+        if axis != length_axis.upper():
+            _connect_attr_once(
+                f"{blend}.outputR", f"{driven_node}.scale{axis}", force=True
+            )
+    return [clamp, power, blend]
 
 
 def _joint_segment_axis(joint):
@@ -628,6 +665,7 @@ def setup_spine_segment_stretch(spine_joints, control_data, pelvis_ctrl, scale_r
             return {"enabled": False, "reason": "spine joints are not contiguous", "nodes": []}
 
     stretch_attr = _ensure_stretch_attr(pelvis_ctrl)
+    volume_attr = _ensure_stretch_attr(pelvis_ctrl, "volumeStretch")
     controls = [row["ctrl"] for row in control_data]
     constraint_drivers = [row.get("sub_ctrl") or row["ctrl"] for row in control_data]
     created_nodes = []
@@ -670,6 +708,13 @@ def setup_spine_segment_stretch(spine_joints, control_data, pelvis_ctrl, scale_r
         cmds.setAttr(f"{scale_driver}.visibility", 0)
         axis, _rest_translate = _joint_segment_axis(child_joint)
         _connect_attr_once(ratio_attr, f"{scale_driver}.scale{axis}", force=True)
+        volume_nodes = _create_volume_stretch_network(
+            prefix,
+            ratio_attr,
+            volume_attr,
+            scale_driver,
+            axis,
+        )
 
         constraints = cmds.listConnections(
             joint,
@@ -703,11 +748,12 @@ def setup_spine_segment_stretch(spine_joints, control_data, pelvis_ctrl, scale_r
         created_nodes.extend(rest_dimension["nodes"])
         created_nodes.extend(current_dimension["nodes"])
         created_nodes.extend(ratio_nodes)
-        created_nodes.extend([scale_driver, fk_weight])
+        created_nodes.extend([scale_driver, fk_weight] + volume_nodes)
 
     return {
         "enabled": True,
         "attr": stretch_attr,
+        "volume_attr": volume_attr,
         "nodes": created_nodes,
     }
 
@@ -743,6 +789,7 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
     stretch_attr = _ensure_stretch_attr(switch_ctrl)
     if not stretch_attr:
         return {"enabled": False, "nodes": []}
+    volume_attr = _ensure_stretch_attr(switch_ctrl, "volumeStretch")
 
     prefix = _stretch_node_token(ik_joints[0]).replace("_ik", "")
     positions = [
@@ -787,6 +834,16 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
         rest_length_attr=f"{rest_sum}.output1D",
     )
     segment_nodes = _drive_stretch_segments(prefix, ik_joints[1:3], ratio_attr)
+    volume_nodes = []
+    for index, driven_joint in enumerate(ik_joints[:2]):
+        length_axis, _rest_translate = _joint_segment_axis(ik_joints[index + 1])
+        volume_nodes.extend(_create_volume_stretch_network(
+            f"{prefix}_segment{index + 1}",
+            ratio_attr,
+            volume_attr,
+            driven_joint,
+            length_axis,
+        ))
     dimension_nodes = (
         upper_dimension["nodes"]
         + lower_dimension["nodes"]
@@ -795,8 +852,9 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
     return {
         "enabled": True,
         "attr": stretch_attr,
+        "volume_attr": volume_attr,
         "dimensions": [upper_dimension, lower_dimension, reach_dimension],
-        "nodes": dimension_nodes + [rest_sum] + ratio_nodes + segment_nodes,
+        "nodes": dimension_nodes + [rest_sum] + ratio_nodes + segment_nodes + volume_nodes,
     }
 
 
@@ -852,7 +910,10 @@ def create_ik_fk_limb(sel, root_parent):
             duplicate = cmds.duplicate(source, parentOnly=True, name=target_name)[0]
             parent_target = previous or root_parent
             if parent_target and cmds.objExists(parent_target):
-                duplicate = cmds.parent(duplicate, parent_target, absolute=True)[0]
+                current_parent = cmds.listRelatives(duplicate, parent=True, fullPath=True) or []
+                target_matches = cmds.ls(parent_target, long=True) or [parent_target]
+                if not current_parent or current_parent[0] != target_matches[0]:
+                    duplicate = cmds.parent(duplicate, parent_target, absolute=True)[0]
             duplicate_matches = cmds.ls(duplicate, long=True, type="joint") or []
             if len(duplicate_matches) != 1:
                 raise RuntimeError(
@@ -866,6 +927,22 @@ def create_ik_fk_limb(sel, root_parent):
     fk_joints = duplicate_exact_chain(sel, "fk")
     ik_joints = duplicate_exact_chain(sel, "ik")
     driver_joints = duplicate_exact_chain(sel, "driver")
+
+    # duplicate(parentOnly=True) normally copies these values, but enforce the
+    # placer-authored final-pose bend preference on every generated chain. This
+    # also protects rebuilds from stale duplicate joints left by older rigs.
+    for source, fk_joint, ik_joint, driver_joint in zip(
+        sel, fk_joints, ik_joints, driver_joints
+    ):
+        for axis in "XYZ":
+            source_plug = "{}.preferredAngle{}".format(source, axis)
+            if not cmds.objExists(source_plug):
+                continue
+            value = cmds.getAttr(source_plug)
+            for target in (fk_joint, ik_joint, driver_joint):
+                target_plug = "{}.preferredAngle{}".format(target, axis)
+                if cmds.objExists(target_plug):
+                    cmds.setAttr(target_plug, value)
 
     for chain_name, chain in (
         ("FK", fk_joints),
@@ -913,8 +990,18 @@ def create_ik_fk_limb(sel, root_parent):
 
     cmds.delete(temp_grp)
 
-    # Snap the pad to the IK joint
-    cmds.delete(cmds.pointConstraint(ik_joints[ik_end_index], ik_ctrl_dict["pad"]))
+    # IK controls are world-oriented: only their position follows the authored
+    # end joint.  The wrist constraint below retains the bind-frame offset so
+    # the pad and control can keep clean zero rotation channels.
+    ik_end_position = cmds.xform(
+        ik_joints[ik_end_index], query=True, worldSpace=True, translation=True
+    )
+    cmds.xform(
+        ik_ctrl_dict["pad"],
+        worldSpace=True,
+        translation=ik_end_position,
+        rotation=(0.0, 0.0, 0.0),
+    )
 
     # Access control and pad if needed
     ik_ctrl = ik_ctrl_dict["ctrl"]
@@ -941,6 +1028,86 @@ def create_ik_fk_limb(sel, root_parent):
     pv_ctrl = pv_ctrl_dict["ctrl"]
     pv_pad = pv_ctrl_dict["pad"]
 
+    # Position the pole vector in the authored limb's bend plane before
+    # creating/constraining the RP handle.  A fixed world-Z offset loses the
+    # mirrored/anatomical plane and is the source of the build-time twist.
+    start_pos = om.MVector(cmds.xform(sel[0], q=True, ws=True, t=True))
+    mid_vector = om.MVector(cmds.xform(sel[1], q=True, ws=True, t=True))
+    end_pos = om.MVector(cmds.xform(sel[ik_end_index], q=True, ws=True, t=True))
+    is_leg = (joint_count >= 4)
+    pv_distance = 40.0
+    limb_line = end_pos - start_pos
+    if limb_line.length() > 1.0e-8:
+        projection = start_pos + limb_line * (
+            ((mid_vector - start_pos) * limb_line) / (limb_line * limb_line)
+        )
+        pole_direction = mid_vector - projection
+    else:
+        pole_direction = om.MVector()
+    # A T-pose arm is intentionally straight. Treat residual placement noise
+    # relative to the limb length as straight instead of normalizing it into a
+    # large, arbitrary PV offset. Both sides must use the same character-front
+    # half-plane: mirrored local joint axes otherwise put one arm PV behind the
+    # character and the other in front.
+    # Sub-centimeter fitting noise on a roughly half-meter arm should not
+    # dictate a pole plane. One percent still preserves intentional bends but
+    # classifies an authored T-pose as straight.
+    straight_tolerance = max(limb_line.length() * 1.0e-2, 1.0e-6)
+    if pole_direction.length() <= straight_tolerance:
+        # Derive a scene-independent bend plane from the authored preferred
+        # angle instead of assuming that every character faces world -Z.  For
+        # a local bend axis A and limb axis X, the elbow lies on X cross A in
+        # the sign of the preferred rotation.
+        limb_axis = limb_line.normal() if limb_line.length() > 1.0e-8 else om.MVector(1.0, 0.0, 0.0)
+        preferred = []
+        for axis in "XYZ":
+            plug = f"{sel[1]}.preferredAngle{axis}"
+            preferred.append(float(cmds.getAttr(plug)) if cmds.objExists(plug) else 0.0)
+        dominant_index = max(range(3), key=lambda index: abs(preferred[index]))
+        mid_matrix = cmds.xform(sel[1], query=True, worldSpace=True, matrix=True)
+        world_axes = (
+            om.MVector(*mid_matrix[0:3]),
+            om.MVector(*mid_matrix[4:7]),
+            om.MVector(*mid_matrix[8:11]),
+        )
+        bend_axis = world_axes[dominant_index]
+        bend_sign = -1.0 if preferred[dominant_index] < 0.0 else 1.0
+        pole_direction = (limb_axis ^ bend_axis) * bend_sign
+        if pole_direction.length() <= 1.0e-8:
+            # Last-resort perpendicular for skeletons without usable preferred
+            # angles. This is deterministic but does not encode a facing axis.
+            fallback_axis = om.MVector(0.0, 1.0, 0.0)
+            pole_direction = limb_axis ^ fallback_axis
+            if pole_direction.length() <= 1.0e-8:
+                pole_direction = limb_axis ^ om.MVector(0.0, 0.0, 1.0)
+        pole_direction.normalize()
+    else:
+        pole_direction.normalize()
+    if not is_leg:
+        # Wrist translations and hand jointOrient can add a vertical component
+        # to an otherwise valid arm bend plane.  That places the PV above or
+        # below the elbow and makes a neutral IK arm visibly hinge upward. Keep
+        # arm PVs on the elbow-height plane while preserving their authored
+        # front/back side.
+        pole_direction.y = 0.0
+        if pole_direction.length() <= 1.0e-8:
+            mid_matrix = cmds.xform(sel[1], query=True, worldSpace=True, matrix=True)
+            pole_direction = om.MVector(*mid_matrix[8:11])
+            pole_direction.y = 0.0
+        if pole_direction.length() <= 1.0e-8:
+            pole_direction = om.MVector(0.0, 0.0, -1.0)
+        pole_direction.normalize()
+    # Place the pad from the closest point on the shoulder-to-wrist line, not
+    # from the authored elbow itself.  Any small vertical elbow prebend would
+    # otherwise become a permanent vertical PV bias.
+    pole_origin = projection if limb_line.length() > 1.0e-8 else mid_vector
+    pole_position = pole_origin + pole_direction * pv_distance
+    cmds.xform(
+        pv_pad,
+        ws=True,
+        t=(pole_position.x, pole_position.y, pole_position.z),
+    )
+
     ik_handle, eff = cmds.ikHandle(
         n=f"{top_joint.replace('_jnt', '')}_ikh",
         sj=ik_joints[0],
@@ -966,24 +1133,54 @@ def create_ik_fk_limb(sel, root_parent):
     if handle_parent_short != ik_ctrl_short:
         ik_handle = cmds.parent(ik_handle, ik_ctrl)[0]
 
-    # Pole Vector placement
-    mid_pos = cmds.xform(fk_joints[1], q=True, ws=True, t=True)
-    is_leg = (joint_count >= 4)
-    pv_offset = 40 if is_leg else -40
-    cmds.xform(pv_pad, ws=True, t=[mid_pos[0], mid_pos[1], mid_pos[2]])
-    cmds.move(0, 0, pv_offset, pv_pad, r=True, ws=True)
+    # Keep the RP bend plane exactly on the pole vector. Solver twist rotates
+    # that plane and makes an otherwise horizontal arm hinge upward. Bind/FK
+    # frame agreement is handled below by maintained-offset pose targets, so
+    # twisting the handle to match joint orientation is both redundant and
+    # harmful to the elbow trajectory.
+    matched_ik_twist = 0.0
+    if cmds.attributeQuery("twist", node=ik_handle, exists=True):
+        cmds.setAttr(ik_handle + ".twist", matched_ik_twist)
 
+
+
+    if joint_count == 3:
+        cmds.delete(cmds.orientConstraint(end_joint, ik_joints[ik_end_index], mo=False))
     wrist_con = cmds.orientConstraint(ik_ctrl, ik_joints[ik_end_index], mo=True)
     if len(ik_joints) > 3:
         cmds.delete(wrist_con)
 
     blend_constraints = []
+    blend_point_constraints = []
     blend_scale_constraints = []
+    ik_pose_targets = []
 
     for i in range(joint_count):
+        # Maya constraints have one shared offset, not one offset per target.
+        # Give the IK solution a small world-space proxy which retains its
+        # solver motion but removes the RP solver's bind-pose roll/position
+        # delta. FK and this proxy therefore agree exactly at rig creation.
+        pose_target_name = f"{ik_joints[i]}_poseTarget"
+        if cmds.objExists(pose_target_name):
+            cmds.delete(pose_target_name)
+        ik_pose_target = cmds.createNode(
+            "transform",
+            name=pose_target_name,
+            parent=root_parent,
+        )
+        cmds.xform(
+            ik_pose_target,
+            worldSpace=True,
+            matrix=cmds.xform(
+                driver_joints[i], query=True, worldSpace=True, matrix=True
+            ),
+        )
+        cmds.parentConstraint(ik_joints[i], ik_pose_target, mo=True)
+        ik_pose_targets.append(ik_pose_target)
+
         orient_con = cmds.orientConstraint(
             fk_joints[i],
-            ik_joints[i],
+            ik_pose_target,
             driver_joints[i],
             mo=False,
             n=f"{driver_joints[i]}_orientConstraint"
@@ -999,7 +1196,21 @@ def create_ik_fk_limb(sel, root_parent):
             n=f"{driver_joints[i]}_scaleConstraint"
         )[0]
 
+        # Segment length is stored on the child joint's local translation.
+        # Orientation/scale blending alone leaves the driver chain at its rest
+        # length even when the IK chain stretches correctly. Blend world
+        # positions as well so the translated IK mid/end joints reach the
+        # driver and, in turn, the original bind chain.
+        point_con = cmds.pointConstraint(
+            fk_joints[i],
+            ik_pose_target,
+            driver_joints[i],
+            mo=False,
+            n=f"{driver_joints[i]}_pointConstraint",
+        )[0]
+
         blend_constraints.append(orient_con)
+        blend_point_constraints.append(point_con)
         blend_scale_constraints.append(scale_con)
 
     for i in range(joint_count):
@@ -1034,6 +1245,9 @@ def create_ik_fk_limb(sel, root_parent):
     if not cmds.attributeQuery("ikFkBlend", node=switch_ctrl_name, exists=True):
         cmds.addAttr(switch_ctrl_name, longName="ikFkBlend", attributeType="float", min=0, max=1, dv=1.0)
         cmds.setAttr(f"{switch_ctrl_name}.ikFkBlend", e=True, keyable=True)
+    # IK is the studio default. The maintained-offset pose targets make the IK
+    # and FK solutions agree at construction, so selecting IK here must not
+    # alter the freshly built bind pose.
     cmds.setAttr(f"{switch_ctrl_name}.ikFkBlend", 1.0)
 
     # connect to all orient constraints
@@ -1047,6 +1261,14 @@ def create_ik_fk_limb(sel, root_parent):
 
     for con in blend_scale_constraints:
         weights = cmds.scaleConstraint(con, q=True, weightAliasList=True)
+        if weights and len(weights) >= 2:
+            rev_node = cmds.createNode("reverse", n=f"{con}_rev")
+            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{rev_node}.inputX")
+            cmds.connectAttr(f"{rev_node}.outputX", f"{con}.{weights[0]}", force=True)
+            cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{con}.{weights[1]}", force=True)
+
+    for con in blend_point_constraints:
+        weights = cmds.pointConstraint(con, q=True, weightAliasList=True)
         if weights and len(weights) >= 2:
             rev_node = cmds.createNode("reverse", n=f"{con}_rev")
             cmds.connectAttr(f"{switch_ctrl_name}.ikFkBlend", f"{rev_node}.inputX")
@@ -1078,7 +1300,10 @@ def create_ik_fk_limb(sel, root_parent):
         "ik_ctrl": ik_ctrl,
         "pv_ctrl": pv_ctrl,
         "ik_handle": ik_handle,
+        "matched_ik_twist": matched_ik_twist,
         "blend_constraints": blend_constraints,
+        "blend_point_constraints": blend_point_constraints,
+        "ik_pose_targets": ik_pose_targets,
         "switch_ctrl": switch_ctrl_name,
         "stretch": stretch_data,
     }
@@ -1209,6 +1434,91 @@ def ensure_rfl_attrs(ik_leg_ctrl):
         )
 
 
+def ensure_world_aligned_bank_sdk(joint):
+    """Insert a world-aligned rotation group below an RFL bank joint.
+
+    RFL joints can carry arbitrary joint orientation from skeleton placement.
+    Driving their ordinary control SDK's local Z therefore banks around a
+    diagonal axis. This group parents the downstream RFL control pad, so its
+    clean Z axis moves the constrained foot hierarchy as one rigid branch.
+    """
+    short_name = _short_node_name(joint)
+    align_pad = f"{short_name}_bank_align_pad"
+    bank_sdk = f"{short_name}_bank_sdk_pad"
+    outer_control = f"{short_name.replace('innerBank', 'outerBank')}_ctrl"
+    expected_downstream_pad = f"{short_name.replace('innerBank', 'toeTip')}_ctrl_pad"
+    alignment_parent = outer_control if cmds.objExists(outer_control) else joint
+    if cmds.objExists(bank_sdk):
+        bank_parent = cmds.listRelatives(bank_sdk, parent=True, fullPath=True) or []
+        if bank_parent and _short_node_name(bank_parent[0]) == align_pad:
+            align_parent = cmds.listRelatives(
+                bank_parent[0], parent=True, fullPath=True
+            ) or []
+            expected_parent = cmds.ls(alignment_parent, long=True) or [alignment_parent]
+            downstream_parent = (
+                cmds.listRelatives(expected_downstream_pad, parent=True, fullPath=True) or []
+                if cmds.objExists(expected_downstream_pad)
+                else []
+            )
+            bank_matches = cmds.ls(bank_sdk, long=True) or [bank_sdk]
+            if (
+                align_parent
+                and align_parent[0] == expected_parent[0]
+                and downstream_parent
+                and downstream_parent[0] == bank_matches[0]
+            ):
+                return bank_sdk
+
+        # Migrate the short-lived control-hierarchy implementation without
+        # disturbing the current rig pose.
+        control_pad = f"{short_name}_ctrl_pad"
+        helper_parent = cmds.listRelatives(bank_sdk, parent=True, fullPath=True) or []
+        if helper_parent and cmds.objExists(control_pad):
+            control_parent = cmds.listRelatives(
+                control_pad, parent=True, fullPath=True
+            ) or []
+            if control_parent and control_parent[0] == (cmds.ls(bank_sdk, long=True) or [bank_sdk])[0]:
+                cmds.parent(control_pad, helper_parent[0], absolute=True)
+        for child_joint in cmds.listRelatives(
+            bank_sdk, children=True, type="joint", fullPath=True
+        ) or []:
+            cmds.parent(child_joint, joint, absolute=True)
+        cmds.delete(bank_sdk)
+    if cmds.objExists(align_pad):
+        cmds.delete(align_pad)
+
+    if not cmds.objExists(joint):
+        return f"{short_name}_ctrl_sdk_pad"
+
+    world_position = cmds.xform(
+        joint, query=True, worldSpace=True, translation=True
+    )
+    downstream_joints = cmds.listRelatives(
+        joint, children=True, type="joint", fullPath=True
+    ) or []
+    downstream_control_pad = None
+    if downstream_joints:
+        candidate = f"{_short_node_name(downstream_joints[0])}_ctrl_pad"
+        if cmds.objExists(candidate):
+            downstream_control_pad = candidate
+
+    align_pad = cmds.createNode("transform", name=align_pad)
+    alignment_rotation = cmds.xform(
+        alignment_parent, query=True, worldSpace=True, rotation=True
+    )
+    cmds.xform(
+        align_pad,
+        worldSpace=True,
+        translation=world_position,
+        rotation=alignment_rotation,
+    )
+    align_pad = cmds.parent(align_pad, alignment_parent, absolute=True)[0]
+    bank_sdk = cmds.createNode("transform", name=bank_sdk, parent=align_pad)
+    if downstream_control_pad:
+        cmds.parent(downstream_control_pad, bank_sdk, absolute=True)
+    return bank_sdk
+
+
 def setup_rfl_sdks(ik_leg_ctrl, rfl_joints):
     """
     Connect the reverse-foot attributes to the RFL control SDK groups.
@@ -1238,7 +1548,7 @@ def setup_rfl_sdks(ik_leg_ctrl, rfl_joints):
     heel_sdk = sdk_from_joint(rfl_joints["heel"])
     toe_sdk = sdk_from_joint(rfl_joints["toe"])
     toe_tip_sdk = sdk_from_joint(rfl_joints["toeTip"])
-    inner_bank_sdk = sdk_from_joint(rfl_joints["innerBank"])
+    inner_bank_sdk = ensure_world_aligned_bank_sdk(rfl_joints["innerBank"])
     outer_bank_sdk = sdk_from_joint(rfl_joints["outerBank"])
 
     foot_roll = f"{ik_leg_ctrl}.footRoll"
@@ -1306,6 +1616,7 @@ def build_rfl_ik_and_constraints(
         root_parent=ik_leg_ctrl,
         sub_ctrls=False
     )
+    ensure_world_aligned_bank_sdk(rfl_joints[2])
 
     ankle_ik, _ = cmds.ikHandle(
         sj=ik_leg_joints[0],
@@ -1481,7 +1792,8 @@ def create_joint_controls(
         control_shape="sphere",
         root_parent=None,
         sub_ctrls=False,
-        keep_constraint=True
+        keep_constraint=True,
+        sub_ctrl_shape_rotation_x=0.0,
 ):
     """
         Creates a control hierarchy for the joints
@@ -1490,6 +1802,7 @@ def create_joint_controls(
     :param root_parent: what to parent hierarchy to
     :param sub_ctrls: do you want local sub controls
     :param keep_constraint: do you want to keep connected to the joint or just snapped to
+    :param sub_ctrl_shape_rotation_x: local X rotation baked into sub-control CVs
     :return: each ctrl gets added to a list of results, which then has a dict for each joint in the list
         results.append({
             "joint": jnt,
@@ -1524,14 +1837,24 @@ def create_joint_controls(
             ctrl = create_prism_ctrl(ctrl_name, size=1.0)
         elif control_shape == "circle":
             ctrl = cmds.circle(n=ctrl_name, ch=False, normal=[1, 0, 0], radius=1.5)[0]
+        elif control_shape == "circle_z":
+            # Facial surface joints author local Z as the outward normal, so
+            # this circle lies flat over the skin instead of turning edge-on.
+            ctrl = cmds.circle(n=ctrl_name, ch=False, normal=[0, 0, 1], radius=1.5)[0]
         elif control_shape == "arrow":
             ctrl = create_bi_arrow_ctrl(ctrl_name)
         else:
             cmds.error(f"Unsupported shape: {control_shape}")
+        # Shape constructors may return a root-level absolute DAG path. The
+        # grouping below immediately changes that path, so retain the unique
+        # short build name for all subsequent commands and returned metadata.
+        ctrl = ctrl.rsplit("|", 1)[-1]
         apply_side_color_override(ctrl)
 
         sdk = cmds.group(ctrl, n=sdk_name)
         pad = cmds.group(sdk, n=pad_name)
+        sdk = sdk.rsplit("|", 1)[-1]
+        pad = pad.rsplit("|", 1)[-1]
 
         snap_to_joint_matrix(jnt, pad)
 
@@ -1543,9 +1866,20 @@ def create_joint_controls(
 
         if sub_ctrls:
             sub_ctrl = create_bi_arrow_ctrl(f"{base}_sub_ctrl")
+            sub_ctrl = sub_ctrl.rsplit("|", 1)[-1]
             scale_ctrl_cvs_local(sub_ctrl, [10, 20, 10])
+            if abs(float(sub_ctrl_shape_rotation_x)) > 1.0e-8:
+                # Bake the requested display plane into the curve before any
+                # grouping, snapping, parenting, or constraints.  Doing this
+                # here prevents later build paths from accidentally skipping
+                # or undoing the spine sub-control shape orientation.
+                rotate_ctrl_cvs_object_x(
+                    sub_ctrl, float(sub_ctrl_shape_rotation_x)
+                )
             sub_sdk = cmds.group(sub_ctrl, n=f"{base}_sub_ctrl_sdk")
             sub_pad = cmds.group(sub_sdk, n=f"{base}_sub_ctrl_pad")
+            sub_sdk = sub_sdk.rsplit("|", 1)[-1]
+            sub_pad = sub_pad.rsplit("|", 1)[-1]
 
             snap_to_joint_matrix(jnt, sub_pad)
             cmds.parent(sub_pad, ctrl)
@@ -1630,6 +1964,106 @@ def scale_ctrl_cvs_local(ctrl, scale=(1.0, 1.0, 1.0)):
             cmds.xform(cv, os=True, t=new_pos)
 
 
+def rotate_ctrl_cvs_object_x(ctrl, degrees=90.0):
+    """Rotate a control's shape CVs around its local X axis.
+
+    The transform itself is not rotated, so its zero channels, constraints,
+    and animation behavior remain unchanged.
+    """
+    marker = "tcShapeRotationX"
+    schema_marker = "tcShapeRotationSchema"
+    schema_is_current = (
+        cmds.attributeQuery(schema_marker, node=ctrl, exists=True)
+        and int(cmds.getAttr(f"{ctrl}.{schema_marker}")) >= 1
+    )
+    current = (
+        float(cmds.getAttr(f"{ctrl}.{marker}"))
+        if schema_is_current and cmds.attributeQuery(marker, node=ctrl, exists=True)
+        else 0.0
+    )
+    delta_degrees = float(degrees) - current
+    if abs(delta_degrees) <= 1.0e-8:
+        if not cmds.attributeQuery(schema_marker, node=ctrl, exists=True):
+            cmds.addAttr(ctrl, longName=schema_marker, attributeType="long")
+        cmds.setAttr(f"{ctrl}.{schema_marker}", 1)
+        return
+    shapes = cmds.listRelatives(ctrl, shapes=True, noIntermediate=True) or []
+    radians = math.radians(delta_degrees)
+    cosine = math.cos(radians)
+    sine = math.sin(radians)
+
+    for shape in shapes:
+        if cmds.nodeType(shape) not in ("nurbsCurve", "nurbsSurface"):
+            continue
+        for cv in cmds.ls(f"{shape}.cv[*]", flatten=True) or []:
+            x_value, y_value, z_value = cmds.xform(
+                cv, query=True, objectSpace=True, translation=True
+            )
+            cmds.xform(
+                cv,
+                objectSpace=True,
+                translation=(
+                    x_value,
+                    (y_value * cosine) - (z_value * sine),
+                    (y_value * sine) + (z_value * cosine),
+                ),
+            )
+    if not cmds.attributeQuery(marker, node=ctrl, exists=True):
+        cmds.addAttr(ctrl, longName=marker, attributeType="double")
+    cmds.setAttr(f"{ctrl}.{marker}", float(degrees))
+    if not cmds.attributeQuery(schema_marker, node=ctrl, exists=True):
+        cmds.addAttr(ctrl, longName=schema_marker, attributeType="long")
+    cmds.setAttr(f"{ctrl}.{schema_marker}", 1)
+
+
+def rotate_ctrl_cvs_object_y(ctrl, degrees=90.0):
+    """Rotate a control's shape CVs around local Y without rotating its transform."""
+    marker = "tcShapeRotationY"
+    schema_marker = "tcShapeRotationSchema"
+    schema_is_current = (
+        cmds.attributeQuery(schema_marker, node=ctrl, exists=True)
+        and int(cmds.getAttr(f"{ctrl}.{schema_marker}")) >= 1
+    )
+    current = (
+        float(cmds.getAttr(f"{ctrl}.{marker}"))
+        if schema_is_current and cmds.attributeQuery(marker, node=ctrl, exists=True)
+        else 0.0
+    )
+    delta_degrees = float(degrees) - current
+    if abs(delta_degrees) <= 1.0e-8:
+        if not cmds.attributeQuery(schema_marker, node=ctrl, exists=True):
+            cmds.addAttr(ctrl, longName=schema_marker, attributeType="long")
+        cmds.setAttr(f"{ctrl}.{schema_marker}", 1)
+        return
+    shapes = cmds.listRelatives(ctrl, shapes=True, noIntermediate=True) or []
+    radians = math.radians(delta_degrees)
+    cosine = math.cos(radians)
+    sine = math.sin(radians)
+
+    for shape in shapes:
+        if cmds.nodeType(shape) not in ("nurbsCurve", "nurbsSurface"):
+            continue
+        for cv in cmds.ls(f"{shape}.cv[*]", flatten=True) or []:
+            x_value, y_value, z_value = cmds.xform(
+                cv, query=True, objectSpace=True, translation=True
+            )
+            cmds.xform(
+                cv,
+                objectSpace=True,
+                translation=(
+                    (x_value * cosine) + (z_value * sine),
+                    y_value,
+                    (-x_value * sine) + (z_value * cosine),
+                ),
+            )
+    if not cmds.attributeQuery(marker, node=ctrl, exists=True):
+        cmds.addAttr(ctrl, longName=marker, attributeType="double")
+    cmds.setAttr(f"{ctrl}.{marker}", float(degrees))
+    if not cmds.attributeQuery(schema_marker, node=ctrl, exists=True):
+        cmds.addAttr(ctrl, longName=schema_marker, attributeType="long")
+    cmds.setAttr(f"{ctrl}.{schema_marker}", 1)
+
+
 def get_region_size_from_joints(joints):
     """
         Returns average spatial size of a joint region.
@@ -1702,6 +2136,35 @@ def offset_pv_pad(pad, side, amount=5.0):
 
     z_offset = amount if side == "r" else -amount
     cmds.move(0, 0, z_offset, pad, r=True, os=True)
+
+
+def position_finger_pv_above_knuckle(pad, knuckle_joint, distance=5.0):
+    """Place a finger PV above the knuckle on its signed local-Z axis.
+
+    The project finger frame has local Y pointing sideways. Local Z is the
+    knuckle-up axis; choose its sign against scene up so mirrored hands both
+    place the PV above rather than below the digit.
+    """
+    knuckle_position = om.MVector(*cmds.xform(
+        knuckle_joint, query=True, worldSpace=True, translation=True
+    ))
+    knuckle_matrix = cmds.xform(
+        knuckle_joint, query=True, worldSpace=True, matrix=True
+    )
+    knuckle_up_axis = om.MVector(*knuckle_matrix[8:11])
+    if knuckle_up_axis.length() <= 1.0e-8:
+        knuckle_up_axis = om.MVector(0.0, 1.0, 0.0)
+    knuckle_up_axis.normalize()
+    if knuckle_up_axis * om.MVector(0.0, 1.0, 0.0) < 0.0:
+        knuckle_up_axis *= -1.0
+    position = knuckle_position + knuckle_up_axis * float(distance)
+    cmds.xform(
+        pad,
+        worldSpace=True,
+        translation=(position.x, position.y, position.z),
+        rotation=(0.0, 0.0, 0.0),
+    )
+    return (position.x, position.y, position.z)
 
 
 def normalize(v):
@@ -1930,6 +2393,12 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
     :return: dict mapping eyelid joints to their controls
     """
 
+    is_twist_rig = (
+        "twist" in str(loft_name).lower()
+        or "twist" in str(region).lower()
+        or any("_twist" in str(joint).lower() for joint in joint_chain)
+    )
+
     # Duplicate first joint to append at end
     temp_joint = cmds.duplicate(joint_chain[0], parentOnly=True, name=joint_chain[0] + "_temp")[0]
     cmds.delete(cmds.parentConstraint(joint_chain[0], temp_joint))
@@ -1977,6 +2446,34 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
     if closed_loop_region:
         follicle_joints = follicle_joints[:-1]
 
+    if is_twist_rig:
+        for follicle_joint in follicle_joints:
+            follicle_transform = (
+                cmds.listRelatives(follicle_joint, parent=True, fullPath=True) or []
+            )
+            if not follicle_transform:
+                continue
+            follicle_transform = follicle_transform[0]
+            follicle_shapes = cmds.listRelatives(
+                follicle_transform,
+                shapes=True,
+                type="follicle",
+                fullPath=True,
+            ) or []
+            if not follicle_shapes:
+                continue
+            rotate_value = cmds.getAttr(follicle_transform + ".rotate")[0]
+            rotate_source = follicle_shapes[0] + ".outRotate"
+            rotate_destination = follicle_transform + ".rotate"
+            if cmds.isConnected(rotate_source, rotate_destination):
+                cmds.disconnectAttr(rotate_source, rotate_destination)
+                cmds.setAttr(
+                    rotate_destination,
+                    rotate_value[0],
+                    rotate_value[1],
+                    rotate_value[2],
+                )
+
     # Create controls and aim them at follicle joints
     joint_to_ctrl = {}
     if create_controls:
@@ -2010,7 +2507,7 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                     if c not in aim:
                         cmds.delete(c)
             else:
-                control_shape = "circle"
+                control_shape = "circle_z" if region == "brow" else "circle"
                 local_root_parent = root_parent
                 if region == "mouth":
                     if "upper" in joint:
@@ -2031,7 +2528,14 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                 ctrl_name = ctrl_data[0]['ctrl']
                 ctrl_pad = ctrl_data[0]['pad']
 
-                cmds.parentConstraint(follicle_joints[idx], ctrl_pad, mo=True)
+                if is_twist_rig:
+                    # A follicle's tangent frame can flip 180 degrees on a
+                    # nearly planar ribbon even when every surface CV is
+                    # stationary. Use it only for position; create_twist_driver
+                    # supplies a stable endpoint-interpolated orientation.
+                    cmds.pointConstraint(follicle_joints[idx], ctrl_pad, mo=True)
+                else:
+                    cmds.parentConstraint(follicle_joints[idx], ctrl_pad, mo=True)
 
             joint_to_ctrl[joint] = ctrl_name
 
@@ -2041,26 +2545,34 @@ def setup_surface_rig(joint_chain, loft_name="eyelid", offset=0.5, region="eyeli
                 base_size=1.0,
                 multiplier=1.0
             )
+            if region == "brow":
+                rotate_ctrl_cvs_object_y(ctrl_name, 90.0)
         if region not in ("eyelid", "mouth"):
             ctrl_data = create_joint_controls(
                 joint_list=[joint_chain[-1]],
-                control_shape="circle",
+                control_shape="circle_z" if region == "brow" else "circle",
                 root_parent=root_parent,
                 sub_ctrls=False,
                 keep_constraint=True
             )
             ctrl_name = ctrl_data[0]['ctrl']
             ctrl_pad = ctrl_data[0]['pad']
-            cmds.parentConstraint(follicle_joints[-1], ctrl_pad, mo=True)
+            if is_twist_rig:
+                cmds.pointConstraint(follicle_joints[-1], ctrl_pad, mo=True)
+            else:
+                cmds.parentConstraint(follicle_joints[-1], ctrl_pad, mo=True)
+            joint_to_ctrl[joint_chain[-1]] = ctrl_name
             scale_ctrl_to_region(
                 ctrl_name,
                 follicle_joints,
                 base_size=1.0,
                 multiplier=1.0
             )
+            if region == "brow":
+                rotate_ctrl_cvs_object_y(ctrl_name, 90.0)
 
     # Clean up the temporary joint used for closed loops
-    if closed_loop_region and cmds.objExists(temp_joint):
+    if cmds.objExists(temp_joint):
         try:
             cmds.delete(temp_joint)
         except Exception:
@@ -2308,7 +2820,13 @@ def setup_surface_rig_with_drivers(
 
         child_bone = cmds.listRelatives(driver_bone, c=1)[0]
         parent_transform = cmds.listRelatives(driver_bone, p=1)[0]
-        create_twist_driver(driver_bone, child_bone, parent_transform, loft_surf)
+        create_twist_driver(
+            driver_bone,
+            child_bone,
+            parent_transform,
+            loft_surf,
+            joint_to_ctrl=joint_to_ctrl,
+        )
         return loft_surf, follicle_joints, joint_to_ctrl, {}
 
     for idx in driver_follicle_indices:
@@ -2339,7 +2857,7 @@ def setup_surface_rig_with_drivers(
         if cmds.listRelatives(driver_joint, parent=True):
             driver_joint = cmds.parent(driver_joint, world=True, absolute=True)[0]
 
-        control_shape = "circle"
+        control_shape = "circle_z" if region == "brow" else "circle"
         if region in ("mouth", "center_eyelid"):
             control_shape = "cube"
 
@@ -2725,7 +3243,238 @@ def create_finger_rigs(finger_joints, hand_driver=None):
             else:
                 actual_hand_driver = None
 
-        duplicate_source = fk_chain if finger == "thumb" else fk_chain[1:]
+        # The thumb is an opposable, non-planar chain. An RP solver and pole
+        # vector manufacture a plane and can immediately pull it out of its
+        # authored bind pose. Give it the expected three FK controls plus a
+        # bend-plane-aware RP IK/PV setup, then prove the complete setup did
+        # not move any deformation joint.
+        if finger == "thumb":
+            # HIK exposes only three thumb slots and may map its third slot to
+            # the terminal thumb04 joint, skipping the actual thumb03 hinge.
+            # Reconstruct the authoritative chain from the DAG, then create FK
+            # controls for 01-03 while retaining 04 as the IK endpoint.
+            def _thumb_index(joint):
+                match = re.search(r"_(\d+)$", joint.split("|")[-1])
+                return int(match.group(1)) if match else 999
+
+            thumb_root = min(fk_chain, key=_thumb_index)
+            thumb_deform_chain = [thumb_root]
+            current_thumb = thumb_root
+            while True:
+                children = cmds.listRelatives(
+                    current_thumb,
+                    children=True,
+                    type="joint",
+                    fullPath=False,
+                ) or []
+                children = [
+                    child for child in children
+                    if "thumb" in child.lower()
+                ]
+                if not children:
+                    break
+                current_thumb = min(children, key=_thumb_index)
+                thumb_deform_chain.append(current_thumb)
+            if len(thumb_deform_chain) >= 2:
+                fk_chain = thumb_deform_chain[:-1]
+
+            bind_matrices = {
+                joint: tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, matrix=True
+                ))
+                for joint in thumb_deform_chain
+            }
+            # Duplicate before controls add constraints below the source
+            # hierarchy; otherwise Maya can duplicate those constraint nodes
+            # as if they were thumb-chain transforms.
+            _ik_root, ik_chain = duplicate_static_hierarchy(
+                fk_chain, suffix="ik"
+            )
+            if actual_hand_driver and ik_chain:
+                cmds.parent(ik_chain[0], actual_hand_driver)
+            for ik_joint in ik_chain:
+                cmds.setAttr(f"{ik_joint}.drawStyle", 2)
+
+            fk_ctrls = create_joint_controls(
+                fk_chain,
+                control_shape="cube",
+                root_parent=actual_hand_driver,
+            )
+            for index, joint in enumerate(fk_chain):
+                if joint != fk_chain[-1]:
+                    snap_ctrl_cvs_to_child(
+                        fk_ctrls[index]["ctrl"], fk_chain[index + 1]
+                    )
+                else:
+                    children = cmds.listRelatives(
+                        joint, children=True, type="joint", fullPath=True
+                    ) or []
+                    if children:
+                        snap_ctrl_cvs_to_child(
+                            fk_ctrls[index]["ctrl"], children[0]
+                        )
+
+            ik_handle, _effector = cmds.ikHandle(
+                n=f"{side}_{finger}_ikh" if side else f"{finger}_ikh",
+                sj=ik_chain[0],
+                ee=ik_chain[-1],
+                sol="ikRPsolver",
+            )
+            ik_ctrl_info = create_joint_controls(
+                [ik_handle], control_shape="cube", keep_constraint=False
+            )[0]
+            # Thumb joints intentionally follow the modeled opposition plane,
+            # but that makes their terminal orientation a poor animator frame.
+            # Keep the IK control axes consistent across hands and independent
+            # of the source thumb pose by authoring its pad in world axes.
+            # Do this before parenting the handle so the alignment cannot alter
+            # the solved IK chain or the deformation bind pose.
+            cmds.xform(
+                ik_ctrl_info["pad"],
+                worldSpace=True,
+                rotation=(0.0, 0.0, 0.0),
+            )
+            if actual_hand_driver:
+                cmds.parent(ik_ctrl_info["pad"], actual_hand_driver)
+            cmds.parent(ik_handle, ik_ctrl_info["ctrl"])
+
+            # Build a real thumb pole-vector control from the authored bend
+            # plane. Choose the intermediate joint furthest from the root-tip
+            # line so a subtly offset thumb01 cannot overpower the planar
+            # thumb02-04 hinge chain. This avoids the old fixed world-Z offset
+            # that inverted or twisted thumbs on the mirrored side.
+            start_position = om.MVector(cmds.xform(
+                ik_chain[0], query=True, worldSpace=True, translation=True
+            ))
+            end_position = om.MVector(cmds.xform(
+                ik_chain[-1], query=True, worldSpace=True, translation=True
+            ))
+            thumb_line = end_position - start_position
+            line_length_squared = thumb_line * thumb_line
+            pole_origin = start_position
+            pole_direction = om.MVector()
+            for candidate in ik_chain[1:-1]:
+                candidate_position = om.MVector(cmds.xform(
+                    candidate, query=True, worldSpace=True, translation=True
+                ))
+                if line_length_squared > 1.0e-12:
+                    projection = start_position + thumb_line * (
+                        ((candidate_position - start_position) * thumb_line)
+                        / line_length_squared
+                    )
+                else:
+                    projection = start_position
+                candidate_direction = candidate_position - projection
+                if candidate_direction.length() > pole_direction.length():
+                    pole_origin = projection
+                    pole_direction = candidate_direction
+
+            if pole_direction.length() <= 1.0e-8:
+                # Deterministic fallback for an exactly straight authored
+                # thumb. Use a source-joint axis, projected perpendicular to
+                # the chain, rather than a scene-axis guess.
+                start_matrix = cmds.xform(
+                    ik_chain[0], query=True, worldSpace=True, matrix=True
+                )
+                source_axis = om.MVector(*start_matrix[8:11])
+                if line_length_squared > 1.0e-12:
+                    pole_direction = source_axis - thumb_line * (
+                        (source_axis * thumb_line) / line_length_squared
+                    )
+                else:
+                    pole_direction = source_axis
+                if pole_direction.length() <= 1.0e-8:
+                    pole_direction = om.MVector(0.0, 1.0, 0.0)
+            pole_direction.normalize()
+
+            # Match the established finger-PV spacing. The previous 1.5x
+            # chain-length offset pushed short/opposed thumbs much farther
+            # from the hand than the other digit PVs.
+            pole_distance = 5.0
+            pole_position = pole_origin + pole_direction * pole_distance
+
+            pv_ctrl_info = create_joint_controls(
+                [ik_chain[1]],
+                control_shape="diamond",
+                keep_constraint=False,
+            )[0]
+            cmds.xform(
+                pv_ctrl_info["pad"],
+                worldSpace=True,
+                translation=(
+                    pole_position.x, pole_position.y, pole_position.z
+                ),
+                rotation=(0.0, 0.0, 0.0),
+            )
+            if actual_hand_driver:
+                cmds.parent(pv_ctrl_info["pad"], actual_hand_driver)
+            pv_constraint = cmds.poleVectorConstraint(
+                pv_ctrl_info["ctrl"], ik_handle
+            )[0]
+
+            # Give the thumb PV the same IK/local/composite space behavior as
+            # every other finger PV instead of leaving it directly parented.
+            finger_pv_space = create_composite_space(
+                name=pv_ctrl_info["pad"] + "_space",
+                parents=[ik_ctrl_info["ctrl"], actual_hand_driver],
+                match_to=pv_ctrl_info["ctrl"],
+                parent_node=actual_hand_driver,
+            )
+            create_space_switch(
+                driven=pv_ctrl_info["ctrl"],
+                targets=[
+                    ik_ctrl_info["ctrl"],
+                    actual_hand_driver,
+                    finger_pv_space,
+                ],
+                attr_name="space",
+                constraint_type="parent",
+            )
+
+            thumb_ik_constraints = []
+            for ik_joint in ik_chain:
+                fk_joint = ik_joint.replace("_ik", "")
+                pad = f"{fk_joint}_ctrl_pad"
+                if not cmds.objExists(pad):
+                    continue
+                # The SC solver may choose a different internal Euler solution
+                # when its handle is created. Maintain the bind-space offset
+                # instead of copying those absolute channels into an already
+                # snapped FK pad.
+                thumb_ik_constraints.append(cmds.parentConstraint(
+                    ik_joint, pad, maintainOffset=True
+                )[0])
+
+            maximum_bind_error = max(
+                abs(after - before)
+                for joint in thumb_deform_chain
+                for before, after in zip(
+                    bind_matrices[joint],
+                    cmds.xform(joint, query=True, worldSpace=True, matrix=True),
+                )
+            )
+            if maximum_bind_error > 1.0e-5:
+                raise RuntimeError(
+                    "Thumb FK control build changed the bind pose for {}: {}".format(
+                        side, maximum_bind_error
+                    )
+                )
+            fingers[f"{side}_{finger}" if side else finger] = {
+                "fk_chain": fk_chain,
+                "ik_chain": ik_chain,
+                "ik_handle": ik_handle,
+                "ik_ctrl": ik_ctrl_info["ctrl"],
+                "pv_ctrl": pv_ctrl_info["ctrl"],
+                "pv_constraint": pv_constraint,
+                "ik_constraints": thumb_ik_constraints,
+                "fk_ctrls": fk_ctrls,
+                "joints": thumb_deform_chain,
+                "bind_pose_preserved": True,
+                "maximum_bind_matrix_error": maximum_bind_error,
+            }
+            continue
+
+        duplicate_source = fk_chain[1:]
         ik_root, ik_chain = duplicate_static_hierarchy(duplicate_source, suffix="ik")
 
         if actual_hand_driver and ik_chain:
@@ -2766,9 +3515,21 @@ def create_finger_rigs(finger_joints, hand_driver=None):
         for c in cmds.listRelatives(pv_joint, type="constraint") or []:
             cmds.delete(c)
         pv_pad = pv_ctrl_info['pad']
-        cmds.xform(pv_ctrl, ws=True, t=cmds.xform(pv_joint, q=True, ws=True, t=True))
+        pv_joint_position = cmds.xform(
+            pv_joint, query=True, worldSpace=True, translation=True
+        )
 
-        offset_pv_pad(pv_pad, side, amount=-5.0)
+        # Align and position the pad in one operation. Rotating the pad after
+        # positioning its child control changes that child's world position,
+        # which pushed the non-thumb PVs away from their fingers at build time.
+        cmds.xform(
+            pv_pad,
+            worldSpace=True,
+            translation=pv_joint_position,
+            rotation=(0.0, 0.0, 0.0),
+        )
+
+        position_finger_pv_above_knuckle(pv_pad, pv_joint, distance=5.0)
 
         start_joint = ik_chain[0]
         ikh_name = f"{side}_{finger}_ikh" if side else f"{finger}_ikh"
@@ -3215,16 +3976,50 @@ def store_all_control_cv_positions(store_node=MODULE_STORE_NODE):
     attr = "controlCvPositions"
     if not cmds.attributeQuery(attr, node=store_node, exists=True):
         cmds.addAttr(store_node, ln=attr, dt="string")
+    rotation_attr = "controlCvShapeRotations"
+    if not cmds.attributeQuery(rotation_attr, node=store_node, exists=True):
+        cmds.addAttr(store_node, ln=rotation_attr, dt="string")
 
     ctrls = cmds.ls("*_ctrl", type="transform") or []
     data = {}
+    rotations = {}
 
     for ctrl in ctrls:
         cv_data = get_ctrl_shape_cvs(ctrl)
         if cv_data:
             data[ctrl] = cv_data
+            schema = (
+                int(cmds.getAttr(f"{ctrl}.tcShapeRotationSchema"))
+                if cmds.attributeQuery(
+                    "tcShapeRotationSchema", node=ctrl, exists=True
+                )
+                else 0
+            )
+            # Markers from older builds could survive even after the UI's CV
+            # restore replaced their geometry. Only schema-validated markers
+            # describe the actual stored CV orientation.
+            rotations[ctrl] = {
+                "schema": schema,
+                "x": (
+                    float(cmds.getAttr(f"{ctrl}.tcShapeRotationX"))
+                    if schema >= 1 and cmds.attributeQuery(
+                        "tcShapeRotationX", node=ctrl, exists=True
+                    )
+                    else 0.0
+                ),
+                "y": (
+                    float(cmds.getAttr(f"{ctrl}.tcShapeRotationY"))
+                    if schema >= 1 and cmds.attributeQuery(
+                        "tcShapeRotationY", node=ctrl, exists=True
+                    )
+                    else 0.0
+                ),
+            }
 
     cmds.setAttr(f"{store_node}.{attr}", json.dumps(data), type="string")
+    cmds.setAttr(
+        f"{store_node}.{rotation_attr}", json.dumps(rotations), type="string"
+    )
     print(f"[CV Store] Stored CVs for {len(data)} controls.")
     return data
 
@@ -3246,11 +4041,35 @@ def restore_all_control_cv_positions(store_node=MODULE_STORE_NODE):
         return {}
 
     data = json.loads(raw)
+    rotation_attr = f"{store_node}.controlCvShapeRotations"
+    rotation_data = {}
+    if cmds.objExists(rotation_attr):
+        rotation_raw = cmds.getAttr(rotation_attr)
+        if rotation_raw:
+            rotation_data = json.loads(rotation_raw)
     restored = {}
 
     for ctrl, shape_map in data.items():
         if not cmds.objExists(ctrl):
             continue
+
+        desired_schema = (
+            int(cmds.getAttr(f"{ctrl}.tcShapeRotationSchema"))
+            if cmds.attributeQuery("tcShapeRotationSchema", node=ctrl, exists=True)
+            else 0
+        )
+        desired_x = (
+            float(cmds.getAttr(f"{ctrl}.tcShapeRotationX"))
+            if desired_schema >= 1
+            and cmds.attributeQuery("tcShapeRotationX", node=ctrl, exists=True)
+            else 0.0
+        )
+        desired_y = (
+            float(cmds.getAttr(f"{ctrl}.tcShapeRotationY"))
+            if desired_schema >= 1
+            and cmds.attributeQuery("tcShapeRotationY", node=ctrl, exists=True)
+            else 0.0
+        )
 
         shapes = cmds.listRelatives(ctrl, s=True, ni=True, fullPath=True) or []
         current_shapes = {
@@ -3277,6 +4096,36 @@ def restore_all_control_cv_positions(store_node=MODULE_STORE_NODE):
                 cmds.xform(cv, os=True, t=pos)
 
             restored.setdefault(ctrl, []).append(shape_name)
+
+        if ctrl not in restored:
+            continue
+
+        stored_rotation = rotation_data.get(ctrl) or {}
+        stored_schema = int(stored_rotation.get("schema", 0))
+        stored_x = float(stored_rotation.get("x", 0.0)) if stored_schema >= 1 else 0.0
+        stored_y = float(stored_rotation.get("y", 0.0)) if stored_schema >= 1 else 0.0
+        for marker, value in (
+            ("tcShapeRotationX", stored_x),
+            ("tcShapeRotationY", stored_y),
+        ):
+            if not cmds.attributeQuery(marker, node=ctrl, exists=True):
+                cmds.addAttr(ctrl, longName=marker, attributeType="double")
+            cmds.setAttr(f"{ctrl}.{marker}", value)
+        if not cmds.attributeQuery(
+            "tcShapeRotationSchema", node=ctrl, exists=True
+        ):
+            cmds.addAttr(
+                ctrl, longName="tcShapeRotationSchema", attributeType="long"
+            )
+        cmds.setAttr(f"{ctrl}.tcShapeRotationSchema", stored_schema)
+
+        # Reapply any newer build-standard orientation after restoring the
+        # artist's saved CV shape. This is the ordering fix that keeps the
+        # spine X90 and brow Y90 standards from being overwritten by rebuild.
+        if abs(desired_x - stored_x) > 1.0e-8:
+            rotate_ctrl_cvs_object_x(ctrl, desired_x)
+        if abs(desired_y - stored_y) > 1.0e-8:
+            rotate_ctrl_cvs_object_y(ctrl, desired_y)
 
     return restored
 
@@ -3604,6 +4453,12 @@ def create_arm_space_switches(side, body_joint_map=None):
                 attr_name="space",
                 enum_names=enum_names
             )
+            # A pole vector left in World space gains a vertical bias as soon
+            # as the hand target changes height. Default arms to the existing
+            # hand/clavicle composite so the PV follows the limb midpoint and
+            # preserves a clean front/back elbow plane.
+            if hand_clav_space in pv_targets:
+                cmds.setAttr(f"{arm_pv_ctrl}.space", pv_targets.index(hand_clav_space))
 
     # FK Upperarm space switch
     fk_upper = side + '_upperarm_fk_ctrl'
@@ -4007,7 +4862,8 @@ def setup_jaw_lip_driver(jaw_ctrl, lip_driver_ctrls, lip_ctrl_dict, head_ctrl="h
 def create_twist_driver(driver_bone="l_thigh_driver",
                         child_bone="l_knee_driver",
                         parent="hipswing_ctrl",
-                        surface="l_thigh_surface"):
+                        surface="l_thigh_surface",
+                        joint_to_ctrl=None):
     """
     Creates a twist driver setup for a limb segment.
 
@@ -4048,26 +4904,24 @@ def create_twist_driver(driver_bone="l_thigh_driver",
         if not current_parent or current_parent[0] != desired_parent:
             twist_bone = cmds.parent(twist_bone, desired_parent, absolute=True)[0]
 
-    world_up_object = parent
-    if "lower" in driver_bone or "knee" in driver_bone:
-        world_up_object = child_bone
     cmds.pointConstraint(child_bone, twist_bone, mo=False)
 
-    x_val = 1
-    if "knee" in driver_bone and driver_bone[0] == "l":
-        x_val = -1
-
-    if "thigh" in driver_bone:
-        wuv = (1, 0, 0)
-    else:
-        wuv = (0, 1, 0)
+    # The endpoint twist joint sits on the child and aims back toward the
+    # segment root. Derive the signed aim axis from the actual mirrored child
+    # offset instead of hard-coding side/name combinations.
+    child_tx = cmds.getAttr(child_bone + ".translateX")
+    x_val = -1.0 if child_tx >= 0.0 else 1.0
 
     cmds.aimConstraint(driver_bone, twist_bone,
                        aimVector=(x_val, 0, 0),
                        upVector=(0, 1, 0),
                        worldUpType="objectrotation",
-                       worldUpObject=world_up_object,
-                       worldUpVector=wuv,
+                       worldUpObject=driver_bone,
+                       worldUpVector=(0, 1, 0),
+                       # Preserve the duplicated endpoint joint's authored
+                       # frame. With mo=False Maya solves a new roll at build
+                       # time; the endpoint can stay in place while its skin
+                       # rotation moves the ribbon CVs and all follicles.
                        mo=True)
 
     if surface and cmds.objExists(surface):
@@ -4081,16 +4935,31 @@ def create_twist_driver(driver_bone="l_thigh_driver",
         )
 
         num_cvs = 4
+        driver_position = om.MVector(*cmds.xform(driver_bone, q=True, ws=True, rp=True))
+        twist_position = om.MVector(*cmds.xform(twist_bone, q=True, ws=True, rp=True))
+        segment = twist_position - driver_position
+        segment_length_squared = segment * segment
 
         for i in range(num_cvs):
-            # Proper string formatting for i
             cvs = cmds.ls(f"{surface}.cv[0:3][{i}]", flatten=True)
-            if 'lowerarm' not in driver_bone:
-                weight_twist = 1.0 - (i / float(num_cvs - 1))
-                weight_driver = 1.0 - weight_twist
+            if not cvs:
+                continue
+
+            # Loft parameter direction is not consistent across mirrored limbs
+            # (and has historically differed for forearms). Determine each
+            # row's blend from its actual position along the segment instead of
+            # relying on a name or CV index. This keeps the ribbon attached to
+            # the correct endpoint in both FK and IK.
+            row_position = om.MVector()
+            for cv in cvs:
+                row_position += om.MVector(*cmds.pointPosition(cv, world=True))
+            row_position /= float(len(cvs))
+            if segment_length_squared > 1e-12:
+                weight_twist = ((row_position - driver_position) * segment) / segment_length_squared
+                weight_twist = max(0.0, min(1.0, weight_twist))
             else:
-                weight_driver = 1.0 - (i / float(num_cvs - 1))
-                weight_twist = 1.0 - weight_driver
+                weight_twist = i / float(num_cvs - 1)
+            weight_driver = 1.0 - weight_twist
 
             for cv in cvs:
                 cmds.skinPercent(
@@ -4101,5 +4970,37 @@ def create_twist_driver(driver_bone="l_thigh_driver",
                         (driver_bone, weight_driver)
                     ]
                 )
+
+        # Follicle positions remain an excellent surface sample, but follicle
+        # rotations can discontinuously flip when the ribbon tangent is nearly
+        # degenerate. Orient twist pads by interpolating the two stable endpoint
+        # drivers instead. The maintained offset preserves each authored twist
+        # joint frame at build time.
+        for joint, ctrl in (joint_to_ctrl or {}).items():
+            sdk = ctrl + "_sdk_pad"
+            if not cmds.objExists(joint) or not cmds.objExists(sdk):
+                continue
+            joint_position = om.MVector(*cmds.xform(joint, q=True, ws=True, rp=True))
+            if segment_length_squared > 1e-12:
+                twist_weight = ((joint_position - driver_position) * segment) / segment_length_squared
+                twist_weight = max(0.0, min(1.0, twist_weight))
+            else:
+                twist_weight = 0.0
+            orient_constraint = cmds.orientConstraint(
+                driver_bone,
+                twist_bone,
+                sdk,
+                mo=True,
+                name=sdk + "_twistOrientConstraint",
+            )[0]
+            cmds.setAttr(orient_constraint + ".interpType", 2)
+            aliases = cmds.orientConstraint(
+                orient_constraint,
+                query=True,
+                weightAliasList=True,
+            ) or []
+            if len(aliases) >= 2:
+                cmds.setAttr(orient_constraint + "." + aliases[0], 1.0 - twist_weight)
+                cmds.setAttr(orient_constraint + "." + aliases[1], twist_weight)
 
     return twist_bone

@@ -71,7 +71,7 @@ These cannot be completed safely in the public client repository:
 - Configure real HTTPS endpoints and run `release_gate.py --production`.
 - Provision the Authenticode certificate and complete a clean-machine signed
   installer/uninstaller test on supported Windows versions.
-- Keep the repository-root README, LICENSE, and GitHub workflow checks installed
+- Keep the repository-root README, LICENSE.md, and GitHub workflow checks installed
   in the public monorepo, without private services, signing material, production
   credentials, or security-sensitive deployment components.
 - Establish monitoring, backups, rate limits, abuse controls, incident response,

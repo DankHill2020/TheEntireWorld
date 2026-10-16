@@ -103,6 +103,7 @@ from tech_connector.ui.icons import configure_button
 from tech_connector.ui.dcc_viewer.scene_document_lifecycle import SceneDocumentLifecycle
 from tech_connector.ui.dcc_viewer.scene_document_controller import finalize_adaptive_command
 from tech_connector.ui.dcc_viewer.component_picker import (
+    ComponentScreenIndex,
     edges_in_rectangle,
     faces_in_rectangle,
     nearest_edge,
@@ -237,6 +238,10 @@ class ThreeDMeshPainterViewportMixin01:
         self.active_transform_axis = ""
         self.hover_transform_axis = ""
         self.transform_orientation_mode = "world"
+        self.transform_pivot_mode = "object"
+        self.transform_pivot_custom_shared = None
+        self.pivot_edit_mode = False
+        self._transient_snap_target = ""
         self.is_resizing_brush = False
         self.is_b_key_held = False
         self._suppress_next_context_menu = False
@@ -264,6 +269,7 @@ class ThreeDMeshPainterViewportMixin01:
         self.drive_dcc_time_enabled = True
         self.viewport_mode = "Selection"
         self.live_refresh_interval_ms = 2500
+        self.live_interactive_refresh_interval_ms = 83
         self.timeline_refresh_interval_ms = 42
         self.resolved_shaded_refresh_interval_ms = 650
         self.camera_drive_interval_ms = 33
@@ -487,7 +493,7 @@ class ThreeDMeshPainterViewportMixin01:
         if str(getattr(self, "viewport_display_source", "") or "").lower() == "dcc":
             QTimer.singleShot(0, lambda: self.start_dcc_viewport_stream(self.active_dcc_view_provider))
         if bool(getattr(self, "live_dcc_refresh_btn", None) and self.live_dcc_refresh_btn.isChecked()):
-            self.live_refresh_timer.setInterval(int(getattr(self, "timeline_refresh_interval_ms", 42) or 42))
+            self.live_refresh_timer.setInterval(int(getattr(self, "live_interactive_refresh_interval_ms", 83) or 83))
             self.live_refresh_timer.start()
         if getattr(self, "drive_dcc_camera_enabled", False):
             QTimer.singleShot(0, lambda: self.schedule_dcc_camera_drive("viewer shown"))
@@ -1673,6 +1679,8 @@ class ThreeDMeshPainterViewportMixin01:
         modeling_menu.addAction("Select Faces By Index...", self.prompt_mesh_face_selection)
         modeling_menu.addAction("Select Vertices By Index...", self.prompt_mesh_vertex_selection)
         modeling_menu.addAction("Select Edges By Vertex Pair...", self.prompt_mesh_edge_selection)
+        modeling_menu.addAction("Grow Component Selection", self.grow_mesh_component_selection)
+        modeling_menu.addAction("Shrink Component Selection", self.shrink_mesh_component_selection)
         pose_menu = modeling_menu.addMenu("Default Pose")
         pose_menu.addAction(
             "Restore Default Shape",
@@ -1685,6 +1693,7 @@ class ThreeDMeshPainterViewportMixin01:
         modeling_menu.addSeparator()
         modeling_menu.addAction("Insert Edge Loop...", self.prompt_split_selected_edge_loop)
         modeling_menu.addAction("Bevel Selected Edges...", self.prompt_bevel_selected_edges)
+        modeling_menu.addAction("Bridge Two Selected Edge Loops", self.prompt_bridge_selected_edge_loops)
         modeling_menu.addSeparator()
         modeling_menu.addAction("Generate Mesh LODs...", self.prompt_generate_mesh_lods)
         modeling_menu.addAction("Compile Point Runtime Proxy...", lambda: self.prompt_compile_runtime_geometry("point"))
@@ -1874,13 +1883,15 @@ class ThreeDMeshPainterViewportMixin01:
             world_layout_menu.addAction(label, lambda _checked=False, value=layout: self.set_viewer_world_layout(value))
         environment_menu = look_menu.addMenu("Environment")
         lighting_profile_menu = environment_menu.addMenu(f"{HEPHAESTUS_SECTION_HELIOS} Profile")
-        from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profiles
-        for profile in lighting_profiles():
-            action = lighting_profile_menu.addAction(profile.display_name)
-            action.setToolTip(profile.description)
-            action.triggered.connect(
-                lambda _checked=False, value=profile.profile_id: self.set_viewport_lighting_profile(value)
-            )
+        from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profile_groups
+        for category, profiles in lighting_profile_groups():
+            category_menu = lighting_profile_menu.addMenu(category)
+            for profile in profiles:
+                action = category_menu.addAction(profile.display_name)
+                action.setToolTip(profile.description)
+                action.triggered.connect(
+                    lambda _checked=False, value=profile.profile_id: self.set_viewport_lighting_profile(value)
+                )
         environment_menu.addSeparator()
         environment_menu.addAction("Load HDRI / Environment...", self.choose_viewport_environment)
         environment_menu.addAction("Clear Environment", self.clear_viewport_environment)
@@ -2016,6 +2027,17 @@ class ThreeDMeshPainterViewportMixin01:
         self.transform_orientation_combo.addItems(["World", "Object", "Parent"])
         self.transform_orientation_combo.currentTextChanged.connect(self.change_transform_orientation_mode)
         paint_hdr.addWidget(self.transform_orientation_combo)
+
+        self.transform_pivot_combo = QComboBox()
+        self.transform_pivot_combo.setToolTip("Transform pivot: object origin, selection center, world origin, or an edited custom pivot (D / Insert).")
+        self.transform_pivot_combo.addItems(["Object Pivot", "Selection Center", "World Origin", "Custom Pivot"])
+        self.transform_pivot_combo.currentTextChanged.connect(self.configure_transform_pivot)
+        paint_hdr.addWidget(self.transform_pivot_combo)
+        self.transform_snap_target_combo = QComboBox()
+        self.transform_snap_target_combo.setToolTip("Snap target. Maya: hold X for Grid or V for Point. Blender: hold Ctrl for incremental snapping.")
+        self.transform_snap_target_combo.addItems(["Snap: Off", "Snap: Increment", "Snap: Grid", "Snap: Point / Pivot"])
+        self.transform_snap_target_combo.currentTextChanged.connect(self.change_transform_snap_target)
+        paint_hdr.addWidget(self.transform_snap_target_combo)
 
         # Medium Preset Dropdown
         self.medium_combo = QComboBox()
@@ -2274,6 +2296,32 @@ class ThreeDMeshPainterViewportMixin01:
         self.clear_syncsketch_markup_shortcut.activated.connect(self.clear_all_syncsketch_markups)
         self.key_selected_shortcut = QShortcut(QKeySequence("K"), self)
         self.key_selected_shortcut.activated.connect(self.key_selected_rig_controls)
+        self._standard_viewport_shortcuts = []
+
+        def bind_viewport_shortcut(sequence, callback) -> None:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(callback)
+            self._standard_viewport_shortcuts.append(shortcut)
+
+        def save_scene() -> None:
+            path = str(getattr(self, "_federated_scene_path", "") or "")
+            self._save_federated_scene_to_path(path) if path else self.save_federated_scene_dialog()
+
+        def rename_actor() -> None:
+            proxy = getattr(self, "_selected_scene_proxy", None)
+            if not isinstance(proxy, (dict, SceneProxyInstance)) or str(proxy.get("provider_id") or "") != "tech_connector":
+                return
+            value, accepted = QInputDialog.getText(
+                self, "Rename Actor", "Name", text=str(proxy.get("name") or "Actor")
+            )
+            if accepted and value.strip():
+                self.rename_selected_level_actor(value)
+
+        bind_viewport_shortcut(QKeySequence.Save, save_scene)
+        bind_viewport_shortcut("Ctrl+D", self.duplicate_selected_level_actors)
+        bind_viewport_shortcut(QKeySequence.Delete, self.delete_selected_level_actors)
+        bind_viewport_shortcut("F2", rename_actor)
         self.refresh_palette_swatches()
         QTimer.singleShot(0, lambda: self.sync_gpu_viewport(full=True))
 
@@ -2307,7 +2355,9 @@ class ThreeDMeshPainterViewportMixin01:
             if not control.accessibleDescription() and control.toolTip():
                 control.setAccessibleDescription(control.toolTip())
         self.gizmo_mode_combo.setAccessibleDescription(
-            "Choose object, paint, transform, vertex, edge, or face interaction. Keyboard shortcuts are Q, P, W, E, R, F8, F9, and F10."
+            "Choose object, paint, transform, vertex, edge, or face interaction. Shortcuts: Q Select, P Paint, "
+            "W Move, E Rotate, R Scale, F Frame, H Hide, Shift+H Isolate, Ctrl+H Show All, "
+            "F8 Vertex, F9 Edge, F10 Face, Ctrl+D Duplicate, F2 Rename, Delete Remove."
         )
         tab_controls = [
             getattr(self, name, None) for name in (
@@ -2492,6 +2542,19 @@ class ThreeDMeshPainterViewportMixin01:
             raycast_vertices.append((screen_x, screen_y, projected_depth, *display_point, 0.0, 0.0))
             projected_vertices.append((screen_x, screen_y, raw_depth))
         result = (topology, raycast_vertices, projected_vertices, camera)
+        triangles: list[tuple[int, int, int]] = []
+        triangle_to_face: list[int] = []
+        for face_index, face in enumerate(topology.faces):
+            for offset in range(1, len(face) - 1):
+                triangles.append((int(face[0]), int(face[offset]), int(face[offset + 1])))
+                triangle_to_face.append(face_index)
+        self._component_face_raycaster = _ProjectedMeshRaycaster(raycast_vertices, triangles)
+        self._component_triangle_to_face = triangle_to_face
+        self._component_screen_index = ComponentScreenIndex(
+            projected_vertices,
+            unique_polygon_edges(topology.faces),
+            near_clip=camera.near_clip,
+        )
         self._component_projection_cache_key = cache_key
         self._component_projection_cache = result
         return result
@@ -2515,11 +2578,13 @@ class ThreeDMeshPainterViewportMixin01:
 
         selected_component: Any = None
         if mode == "Vertex":
-            selected_component = nearest_vertex_index(
+            index = getattr(self, "_component_screen_index", None)
+            selected_component = index.nearest_vertex(position.x(), position.y()) if index is not None else nearest_vertex_index(
                 projected_vertices, position.x(), position.y(), near_clip=camera.near_clip,
             )
         elif mode == "Edge":
-            selected_component = nearest_edge(
+            index = getattr(self, "_component_screen_index", None)
+            selected_component = index.nearest_edge(position.x(), position.y()) if index is not None else nearest_edge(
                 projected_vertices,
                 unique_polygon_edges(topology.faces),
                 position.x(),
@@ -2527,15 +2592,11 @@ class ThreeDMeshPainterViewportMixin01:
                 near_clip=camera.near_clip,
             )
         else:
-            triangles: list[tuple[int, int, int]] = []
-            triangle_to_face: list[int] = []
-            for face_index, face in enumerate(topology.faces):
-                for offset in range(1, len(face) - 1):
-                    triangles.append((int(face[0]), int(face[offset]), int(face[offset + 1])))
-                    triangle_to_face.append(face_index)
-            triangle_index = _ProjectedMeshRaycaster(raycast_vertices, triangles).face_indices_at(
+            raycaster = getattr(self, "_component_face_raycaster", None)
+            triangle_to_face = getattr(self, "_component_triangle_to_face", ())
+            triangle_index = raycaster.face_indices_at(
                 [(position.x(), position.y())], tolerance=0.02,
-            )[0]
+            )[0] if raycaster is not None else None
             if triangle_index is not None:
                 selected_component = triangle_to_face[triangle_index]
 
@@ -2598,6 +2659,81 @@ class ThreeDMeshPainterViewportMixin01:
         else:
             selection.update(range(len(topology.faces)))
         self._resolved_shaded_status = f"Selected all {len(selection)} mesh {mode.casefold()} components."
+        self.update_viewport_status()
+        self.canvas.update()
+        return set(selection)
+
+    def grow_mesh_component_selection(self) -> set:
+        """Expand the active polygon-component selection by one adjacency step."""
+        mode = str(getattr(self, "viewport_mode", "Selection") or "Selection")
+        if mode not in {"Vertex", "Edge", "Face"}:
+            return set()
+        topology, _colors, _proxies = self._canonical_mesh_topology()
+        all_edges = set(unique_polygon_edges(topology.faces))
+        selection = self._component_selection_for_mode(mode)
+        if mode == "Vertex":
+            adjacent = {
+                other
+                for first, second in all_edges
+                for vertex, other in ((first, second), (second, first))
+                if vertex in selection
+            }
+        elif mode == "Edge":
+            vertices = {vertex for edge in selection for vertex in edge}
+            adjacent = {edge for edge in all_edges if vertices.intersection(edge)}
+        else:
+            selected_edges = {
+                edge
+                for index in selection
+                for edge in unique_polygon_edges((topology.faces[index],))
+            }
+            adjacent = {
+                index
+                for index, face in enumerate(topology.faces)
+                if selected_edges.intersection(unique_polygon_edges((face,)))
+            }
+        selection.update(adjacent)
+        self._resolved_shaded_status = f"Grew {mode.casefold()} selection to {len(selection)} component(s)."
+        self.update_viewport_status()
+        self.canvas.update()
+        return set(selection)
+
+    def shrink_mesh_component_selection(self) -> set:
+        """Remove the one-ring boundary from the active component selection."""
+        mode = str(getattr(self, "viewport_mode", "Selection") or "Selection")
+        if mode not in {"Vertex", "Edge", "Face"}:
+            return set()
+        topology, _colors, _proxies = self._canonical_mesh_topology()
+        all_edges = set(unique_polygon_edges(topology.faces))
+        selection = self._component_selection_for_mode(mode)
+        if mode == "Vertex":
+            boundary = {
+                selected
+                for first, second in all_edges
+                for selected, other in ((first, second), (second, first))
+                if selected in selection and other not in selection
+            }
+        elif mode == "Edge":
+            selected_vertices = {vertex for edge in selection for vertex in edge}
+            boundary_vertices = {
+                vertex
+                for edge in all_edges - set(selection)
+                for vertex in edge
+                if vertex in selected_vertices
+            }
+            boundary = {edge for edge in selection if boundary_vertices.intersection(edge)}
+        else:
+            edge_faces: dict[tuple[int, int], set[int]] = {}
+            for index, face in enumerate(topology.faces):
+                for edge in unique_polygon_edges((face,)):
+                    edge_faces.setdefault(edge, set()).add(index)
+            boundary = {
+                index
+                for index in selection
+                if any(neighbors - selection for edge, neighbors in edge_faces.items() if index in neighbors)
+            }
+        selection.difference_update(boundary)
+        self._resolved_shaded_status = f"Shrank {mode.casefold()} selection to {len(selection)} component(s)."
         self.update_viewport_status()
         self.canvas.update()
         return set(selection)
@@ -2667,6 +2803,62 @@ class ThreeDMeshPainterViewportMixin01:
                 "modeling.bevel_edges",
                 {"edges": [list(edge) for edge in sorted(self.selected_mesh_edges)], "width": float(width)},
             )
+
+    def prompt_bridge_selected_edge_loops(self) -> None:
+        """Bridge two closed, equally sized loops from the current edge selection."""
+        remaining = {tuple(sorted(edge)) for edge in self.selected_mesh_edges}
+        components: list[set[tuple[int, int]]] = []
+        while remaining:
+            component = {remaining.pop()}
+            vertices = set(next(iter(component)))
+            changed = True
+            while changed:
+                changed = False
+                for edge in list(remaining):
+                    if vertices.intersection(edge):
+                        remaining.remove(edge)
+                        component.add(edge)
+                        vertices.update(edge)
+                        changed = True
+            components.append(component)
+        if len(components) != 2:
+            QMessageBox.warning(self, "Bridge Edge Loops", "Select exactly two separate closed edge loops.")
+            return
+
+        def ordered_loop(edges: set[tuple[int, int]]) -> list[int]:
+            graph: dict[int, list[int]] = {}
+            for first, second in edges:
+                graph.setdefault(first, []).append(second)
+                graph.setdefault(second, []).append(first)
+            if len(graph) < 3 or any(len(neighbors) != 2 for neighbors in graph.values()):
+                raise ValueError("Each bridge selection must be one closed, non-branching edge loop.")
+            start = min(graph)
+            ordered = [start]
+            previous = None
+            current = start
+            while True:
+                candidates = sorted(value for value in graph[current] if value != previous)
+                following = candidates[0]
+                if following == start:
+                    break
+                if following in ordered:
+                    raise ValueError("The selected edge loop crosses or branches.")
+                ordered.append(following)
+                previous, current = current, following
+            if len(ordered) != len(graph):
+                raise ValueError("The selected edges do not form one complete loop.")
+            return ordered
+
+        try:
+            loops = [ordered_loop(component) for component in components]
+            if len(loops[0]) != len(loops[1]):
+                raise ValueError("Bridge loops must contain the same number of vertices.")
+            self.run_modeling_command_from_ui(
+                "modeling.bridge_edge_loops",
+                {"first_loop": loops[0], "second_loop": loops[1]},
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Bridge Edge Loops", str(exc))
 
     def prompt_generate_mesh_lods(self) -> None:
         native_model = getattr(self, "_native_scene_model", None)

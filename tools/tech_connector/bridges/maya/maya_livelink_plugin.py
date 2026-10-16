@@ -9,7 +9,7 @@ import re
 import tempfile
 from typing import Iterable
 
-BOOTSTRAP_VERSION = "3"
+BOOTSTRAP_VERSION = "4"
 BLOCK_BEGIN = "# BEGIN Tech Connector Maya Bridge (managed)"
 BLOCK_END = "# END Tech Connector Maya Bridge (managed)"
 
@@ -41,7 +41,7 @@ def _init_tech_connector_livelink():
 cmds.evalDeferred(_init_tech_connector_livelink)
 """
 
-MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Authenticated JSON Bridge Startup Script v3
+MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Authenticated JSON Bridge Startup Script v4
 import maya.cmds as cmds
 
 TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "3"
@@ -53,7 +53,7 @@ def _init_tech_connector_maya_bridge():
         from maya_tools import maya_menu
         opened_port = maya_menu.initialize_command_port()
         if not opened_port:
-            cmds.warning("[Tech Connector] Activate Tech Connector before starting the authenticated Maya bridge.")
+            cmds.warning("[Tech Connector] Authenticated Maya bridge listener could not be started.")
     except Exception:
         cmds.warning("[Tech Connector] Authenticated Maya bridge could not be started.")
 

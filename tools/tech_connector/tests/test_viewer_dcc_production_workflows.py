@@ -77,6 +77,10 @@ def test_viewer_parses_selected_session_and_returns_workflow_receipt(monkeypatch
 
     def execute(*args, **kwargs):
         calls.append((args, kwargs))
+        kwargs["progress_callback"]({
+            "event": "step_completed", "label": "Plot animation",
+            "operation": "character.plot_animation", "progress_percent": 60.0,
+        })
         return receipt
 
     monkeypatch.setattr(workflows, "execute_dcc_workflow", execute)
@@ -95,6 +99,7 @@ def test_viewer_parses_selected_session_and_returns_workflow_receipt(monkeypatch
     assert calls[0][1]["session_port"] == 7014
     assert calls[0][1]["confirm_mutating"] is True
     assert result["dcc_workflow_receipt"]["status"] == "verified"
+    assert result["dcc_workflow_events"][0]["progress_percent"] == 60.0
 
 
 def test_viewer_workflow_audit_loads_persisted_workflow_receipts(monkeypatch, tmp_path) -> None:

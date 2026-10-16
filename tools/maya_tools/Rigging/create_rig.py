@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from maya_tools.Rigging import create_rig_core as _core
+from maya_tools.Rigging.undo_utils import undoable
+from maya_tools.Rigging.temp_cleanup import cleanup_temp_bones, delete_temp_bones
 from maya_tools.Rigging.create_rig_core import (
     GLOBAL_RIG_STORE,
     MODULE_STORE_NODE,
@@ -55,6 +57,8 @@ from maya_tools.Rigging.create_rig_core import (
     os,
     re,
     restore_all_control_cv_positions,
+    rotate_ctrl_cvs_object_x,
+    rotate_ctrl_cvs_object_y,
     scale_ctrl_to_region,
     scale_ctrl_cvs_local,
     set_sdk,
@@ -69,6 +73,24 @@ from maya_tools.Rigging.create_rig_core import (
     snap_ctrl_cvs_to_child,
     store_all_control_cv_positions,
     strip_ctrl_shape_and_rename,
+)
+
+
+POST_BUILD_EXTENSION_ATTR = "postBuildExtensionManifest"
+RIG_OWNERSHIP_ATTR = "rigOwnedNodeUuids"
+DYNAMIC_MODULES_ATTR = "dynamicRigModules"
+POST_BUILD_EXTENSION_GROUP = "rig_user_extensions_preserve_grp"
+RIG_MODULE_IDS = (
+    "Root / Origin", "Pelvis & Hips", "Spine", "Left Clavicle",
+    "Right Clavicle", "Neck", "Head", "Left Arm", "Right Arm",
+    "Left Leg", "Right Leg", "Brows (Left)", "Brows (Right)",
+    "Eyes Aim", "Eyelids (Left)", "Eyelids (Right)",
+    "Mouth & Lips", "Tongue", "Teeth", "Other Face Joints",
+)
+BUILDER_OWNED_CONTROL_ROOTS = (
+    # Principal nose controls are created inside Other Face Joints but are not
+    # one-control-per-joint, so legacy metadata discovery cannot infer them.
+    "nose_root_ctrl_pad",
 )
 
 def _mapped_existing_joint(mapping, slot):
@@ -317,7 +339,7 @@ def create_brow_main_setup(side, root_parent='head1_ctrl'):
     # Create control setup
     ctrl_data = create_joint_controls(
         [brow_main_transform],
-        control_shape="circle",
+        control_shape="circle_z",
         root_parent=root_parent,
         sub_ctrls=False,
         keep_constraint=False
@@ -330,6 +352,7 @@ def create_brow_main_setup(side, root_parent='head1_ctrl'):
 
     # Scale cvs
     scale_ctrl_cvs_local(main_ctrl, [3, 3, 3])
+    rotate_ctrl_cvs_object_y(main_ctrl, 90.0)
 
     # Parent pads underneath the new main control
     child_nodes = []
@@ -559,6 +582,98 @@ __all__ = list(_create_rig_modules.__all__)
 from maya_tools.Rigging.create_rig_modules import *  # noqa: F401,F403,E402
 
 
+POST_BUILD_HIDDEN_FACE_NODES = (
+    "l_brow5_main",
+    "l_upper_lip3_main",
+    "r_lower_inner_eyelid",
+    "l_brow2_main",
+    "c_upper_lip_main",
+    "l_upper_outer_eyelid",
+    "r_brow4_main",
+    "c_lower_lip_main",
+    "r_lower_outer_eyelid",
+    "r_brow1_main",
+    "r_upper_lip3_main",
+    "l_lip_corner1_main",
+    "l_lower_lip3_main",
+    "r_brow3_main",
+    "r_lip_corner1_main",
+    "l_lower_eyelid",
+    "r_upper_eyelid",
+    "r_inner_eyelid1",
+    "r_upper_outer_eyelid",
+    "r_brow5_main",
+    "r_lower_eyelid",
+    "r_upper_inner_eyelid",
+    "l_lower_outer_eyelid",
+    "l_lower_inner_eyelid",
+    "l_brow4_main",
+    "l_upper_inner_eyelid",
+    "r_brow2_main",
+    "r_lower_lip3_main",
+    "l_outer_eyelid1",
+    "l_brow1_main",
+    "l_brow3_main",
+    "r_outer_eyelid1",
+    "l_upper_eyelid",
+    "l_inner_eyelid1",
+)
+
+
+def hide_post_build_face_nodes(node_names=POST_BUILD_HIDDEN_FACE_NODES):
+    """Hide the internal face joints that should not remain visible to animators."""
+    hidden = []
+    missing = []
+    failed = []
+
+    for base_name in node_names:
+        matches = cmds.ls(base_name, "*:" + base_name, long=True) or []
+        matches = sorted({
+            node for node in matches
+            if node.rsplit("|", 1)[-1].rsplit(":", 1)[-1] == base_name
+        })
+        if not matches:
+            missing.append(base_name)
+            continue
+
+        for node in matches:
+            visibility_attr = node + ".visibility"
+            if not cmds.objExists(visibility_attr):
+                failed.append(node)
+                continue
+
+            was_locked = False
+            try:
+                was_locked = bool(cmds.getAttr(visibility_attr, lock=True))
+                if was_locked:
+                    cmds.setAttr(visibility_attr, lock=False)
+                cmds.setAttr(visibility_attr, 0)
+                # Joint drawStyle is an additional Maya-native guarantee that
+                # the bone is not drawn even if a display layer or inherited
+                # visibility later overrides the transform visibility.
+                draw_style_attr = node + ".drawStyle"
+                if cmds.nodeType(node) == "joint" and cmds.objExists(draw_style_attr):
+                    draw_style_locked = bool(cmds.getAttr(draw_style_attr, lock=True))
+                    if draw_style_locked:
+                        cmds.setAttr(draw_style_attr, lock=False)
+                    cmds.setAttr(draw_style_attr, 2)
+                    if draw_style_locked:
+                        cmds.setAttr(draw_style_attr, lock=True)
+                hidden.append(node)
+            except Exception as exc:
+                failed.append(node)
+                print("[Warning] Failed to hide {0}: {1}".format(node, exc))
+            finally:
+                if was_locked:
+                    try:
+                        cmds.setAttr(visibility_attr, lock=True)
+                    except Exception:
+                        pass
+
+    print("[Rig Build] Hid {0} internal face node(s).".format(len(hidden)))
+    return {"hidden": hidden, "missing": missing, "failed": failed}
+
+
 def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_joints=None, root_joints=None,
                     hip_swing="hipswing", face_joint_map=None, face_joints=None):
     """
@@ -575,7 +690,7 @@ def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_jo
     """
     face_joint_map = _filter_existing_face_joint_map(face_joint_map)
 
-    # 1. T-Pose setup
+    # Normalize arm inputs before applying the build's required T-pose pass.
     if not arm_joints and isinstance(leg_joints, dict):
         b_map = leg_joints
         def _get_j(slot):
@@ -597,15 +712,6 @@ def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_jo
                       'l_clavicle', 'r_clavicle',
                       'l_lowerarm', 'r_lowerarm',
                       'l_hand', 'r_hand']
-
-    arm_joints_valid = [j for j in arm_joints if j and cmds.objExists(j)]
-    if len(arm_joints_valid) >= 8:
-        setup_hik.set_t_pose(arm_joints_valid[0], arm_joints_valid[1], arm_joints_valid[2], arm_joints_valid[3],
-                             arm_joints_valid[4], arm_joints_valid[5], arm_joints_valid[6], arm_joints_valid[7])
-    elif arm_joints_valid:
-        setup_hik.set_t_pose(*arm_joints)
-    elif isinstance(leg_joints, dict):
-        setup_hik.set_t_pose(joint_map=leg_joints)
 
     # Convert the inputs into unified joint maps for modules to read
     body_joint_map = {}
@@ -639,6 +745,23 @@ def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_jo
             body_joint_map["RightForeArm"] = {"joint": arm_joints[5]}
             body_joint_map["LeftHand"] = {"joint": arm_joints[6]}
             body_joint_map["RightHand"] = {"joint": arm_joints[7]}
+
+    # Full-rig construction always prepares the deformation skeleton.  The
+    # T-pose operation records its completed matrices, making repeated calls a
+    # no-op while the skeleton remains in that exact pose.  Passing the unified
+    # map also includes the pelvis and legs in legacy argument-based builds.
+    padded_arms = (list(arm_joints or []) + [None] * 8)[:8]
+    setup_hik.set_t_pose(
+        l_upperarm=padded_arms[0],
+        r_upperarm=padded_arms[1],
+        l_clav=padded_arms[2],
+        r_clav=padded_arms[3],
+        l_elbow=padded_arms[4],
+        r_elbow=padded_arms[5],
+        l_hand=padded_arms[6],
+        r_hand=padded_arms[7],
+        joint_map=body_joint_map,
+    )
 
     # Ensure face_joint_map is populated
     if not face_joint_map:
@@ -772,6 +895,1219 @@ def create_full_rig(arm_joints=None, leg_joints=None, spine_joints=None, neck_jo
         except Exception as e:
             print(f"[Warning] Failed to import enum orders: {e}")
 
+    # Tool-authored additions are official modules and rebuild before genuinely
+    # external Maya systems are reattached.
+    rebuild_dynamic_rig_modules()
+
+    # Capture builder ownership before user-authored extensions are reattached,
+    # then restore those preserved systems against the newly created controls.
+    record_rig_owned_nodes()
+    restore_post_build_extensions()
+
+    # Final animator-facing defaults run after connection restoration so a
+    # rebuild cannot reapply stale FK values from saved module metadata.
+    set_all_limb_ik_fk_switches(1.0)
+    hide_post_build_face_nodes()
+
+
+def set_all_limb_ik_fk_switches(value=1.0):
+    """Set every constructed arm/leg IK/FK switch to the build default."""
+    target = max(0.0, min(1.0, float(value)))
+    updated = []
+    for node in cmds.ls(type="transform", long=True) or []:
+        if not cmds.attributeQuery("ikFkBlend", node=node, exists=True):
+            continue
+        plug = node + ".ikFkBlend"
+        if cmds.getAttr(plug, lock=True):
+            raise RuntimeError("Cannot set locked limb switch: {}".format(plug))
+        cmds.setAttr(plug, target)
+        if abs(float(cmds.getAttr(plug)) - target) > 1.0e-8:
+            raise RuntimeError("Failed to set limb switch: {}".format(plug))
+        updated.append(plug)
+    return updated
+
+
+def _short_scene_name(node):
+    return str(node or "").split("|")[-1]
+
+
+def _extension_base_name(node):
+    """Return the authored system stem for a joint/control hierarchy node."""
+    name = _short_scene_name(node)
+    suffixes = (
+        "_ctrl_sdk_pad", "_ctrl_pad", "_sub_ctrl_sdk", "_sub_ctrl_pad",
+        "_driver_pad", "_ctrl", "_sub_ctrl", "_driver", "_pad",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                changed = True
+                break
+    return name
+
+
+_BUILDER_CONTROL_ROOT_SUFFIXES = (
+    "_ctrl_pad",
+    "_ctrl_sdk_pad",
+    "_sub_ctrl_pad",
+    "_sub_ctrl_sdk",
+)
+
+
+def _is_builder_owned_extension_root(node, owned, known_bases):
+    """Return whether an apparent extension root belongs to a fixed module.
+
+    Old extension manifests can outlive the metadata bug that originally
+    misclassified a face control. Match generated control-root naming only;
+    custom systems with unrelated stems remain visible as external systems.
+    """
+    short = _short_scene_name(node)
+    if short in set(owned or ()):
+        return True
+    if not short.endswith(_BUILDER_CONTROL_ROOT_SUFFIXES):
+        return False
+    return _extension_base_name(short) in set(known_bases or ())
+
+
+def _set_store_json(attribute, value):
+    if not cmds.objExists(MODULE_STORE_NODE):
+        cmds.createNode("network", name=MODULE_STORE_NODE)
+    if not cmds.attributeQuery(attribute, node=MODULE_STORE_NODE, exists=True):
+        cmds.addAttr(MODULE_STORE_NODE, longName=attribute, dataType="string")
+    cmds.setAttr(
+        "{}.{}".format(MODULE_STORE_NODE, attribute),
+        json.dumps(value, sort_keys=True, separators=(",", ":")),
+        type="string",
+    )
+
+
+def _get_store_json(attribute, default=None):
+    plug = "{}.{}".format(MODULE_STORE_NODE, attribute)
+    if not cmds.objExists(plug):
+        return default
+    raw = cmds.getAttr(plug) or ""
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
+def _node_reference(node):
+    """Return a rename-tolerant scene reference with a readable fallback."""
+    matches = cmds.ls(node, long=True) or []
+    if not matches:
+        return {"name": str(node or ""), "uuid": ""}
+    resolved = matches[0]
+    uuids = cmds.ls(resolved, uuid=True) or []
+    return {"name": resolved, "uuid": uuids[0] if uuids else ""}
+
+
+def _resolve_node_reference(reference):
+    """Resolve a stored node reference by UUID first and name second."""
+    if isinstance(reference, str):
+        reference = {"name": reference, "uuid": ""}
+    reference = reference or {}
+    uuid_value = reference.get("uuid")
+    if uuid_value:
+        matches = cmds.ls(uuid_value, long=True) or []
+        if len(matches) == 1:
+            return matches[0]
+    name = reference.get("name") or ""
+    matches = cmds.ls(name, long=True) or []
+    if len(matches) == 1:
+        return matches[0]
+    short_name = _short_scene_name(name)
+    matches = cmds.ls(short_name, long=True) or []
+    return matches[0] if len(matches) == 1 else None
+
+
+def get_dynamic_rig_modules():
+    """Return ordered tool-authored module build records stored in the scene."""
+    records = _get_store_json(DYNAMIC_MODULES_ATTR, []) or []
+    return sorted(
+        [record for record in records if isinstance(record, dict)],
+        key=lambda record: int(record.get("order", 0)),
+    )
+
+
+def _save_dynamic_rig_modules(records):
+    _set_store_json(DYNAMIC_MODULES_ATTR, list(records or []))
+
+
+def _capture_new_nodes(before_uuids):
+    """Capture all nodes created since a UUID snapshot."""
+    captured = []
+    for node in cmds.ls(long=True) or []:
+        uuids = cmds.ls(node, uuid=True) or []
+        if uuids and uuids[0] not in before_uuids:
+            captured.append(_node_reference(node))
+    return captured
+
+
+def _scene_node_uuids():
+    """Return all scene UUIDs without relying on Maya's argument-less ls mode."""
+    uuids = set()
+    for node in cmds.ls(long=True) or []:
+        values = cmds.ls(node, uuid=True) or []
+        if values:
+            uuids.add(values[0])
+    return uuids
+
+
+def _dynamic_build_inputs(spec):
+    joints = [_resolve_node_reference(item) for item in spec.get("joints", [])]
+    missing = [item for item, joint in zip(spec.get("joints", []), joints) if not joint]
+    if missing:
+        raise RuntimeError("Dynamic module input joints are missing: {}".format(missing))
+    parent = _resolve_node_reference(spec.get("parent")) if spec.get("parent") else None
+    if spec.get("parent") and not parent:
+        raise RuntimeError("Dynamic module parent is missing: {}".format(spec.get("parent")))
+    return joints, parent
+
+
+def _build_dynamic_module_record(record):
+    """Build one registered module and refresh its generated-node ownership."""
+    spec = dict(record.get("build_spec") or {})
+    module_type = record.get("module_type")
+    joints, parent = _dynamic_build_inputs(spec)
+    before = _scene_node_uuids()
+    result = None
+    if module_type == "controls":
+        result = create_joint_controls(
+            joint_list=joints,
+            control_shape=spec.get("control_shape", "cube"),
+            root_parent=parent,
+            sub_ctrls=bool(spec.get("sub_ctrls", False)),
+            keep_constraint=bool(spec.get("keep_constraint", True)),
+        )
+    elif module_type == "surface_rig":
+        result = setup_surface_rig_with_drivers(
+            joint_list=joints,
+            loft_name=spec.get("loft_name", "surface"),
+            offset=float(spec.get("offset", 0.5)),
+            driver_follicle_indices=spec.get("driver_follicle_indices"),
+            side=spec.get("side", "c"),
+            region=spec.get("region", "other"),
+            root_parent=parent,
+        )
+    elif module_type in ("arm", "leg"):
+        required = 3 if module_type == "arm" else 4
+        if len(joints) < required:
+            raise RuntimeError(
+                "{} module requires at least {} ordered joints.".format(module_type.title(), required)
+            )
+        result = create_ik_fk_limb(joints, parent)
+    else:
+        raise RuntimeError("Unsupported dynamic rig module type: {}".format(module_type))
+
+    generated = _capture_new_nodes(before)
+    record["generated_nodes"] = generated
+    record["built"] = True
+    record["last_error"] = ""
+    # Keep dynamic modules visible to the same metadata/detail infrastructure
+    # as the fixed studio modules without relying on naming heuristics.
+    generated_names = [item.get("name", "") for item in generated]
+    generated_controls = []
+    for item in generated:
+        node = _resolve_node_reference(item)
+        if not node or cmds.nodeType(node) != "transform":
+            continue
+        shapes = cmds.listRelatives(node, shapes=True, type="nurbsCurve") or []
+        if shapes:
+            generated_controls.append(item.get("name", ""))
+    save_module_metadata(record["module_id"], {
+        "module_type": module_type,
+        "build_spec": spec,
+        "joints": [item.get("name", "") for item in spec.get("joints", [])],
+        "parent": (spec.get("parent") or {}).get("name", ""),
+        "controls": generated_controls,
+        "cleanup_nodes": generated_names,
+        "built": True,
+        "dynamic": True,
+    })
+    return result
+
+
+def register_dynamic_rig_module(module_id, module_type, build_spec, build_now=True):
+    """Register a tool-authored module and optionally build it immediately."""
+    module_id = str(module_id or "").strip()
+    if not module_id:
+        raise ValueError("A unique module name is required.")
+    if module_id in RIG_MODULE_IDS:
+        raise ValueError(
+            "'{}' is reserved for a standard rig module.".format(module_id)
+        )
+    records = get_dynamic_rig_modules()
+    existing = next((item for item in records if item.get("module_id") == module_id), None)
+    if existing and existing.get("built"):
+        raise RuntimeError("Dynamic rig module already exists: {}".format(module_id))
+    record = existing or {
+        "module_id": module_id,
+        "order": max([int(item.get("order", 0)) for item in records] + [0]) + 1,
+    }
+    record.update({
+        "module_type": module_type,
+        "build_spec": dict(build_spec or {}),
+        "generated_nodes": [],
+        "built": False,
+        "enabled": True,
+    })
+    if not existing:
+        records.append(record)
+    if build_now:
+        _build_dynamic_module_record(record)
+    _save_dynamic_rig_modules(records)
+    # Do not refresh the whole-tree ownership snapshot here: user-authored
+    # extensions are attached during interactive module creation and must not
+    # be accidentally claimed. _current_rig_ownership unions this module's
+    # exact UUID inventory from metadata until the next full-build snapshot.
+    return record
+
+
+def remove_dynamic_rig_modules_for_rebuild():
+    """Remove generated nodes while retaining every registered build recipe."""
+    records = get_dynamic_rig_modules()
+    removed = 0
+    for record in reversed(records):
+        nodes = []
+        for reference in record.get("generated_nodes", []):
+            node = _resolve_node_reference(reference)
+            if node:
+                nodes.append(node)
+        # Delete deepest DAG paths first; Maya will naturally remove descendants.
+        nodes.sort(key=lambda node: node.count("|"), reverse=True)
+        removed += _safe_delete_nodes(nodes)
+        record["generated_nodes"] = []
+        record["built"] = False
+        clear_module_metadata(record.get("module_id", ""))
+    _save_dynamic_rig_modules(records)
+    return removed
+
+
+def rebuild_dynamic_rig_modules():
+    """Rebuild all enabled dynamic modules in their original creation order."""
+    records = get_dynamic_rig_modules()
+    rebuilt = []
+    failed = []
+    for record in records:
+        if not record.get("enabled", True):
+            continue
+        try:
+            _build_dynamic_module_record(record)
+            rebuilt.append(record.get("module_id"))
+        except Exception as exc:
+            record["built"] = False
+            record["last_error"] = str(exc)
+            failed.append({"module_id": record.get("module_id"), "error": str(exc)})
+            print("[Dynamic Rig Module] Failed {}: {}".format(record.get("module_id"), exc))
+    _save_dynamic_rig_modules(records)
+    return {"rebuilt": rebuilt, "failed": failed}
+
+
+def set_dynamic_rig_module_active(module_id, active):
+    """Remove or rebuild one registered module while retaining its recipe."""
+    records = get_dynamic_rig_modules()
+    record = next(
+        (item for item in records if item.get("module_id") == module_id), None
+    )
+    if record is None:
+        raise ValueError("Unknown dynamic rig module: {}".format(module_id))
+    if active:
+        if not record.get("built"):
+            record["enabled"] = True
+            _build_dynamic_module_record(record)
+    else:
+        nodes = []
+        for reference in record.get("generated_nodes", []):
+            node = _resolve_node_reference(reference)
+            if node:
+                nodes.append(node)
+        nodes.sort(key=lambda node: node.count("|"), reverse=True)
+        _safe_delete_nodes(nodes)
+        record["generated_nodes"] = []
+        record["built"] = False
+        record["enabled"] = False
+        clear_module_metadata(module_id)
+    _save_dynamic_rig_modules(records)
+    return record
+
+
+def dynamic_module_spec(joints, parent=None, **settings):
+    """Create the persistent input specification used by rigging UI widgets."""
+    spec = {
+        "joints": [_node_reference(joint) for joint in joints],
+        "parent": _node_reference(parent) if parent else None,
+    }
+    spec.update(settings)
+    return spec
+
+
+def repair_preserved_extension_body_mapping(body_joint_map):
+    """Keep preserved user systems out of fixed HumanIK body module slots.
+
+    Auto-detection can map a later user joint branch (for example baby_neck)
+    into the standard Neck/Head slots. During rebuild that would create a
+    second control with the same name as the detached extension. When a mapped
+    joint matches a preserved control stem, restore the last standard module
+    input saved in module metadata instead.
+    """
+    manifest = _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {}
+    if not manifest.get("preserved") or not body_joint_map:
+        return {}
+
+    extension_stems = set()
+    for row in manifest.get("roots", []):
+        root = _resolve_unique_node(row.get("node"))
+        if not root:
+            continue
+        hierarchy = [root] + (
+            cmds.listRelatives(root, allDescendents=True, fullPath=True) or []
+        )
+        for node in hierarchy:
+            if cmds.nodeType(node) != "transform":
+                continue
+            shapes = cmds.listRelatives(node, shapes=True, type="nurbsCurve") or []
+            if shapes or _short_scene_name(node).endswith("_ctrl_pad"):
+                extension_stems.add(_extension_base_name(node))
+
+    slot_sources = {
+        "Neck": ("Neck", 0),
+        "Neck1": ("Neck", 1),
+        "Head": ("Head", 0),
+        "Reference": ("Root / Origin", 0),
+        "Hips": ("Pelvis & Hips", 0),
+        "Spine": ("Spine", 0),
+        "Spine1": ("Spine", 1),
+        "Spine2": ("Spine", 2),
+        "Spine3": ("Spine", 3),
+        "LeftArm": ("Left Arm", 0),
+        "LeftForeArm": ("Left Arm", 1),
+        "LeftHand": ("Left Arm", 2),
+        "RightArm": ("Right Arm", 0),
+        "RightForeArm": ("Right Arm", 1),
+        "RightHand": ("Right Arm", 2),
+        "LeftUpLeg": ("Left Leg", 0),
+        "LeftLeg": ("Left Leg", 1),
+        "LeftFoot": ("Left Leg", 2),
+        "RightUpLeg": ("Right Leg", 0),
+        "RightLeg": ("Right Leg", 1),
+        "RightFoot": ("Right Leg", 2),
+    }
+    repairs = {}
+    for slot, (module_id, index) in slot_sources.items():
+        value = body_joint_map.get(slot)
+        current = value.get("joint") if isinstance(value, dict) else value
+        if not current or _extension_base_name(current) not in extension_stems:
+            continue
+        saved_joints = (load_module_metadata(module_id) or {}).get("joints", [])
+        replacement = saved_joints[index] if index < len(saved_joints) else None
+        if not replacement or not cmds.objExists(replacement):
+            continue
+        if isinstance(value, dict):
+            value["joint"] = replacement
+        else:
+            body_joint_map[slot] = replacement
+        repairs[slot] = replacement
+    return repairs
+
+
+def _metadata_rig_ownership():
+    """Return builder-owned nodes, base joints, and known authored stems."""
+    owned = set()
+    base_joints = set()
+    known_bases = set()
+    for module_id in RIG_MODULE_IDS:
+        metadata = load_module_metadata(module_id) or {}
+        controls = _discover_module_controls(module_id, metadata)
+        cleanup = _discover_module_cleanup_nodes(module_id, metadata)
+        joints = _metadata_joint_nodes(metadata)
+        owned.update(_short_scene_name(node) for node in controls + cleanup)
+        base_joints.update(_short_scene_name(node) for node in joints)
+        known_bases.update(
+            _extension_base_name(node) for node in controls + cleanup + joints
+        )
+    for record in get_dynamic_rig_modules():
+        for reference in record.get("generated_nodes", []):
+            node = _resolve_node_reference(reference)
+            if not node:
+                continue
+            short_name = _short_scene_name(node)
+            owned.add(short_name)
+            known_bases.add(_extension_base_name(short_name))
+        for reference in (record.get("build_spec") or {}).get("joints", []):
+            node = _resolve_node_reference(reference)
+            if node:
+                base_joints.add(_short_scene_name(node))
+    for root_name in BUILDER_OWNED_CONTROL_ROOTS:
+        roots = cmds.ls(root_name, long=True) or []
+        if len(roots) != 1:
+            continue
+        root = roots[0]
+        hierarchy = [root] + (
+            cmds.listRelatives(root, allDescendents=True, fullPath=True) or []
+        )
+        owned.update(_short_scene_name(node) for node in hierarchy)
+        known_bases.update(_extension_base_name(node) for node in hierarchy)
+    # Joint Placer marks the complete deformation template, including terminal
+    # and detail joints that are intentionally omitted from compact module
+    # metadata. User-authored joints added later do not carry this marker.
+    for joint in cmds.ls(type="joint", long=True) or []:
+        if not cmds.attributeQuery(
+                "autoJointPlacerGenerated", node=joint, exists=True):
+            continue
+        if not cmds.getAttr(joint + ".autoJointPlacerGenerated"):
+            continue
+        short = _short_scene_name(joint)
+        base_joints.add(short)
+        known_bases.add(_extension_base_name(short))
+    return owned, base_joints, known_bases
+
+
+def record_rig_owned_nodes():
+    """Record the exact builder-owned scene nodes before extensions reattach."""
+    owned, base_joints, known_bases = _metadata_rig_ownership()
+    # At this stage preserved extensions are detached. Everything beneath the
+    # generated control-rig root can therefore be marked exactly, closing the
+    # gaps left by older per-module metadata.
+    root_control = _resolve_unique_node("origin_ctrl_pad")
+    if root_control:
+        top = root_control
+        while True:
+            parent = cmds.listRelatives(top, parent=True, fullPath=True) or []
+            if not parent:
+                break
+            top = parent[0]
+        owned.add(_short_scene_name(top))
+        owned.update(
+            _short_scene_name(node) for node in (
+                cmds.listRelatives(top, allDescendents=True, fullPath=True) or []
+            )
+        )
+
+    # The detached extension group is deliberately excluded from the base
+    # skeleton snapshot. Thus later joint branches can be recognized as user
+    # additions even when the source skeleton did not come from Joint Placer.
+    origin = _resolve_unique_node("origin")
+    if origin:
+        base_joints.add(_short_scene_name(origin))
+        base_joints.update(
+            _short_scene_name(node) for node in (
+                cmds.listRelatives(
+                    origin, allDescendents=True, type="joint", fullPath=True
+                ) or []
+            )
+        )
+        known_bases.update(_extension_base_name(node) for node in base_joints)
+
+    rows = []
+    for name in sorted(owned):
+        matches = cmds.ls(name, long=True) or []
+        if len(matches) != 1:
+            continue
+        uuids = cmds.ls(matches[0], uuid=True) or []
+        rows.append({
+            "name": name,
+            "uuid": uuids[0] if uuids else "",
+        })
+    payload = {
+        "schema": 1,
+        "nodes": rows,
+        "base_joints": sorted(base_joints),
+        "known_bases": sorted(known_bases),
+    }
+    _set_store_json(RIG_OWNERSHIP_ATTR, payload)
+    return payload
+
+
+def _current_rig_ownership():
+    """Resolve the latest exact ownership snapshot, with legacy fallback."""
+    fallback_owned, fallback_joints, fallback_bases = _metadata_rig_ownership()
+    stored = _get_store_json(RIG_OWNERSHIP_ATTR, {}) or {}
+    if not stored.get("nodes"):
+        return fallback_owned, fallback_joints, fallback_bases
+
+    live_by_uuid = {}
+    for node in cmds.ls(long=True) or []:
+        uuids = cmds.ls(node, uuid=True) or []
+        if uuids:
+            live_by_uuid[uuids[0]] = _short_scene_name(node)
+    exact_owned = {
+        live_by_uuid[row.get("uuid")]
+        for row in stored.get("nodes", [])
+        if row.get("uuid") in live_by_uuid
+    }
+    # Metadata may have been refreshed after the ownership snapshot. Unioning
+    # it is conservative: builder-declared nodes must never become extensions.
+    exact_owned.update(fallback_owned)
+    return (
+        exact_owned,
+        set(stored.get("base_joints") or fallback_joints),
+        set(stored.get("known_bases") or fallback_bases),
+    )
+
+
+def _extension_boundary_roots(owned, base_joints, known_bases):
+    """Find unowned control branches attached to the generated rig.
+
+    Extra deformation joints remain safe beneath the source skeleton during
+    teardown. Only control DAG branches must be detached from control parents
+    that the builder replaces.
+    """
+    boundary_parents = set(owned) | set(base_joints)
+    roots = []
+    for node in cmds.ls(type="transform", long=True) or []:
+        short = _short_scene_name(node)
+        if short in owned or short == POST_BUILD_EXTENSION_GROUP:
+            continue
+        parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        if not parent or _short_scene_name(parent[0]) not in boundary_parents:
+            continue
+        if _extension_base_name(short) in known_bases:
+            continue
+        curve_shapes = [
+            descendant for descendant in (cmds.listRelatives(
+                node, allDescendents=True, fullPath=True
+            ) or [])
+            if cmds.nodeType(descendant) == "nurbsCurve"
+        ]
+        if not curve_shapes:
+            continue
+        curve_bases = {
+            _extension_base_name((
+                cmds.listRelatives(shape, parent=True, fullPath=False) or [""]
+            )[0])
+            for shape in curve_shapes
+        }
+        if curve_bases and curve_bases.issubset(known_bases):
+            continue
+        roots.append(node)
+    return roots
+
+
+def _constraint_record(node):
+    constraint_type = cmds.nodeType(node)
+    command = getattr(cmds, constraint_type, None)
+    if command is None:
+        return None
+    driven = cmds.listRelatives(node, parent=True, fullPath=False) or []
+    try:
+        targets = command(node, query=True, targetList=True) or []
+        aliases = command(node, query=True, weightAliasList=True) or []
+    except Exception:
+        return None
+    settings = {}
+    for attribute in (
+        "interpType", "offsetX", "offsetY", "offsetZ",
+        "aimVectorX", "aimVectorY", "aimVectorZ",
+        "upVectorX", "upVectorY", "upVectorZ", "worldUpType",
+        "worldUpVectorX", "worldUpVectorY", "worldUpVectorZ",
+    ):
+        plug = node + "." + attribute
+        if cmds.objExists(plug):
+            try:
+                settings[attribute] = cmds.getAttr(plug)
+            except Exception:
+                pass
+    return {
+        "name": _short_scene_name(node),
+        "type": constraint_type,
+        "driven": _short_scene_name(driven[0]) if driven else "",
+        "targets": [_short_scene_name(target) for target in targets],
+        "weights": [float(cmds.getAttr(node + "." + alias)) for alias in aliases],
+        "settings": settings,
+    }
+
+
+def _node_from_plug(plug):
+    return _short_scene_name(str(plug).split(".", 1)[0])
+
+
+def _cross_boundary_connections(extension_nodes, owned, constraint_nodes):
+    records = set()
+    for node in extension_nodes:
+        if not cmds.objExists(node):
+            continue
+        pairs = cmds.listConnections(
+            node, source=True, destination=True,
+            connections=True, plugs=True,
+        ) or []
+        for first, second in zip(pairs[0::2], pairs[1::2]):
+            if _node_from_plug(first) in constraint_nodes or _node_from_plug(second) in constraint_nodes:
+                continue
+            first_is_destination = bool(cmds.connectionInfo(first, isDestination=True))
+            second_is_destination = bool(cmds.connectionInfo(second, isDestination=True))
+            if first_is_destination and not second_is_destination:
+                source, destination = second, first
+            elif second_is_destination and not first_is_destination:
+                source, destination = first, second
+            else:
+                continue
+            source_node = _node_from_plug(source)
+            destination_node = _node_from_plug(destination)
+            if not (
+                (source_node in extension_nodes and destination_node in owned)
+                or (source_node in owned and destination_node in extension_nodes)
+            ):
+                continue
+            if source.endswith(".message") or destination.endswith(".message"):
+                continue
+            records.add((source, destination))
+    return [
+        {"source": source, "destination": destination}
+        for source, destination in sorted(records)
+    ]
+
+
+def preserve_post_build_extensions():
+    """Detach and store every post-build system crossing the rig boundary."""
+    existing = _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {}
+    if existing.get("preserved"):
+        return existing
+
+    owned, base_joints, known_bases = _current_rig_ownership()
+    roots = _extension_boundary_roots(owned, base_joints, known_bases)
+
+    extension_nodes = set()
+    extension_root_by_node = {}
+    for root in roots:
+        root_short = _short_scene_name(root)
+        hierarchy = {root_short}
+        hierarchy.update(
+            _short_scene_name(node) for node in (
+                cmds.listRelatives(root, allDescendents=True, fullPath=True) or []
+            )
+        )
+        extension_nodes.update(hierarchy)
+        extension_root_by_node.update(
+            (node, root_short) for node in hierarchy
+        )
+
+    constraint_types = (
+        "parentConstraint", "pointConstraint", "orientConstraint",
+        "scaleConstraint", "aimConstraint",
+    )
+    constraints = []
+    cross_constraint_nodes = set()
+    for constraint_type in constraint_types:
+        for node in cmds.ls(type=constraint_type, long=True) or []:
+            record = _constraint_record(node)
+            if not record:
+                continue
+            endpoints = set(record["targets"] + [record["driven"]])
+            if endpoints & extension_nodes and endpoints - extension_nodes:
+                system_nodes = sorted(endpoints & extension_nodes)
+                record["system"] = extension_root_by_node.get(system_nodes[0], "")
+                constraints.append(record)
+                cross_constraint_nodes.add(record["name"])
+
+    connections = _all_boundary_connections(
+        extension_nodes, cross_constraint_nodes
+    )
+    for record in connections:
+        inside = (
+            _node_from_plug(record["source"])
+            if _node_from_plug(record["source"]) in extension_nodes
+            else _node_from_plug(record["destination"])
+        )
+        record["system"] = extension_root_by_node.get(inside, "")
+    if not roots and not constraints and not connections:
+        manifest = {
+            "schema": 1, "preserved": False, "roots": [],
+            "constraints": [], "connections": [],
+        }
+        _set_store_json(POST_BUILD_EXTENSION_ATTR, manifest)
+        return manifest
+    root_records = []
+    for root in roots:
+        parent = cmds.listRelatives(root, parent=True, fullPath=True) or []
+        root_records.append({
+            "node": _short_scene_name(root),
+            "parent": _short_scene_name(parent[0]) if parent else "",
+            "world_matrix": [float(value) for value in cmds.xform(
+                root, query=True, worldSpace=True, matrix=True
+            )],
+            "detached": True,
+        })
+
+    # Disconnect cross-boundary DG links before module discovery/teardown can
+    # mistake an extension helper for a generated module helper.
+    for row in connections:
+        if cmds.isConnected(row["source"], row["destination"]):
+            cmds.disconnectAttr(row["source"], row["destination"])
+    for record in constraints:
+        if cmds.objExists(record["name"]):
+            cmds.delete(record["name"])
+
+    if not cmds.objExists(POST_BUILD_EXTENSION_GROUP):
+        cmds.group(empty=True, world=True, name=POST_BUILD_EXTENSION_GROUP)
+    for root in roots:
+        if cmds.objExists(root):
+            cmds.parent(root, POST_BUILD_EXTENSION_GROUP, absolute=True)
+    cmds.setAttr(POST_BUILD_EXTENSION_GROUP + ".visibility", 0)
+
+    manifest = {
+        "schema": 1,
+        "preserved": True,
+        "roots": root_records,
+        "constraints": constraints,
+        "connections": connections,
+    }
+    _set_store_json(POST_BUILD_EXTENSION_ATTR, manifest)
+    print("[Rig Extensions] Preserved {} root system(s).".format(len(root_records)))
+    return manifest
+
+
+def _resolve_unique_node(name):
+    matches = cmds.ls(name, long=True) or []
+    return matches[0] if len(matches) == 1 else None
+
+
+def _additional_system_display_name(name):
+    """Return a concise animator-facing label for an authored system root."""
+    stem = _extension_base_name(name)
+    side_labels = {"l": "Left", "r": "Right", "c": "Center"}
+    pieces = [piece for piece in stem.split("_") if piece]
+    if pieces and pieces[0].lower() in side_labels:
+        pieces[0] = side_labels[pieces[0].lower()]
+    return " ".join(piece[:1].upper() + piece[1:] for piece in pieces) or stem
+
+
+def _normalize_extension_manifest_state(manifest):
+    """Clear a stale preserved flag once every saved root is reattached."""
+    if not manifest.get("preserved") or cmds.objExists(POST_BUILD_EXTENSION_GROUP):
+        return manifest
+    if any(row.get("detached") for row in manifest.get("roots", [])):
+        return manifest
+    for row in manifest.get("roots", []):
+        node = _resolve_unique_node(row.get("node"))
+        expected_parent = _resolve_unique_node(row.get("parent"))
+        if not node or not expected_parent:
+            return manifest
+        parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        if not parent or parent[0] != expected_parent:
+            return manifest
+    manifest = dict(manifest)
+    manifest["preserved"] = False
+    _set_store_json(POST_BUILD_EXTENSION_ATTR, manifest)
+    return manifest
+
+
+def get_external_rig_systems(discover_live=True):
+    """Return user-authored control systems attached around the generated rig.
+
+    Saved manifest roots remain an inventory after restoration.  A live scan
+    also exposes newly-authored systems before the first Remove/Rebuild cycle.
+    Builder-owned systems (including the nose rig) and registered dynamic
+    modules are excluded by the ownership boundary calculation.
+    """
+    manifest = _normalize_extension_manifest_state(
+        _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {}
+    )
+    owned, base_joints, known_bases = _current_rig_ownership()
+    root_rows = {}
+    for row in manifest.get("roots", []):
+        node = _resolve_unique_node(row.get("node"))
+        key = _short_scene_name(node or row.get("node"))
+        if key and not _is_builder_owned_extension_root(
+                key, owned, known_bases):
+            root_rows[key] = dict(row)
+
+    if discover_live:
+        for node in _extension_boundary_roots(owned, base_joints, known_bases):
+            short = _short_scene_name(node)
+            if _is_builder_owned_extension_root(
+                    short, owned, known_bases):
+                continue
+            if short in root_rows:
+                continue
+            parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+            root_rows[short] = {
+                "node": short,
+                "parent": _short_scene_name(parent[0]) if parent else "",
+            }
+
+    systems = []
+    for short, row in sorted(root_rows.items()):
+        node = _resolve_unique_node(short)
+        if not node:
+            state = "missing"
+            parent_name = row.get("parent", "")
+            node_count = 0
+        else:
+            parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+            parent_name = _short_scene_name(parent[0]) if parent else "World"
+            state = (
+                "preserved"
+                if row.get("detached") or parent_name == POST_BUILD_EXTENSION_GROUP
+                else "attached"
+            )
+            node_count = 1 + len(
+                cmds.listRelatives(node, allDescendents=True, fullPath=True) or []
+            )
+        inspection = inspect_external_rig_system(short, manifest=manifest)
+        systems.append({
+            "system_id": "external:{}".format(short),
+            "label": _additional_system_display_name(short),
+            "kind": "External",
+            "state": state,
+            "root": short,
+            "parent": parent_name,
+            "node_count": node_count,
+            "constraints": inspection["constraints"],
+            "connections": inspection["connections"],
+        })
+    return systems
+
+
+def _short_plug(plug):
+    node, attribute = str(plug).split(".", 1)
+    return _short_scene_name(node) + "." + attribute
+
+
+def _system_hierarchy_nodes(root):
+    node = _resolve_unique_node(root)
+    if not node:
+        return set()
+    return {
+        _short_scene_name(item)
+        for item in [node] + (
+            cmds.listRelatives(node, allDescendents=True, fullPath=True) or []
+        )
+    }
+
+
+def _boundary_constraint_records(system_nodes):
+    records = []
+    constraint_types = (
+        "parentConstraint", "pointConstraint", "orientConstraint",
+        "scaleConstraint", "aimConstraint",
+    )
+    for constraint_type in constraint_types:
+        for node in cmds.ls(type=constraint_type, long=True) or []:
+            record = _constraint_record(node)
+            if not record:
+                continue
+            endpoints = set(record["targets"] + [record["driven"]])
+            if endpoints & system_nodes and endpoints - system_nodes:
+                records.append(record)
+    return records
+
+
+def _all_boundary_connections(
+        system_nodes, constraint_nodes=(), include_internal=False):
+    """Capture non-message DG links touching a system hierarchy."""
+    records = set()
+    constraint_nodes = set(constraint_nodes)
+    for node in system_nodes:
+        if not cmds.objExists(node):
+            continue
+        pairs = cmds.listConnections(
+            node, source=True, destination=True, connections=True, plugs=True,
+        ) or []
+        for first, second in zip(pairs[0::2], pairs[1::2]):
+            if (
+                _node_from_plug(first) in constraint_nodes
+                or _node_from_plug(second) in constraint_nodes
+            ):
+                continue
+            first_is_destination = bool(cmds.connectionInfo(first, isDestination=True))
+            second_is_destination = bool(cmds.connectionInfo(second, isDestination=True))
+            if first_is_destination and not second_is_destination:
+                source, destination = second, first
+            elif second_is_destination and not first_is_destination:
+                source, destination = first, second
+            else:
+                continue
+            source_inside = _node_from_plug(source) in system_nodes
+            destination_inside = _node_from_plug(destination) in system_nodes
+            if source_inside == destination_inside and not (
+                include_internal and source_inside
+            ):
+                continue
+            if source.endswith(".message") or destination.endswith(".message"):
+                continue
+            records.add((_short_plug(source), _short_plug(destination)))
+    return [
+        {"source": source, "destination": destination}
+        for source, destination in sorted(records)
+    ]
+
+
+def inspect_external_rig_system(root, manifest=None):
+    """Return every saved/live connection that crosses one system boundary."""
+    short = _short_scene_name(root)
+    manifest = manifest or _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {}
+    root_row = next(
+        (item for item in manifest.get("roots", [])
+         if _short_scene_name(item.get("node")) == short),
+        {},
+    )
+    nodes = _system_hierarchy_nodes(short)
+    if nodes and not root_row.get("detached"):
+        constraints = _boundary_constraint_records(nodes)
+        constraint_nodes = {item["name"] for item in constraints}
+        connections = _all_boundary_connections(
+            nodes, constraint_nodes, include_internal=True
+        )
+    else:
+        constraints = [
+            item for item in manifest.get("constraints", [])
+            if item.get("system") == short
+        ]
+        connections = [
+            item for item in manifest.get("connections", [])
+            if item.get("system") == short
+        ]
+    return {
+        "constraints": [
+            "{}: {} -> {}".format(
+                item.get("type", "constraint"),
+                ", ".join(item.get("targets", [])),
+                item.get("driven", ""),
+            )
+            for item in constraints
+        ],
+        "connections": [
+            "{} -> {}".format(item.get("source", ""), item.get("destination", ""))
+            for item in connections
+        ],
+    }
+
+
+def inspect_dynamic_rig_module(record):
+    """Return live boundary details for one recipe-backed added module."""
+    nodes = set()
+    for reference in (record or {}).get("generated_nodes", []):
+        node = _resolve_node_reference(reference)
+        if node:
+            nodes.add(_short_scene_name(node))
+    constraints = _boundary_constraint_records(nodes) if nodes else []
+    constraint_nodes = {item["name"] for item in constraints}
+    connections = _all_boundary_connections(
+        nodes, constraint_nodes, include_internal=True
+    ) if nodes else []
+    return {
+        "node_count": len(nodes),
+        "constraints": [
+            "{}: {} -> {}".format(
+                item.get("type", "constraint"),
+                ", ".join(item.get("targets", [])),
+                item.get("driven", ""),
+            )
+            for item in constraints
+        ],
+        "connections": [
+            "{} -> {}".format(item.get("source", ""), item.get("destination", ""))
+            for item in connections
+        ],
+    }
+
+
+def set_external_rig_system_active(root, active):
+    """Reversibly attach or detach one user-authored system."""
+    short = _short_scene_name(root)
+    manifest = _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {
+        "schema": 1, "preserved": False, "roots": [],
+        "constraints": [], "connections": [],
+    }
+    row = next(
+        (item for item in manifest.get("roots", [])
+         if _short_scene_name(item.get("node")) == short),
+        None,
+    )
+    if row is None:
+        node = _resolve_unique_node(short)
+        if not node:
+            raise RuntimeError("External rig system is missing: {}".format(short))
+        parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        row = {
+            "node": short,
+            "parent": _short_scene_name(parent[0]) if parent else "",
+            "world_matrix": [float(value) for value in cmds.xform(
+                node, query=True, worldSpace=True, matrix=True
+            )],
+            "detached": False,
+        }
+        manifest.setdefault("roots", []).append(row)
+
+    if not active and row.get("detached"):
+        return row
+
+    if active:
+        node = _resolve_unique_node(short)
+        parent = _resolve_unique_node(row.get("parent"))
+        if not node or not parent:
+            raise RuntimeError(
+                "Cannot attach {} because its node or parent is missing.".format(short)
+            )
+        reparented = cmds.parent(node, parent, absolute=True) or []
+        node = reparented[0] if reparented else _resolve_unique_node(short)
+        if not node:
+            raise RuntimeError("Maya did not return the reattached system root: {}".format(short))
+        cmds.xform(node, worldSpace=True, matrix=row.get("world_matrix"))
+        for record in manifest.get("constraints", []):
+            if record.get("system") == short:
+                _restore_constraint(record)
+        for record in manifest.get("connections", []):
+            if record.get("system") != short:
+                continue
+            source = _short_plug(record["source"])
+            destination = _short_plug(record["destination"])
+            if cmds.objExists(source) and cmds.objExists(destination):
+                if not cmds.isConnected(source, destination):
+                    cmds.connectAttr(source, destination, force=True)
+        row["detached"] = False
+    else:
+        node = _resolve_unique_node(short)
+        if not node:
+            raise RuntimeError("External rig system is missing: {}".format(short))
+        nodes = _system_hierarchy_nodes(short)
+        constraints = _boundary_constraint_records(nodes)
+        constraint_names = {item["name"] for item in constraints}
+        connections = _all_boundary_connections(nodes, constraint_names)
+        for item in constraints:
+            item["system"] = short
+        for item in connections:
+            item["system"] = short
+        manifest["constraints"] = [
+            item for item in manifest.get("constraints", [])
+            if item.get("system") != short
+        ] + constraints
+        manifest["connections"] = [
+            item for item in manifest.get("connections", [])
+            if item.get("system") != short
+        ] + connections
+        parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        row["parent"] = _short_scene_name(parent[0]) if parent else row.get("parent", "")
+        row["world_matrix"] = [float(value) for value in cmds.xform(
+            node, query=True, worldSpace=True, matrix=True
+        )]
+        for item in connections:
+            if cmds.isConnected(item["source"], item["destination"]):
+                cmds.disconnectAttr(item["source"], item["destination"])
+        for item in constraints:
+            if cmds.objExists(item["name"]):
+                cmds.delete(item["name"])
+        if not cmds.objExists(POST_BUILD_EXTENSION_GROUP):
+            cmds.group(empty=True, world=True, name=POST_BUILD_EXTENSION_GROUP)
+        cmds.parent(node, POST_BUILD_EXTENSION_GROUP, absolute=True)
+        cmds.setAttr(POST_BUILD_EXTENSION_GROUP + ".visibility", 0)
+        row["detached"] = True
+
+    manifest["preserved"] = any(
+        item.get("detached") for item in manifest.get("roots", [])
+    )
+    if not manifest["preserved"] and cmds.objExists(POST_BUILD_EXTENSION_GROUP):
+        children = cmds.listRelatives(
+            POST_BUILD_EXTENSION_GROUP, children=True, fullPath=True
+        ) or []
+        if not children:
+            cmds.delete(POST_BUILD_EXTENSION_GROUP)
+    _set_store_json(POST_BUILD_EXTENSION_ATTR, manifest)
+    return row
+
+
+def _restore_constraint(record):
+    driven = _resolve_unique_node(record.get("driven"))
+    targets = [_resolve_unique_node(name) for name in record.get("targets", [])]
+    if not driven or not targets or any(target is None for target in targets):
+        return None
+    name = record.get("name") or ""
+    if name and cmds.objExists(name):
+        cmds.delete(name)
+    command = getattr(cmds, record.get("type", ""), None)
+    if command is None:
+        return None
+    create_kwargs = {"maintainOffset": True}
+    if name:
+        create_kwargs["name"] = name
+    created = command(targets, driven, **create_kwargs)[0]
+    aliases = command(created, query=True, weightAliasList=True) or []
+    for alias, value in zip(aliases, record.get("weights", [])):
+        cmds.setAttr(created + "." + alias, float(value))
+    for attribute, value in (record.get("settings") or {}).items():
+        plug = created + "." + attribute
+        if cmds.objExists(plug) and not cmds.getAttr(plug, lock=True):
+            try:
+                cmds.setAttr(plug, value)
+            except Exception:
+                pass
+    return created
+
+
+def restore_post_build_extensions():
+    """Reattach preserved extension systems to the newly generated rig."""
+    manifest = _get_store_json(POST_BUILD_EXTENSION_ATTR, {}) or {}
+    if not manifest.get("preserved"):
+        return {"restored": False, "roots": [], "constraints": [], "connections": []}
+
+    restored_roots = []
+    missing_parents = []
+    for row in manifest.get("roots", []):
+        node = _resolve_unique_node(row.get("node"))
+        parent = _resolve_unique_node(row.get("parent"))
+        if not node or not parent:
+            missing_parents.append(row)
+            continue
+        current_parent = cmds.listRelatives(node, parent=True, fullPath=True) or []
+        if current_parent and current_parent[0] == parent:
+            restored_node = node
+        else:
+            reparented = cmds.parent(node, parent, absolute=True) or []
+            restored_node = (
+                reparented[0]
+                if reparented
+                else _resolve_unique_node(row.get("node"))
+            )
+        if restored_node:
+            cmds.xform(
+                restored_node,
+                worldSpace=True,
+                matrix=row.get("world_matrix"),
+            )
+        restored_roots.append(row["node"])
+        row["detached"] = False
+
+    restored_constraints = []
+    for record in manifest.get("constraints", []):
+        created = _restore_constraint(record)
+        if created:
+            restored_constraints.append(_short_scene_name(created))
+
+    restored_connections = []
+    for row in manifest.get("connections", []):
+        source = _short_plug(row["source"])
+        destination = _short_plug(row["destination"])
+        if not cmds.objExists(source) or not cmds.objExists(destination):
+            continue
+        if not cmds.isConnected(source, destination):
+            cmds.connectAttr(source, destination, force=True)
+        restored_connections.append((source, destination))
+
+    if cmds.objExists(POST_BUILD_EXTENSION_GROUP):
+        remaining = cmds.listRelatives(
+            POST_BUILD_EXTENSION_GROUP, children=True, fullPath=True
+        ) or []
+        if not remaining:
+            cmds.delete(POST_BUILD_EXTENSION_GROUP)
+    complete = not missing_parents
+    if complete:
+        manifest["preserved"] = False
+        _set_store_json(POST_BUILD_EXTENSION_ATTR, manifest)
+    print("[Rig Extensions] Restored {} root system(s).".format(len(restored_roots)))
+    return {
+        "restored": complete,
+        "roots": restored_roots,
+        "constraints": restored_constraints,
+        "connections": restored_connections,
+        "missing_parents": missing_parents,
+    }
+
 
 def remove_full_rig(body_joint_map, face_joint_map=None):
     """
@@ -780,6 +2116,13 @@ def remove_full_rig(body_joint_map, face_joint_map=None):
     :param face_joint_map: face joint mapping dictionary
     :return: None
     """
+
+    preserve_post_build_extensions()
+
+    # Registered additions are owned by the builder. Remove their generated
+    # nodes first, but retain their recipes so the next full build restores
+    # them after the fixed studio modules are available.
+    remove_dynamic_rig_modules_for_rebuild()
 
     def safe_run(func, *args, **kwargs):
         """
@@ -836,6 +2179,8 @@ def remove_full_rig(body_joint_map, face_joint_map=None):
             print(f"[Warning] Failed to delete Do_Not_Touch group: {e}")
 
 
+@undoable("Build Full Rig")
+@cleanup_temp_bones
 def create_rig_from_mapping(body_joint_map, face_joint_map):
     """
         Runs create_full_rig using the mapped joints from HIK/Face mappings.
@@ -843,6 +2188,7 @@ def create_rig_from_mapping(body_joint_map, face_joint_map):
     :param face_joint_map: face joint mapping dictionary
     :return: None
     """
+    repair_preserved_extension_body_mapping(body_joint_map)
     face_joint_map = _filter_existing_face_joint_map(face_joint_map)
 
     def j(slot):
@@ -1013,6 +2359,10 @@ def delete_unused_scaffold_nodes():
     must survive even if Maya does not report its skinCluster through a direct
     ``listConnections`` query.
     """
+    # Temporary joints are construction artifacts even when a stale
+    # constraint makes them appear "used". Remove them unconditionally before
+    # the conservative scaffold pass below.
+    delete_temp_bones()
     to_delete = []
     legacy_snap_nodes = {"l_brow_main", "r_brow_main", "lip_main"}
 
@@ -1132,6 +2482,7 @@ def rig_eyelids_module(side, face_joint_map, parent_ctrl=None):
     :param parent_ctrl: parent control node name
     :return: None
     """
+    before_uuids = _scene_node_uuids()
     parent_ctrl = parent_ctrl or (f"{side}_eye_ctrl" if cmds.objExists(f"{side}_eye_ctrl") else "head1_ctrl")
     eyelid_joints = []
     if face_joint_map:
@@ -1174,9 +2525,21 @@ def rig_eyelids_module(side, face_joint_map, parent_ctrl=None):
             driver_follicle_indices=driver_indices,
             root_parent=parent_ctrl
         )
+    generated = _capture_new_nodes(before_uuids)
+    generated_names = [item.get("name", "") for item in generated]
+    generated_controls = []
+    for item in generated:
+        node = _resolve_node_reference(item)
+        if not node or cmds.nodeType(node) != "transform":
+            continue
+        if cmds.listRelatives(node, shapes=True, type="nurbsCurve") or []:
+            generated_controls.append(item.get("name", ""))
     save_module_metadata(f"Eyelids ({'Left' if side == 'l' else 'Right'})", {
         "joints": eyelid_joints,
         "parent": parent_ctrl or "",
+        "controls": generated_controls,
+        "cleanup_nodes": generated_names,
+        "exact_ownership": True,
         "built": True
     })
 
@@ -1271,7 +2634,8 @@ def remove_eyelids_module(side, face_joint_map):
             f"{side}_lower_eyelidTip7", f"{side}_lower_eyelidTip8", f"{side}_lower_eyelidTip9"
         ]
     nodes_to_delete = [
-        f"{side}_eyelid_surface_grp"
+        f"{side}_eyelid_surface_grp",
+        f"{side}_eye_ctrl_pad_static",
     ]
 
     driver_semantics = [
@@ -1284,6 +2648,7 @@ def remove_eyelids_module(side, face_joint_map):
         side + "_lower_eyelid",
         side + "_lower_inner_eyelid",
     ]
+    safe_controls = [f"{sem}_ctrl" for sem in driver_semantics]
     for sem in driver_semantics:
         nodes_to_delete.append(f"{sem}_ctrl_pad")
     for ej in eyelid_joints:
@@ -1294,9 +2659,26 @@ def remove_eyelids_module(side, face_joint_map):
             if parent:
                 parent_base = parent[0].replace("_jnt", "").split("|")[-1].split(":")[-1]
         nodes_to_delete.append(f"{parent_base}_ctrl_pad")
+        safe_controls.append(f"{parent_base}_ctrl")
 
     module_id = f"Eyelids ({'Left' if side == 'l' else 'Right'})"
-    return _delete_module_from_metadata(module_id, nodes_to_delete)
+    shared_eye_nodes = {
+        f"{side}_eye_ctrl_pad", f"{side}_eye_ctrl",
+        f"{side}_eye_aim_ctrl_pad", f"{side}_eye_aim_ctrl",
+        "eye_aim_ctrl_pad", "eye_aim_ctrl",
+    }
+    eyes_metadata = load_module_metadata("Eyes Aim") or {}
+    shared_eye_nodes.update(eyes_metadata.get("controls", []))
+    shared_eye_nodes.update(eyes_metadata.get("cleanup_nodes", []))
+    return _delete_module_from_metadata(
+        module_id,
+        nodes_to_delete,
+        fallback_controls=safe_controls,
+        protected_nodes=shared_eye_nodes,
+        prefer_fallback=not bool(
+            (load_module_metadata(module_id) or {}).get("exact_ownership")
+        ),
+    )
 
 
 def rig_mouth_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None):
@@ -1455,6 +2837,7 @@ def rig_eyes_module(face_joint_map, parent_ctrl=None):
     :param parent_ctrl: parent control node name
     :return: None
     """
+    before_uuids = _scene_node_uuids()
     parent_ctrl = parent_ctrl or "head1_ctrl"
     l_eye = "l_eye"
     r_eye = "r_eye"
@@ -1464,12 +2847,24 @@ def rig_eyes_module(face_joint_map, parent_ctrl=None):
 
     if cmds.objExists(l_eye) and cmds.objExists(r_eye) and cmds.objExists(parent_ctrl):
         create_eye_aim_setup(l_eye, r_eye, head_ctrl=parent_ctrl)
+    generated = _capture_new_nodes(before_uuids)
+    generated_names = [item.get("name", "") for item in generated]
+    generated_controls = []
+    for item in generated:
+        node = _resolve_node_reference(item)
+        if not node or cmds.nodeType(node) != "transform":
+            continue
+        if cmds.listRelatives(node, shapes=True, type="nurbsCurve") or []:
+            generated_controls.append(item.get("name", ""))
     save_module_metadata("Eyes Aim", {
         "joints": [
             joint for joint in (l_eye, r_eye)
             if joint and cmds.objExists(joint)
         ],
         "parent": parent_ctrl or "",
+        "controls": generated_controls,
+        "cleanup_nodes": generated_names,
+        "exact_ownership": True,
         "built": True
     })
 
@@ -1496,7 +2891,17 @@ def remove_eyes_module(face_joint_map):
         nodes_to_delete.append(f"{base}1")
         pads = cmds.ls(f"{base}_ctrl_pad*", type="transform") or []
         nodes_to_delete.extend(pads)
-    return _delete_module_from_metadata("Eyes Aim", nodes_to_delete)
+    metadata = load_module_metadata("Eyes Aim") or {}
+    return _delete_module_from_metadata(
+        "Eyes Aim",
+        nodes_to_delete,
+        fallback_controls=[
+            "eye_aim_ctrl", "l_eye_aim_ctrl", "r_eye_aim_ctrl",
+            f"{_base_from_joint(l_eye)}_ctrl",
+            f"{_base_from_joint(r_eye)}_ctrl",
+        ],
+        prefer_fallback=not bool(metadata.get("exact_ownership")),
+    )
 
 
 def rig_tongue_module(face_joint_map, parent_ctrl=None):
@@ -2402,8 +3807,13 @@ def _module_prefixes(module_id, metadata):
         prefixes.append(f"{side}_brow")
     elif module_id in ("Eyelids (Left)", "Eyelids (Right)"):
         side = "l" if "Left" in module_id else "r"
-        prefixes.extend(
-            [f"{side}_eyelid", f"{side}_eye", f"{side}_upper", f"{side}_lower", f"{side}_inner", f"{side}_outer"])
+        prefixes.extend([
+            f"{side}_eyelid",
+            f"{side}_inner_eyelid", f"{side}_upper_inner_eyelid",
+            f"{side}_upper_eyelid", f"{side}_upper_outer_eyelid",
+            f"{side}_outer_eyelid", f"{side}_lower_outer_eyelid",
+            f"{side}_lower_eyelid", f"{side}_lower_inner_eyelid",
+        ])
     elif module_id == "Mouth & Lips":
         prefixes.extend(["mouth", "lip", "c_upper_lip", "c_lower_lip", "l_lip", "r_lip"])
     elif module_id == "Eyes Aim":
@@ -2568,6 +3978,17 @@ def _prepare_module_metadata_for_save(module_id, data_dict):
     :return: result
     """
     data = dict(data_dict or {})
+    # Dynamic modules already carry an exact UUID-derived node inventory.
+    # Applying the fixed-module prefix/connection heuristics here can claim
+    # unrelated nodes in scenes containing duplicate short names.
+    if data.get("dynamic") or data.get("exact_ownership"):
+        data["controls"] = _unique_existing_nodes(
+            data.get("controls", []), include_missing=True
+        )
+        data["cleanup_nodes"] = _unique_existing_nodes(
+            data.get("cleanup_nodes", []), include_missing=True
+        )
+        return data
     if data.get("built"):
         data["controls"] = _discover_module_controls(module_id, data)
         data["cleanup_nodes"] = _discover_module_cleanup_nodes(module_id, data)
@@ -2600,7 +4021,9 @@ def get_module_controls(module_id, existing_only=True):
     return _unique_existing_nodes(controls, include_missing=not existing_only)
 
 
-def _delete_module_from_metadata(module_id, fallback_nodes=None, fallback_controls=None):
+def _delete_module_from_metadata(
+        module_id, fallback_nodes=None, fallback_controls=None,
+        protected_nodes=None, prefer_fallback=False):
     """
         Deletes module from metadata.
     :param module_id: module id
@@ -2608,18 +4031,32 @@ def _delete_module_from_metadata(module_id, fallback_nodes=None, fallback_contro
     :param fallback_controls: list of fallback controls
     :return: result
     """
-    controls = _get_module_controls_for_removal(module_id, fallback_controls)
+    controls = (
+        list(fallback_controls or [])
+        if prefer_fallback
+        else _get_module_controls_for_removal(module_id, fallback_controls)
+    )
     _capture_orphaned_space_switch_roles(controls, module_id)
     for ctrl in controls:
         _delete_space_switch_for_ctrl(ctrl)
 
     meta = load_module_metadata(module_id)
-    nodes = meta.get("cleanup_nodes") or meta.get("nodes") or []
-    if not nodes and meta:
-        nodes = _discover_module_cleanup_nodes(module_id, meta)
-    if not nodes:
-        nodes = fallback_nodes or []
-    nodes = [node for node in nodes if not _is_rfl_pivot_joint(node)]
+    if prefer_fallback:
+        nodes = list(fallback_nodes or [])
+    else:
+        nodes = meta.get("cleanup_nodes") or meta.get("nodes") or []
+        if not nodes and meta:
+            nodes = _discover_module_cleanup_nodes(module_id, meta)
+        if not nodes:
+            nodes = fallback_nodes or []
+    protected = {
+        _short_node_name(node) for node in (protected_nodes or []) if node
+    }
+    nodes = [
+        node for node in nodes
+        if not _is_rfl_pivot_joint(node)
+        and _short_node_name(node) not in protected
+    ]
     deleted = _safe_delete_nodes(nodes)
     clear_module_metadata(module_id)
     return deleted
@@ -2896,27 +4333,12 @@ def rig_leg_module(side, body_joint_map, parent_ctrl=None):
             output_attr = f"output{['X', 'Y', 'Z'][i]}"
             cmds.connectAttr(f"{md_node}.{output_attr}", f"{knee_sdk}.rotateX")
 
-    def get_ik_joint_name(jnt):
-        """
-            Gets ik joint name.
-        :param jnt: jnt
-        :return: result
-        """
-        if not jnt:
-            return ""
-        base = jnt.split("|")[-1]
-        base = re.sub(r'\d+$', '', base)
-        base = base.replace("_jnt", "")
-        return f"{base}_ik"
-
     rfl_joints = resolve_rfl_joints(side)
-    ik_leg_joints = []
-    if len(leg_chain) >= 5:
-        ik_leg_joints = [
-            get_ik_joint_name(leg_chain[2]),
-            get_ik_joint_name(leg_chain[3]),
-            get_ik_joint_name(leg_chain[4])
-        ]
+    # Use the exact duplicates returned by the limb builder. Reconstructing
+    # names used to strip numeric suffixes (toe1 -> toe_ik), which could bind
+    # the reverse-foot handles to a different or stale toe chain.
+    built_ik_chain = list(limb_data.get("ik_chain") or [])
+    ik_leg_joints = built_ik_chain[2:5] if len(built_ik_chain) >= 5 else []
 
     if ik_leg_joints and cmds.objExists(f"{side}_ankle_ik_ctrl"):
         if not rfl_joints:
@@ -3164,6 +4586,7 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
             control_shape="sphere",
             root_parent=root_p,
             sub_ctrls=True,
+            sub_ctrl_shape_rotation_x=90.0,
         )
         tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
         control_data.extend(create_joint_controls(
@@ -3181,7 +4604,13 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
         spine_tip = spine_joints[-1]
         spine_base = spine_joints[:-1]
         if spine_base:
-            create_joint_controls(spine_base, control_shape="sphere", root_parent=root_p, sub_ctrls=True)
+            control_data = create_joint_controls(
+                spine_base,
+                control_shape="sphere",
+                root_parent=root_p,
+                sub_ctrls=True,
+                sub_ctrl_shape_rotation_x=90.0,
+            )
         tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
         if cmds.objExists(spine_tip):
             create_joint_controls([spine_tip], control_shape="sphere", root_parent=tip_root)

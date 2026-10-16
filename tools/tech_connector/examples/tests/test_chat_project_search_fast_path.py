@@ -136,6 +136,53 @@ class TestChatProjectSearchFastPath(unittest.TestCase):
         self.assertIn("No explicit `return` value was detected", result.text)
         self.assertNotIn("Next: ask `show functions in that file`", result.text)
 
+    def test_slash_qualified_symbol_question_returns_an_explanation_not_search_results(self) -> None:
+        prompt = (
+            "@maya_tools/Rigging.create_rig.rig_arm_module "
+            "what does this function do?"
+        )
+        context = RequestContext(
+            text=prompt,
+            project_roots=["C:/depot/tools"],
+        )
+
+        result = RequestEngine(progress=lambda _event: None).process(context)
+
+        self.assertEqual("answer", result.action)
+        self.assertEqual("Symbol Inspection", result.label)
+        self.assertEqual("symbol_inspection_direct", result.metadata.get("result_type"))
+        self.assertIn("Signature: `rig_arm_module(side, body_joint_map, parent_ctrl=None)`", result.text)
+        self.assertIn("Rigs the Arm", result.text)
+        self.assertIn("`create_ik_fk_limb`", result.text)
+        self.assertIn("`create_finger_rigs`", result.text)
+        self.assertIn("`setup_surface_rig_with_drivers`", result.text)
+        self.assertIn("`save_module_metadata`", result.text)
+        self.assertIn("Raises an error", result.text)
+        self.assertNotIn("Matching indexed functions", result.text)
+        self.assertNotIn("Next: ask", result.text)
+
+    def test_exact_callers_question_returns_real_call_sites_without_model_planning(self) -> None:
+        prompt = (
+            "Find all callers of build_project_edit_agent_request and explain "
+            "the execution flow."
+        )
+        result = RequestEngine(progress=lambda _event: None).process(
+            RequestContext(text=prompt, project_roots=["C:/depot/tools"])
+        )
+
+        self.assertEqual("answer", result.action)
+        self.assertEqual("Project Callers", result.label)
+        self.assertEqual("exact_symbol_callers_direct", result.metadata.get("result_type"))
+        self.assertIn(
+            "build_project_edit_agent_request(prompt, *, active_path=None, limit=8)",
+            result.text,
+        )
+        self.assertIn("project_edit_workflow_runner_planning.py:68", result.text)
+        self.assertIn("test_code_agent_prompt_smoke_suite.py:127", result.text)
+        self.assertNotIn("detect_editor_intent", result.text)
+        self.assertNotIn("\\dist\\", result.text)
+        self.assertEqual([], result.metadata.get("llm_model_calls"))
+
     def test_project_wide_maya_rig_search_does_not_get_stuck_on_active_file(self) -> None:
         prompt = "What functions create a rig in maya?"
         decision = classify_prompt_route(prompt, active_path="C:/depot/tools/custom_qt/custom_widgets.py")

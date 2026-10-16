@@ -84,7 +84,7 @@ def choose_adaptive_model_budget(
     return AdaptiveModelBudget(
         stage_type=stage_type,
         model_tier=tier,
-        model_name=str(model or selected_model or settings.get("model") or "ollama:qwen2.5-coder:7b"),
+        model_name=str(model or selected_model or settings.get("model") or "ollama:qwen3.5:4b"),
         num_ctx=max(512, int(ctx)),
         num_predict=max(32, int(predict)),
         timeout_seconds=max(30, timeout),

@@ -1,4 +1,4 @@
-"""Short-lived entitlement-derived authorization for embedded DCC bridges."""
+"""Per-user authorization for embedded DCC bridges."""
 
 from __future__ import annotations
 
@@ -31,8 +31,11 @@ from tech_connector.bridges.substance_painter.substance_painter_bridge import (
     PLUGIN_SOURCE_CODE as SUBSTANCE_PAINTER_SOURCE,
 )
 from tech_connector.bridges.session_authorization import (
+    bridge_session_token,
     embedded_bridge_authorization_source,
+    ensure_local_bridge_session,
     issue_bridge_session,
+    issue_local_bridge_session,
     load_bridge_session,
     validate_bridge_session,
 )
@@ -72,6 +75,52 @@ def test_bridge_session_contains_no_identity_project_or_financial_metadata(tmp_p
         term in serialized
         for term in ("email", "account_id", "organization_id", "license_id", "project_id", "profit")
     )
+
+
+def test_local_bridge_session_is_automatic_and_activation_independent(tmp_path) -> None:
+    path = tmp_path / "bridge_session.json"
+    session = ensure_local_bridge_session("maya", path=path, now=NOW)
+
+    assert session == ensure_local_bridge_session("maya", path=path, now=NOW)
+    assert validate_bridge_session(session.token, "maya", path=path, now=NOW)
+    assert validate_bridge_session(session.token, "blender", path=path, now=NOW)
+    assert session.expires_at == NOW + timedelta(days=30)
+
+    renewed = ensure_local_bridge_session(
+        "maya",
+        path=path,
+        now=session.expires_at,
+    )
+    assert renewed.token != session.token
+    assert validate_bridge_session(
+        renewed.token,
+        "maya",
+        path=path,
+        now=session.expires_at,
+    )
+
+
+def test_local_bridge_session_rejects_nonpositive_lifetime(tmp_path) -> None:
+    try:
+        issue_local_bridge_session(
+            path=tmp_path / "bridge_session.json",
+            now=NOW,
+            lifetime=timedelta(0),
+        )
+    except ValueError as exc:
+        assert "positive" in str(exc)
+    else:
+        raise AssertionError("nonpositive local bridge lifetime was accepted")
+
+
+def test_bridge_client_token_is_created_without_activation(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "bridge_session.json"
+    monkeypatch.setenv("TECH_CONNECTOR_BRIDGE_SESSION_FILE", str(path))
+
+    token = bridge_session_token("maya")
+
+    assert len(token) >= 32
+    assert validate_bridge_session(token, "maya", path=path)
 
 
 def test_bridge_session_expires_and_cannot_outlive_offline_entitlement(tmp_path) -> None:
@@ -364,6 +413,23 @@ def test_every_official_bridge_client_carries_the_host_session() -> None:
     for host_id, path in clients.items():
         source = path.read_text(encoding="utf-8")
         assert f'bridge_session_token("{host_id}")' in source
+
+
+def test_maya_listener_starts_before_activation_but_requests_stay_guarded() -> None:
+    maya_menu = (
+        Path(__file__).resolve().parents[2] / "maya_tools" / "maya_menu.py"
+    ).read_text(encoding="utf-8")
+    initializer = maya_menu.split("def initialize_command_port():", 1)[1].split(
+        "def on_before_save", 1
+    )[0]
+    handler = maya_menu.split("def _handle_bridge_client", 1)[1].split(
+        "def _serve_authenticated_bridge", 1
+    )[0]
+
+    assert "return create_command_port(port=COMMAND_PORT_START)" in initializer
+    assert "load_bridge_session" not in initializer
+    assert 'validate_bridge_session(session_token, "maya")' in handler
+    assert '"bridge_authorization_required"' in handler
 
 
 def test_installed_substance_and_unity_servers_reject_before_execution() -> None:

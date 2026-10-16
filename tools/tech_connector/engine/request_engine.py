@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import ast
+from pathlib import Path
 import re
 from typing import Callable, Iterable
 
@@ -320,12 +322,169 @@ class RequestEngine:
     ) -> EngineResult | None:
         """Resolve an explicit @qualified.symbol without semantic/model routing."""
         if not re.search(
-            r"(?<![\w.])@[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}(?![\w.])",
+            r"(?<![\w.])@[A-Za-z_][A-Za-z0-9_]*(?:(?:[./\\])[A-Za-z_][A-Za-z0-9_]*){1,}(?![\w./\\])",
             context.text or "",
         ):
             return None
         from tech_connector.services.project_search_service import (
             answer_explicit_symbol_inspection_question,
+        )
+
+        answer = answer_explicit_symbol_inspection_question(
+            context.text,
+            project_roots=list(context.project_roots or []),
+            active_path=context.current_file_path,
+        )
+        if not answer:
+            return None
+        self.emit("project_search", "Exact symbol inspected", 1, 1)
+        return EngineResult(
+            action="answer",
+            label="Symbol Inspection",
+            text=answer,
+            metadata={
+                "engine_path": "project_search",
+                "result_type": "symbol_inspection_direct",
+                "deep_search_candidate": False,
+                "deep_search_query": context.text,
+                "original_query": context.text,
+                "reference_scope_locked": True,
+            },
+        )
+
+    def _fast_named_symbol_lookup(self, context: RequestContext) -> EngineResult | None:
+        """Resolve an explicitly named callable without a broad semantic scan."""
+        match = re.search(
+            r"\b(?:find|locate|where\s+is|show)\s+(?:the\s+)?"
+            r"(function|method|class)\s+([A-Za-z_][A-Za-z0-9_]*)(?![\w.])\s*(?:\(\s*\))?",
+            context.text or "", re.IGNORECASE,
+        )
+        if not match or not context.project_roots:
+            return None
+        frame = analyze_request_frame(context.text)
+        if frame.wants_mutation or frame.wants_execution:
+            return None
+        from tech_connector.services.symbol_lookup_service import find_symbols
+
+        kind, name = match.group(1).lower(), match.group(2)
+        hits = []
+        seen = set()
+        for root in context.project_roots:
+            for hit in find_symbols(name, project_root=root, limit=24):
+                if hit.name.casefold() != name.casefold():
+                    continue
+                if kind == "class" and hit.kind != "class":
+                    continue
+                if kind != "class" and hit.kind not in {"function", "method"}:
+                    continue
+                path = Path(hit.path)
+                if path.suffix.lower() != ".py" or not path.is_file():
+                    continue
+                key = (str(path).casefold(), hit.qualname, hit.start_line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                hits.append(hit)
+        if not hits:
+            return EngineResult(
+                action="clarify", label="Exact Symbol Not Verified",
+                text=f"I could not verify `{name}` in the current project index. Refresh the index or give me its file path; I won't substitute a loosely related function.",
+                metadata={"result_type": "named_symbol_unverified", "symbol": name},
+            )
+        verified = []
+        for hit in hits:
+            try:
+                tree = ast.parse(Path(hit.path).read_text(encoding="utf-8-sig"))
+                nodes = [
+                    node for node in ast.walk(tree)
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                    and node.name == hit.name
+                ]
+                if nodes:
+                    node = min(nodes, key=lambda item: abs(item.lineno - hit.start_line))
+                    verified.append((hit, node.lineno))
+            except (OSError, SyntaxError, UnicodeError):
+                continue
+        if not verified:
+            return EngineResult(
+                action="clarify", label="Stale Symbol Index",
+                text=f"The index mentions `{name}`, but I could not verify its definition in the current source. Refresh the project index before using this result.",
+                metadata={"result_type": "named_symbol_stale", "symbol": name},
+            )
+        if len(verified) > 1:
+            choices = "\n".join(
+                f"- `{hit.qualname}` in `{hit.path}:{line}`"
+                for hit, line in verified[:8]
+            )
+            return EngineResult(
+                action="clarify", label="Multiple Symbol Matches",
+                text=f"I found multiple definitions of `{name}`. Which one do you mean?\n{choices}",
+                metadata={"result_type": "named_symbol_ambiguous", "symbol": name},
+            )
+        hit, line = verified[0]
+        from tech_connector.services.conversation_workspace_service import file_entity_payload
+
+        return EngineResult(
+            action="answer", label="Exact Symbol Lookup",
+            text=f"Found `{hit.qualname}` in `{hit.path}:{line}`. This was verified against the current source file.",
+            metadata={
+                "engine_path": "exact_symbol_lookup",
+                "result_type": "named_symbol_direct",
+                "selected_file": hit.path,
+                "selected_callable": hit.qualname or hit.name,
+                "selected_symbol": hit.name,
+                "workspace_update": {
+                    "entities": [
+                        file_entity_payload(hit.path, source="exact_symbol_lookup"),
+                        {"kind": "function" if kind != "class" else "class", "ref": hit.qualname or hit.name,
+                         "name": hit.name, "source": "exact_symbol_lookup", "metadata": {"file": hit.path}},
+                    ],
+                    "result_summary": f"Located {hit.name} in {hit.path}",
+                },
+            },
+        )
+
+    def _fast_contextual_symbol_inspection(self, context: RequestContext) -> EngineResult | None:
+        """Reuse a prior exact callable for a read-only 'that function' question."""
+        text = context.text or ""
+        if not re.search(r"\b(?:that|this|the previous|the last)\s+(?:function|method|callable)\b", text, re.IGNORECASE):
+            return None
+        if analyze_request_frame(text).wants_mutation:
+            return None
+        memory = dict((context.extras or {}).get("operation_memory") or {})
+        prior = dict((context.extras or {}).get("prior_result_metadata") or {})
+        symbol = str(memory.get("selected_callable") or prior.get("selected_callable") or prior.get("selected_symbol") or "")
+        file_text = str(memory.get("selected_file") or prior.get("selected_file") or "")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", symbol) or not file_text:
+            return None
+        path = Path(re.sub(r"^File:\s*", "", file_text, flags=re.IGNORECASE))
+        if not path.is_file() or path.suffix.lower() != ".py":
+            return None
+        module = ""
+        for root in context.project_roots:
+            try:
+                module = ".".join(path.resolve().relative_to(Path(root).resolve()).with_suffix("").parts)
+                break
+            except ValueError:
+                continue
+        if not module:
+            return None
+        from tech_connector.services.project_search_service import answer_explicit_symbol_inspection_question
+
+        operation = "Find callers of" if re.search(r"\bcallers?|who\s+calls\b", text, re.IGNORECASE) else "Explain"
+        answer = answer_explicit_symbol_inspection_question(
+            f"{operation} @{module}.{symbol}",
+            project_roots=list(context.project_roots), active_path=str(path),
+        )
+        if not answer:
+            return None
+        return EngineResult(
+            action="answer", label="Contextual Symbol Inspection", text=answer,
+            metadata={
+                "engine_path": "exact_symbol_lookup",
+                "result_type": "contextual_symbol_inspection_direct",
+                "selected_file": str(path), "selected_callable": symbol,
+            },
         )
 
     def _fast_unreal_animation_continuation(
@@ -514,28 +673,6 @@ class RequestEngine:
             )
         return None
 
-        answer = answer_explicit_symbol_inspection_question(
-            context.text,
-            project_roots=list(context.project_roots or []),
-            active_path=context.current_file_path,
-        )
-        if not answer:
-            return None
-        self.emit("project_search", "Exact symbol inspected", 1, 1)
-        return EngineResult(
-            action="answer",
-            label="Symbol Inspection",
-            text=answer,
-            metadata={
-                "engine_path": "project_search",
-                "result_type": "symbol_inspection_direct",
-                "deep_search_candidate": False,
-                "deep_search_query": context.text,
-                "original_query": context.text,
-                "reference_scope_locked": True,
-            },
-        )
-
     def _fast_simple_project_index_lookup(self, context: RequestContext) -> EngineResult | None:
         """Answer simple project-index facts before semantic planning/model work."""
 
@@ -571,6 +708,37 @@ class RequestEngine:
             re.IGNORECASE,
         ):
             return None
+
+        # Exact callers requests can be answered from the declaration and a
+        # bounded source scan. Resolve them before semantic/model preparation;
+        # otherwise generic call-index terms such as "execution flow" can
+        # overwhelm the named callable and add tens of seconds of latency.
+        try:
+            from tech_connector.services.project_search_service import (
+                answer_exact_symbol_callers_question,
+            )
+
+            callers_answer = answer_exact_symbol_callers_question(
+                context.text,
+                active_path=context.current_file_path,
+                project_roots=context.project_roots,
+            )
+        except Exception:
+            callers_answer = None
+        if callers_answer:
+            return EngineResult(
+                action="answer",
+                label="Project Callers",
+                text=callers_answer,
+                metadata={
+                    "engine_path": "project_search",
+                    "result_type": "exact_symbol_callers_direct",
+                    "deep_search_candidate": False,
+                    "original_query": context.text,
+                    "reference_scope_locked": True,
+                    "evidence_tier": 2,
+                },
+            )
 
         try:
             from tech_connector.services.prompt.prompt_intent_service import understand_prompt_request
@@ -1581,6 +1749,12 @@ class RequestEngine:
         fast_symbol = self._fast_explicit_symbol_inspection(context)
         if fast_symbol is not None:
             return fast_symbol
+        contextual_symbol = self._fast_contextual_symbol_inspection(context)
+        if contextual_symbol is not None:
+            return contextual_symbol
+        named_symbol = self._fast_named_symbol_lookup(context)
+        if named_symbol is not None:
+            return named_symbol
         fast_simple_lookup = self._fast_simple_project_index_lookup(context)
         if fast_simple_lookup is not None:
             return fast_simple_lookup

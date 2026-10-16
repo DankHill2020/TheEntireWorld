@@ -1,11 +1,58 @@
 """Project-edit workflow phase: _run_planning_phase."""
 
 from __future__ import annotations
+from typing import Any
+
 from tech_connector.services import project_edit_workflow_runner_dependencies as _deps
 from tech_connector.services.project_edit_requirement_semantics import (
     is_project_edit_quality_requirement as _is_project_edit_quality_requirement,
 )
 from tech_connector.services.project_edit_workflow_runner_control import _WorkflowReturn
+
+
+def _recover_unique_callable_owner_assignments(
+    assignments: list[dict[str, Any]],
+    declarations: list[dict[str, Any]],
+) -> list[str]:
+    """Move executable module-only work to the sole approved owner in a file."""
+
+    by_id = {
+        str(row.get("declaration_id") or ""): row
+        for row in declarations
+        if isinstance(row, dict)
+    }
+    recovered: list[str] = []
+    for assignment in assignments:
+        if str(assignment.get("semantic_role") or "") not in {
+            "behavior", "integration", "interaction"
+        }:
+            continue
+        assigned_rows = [by_id.get(str(value)) for value in assignment.get("declaration_ids") or []]
+        if not assigned_rows or any(
+            row is None or str(row.get("owner") or "") != "<module>"
+            for row in assigned_rows
+        ):
+            continue
+        paths = {str(row.get("path") or "") for row in assigned_rows if row is not None}
+        if len(paths) != 1:
+            continue
+        path = next(iter(paths))
+        candidates = [
+            row for row in declarations
+            if str(row.get("path") or "") == path
+            and str(row.get("owner") or "") not in {"", "<module>"}
+        ]
+        if len({str(row.get("owner") or "") for row in candidates}) != 1:
+            continue
+        assignment["declaration_ids"] = list(dict.fromkeys(
+            str(row.get("declaration_id") or "") for row in candidates
+        ))
+        assignment["reason"] = (
+            "Recovered the file's unique approved callable owner from "
+            "module-only behavior assignment"
+        )
+        recovered.append(str(assignment.get("requirement_id") or ""))
+    return recovered
 
 
 class _ProjectEditPlanningPhase:
@@ -1959,6 +2006,16 @@ class _ProjectEditPlanningPhase:
             else:
                 self.unresolved_plan_failures.append(
                     f"{self.requirement_id}: " + " | ".join(self.requirement_errors[:4])
+                )
+        recovered_ids = _recover_unique_callable_owner_assignments(
+            self.chunk_plan,
+            list((self.chunk_plan_stage.metadata or {}).get("declarations", [])),
+        )
+        if self.status_callback:
+            for requirement_id in recovered_ids:
+                self.status_callback(
+                    f"Recovered {requirement_id} from module-only behavior ownership "
+                    "to the file's unique approved callable owner."
                 )
         self.required_ids = {
             str(item.get("id") or item.get("requirement_id") or "")

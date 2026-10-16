@@ -3305,6 +3305,110 @@ def _repair_pre_mutation_rejection_guards(
                     if isinstance(node, (ast.With, ast.AsyncWith))
                 )
                 for statements in blocks:
+                    # A missing-key zero initializer is observable state on a
+                    # rejected first attempt. Defer it by reading the same
+                    # default through get() until the limit guard succeeds.
+                    for index in range(len(statements) - 1):
+                        initializer = statements[index]
+                        candidate = statements[index + 1]
+                        if not (
+                            isinstance(initializer, ast.If)
+                            and isinstance(initializer.test, ast.Compare)
+                            and len(initializer.test.ops) == 1
+                            and isinstance(initializer.test.ops[0], ast.NotIn)
+                            and len(initializer.test.comparators) == 1
+                            and len(initializer.body) == 1
+                            and not initializer.orelse
+                            and isinstance(initializer.body[0], ast.Assign)
+                            and len(initializer.body[0].targets) == 1
+                            and isinstance(initializer.body[0].value, ast.Constant)
+                            and initializer.body[0].value.value == 0
+                            and isinstance(candidate, ast.Assign)
+                            and len(candidate.targets) == 1
+                            and isinstance(candidate.targets[0], ast.Name)
+                        ):
+                            continue
+                        stored = initializer.body[0].targets[0]
+                        mapping = initializer.test.comparators[0]
+                        key = initializer.test.left
+                        if not (
+                            isinstance(stored, ast.Subscript)
+                            and isinstance(mapping, ast.Attribute)
+                            and isinstance(mapping.value, ast.Name)
+                            and mapping.value.id == "self"
+                            and ast.unparse(stored.value) == ast.unparse(mapping)
+                            and ast.unparse(stored.slice) == ast.unparse(key)
+                        ):
+                            continue
+                        lookup = ast.unparse(stored)
+                        if not any(
+                            isinstance(node, ast.Subscript)
+                            and isinstance(node.ctx, ast.Load)
+                            and ast.unparse(node) == lookup
+                            for node in ast.walk(candidate.value)
+                        ):
+                            continue
+                        local_name = candidate.targets[0].id
+                        if not any(
+                            isinstance(later, ast.If)
+                            and isinstance(later.test, ast.Compare)
+                            and isinstance(later.test.left, ast.Name)
+                            and later.test.left.id == local_name
+                            and any(isinstance(child, ast.Raise) for child in ast.walk(later))
+                            for later in statements[index + 2:]
+                        ):
+                            continue
+
+                        class ReplaceLookup(ast.NodeTransformer):
+                            def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+                                if isinstance(node.ctx, ast.Load) and ast.unparse(node) == lookup:
+                                    return ast.Call(
+                                        func=ast.Attribute(value=node.value, attr="get", ctx=ast.Load()),
+                                        args=[node.slice, ast.Constant(value=0)],
+                                        keywords=[],
+                                    )
+                                return self.generic_visit(node)
+
+                        candidate.value = ReplaceLookup().visit(candidate.value)
+                        del statements[index]
+                        changed = True
+                        notes.append(
+                            f"{class_node.name}.{function.name}: deferred missing-key "
+                            "counter initialization until after the raising guard"
+                        )
+                        break
+                    # Also handle a computed next value stored immediately
+                    # before its rejection guard. The guard uses the local
+                    # candidate, so moving only the store is semantics-safe.
+                    direct_store_index = next((
+                        index
+                        for index in range(len(statements) - 1)
+                        if isinstance(statements[index], ast.Assign)
+                        and len(statements[index].targets) == 1
+                        and isinstance(statements[index].targets[0], ast.Subscript)
+                        and isinstance(statements[index].targets[0].value, ast.Attribute)
+                        and isinstance(statements[index].targets[0].value.value, ast.Name)
+                        and statements[index].targets[0].value.value.id == "self"
+                        and isinstance(statements[index].value, ast.Name)
+                        and isinstance(statements[index + 1], ast.If)
+                        and isinstance(statements[index + 1].test, ast.Compare)
+                        and isinstance(statements[index + 1].test.left, ast.Name)
+                        and statements[index + 1].test.left.id == statements[index].value.id
+                        and len(statements[index + 1].body) == 1
+                        and isinstance(statements[index + 1].body[0], ast.Raise)
+                        and not statements[index + 1].orelse
+                    ), -1)
+                    if direct_store_index >= 0:
+                        statements[direct_store_index:direct_store_index + 2] = [
+                            statements[direct_store_index + 1],
+                            statements[direct_store_index],
+                        ]
+                        changed = True
+                        notes.append(
+                            f"{class_node.name}.{function.name}: moved the counter "
+                            "store after its raising guard"
+                        )
+                        break
                     increment_index = next((
                         index
                         for index, statement in enumerate(statements)

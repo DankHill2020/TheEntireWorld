@@ -176,6 +176,18 @@ class AnimationAssetService:
             raise ValueError(f"Asset is not a Blend Space: {asset_id}")
         return evaluate_blend_space(values, x=x, y=y)
 
+    def evaluate_controller(
+        self, asset_id: str, *, parameter_values: Mapping[str, Any] | None = None,
+        layer_id: str = "", current_state: str = "", normalized_time: float = 0.0,
+    ) -> dict[str, Any]:
+        record, values = self._load(asset_id)
+        if record.asset_type != "tc.animation_controller":
+            raise ValueError(f"Asset is not an Animation Controller: {asset_id}")
+        return evaluate_animation_controller(
+            values, parameter_values=parameter_values, layer_id=layer_id,
+            current_state=current_state, normalized_time=normalized_time,
+        )
+
     def cook(self, asset_id: str, *, platform: str = "desktop", quality: str = "high") -> DerivedArtifact:
         record, values = self._load(asset_id)
         compiled = compile_animation_payload(record.asset_type, values, platform=platform, quality=quality)
@@ -329,6 +341,68 @@ def validate_animation_controller(values: Mapping[str, Any]) -> list[AnimationIs
                 parameter = str(dict(condition).get("parameter") or "")
                 if parameter and parameter not in parameters and parameter not in {"state_time", "normalized_time", "remaining_time"}: issues.append(AnimationIssue("error", "unknown_parameter", f"Transition references unknown parameter '{parameter}'.", f"layers[{layer_index}].transitions[{index}]"))
     return issues
+
+
+def evaluate_animation_controller(
+    values: Mapping[str, Any], *, parameter_values: Mapping[str, Any] | None = None,
+    layer_id: str = "", current_state: str = "", normalized_time: float = 0.0,
+) -> dict[str, Any]:
+    """Evaluate one deterministic editor-preview step without mutating controller data."""
+    layers = [dict(row) for row in values.get("layers") or () if isinstance(row, Mapping)]
+    if not layers:
+        return {"layer_id": "", "previous_state": "", "current_state": "", "transitioned": False,
+                "transition_id": "", "motion": None, "normalized_time": float(normalized_time), "parameters": {}}
+    layer = next((row for row in layers if str(row.get("id") or "") == str(layer_id)), layers[0])
+    machine = dict(layer.get("state_machine") or {})
+    states = [dict(row) for row in machine.get("states") or () if isinstance(row, Mapping)]
+    by_id = {str(row.get("id") or ""): row for row in states if str(row.get("id") or "")}
+    active = str(current_state or machine.get("entry_state") or "")
+    if active not in by_id:
+        active = next(iter(by_id), "")
+    parameters = {
+        str(name): deepcopy(dict(spec).get("default") if isinstance(spec, Mapping) else spec)
+        for name, spec in dict(values.get("parameters") or {}).items()
+    }
+    parameters.update(deepcopy(dict(parameter_values or {})))
+    previous = active; chosen: dict[str, Any] | None = None
+    for raw in machine.get("transitions") or ():
+        transition = dict(raw) if isinstance(raw, Mapping) else {}
+        if str(transition.get("from") or "") not in {active, "any", "*"}:
+            continue
+        exit_time = transition.get("exit_time")
+        if exit_time not in {None, ""} and float(normalized_time) < float(exit_time):
+            continue
+        if all(_animation_condition_matches(dict(condition), parameters, normalized_time) for condition in transition.get("conditions") or ()):
+            target = str(transition.get("to") or "")
+            if target in by_id:
+                active = target; chosen = transition; break
+    state = by_id.get(active, {})
+    return {
+        "layer_id": str(layer.get("id") or "base"), "previous_state": previous, "current_state": active,
+        "transitioned": chosen is not None, "transition_id": str(dict(chosen or {}).get("id") or ""),
+        "blend_seconds": float(dict(chosen or {}).get("blend_seconds", dict(chosen or {}).get("duration", 0.0)) or 0.0),
+        "motion": deepcopy(state.get("motion")), "normalized_time": 0.0 if chosen is not None else float(normalized_time),
+        "parameters": parameters, "root_motion": deepcopy(dict(values.get("root_motion") or {})),
+    }
+
+
+def _animation_condition_matches(condition: Mapping[str, Any], parameters: Mapping[str, Any], normalized_time: float) -> bool:
+    name = str(condition.get("parameter") or "")
+    actual = float(normalized_time) if name in {"state_time", "normalized_time"} else parameters.get(name)
+    expected = condition.get("value", True)
+    operator = str(condition.get("operator") or condition.get("op") or "==").casefold()
+    try:
+        if operator in {"==", "equals", "equal"}: return actual == expected
+        if operator in {"!=", "not_equals", "not_equal"}: return actual != expected
+        if operator in {">", "greater"}: return float(actual) > float(expected)
+        if operator in {">=", "greater_equal"}: return float(actual) >= float(expected)
+        if operator in {"<", "less"}: return float(actual) < float(expected)
+        if operator in {"<=", "less_equal"}: return float(actual) <= float(expected)
+        if operator in {"true", "set", "triggered"}: return bool(actual)
+        if operator in {"false", "unset"}: return not bool(actual)
+    except (TypeError, ValueError):
+        return False
+    return False
 
 
 def evaluate_blend_space(values: Mapping[str, Any], *, x: float, y: float = 0.0) -> dict[str, float]:

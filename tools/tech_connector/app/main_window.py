@@ -81,14 +81,14 @@ if __name__ == "__main__":
                         target=warm_ollama_model, args=(m, keep_alive), daemon=True
                     )
                     t.start()
-            selected_for_policy = settings.get("model") or "ollama:qwen3:4b-instruct"
+            selected_for_policy = settings.get("model") or "ollama:qwen3.5:4b"
             if (
                     not warmed
                     and provider_for_model(selected_for_policy) == "ollama"
                     and should_use_local_runtime(selected_for_policy, settings)
             ):
                 t = threading.Thread(
-                    target=warm_ollama_model, args=("qwen3:4b-instruct", keep_alive), daemon=True
+                    target=warm_ollama_model, args=("qwen3.5:4b", keep_alive), daemon=True
                 )
                 t.start()
     except Exception:

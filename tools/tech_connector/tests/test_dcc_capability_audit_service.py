@@ -7,6 +7,7 @@ from tech_connector.game_engine.integration.dcc_capability_audit_service import 
 )
 from tech_connector.game_engine.integration.rigging_host_adapter_service import (
     BLENDER_CAPABILITY_STATUS,
+    HOUDINI_CAPABILITY_STATUS,
     MAX_CAPABILITY_STATUS,
     MOTIONBUILDER_CAPABILITY_STATUS,
 )
@@ -60,6 +61,16 @@ def test_blender_rigging_is_audited_against_its_native_host_profile() -> None:
     assert set(rigging.out_of_scope_operations) == {
         key for key, status in BLENDER_CAPABILITY_STATUS.items() if status == "unsupported"
     }
+
+
+def test_houdini_kinefx_rigging_covers_the_shared_contract() -> None:
+    report = audit_dcc_host("houdini")
+    rigging = next(row for row in report.departments if row.department == "rigging")
+    assert rigging.status == "translated"
+    assert set(rigging.executable_operations) == set(RIGGING_CAPABILITIES)
+    assert not rigging.missing_operations
+    assert not rigging.out_of_scope_operations
+    assert all(status == "translated" for status in HOUDINI_CAPABILITY_STATUS.values())
 
 
 def test_delegated_host_ui_operations_are_not_counted_as_executable() -> None:

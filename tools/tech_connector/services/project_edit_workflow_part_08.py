@@ -377,13 +377,25 @@ def _query_stage(
                     "think": (
                         False
                         if stage_metadata.get("disable_thinking")
+                        or (
+                            model.startswith(("qwen3.5:4b", "qwen3:4b"))
+                            and stage.key in {
+                                "function_repair",
+                                "class_repair",
+                                "class_set_repair",
+                                "missing_symbol",
+                                "artifact_missing_symbol",
+                            }
+                        )
                         else None
                     ),
                 },
-                timeout=max(int(timeout), int(stage.timeout)),
+                # Both limits are per-call ceilings. An explicit caller budget
+                # must not be extended by a stage's default timeout.
+                timeout=min(int(timeout), int(stage.timeout)),
                 provider_route=provider_route,
                 no_progress_seconds=stage.no_progress_seconds,
-                max_wall_seconds=max(int(timeout), int(stage.timeout)),
+                max_wall_seconds=min(int(timeout), int(stage.timeout)),
                 queue_category="repair",
             )
         response, normalized_fence = normalize_repair_response(stage, response)

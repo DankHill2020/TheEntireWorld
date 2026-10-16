@@ -54,10 +54,12 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
             color: {tokens.text};
             selection-background-color: {tokens.accent_pressed};
             selection-color: {tokens.text};
+            min-height: 28px;
         }}
         QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+        QTextBrowser:focus, QListWidget:focus, QTreeWidget:focus, QTableWidget:focus,
         QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-            border-color: {tokens.focus};
+            border: 2px solid {tokens.focus};
         }}
         QPushButton, QToolButton {{
             background: {tokens.surface_raised};
@@ -66,12 +68,13 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
             color: {tokens.text};
             font-weight: 500;
             padding: 5px 10px;
+            min-height: 28px;
         }}
         QPushButton:hover, QToolButton:hover {{
             background: {tokens.surface_hover};
             border-color: {tokens.border_strong};
         }}
-        QPushButton:focus, QToolButton:focus {{ border-color: {tokens.focus}; }}
+        QPushButton:focus, QToolButton:focus {{ border: 2px solid {tokens.focus}; }}
         QPushButton:disabled, QToolButton:disabled {{
             background: {tokens.surface};
             border-color: {tokens.border};
@@ -254,6 +257,7 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
         QPlainTextEdit[uiRole="composer"]:focus {{ border-color: {tokens.focus}; }}
         QTabBar::tab {{
             min-width: 72px;
+            min-height: 28px;
             padding: 7px 12px;
             background: {tokens.surface};
             border-color: {tokens.border};
@@ -265,6 +269,34 @@ def component_stylesheet(tokens: DesignTokens = TOKENS) -> str:
             color: {tokens.text};
         }}
         QTabBar::tab:hover {{ background: {tokens.surface_hover}; color: {tokens.text}; }}
+        QTabBar:focus {{ border: 2px solid {tokens.focus}; }}
+        QCheckBox, QRadioButton {{ min-height: 24px; spacing: 7px; }}
+        QCheckBox:focus, QRadioButton:focus {{
+            border: 2px solid {tokens.focus}; border-radius: {tokens.radius_small}px;
+        }}
+        QWidget[accessibilityHighContrast="true"] QWidget {{
+            color: #ffffff;
+        }}
+        QWidget[accessibilityHighContrast="true"] QLineEdit,
+        QWidget[accessibilityHighContrast="true"] QTextEdit,
+        QWidget[accessibilityHighContrast="true"] QPlainTextEdit,
+        QWidget[accessibilityHighContrast="true"] QListWidget,
+        QWidget[accessibilityHighContrast="true"] QTreeWidget,
+        QWidget[accessibilityHighContrast="true"] QTableWidget,
+        QWidget[accessibilityHighContrast="true"] QComboBox {{
+            background: #000000; color: #ffffff; border-color: #d7e8ff;
+        }}
+        QWidget[accessibilityHighContrast="true"] QPushButton:focus,
+        QWidget[accessibilityHighContrast="true"] QToolButton:focus,
+        QWidget[accessibilityHighContrast="true"] QLineEdit:focus,
+        QWidget[accessibilityHighContrast="true"] QTextEdit:focus,
+        QWidget[accessibilityHighContrast="true"] QPlainTextEdit:focus,
+        QWidget[accessibilityHighContrast="true"] QListWidget:focus,
+        QWidget[accessibilityHighContrast="true"] QTreeWidget:focus,
+        QWidget[accessibilityHighContrast="true"] QTableWidget:focus,
+        QWidget[accessibilityHighContrast="true"] QComboBox:focus {{
+            border: 3px solid #ffd84d;
+        }}
     """
 
 

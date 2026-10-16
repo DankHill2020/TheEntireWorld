@@ -20,7 +20,7 @@ FEDERATED_SCENE_SCHEMA = "tech_connector.federated_scene.v1"
 DCC_SESSION_STATE_SCHEMA = "tech_connector.dcc_session_state.v1"
 RIG_GRAPH_SCHEMA = "tech_connector.editable_rig_graph.v1"
 SUPPORTED_CONSTRAINTS = {
-    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "spine_stretch", "pole_vector",
+    "parent", "point", "orient", "rotate", "scale", "aim", "ik", "ik_chain", "spine_stretch", "pole_vector",
     "geometry", "normal", "tangent", "motion_path", "ribbon", "opaque",
 }
 SUPPORTED_DEFORMERS = {
@@ -656,6 +656,54 @@ class EditableRigGraph:
             "type": "ik",
             "source_ids": [str(target_node_id)] + ([str(pole_node_id)] if pole_node_id else []),
             "target_id": str(end_joint_id),
+            "settings": solver_settings,
+            "enabled": True,
+            "ownership": "native",
+            "edit_policy": "full",
+        }
+        return native_id
+
+    def add_ik_chain_solver(
+        self,
+        joint_ids: list[str] | tuple[str, ...],
+        target_node_id: str,
+        *,
+        pole_node_id: str = "",
+        solver_id: str | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> str:
+        """Author a native multi-segment rotate-plane IK solver."""
+        chain = [str(value) for value in joint_ids]
+        if len(chain) < 3:
+            raise ValueError("A rotate-plane IK chain requires at least three joints.")
+        missing_joints = [joint_id for joint_id in chain if joint_id not in self.joints]
+        if missing_joints:
+            raise KeyError("Unknown IK joints: " + ", ".join(missing_joints))
+        for parent_id, child_id in zip(chain[:-1], chain[1:]):
+            if str(self.joints[child_id].get("parent_id") or "") != parent_id:
+                raise ValueError("Every IK-chain joint must be parented directly beneath its predecessor.")
+        for node_id in [str(target_node_id), str(pole_node_id or "")]:
+            if node_id and node_id not in self.nodes:
+                raise KeyError(f"Unknown IK control node: {node_id}")
+        native_id = str(solver_id or uuid.uuid4())
+        solver_settings = {
+            "joint_ids": chain,
+            "target_node_id": str(target_node_id),
+            "pole_node_id": str(pole_node_id or ""),
+            **dict(settings or {}),
+        }
+        self.add_node(
+            "Rotate Plane Chain IK",
+            "solver.ik_rotate_plane_chain",
+            node_id=native_id,
+            attributes=solver_settings,
+            source_type="ikRotatePlaneChain",
+        )
+        self.constraints[native_id] = {
+            "id": native_id,
+            "type": "ik_chain",
+            "source_ids": [str(target_node_id)] + ([str(pole_node_id)] if pole_node_id else []),
+            "target_id": chain[-1],
             "settings": solver_settings,
             "enabled": True,
             "ownership": "native",

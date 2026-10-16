@@ -2644,7 +2644,10 @@ class MainWindowChatRuntimeMixin(MainWindowChatCapabilityMixin):
             )
             if mention_context:
                 prepared = f"{prepared}\n\n{mention_context}"
-            smart_search_context = smart_search_context_block(text or "")
+            smart_search_context = smart_search_context_block(
+                text or "",
+                settings=getattr(self, "settings", {}) or {},
+            )
             if smart_search_context:
                 prepared = f"{prepared}\n\n{smart_search_context}"
         except Exception:

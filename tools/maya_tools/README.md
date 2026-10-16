@@ -60,6 +60,46 @@ from maya_tools.Rigging.mocap import hik_ui
 hik_ui.launch_hik_ui()
 ```
 
+Vehicle placement and transfer template:
+
+```python
+from maya_tools.Rigging import rig_template
+report = rig_template.load_default_vehicle_rig_template()
+```
+
+The bundled vehicle scene is a joint-only Maya ASCII template containing a
+root, chassis, and four wheel mount/wheel/contact chains. Its joints carry an
+embedded `tech_connector.vehicle_rig.v1` definition and SI-unit configuration,
+even though the Maya scene uses centimeters. The rig builder is responsible
+for creating controls, geometry bindings, constraints, and native ground
+queries; baked animation remains the fallback for transfer targets.
+
+The finished example rig is bundled at
+`Rigging/templates/vehicle_rig.ma`. The **Vehicle** tab in the HIK & Rig
+Builder can load the joint template, build controls and wheel solver drivers,
+assign selected polygon ground meshes, update or enable live ground raycasts,
+bake the playback range, and save a new Maya rig file.
+
+`Rigging/templates/vehicle_rig_demo.ma` contains an 80-frame baked validation
+pass over uneven ground. Each wheel accumulates signed travel along its own
+steered forward axis and converts it to degrees with
+`-(distance / radius) * 180 / pi`. This lets inside/outside wheels accumulate
+different travel during turns. Suspension uses the ray hit distance minus the
+wheel radius, clamped to the configured compression and droop range. Debug rays
+turn green on contact and red when airborne.
+
+The same operations are available in Maya Python:
+
+```python
+from maya_tools.Rigging import vehicle_rig
+
+result = vehicle_rig.build_vehicle_rig()
+vehicle_rig.attach_selected_ground(result["rig_root"])
+vehicle_rig.install_ground_callback(result["rig_root"])
+vehicle_rig.bake_ground(result["rig_root"])
+vehicle_rig.save_vehicle_rig("C:/project/vehicles/car_rig.ma")
+```
+
 ## Unreal/project workflow
 
 When the Tech Connector menu opens a project-aware tool, select the intended

@@ -1020,6 +1020,7 @@ from tech_connector.api import (
     reasoning_capabilities,
     reasoning_snapshot,
     run_reasoning,
+    run_reasoning_chain,
 )
 ```
 
@@ -1043,6 +1044,24 @@ result = run_reasoning(
     project_root="C:/project",
     context={"current_file_path": "C:/project/tool.py"},
 )
+```
+
+For related requests, use `run_reasoning_chain` (or `api.reasoning.run_chain`).
+It carries the prior result's file/asset/operation workspace into each next
+request, keeps only the latest 12 transcript messages, and stops when a step
+needs clarification or fails. The returned `state` can be passed back as
+`context` to resume a later chain after supplying the missing detail.
+
+```python
+result = run_reasoning_chain(
+    ["Find the export function", "Explain that function", "List its callers"],
+    project_root="C:/project",
+)
+if result.ok:
+    for step in result.result["steps"]:
+        print(step["response"]["text"])
+else:
+    print(result.result["stop_reason"])
 ```
 
 ## Error Handling

@@ -1,0 +1,1383 @@
+{
+  "schema": "ai_studio.workflow.v1",
+  "source": "prompt_review_pack",
+  "naming": {
+    "function_suffix": "_git_ingest",
+    "original_function": "review_3dsmax_unreal_environment_publish"
+  },
+  "host": "cross_dcc",
+  "goal": "Export a 3ds Max environment static mesh as FBX to C:/temp/tc_review_environment.fbx, import it into Unreal /Game/TechConnector/Review/Environment, save it and validate registry readback.",
+  "module": "workflows.cross_dcc.review_3dsmax_unreal_environment_publish",
+  "function": "review_3dsmax_unreal_environment_publish",
+  "function_path": "workflows.cross_dcc.review_3dsmax_unreal_environment_publish.review_3dsmax_unreal_environment_publish",
+  "selected_capabilities": [
+    {
+      "name": "stage_01_3dsmax_io_export",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\max_tools\\operations.py",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "3dsmax",
+      "provider_id": "3dsmax",
+      "package": "",
+      "operation": "io.export",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "max_tools.operations.io_export",
+      "module": "",
+      "start_line": 101,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "module": "",
+      "start_line": 31,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "module": "",
+      "start_line": 111,
+      "source_kind": "callable_definition"
+    }
+  ],
+  "slots": {
+    "step1_filepath": "C:/temp/tc_review_environment.fbx",
+    "step1_selected_only": "False",
+    "step2_destination_path": "/Game/TechConnector/Review/Environment",
+    "step2_subject": "static_mesh",
+    "step2_skeleton_path": "",
+    "step2_replace_existing": "False",
+    "step2_save": "True",
+    "step3_destination_path": "/Game/TechConnector/Review/Environment"
+  },
+  "links": [
+    {
+      "from": "step1.fbx_path",
+      "to": "step2.source_file"
+    },
+    {
+      "from": "step2.imported_paths",
+      "to": "step3.imported_paths"
+    }
+  ],
+  "validation": {
+    "imports_checked_by_test": true,
+    "scene_objects_checked_at_runtime": true
+  },
+  "prompt_verified": true,
+  "nodes": [
+    {
+      "id": "step1",
+      "label": "stage_01_3dsmax_io_export",
+      "name": "stage_01_3dsmax_io_export",
+      "host": "3dsmax",
+      "package": "3dsmax",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "io.export",
+      "callable": "max_tools.operations.io_export",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": false,
+        "filepath": "C:/temp/tc_review_environment.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "filepath": "user_prompt"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "3ds Max Export Scene uses its registered default for `selected_only`: False.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "3dsmax.operations.io.export",
+        "host": "3dsmax",
+        "operation": "io.export",
+        "label": "3ds Max Export Scene",
+        "callable": "max_tools.operations.io_export",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "max_scene"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": false
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:3dsmax",
+        "metadata": {
+          "description": "",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 60
+    },
+    {
+      "id": "step2",
+      "label": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "name": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "/Game/TechConnector/Review/Environment",
+        "subject": "static_mesh",
+        "skeleton_path": "",
+        "replace_existing": false,
+        "save": true,
+        "source_file": {
+          "from_action": "stage_01_3dsmax_io_export",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_prompt",
+        "subject": "planned_value",
+        "skeleton_path": "operation_default",
+        "replace_existing": "operation_default",
+        "save": "operation_default",
+        "source_file": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "subject": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "skeleton_path": {
+          "source": "operation_default",
+          "resolution": "unreal_tools.asset_transfer_adapter.import_fbx_verified uses its registered default for `skeleton_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "replace_existing": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "save": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "label": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "provider": "unreal_tools",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path",
+          "destination_path"
+        ],
+        "produces": [
+          "asset_path",
+          "imported_paths",
+          "asset_count"
+        ],
+        "required": [
+          "source_file"
+        ],
+        "optional": {
+          "destination_path": "/Game/AIStudio/Imports",
+          "subject": "asset",
+          "skeleton_path": "",
+          "replace_existing": false,
+          "save": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object paths resolve in EditorAssetLibrary"
+        ],
+        "rollback": [
+          "unreal_tools.asset_transfer_adapter.rollback_imported_assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 31
+          },
+          "docstring": "Import an FBX with explicit UE 5.8 options and return asset readback."
+        },
+        "executable": true
+      },
+      "x": 360,
+      "y": 60
+    },
+    {
+      "id": "step3",
+      "label": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "name": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "imported_paths": {
+          "from_action": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "destination_path": "/Game/TechConnector/Review/Environment"
+      },
+      "literal_value_provenance": {
+        "imported_paths": "upstream_result_reference",
+        "destination_path": "user_prompt"
+      },
+      "literal_value_details": {
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "Registry validation inherits the explicit Unreal import destination so readback is scoped to the requested content folder.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.registry_readback",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "label": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "provider": "unreal_tools",
+        "role": "validate",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "imported_paths"
+        ],
+        "produces": [
+          "assets",
+          "asset_count"
+        ],
+        "required": [],
+        "optional": {
+          "imported_paths": [],
+          "destination_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "all requested paths resolve in Asset Registry"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 111
+          },
+          "docstring": "Prove imported packages resolve through the Asset Registry."
+        },
+        "executable": true
+      },
+      "x": 660,
+      "y": 60
+    }
+  ],
+  "steps": [
+    {
+      "step_index": 1,
+      "symbol": {
+        "name": "stage_01_3dsmax_io_export",
+        "kind": "function",
+        "host": "3dsmax",
+        "provider_id": "3dsmax",
+        "pipeline_operation": "dcc_operation",
+        "operation": "io.export",
+        "function_path": "max_tools.operations.io_export",
+        "file_path": "C:\\depot\\tools\\max_tools\\operations.py",
+        "start_line": 101,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "filepath",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "selected_only",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "fbx_path",
+            "annotation": "str"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": false,
+        "filepath": "C:/temp/tc_review_environment.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "filepath": "user_prompt"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "3ds Max Export Scene uses its registered default for `selected_only`: False.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "3dsmax.operations.io.export",
+        "host": "3dsmax",
+        "operation": "io.export",
+        "label": "3ds Max Export Scene",
+        "callable": "max_tools.operations.io_export",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "max_scene"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": false
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:3dsmax",
+        "metadata": {
+          "description": "",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 2,
+      "symbol": {
+        "name": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "function_path": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "start_line": 31,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "source_file",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "destination_path",
+            "annotation": "str",
+            "required": false,
+            "default": "/Game/AIStudio/Imports"
+          },
+          {
+            "name": "subject",
+            "annotation": "str",
+            "required": false,
+            "default": "asset"
+          },
+          {
+            "name": "skeleton_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "replace_existing",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          },
+          {
+            "name": "save",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "asset_path",
+            "annotation": "str"
+          },
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "asset_count",
+            "annotation": "int"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "/Game/TechConnector/Review/Environment",
+        "subject": "static_mesh",
+        "skeleton_path": "",
+        "replace_existing": false,
+        "save": true,
+        "source_file": {
+          "from_action": "stage_01_3dsmax_io_export",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_prompt",
+        "subject": "planned_value",
+        "skeleton_path": "operation_default",
+        "replace_existing": "operation_default",
+        "save": "operation_default",
+        "source_file": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "subject": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "skeleton_path": {
+          "source": "operation_default",
+          "resolution": "unreal_tools.asset_transfer_adapter.import_fbx_verified uses its registered default for `skeleton_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "replace_existing": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "save": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "label": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "provider": "unreal_tools",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path",
+          "destination_path"
+        ],
+        "produces": [
+          "asset_path",
+          "imported_paths",
+          "asset_count"
+        ],
+        "required": [
+          "source_file"
+        ],
+        "optional": {
+          "destination_path": "/Game/AIStudio/Imports",
+          "subject": "asset",
+          "skeleton_path": "",
+          "replace_existing": false,
+          "save": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object paths resolve in EditorAssetLibrary"
+        ],
+        "rollback": [
+          "unreal_tools.asset_transfer_adapter.rollback_imported_assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 31
+          },
+          "docstring": "Import an FBX with explicit UE 5.8 options and return asset readback."
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 3,
+      "symbol": {
+        "name": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "function_path": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "start_line": 111,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]",
+            "required": false,
+            "default": []
+          },
+          {
+            "name": "destination_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "assets",
+            "annotation": "list[dict[str, Any]]"
+          },
+          {
+            "name": "asset_count",
+            "annotation": "int"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "imported_paths": {
+          "from_action": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "destination_path": "/Game/TechConnector/Review/Environment"
+      },
+      "literal_value_provenance": {
+        "imported_paths": "upstream_result_reference",
+        "destination_path": "user_prompt"
+      },
+      "literal_value_details": {
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "Registry validation inherits the explicit Unreal import destination so readback is scoped to the requested content folder.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.registry_readback",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "label": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "provider": "unreal_tools",
+        "role": "validate",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "imported_paths"
+        ],
+        "produces": [
+          "assets",
+          "asset_count"
+        ],
+        "required": [],
+        "optional": {
+          "imported_paths": [],
+          "destination_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "all requested paths resolve in Asset Registry"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 111
+          },
+          "docstring": "Prove imported packages resolve through the Asset Registry."
+        },
+        "executable": true
+      }
+    }
+  ],
+  "data_links": [
+    {
+      "from_step": 1,
+      "from_output": "fbx_path",
+      "to_step": 2,
+      "to_input": "source_file",
+      "reason": "Bind typed `fbx_path` output from the planned upstream action."
+    },
+    {
+      "from_step": 2,
+      "from_output": "imported_paths",
+      "to_step": 3,
+      "to_input": "imported_paths",
+      "reason": "Bind typed `imported_paths` output from the planned upstream action."
+    }
+  ],
+  "flow_links": [
+    {
+      "from_step": 1,
+      "to_step": 2,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 2,
+      "to_step": 3,
+      "reason": "Preserve the planned cross-DCC execution order."
+    }
+  ],
+  "prompt_flow_summary": {
+    "schema": "pipeline_prompt_flow_v1",
+    "route": "action_graph",
+    "framework": "dynamic_typed_pipeline_v1",
+    "semantic_verification": {
+      "framework": "verified_pipeline_requirement_ledger_v1",
+      "ledger": {
+        "framework": "pipeline_requirement_ledger_v1",
+        "requirements": [
+          {
+            "id": "clause_1",
+            "requirement": "Export a 3ds Max environment static mesh as FBX to C:/temp/tc_review_environment.fbx",
+            "role": "GOAL",
+            "action": "export",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 0.8333,
+              "matched_terms": [
+                "environment",
+                "export",
+                "mesh",
+                "review",
+                "static"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Environment\", \"subject\": \"static_mesh\", \"skeleton_path\": \"\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_01_3dsmax_io_export\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_01_3dsmax_io_export",
+                "operation": "io.export",
+                "score": 0.6667,
+                "matched_terms": [
+                  "environment",
+                  "export",
+                  "review",
+                  "temp"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "3dsmax export io.export max_tools.operations.io_export {\"selected_only\": false, \"filepath\": \"C:/temp/tc_review_environment.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+              },
+              {
+                "stage": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+                "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+                "score": 0.3333,
+                "matched_terms": [
+                  "environment",
+                  "review"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal validate unreal_tools.asset_transfer_adapter.registry_readback unreal_tools.asset_transfer_adapter.registry_readback {\"imported_paths\": {\"from_action\": \"stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"destination_path\": \"/Game/TechConnector/Review/Environment\"} [\"assets\", \"asset_count\"] [\"all requested paths resolve in Asset Registry\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_2",
+            "requirement": "import it into Unreal /Game/TechConnector/Review/Environment",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 1.2,
+              "matched_terms": [
+                "environment",
+                "game",
+                "import",
+                "review",
+                "techconnector",
+                "unreal"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Environment\", \"subject\": \"static_mesh\", \"skeleton_path\": \"\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_01_3dsmax_io_export\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+                "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+                "score": 1.2,
+                "matched_terms": [
+                  "environment",
+                  "game",
+                  "import",
+                  "review",
+                  "techconnector",
+                  "unreal"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal validate unreal_tools.asset_transfer_adapter.registry_readback unreal_tools.asset_transfer_adapter.registry_readback {\"imported_paths\": {\"from_action\": \"stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"destination_path\": \"/Game/TechConnector/Review/Environment\"} [\"assets\", \"asset_count\"] [\"all requested paths resolve in Asset Registry\"]"
+              },
+              {
+                "stage": "stage_01_3dsmax_io_export",
+                "operation": "io.export",
+                "score": 0.3333,
+                "matched_terms": [
+                  "environment",
+                  "review"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "3dsmax export io.export max_tools.operations.io_export {\"selected_only\": false, \"filepath\": \"C:/temp/tc_review_environment.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_3",
+            "requirement": "save it",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 1.2,
+              "matched_terms": [
+                "save"
+              ],
+              "active_parameter_terms": [
+                "save"
+              ],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Environment\", \"subject\": \"static_mesh\", \"skeleton_path\": \"\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_01_3dsmax_io_export\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": []
+          },
+          {
+            "id": "clause_4",
+            "requirement": "validate registry readback.",
+            "role": "VALIDATION",
+            "action": "validate",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+              "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+              "score": 1.0,
+              "matched_terms": [
+                "readback",
+                "registry",
+                "validate"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal validate unreal_tools.asset_transfer_adapter.registry_readback unreal_tools.asset_transfer_adapter.registry_readback {\"imported_paths\": {\"from_action\": \"stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"destination_path\": \"/Game/TechConnector/Review/Environment\"} [\"assets\", \"asset_count\"] [\"all requested paths resolve in Asset Registry\"]"
+            },
+            "alternates": []
+          }
+        ],
+        "requirement_count": 4,
+        "evidence_found": 4,
+        "needs_semantic_check": 0,
+        "all_requirements_accounted_for": true
+      },
+      "semantic_verdict": {
+        "matches_request": true,
+        "reason": "",
+        "covered": [],
+        "missing": [],
+        "distorted": [],
+        "unsupported_claims": [],
+        "confidence": 0.95,
+        "dismissed_missing": [],
+        "framework": "prompt_plan_alignment_v1",
+        "status": "verified",
+        "elapsed_ms": 6141.57,
+        "model_role": "semantic_plan_critic",
+        "verifier_tier": "semantic_1_5b",
+        "model_attempts": {
+          "primary_ms": 6141.503,
+          "primary_raw": "{\"match\":true,\"missing\":[],\"wrong\":[],\"unsupported\":[],\"confidence\":0.95}",
+          "fallback_ms": 0.0,
+          "fallback_raw": ""
+        }
+      },
+      "matches_request": true,
+      "verification_available": true
+    },
+    "timings": {
+      "context_build_ms": 11599.651,
+      "understanding_validation_ms": 0.535,
+      "route_classification_ms": 393.407,
+      "action_planning_ms": 8.665,
+      "plan_alignment_ms": 6142.264,
+      "workflow_materialization_ms": 2022.996,
+      "total_ms": 20176.261
+    },
+    "ui_materialization": {
+      "ok": true,
+      "node_count": 3,
+      "link_count": 4,
+      "execution_order": [
+        "stage_01_3dsmax_io_export",
+        "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+        "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+      ]
+    },
+    "python_round_trip_node_count": 3,
+    "understanding_false_negative_waived": true,
+    "semantic_verifier_false_negative_waived": false
+  },
+  "review_scenario": {
+    "category": "environment_model",
+    "file_types": [
+      ".max scene",
+      ".fbx",
+      "Unreal static mesh"
+    ]
+  }
+}

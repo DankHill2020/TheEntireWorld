@@ -54,7 +54,8 @@ class RelocatablePackageLayoutTests(unittest.TestCase):
         self.assertIn("CREATE_NO_WINDOW", terminal_service)
         settings_source = (APP_ROOT / "services" / "settings_service.py").read_text(encoding="utf-8")
         self.assertNotIn("sys.executable", settings_source)
-        self.assertIn('"command": "python"', settings_source)
+        self.assertIn("resolve_mcp_python_command", settings_source)
+        self.assertIn('"command": python_command', settings_source)
 
     def test_package_audit_finds_no_unqualified_first_party_imports(self):
         audit = audit_python_package_layout(APP_ROOT)

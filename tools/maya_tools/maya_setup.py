@@ -82,7 +82,7 @@ def add_tools_to_user_setup(tools_dir):
 
 
 def setup_maya_livelink():
-    """Setup the entitlement-aware Maya bridge and official Live Link plugin."""
+    """Setup the automatically authenticated Maya bridge and Live Link plugin."""
     livelink_code = (
         "# TECH_CONNECTOR_SECURE_MAYA_PORT\n"
         "try:\n"

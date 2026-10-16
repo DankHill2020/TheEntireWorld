@@ -884,7 +884,7 @@ def _causal_repair_escalation_model(
         settings.get("router_local_code")
         or settings.get("fast_code_model")
         or settings.get("fallback_code_model")
-        or "qwen2.5-coder:7b"
+        or "qwen3.5:4b"
     ).strip()
     return configured.removeprefix("ollama:") or _strong_task_model(
         selected_model

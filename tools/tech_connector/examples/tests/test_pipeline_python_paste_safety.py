@@ -21,6 +21,17 @@ def pasted_pipeline(step1_value=None):
         ast.parse(cleaned)
         self.assertEqual("pasted_pipeline", first_function_name(cleaned))
 
+    def test_private_codegen_helper_does_not_replace_public_pipeline_entrypoint(self) -> None:
+        code = '''def _tc_bridge_payload(response):
+    return response
+
+
+def publish_character_pipeline():
+    return _tc_bridge_payload({"ok": True})
+'''
+
+        self.assertEqual("publish_character_pipeline", first_function_name(code))
+
 
 if __name__ == "__main__":
     unittest.main()

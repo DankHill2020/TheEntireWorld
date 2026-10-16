@@ -1,9 +1,9 @@
-"""Short-lived local authorization for official DCC execution bridges.
+"""Automatic per-user authorization for official DCC execution bridges.
 
-The bridge session is not a license and cannot extend an entitlement. It is a
-random, per-user capability issued only after the shared signed-entitlement
-policy succeeds. Embedded hosts can validate it with the Python standard
-library, without receiving account, project, or financial metadata.
+Bridge availability is independent of product activation. A random local
+capability is created automatically and is still required on every execution
+request. Embedded hosts can validate it with the Python standard library,
+without receiving account, project, or financial metadata.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import stat
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,7 +36,7 @@ SUPPORTED_HOSTS = (
 SESSION_FILENAME = "bridge_session.json"
 BRIDGE_AUTHORIZATION_ERROR = {
     "ok": False,
-    "error": "Tech Connector activation is required for this DCC bridge.",
+    "error": "A valid local Tech Connector bridge session is required.",
     "code": "bridge_authorization_required",
 }
 
@@ -53,9 +54,20 @@ def bridge_session_path(app_data_root: str | Path | None = None) -> Path:
     if override:
         return Path(override).expanduser()
     if app_data_root is None:
-        from tech_connector.models.constants import APP_DIR
-
-        app_data_root = APP_DIR
+        if os.name == "nt":
+            local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+            app_data_root = (
+                Path(local_app_data)
+                if local_app_data
+                else Path.home() / "AppData" / "Local"
+            ) / "TechConnector"
+        elif sys.platform == "darwin":
+            app_data_root = Path.home() / "Library" / "Application Support" / "TechConnector"
+        else:
+            state_home = os.environ.get("XDG_STATE_HOME", "").strip()
+            app_data_root = (
+                Path(state_home) if state_home else Path.home() / ".local" / "state"
+            ) / "tech_connector"
     return Path(app_data_root).expanduser() / "licensing" / SESSION_FILENAME
 
 
@@ -107,6 +119,33 @@ def issue_development_bridge_session(
     return _write_session(path, current, current + timedelta(hours=12), hosts)
 
 
+def issue_local_bridge_session(
+    *,
+    path: str | Path | None = None,
+    hosts: Iterable[str] = SUPPORTED_HOSTS,
+    now: datetime | None = None,
+    lifetime: timedelta = timedelta(days=30),
+) -> BridgeSession:
+    """Issue an activation-independent, per-user bridge capability."""
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if lifetime <= timedelta(0):
+        raise ValueError("bridge session lifetime must be positive")
+    return _write_session(path, current, current + lifetime, hosts)
+
+
+def ensure_local_bridge_session(
+    host_id: str,
+    *,
+    path: str | Path | None = None,
+    now: datetime | None = None,
+) -> BridgeSession:
+    """Return a current local session, creating or renewing it as needed."""
+    existing = load_bridge_session(host_id, path=path, now=now)
+    if existing is not None:
+        return existing
+    return issue_local_bridge_session(path=path, now=now)
+
+
 def ensure_bridge_session_for_evaluation(
     evaluation,
     *,
@@ -136,7 +175,9 @@ def _write_session(
     )
     target = Path(path).expanduser() if path is not None else bridge_session_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(target.name + ".tmp")
+    temporary = target.with_name(
+        target.name + "." + secrets.token_hex(8) + ".tmp"
+    )
     temporary.write_text(
         json.dumps(
             {
@@ -189,34 +230,9 @@ def load_bridge_session(
 
 
 def bridge_session_token(host_id: str) -> str:
-    """Return or locally issue authorization after evaluating the shared policy."""
-    existing = load_bridge_session(host_id)
-    if existing is not None:
-        return existing.token
+    """Return an automatically maintained per-user bridge capability."""
     try:
-        from tech_connector.services.licensing_startup_policy import (
-            development_entitlement_bypass_allowed,
-        )
-
-        if development_entitlement_bypass_allowed():
-            return issue_development_bridge_session().token
-
-        from tech_connector.licensing.context import LicensingContext
-        from tech_connector.models.constants import APP_DIR, APP_VERSION
-        from tech_connector.services.settings_service import load_settings
-
-        settings = load_settings()
-        context = LicensingContext.from_defaults(APP_DIR)
-        active_project = str(settings.get("active_project") or "") or None
-        evaluation = context.evaluate(
-            project_root=active_project,
-            product=context.configuration.product,
-            app_major_version=str(APP_VERSION).lstrip("vV").split(".", 1)[0],
-            commercial_use=bool(
-                active_project and settings.get("tech_connector_commercial_use", True)
-            ),
-        )
-        return issue_bridge_session(evaluation).token
+        return ensure_local_bridge_session(host_id).token
     except Exception:
         return ""
 

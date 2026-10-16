@@ -203,8 +203,15 @@ class TestRealGameDevPromptPlans(unittest.TestCase):
         )
         self.assertEqual("blender", actions[0]["args"]["host"])
         self.assertEqual("unreal", actions[2]["args"]["host"])
-        self.assertEqual("$fbx_path", actions[2]["args"]["params"]["source_file"])
-        self.assertEqual("$imported_paths", actions[3]["args"]["params"]["imported_paths"])
+        self.assertEqual("C:/tmp/tc_prop.fbx", actions[1]["args"]["params"]["output_path"])
+        self.assertEqual(
+            {"from_action": actions[1]["id"], "result_path": "fbx_path"},
+            actions[2]["args"]["params"]["source_file"],
+        )
+        self.assertEqual(
+            {"from_action": actions[2]["id"], "result_path": "imported_paths"},
+            actions[3]["args"]["params"]["imported_paths"],
+        )
         self.assertEqual(1, actions[0]["args"]["params"]["lod_count"])
         self.assertTrue(actions[0]["args"]["params"]["create_collision"])
         self.assertEqual(["blender", "unreal"], plan.get("hosts"))
@@ -239,9 +246,18 @@ class TestRealGameDevPromptPlans(unittest.TestCase):
             ["maya", "maya", "blender", "blender", "blender", "unreal", "unreal"],
             [action["args"]["host"] for action in actions],
         )
-        self.assertEqual("$fbx_path", actions[2]["args"]["params"]["filepath"])
-        self.assertEqual("$fbx_path", actions[5]["args"]["params"]["source_file"])
-        self.assertEqual("$imported_paths", actions[6]["args"]["params"]["imported_paths"])
+        self.assertEqual(
+            {"from_action": actions[1]["id"], "result_path": "fbx_path"},
+            actions[2]["args"]["params"]["filepath"],
+        )
+        self.assertEqual(
+            {"from_action": actions[4]["id"], "result_path": "fbx_path"},
+            actions[5]["args"]["params"]["source_file"],
+        )
+        self.assertEqual(
+            {"from_action": actions[5]["id"], "result_path": "imported_paths"},
+            actions[6]["args"]["params"]["imported_paths"],
+        )
         self.assertEqual("C:/tmp/tc_chain_maya.fbx", actions[1]["args"]["params"]["export_path"])
         self.assertEqual("C:/tmp/tc_chain_blender.fbx", actions[4]["args"]["params"]["output_path"])
         self.assertEqual("/Game/AIStudio/Validation/Chain", actions[5]["args"]["params"]["destination_path"])
@@ -287,6 +303,8 @@ class TestRealGameDevPromptPlans(unittest.TestCase):
         self.assertEqual(
             [
                 ("fbx_path", "filepath"),
+                ("objects", "objects"),
+                ("export_objects", "selection"),
                 ("fbx_path", "source_file"),
                 ("imported_paths", "imported_paths"),
             ],
@@ -331,8 +349,8 @@ class TestRealGameDevPromptPlans(unittest.TestCase):
         self.assertIn("maya_tools.Rigging.validation_proxy.create_rigged_proxy", code)
         self.assertIn("blender_tools.pipeline_transfer.process_meshes_for_transfer", code)
         self.assertIn("unreal_tools.asset_transfer_adapter.import_fbx_verified", code)
-        self.assertIn("outputs['step2']['fbx_path']", code)
-        self.assertIn("outputs['step5']['fbx_path']", code)
+        self.assertIn("C:/tmp/tc_chain_maya.fbx", code)
+        self.assertIn("C:/tmp/tc_chain_blender.fbx", code)
         self.assertIn("outputs['step6']['imported_paths']", code)
         self.assertIn("import time", code)
         self.assertIn("'elapsed_ms': round(", code)

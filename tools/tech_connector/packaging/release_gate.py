@@ -277,7 +277,7 @@ def validate_github_root_surface(source_root: Path) -> list[str]:
     failures = []
     git_root = _git_root(source_root)
     readme_path = git_root / "README.md"
-    license_path = git_root / "LICENSE"
+    license_path = git_root / "LICENSE.md"
     if not readme_path.is_file():
         failures.append("GitHub repository-root README.md is missing")
     else:
@@ -293,7 +293,7 @@ def validate_github_root_surface(source_root: Path) -> list[str]:
             if phrase not in text:
                 failures.append(f"GitHub repository-root README lacks its {label}")
     if not license_path.is_file():
-        failures.append("GitHub repository-root LICENSE is missing")
+        failures.append("GitHub repository-root LICENSE.md is missing")
     else:
         text = " ".join(license_path.read_text(encoding="utf-8").casefold().split())
         for phrase, label in {
@@ -303,7 +303,7 @@ def validate_github_root_surface(source_root: Path) -> list[str]:
             "tools/tech_connector/license.md": "controlling-license link",
         }.items():
             if phrase not in text:
-                failures.append(f"GitHub repository-root LICENSE lacks its {label}")
+                failures.append(f"GitHub repository-root LICENSE.md lacks its {label}")
     if (git_root / "LICENSE.bak").exists():
         failures.append("obsolete GitHub repository-root LICENSE.bak must be removed")
     return failures

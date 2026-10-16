@@ -494,7 +494,7 @@ def answer_project_index_request(path, question, intent, status_callback=None, a
         settings.get("code_model")
         or settings.get("model")
         or settings.get("general_model")
-        or "qwen2.5-coder:7b"
+        or "qwen3.5:4b"
     )
     plan_model = (
         settings.get("router_local_plan")
@@ -862,7 +862,7 @@ def answer_editor_code_request(path, question, file_text, local_context, intent)
         settings.get("code_model")
         or settings.get("model")
         or settings.get("general_model")
-        or "qwen2.5-coder:7b"
+        or "qwen3.5:4b"
     )
     provider_route = resolve_llm_provider_route(model, settings)
 

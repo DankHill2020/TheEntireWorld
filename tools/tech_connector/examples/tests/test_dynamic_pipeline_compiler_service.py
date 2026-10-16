@@ -27,13 +27,27 @@ class TestDynamicPipelineCompilerService(unittest.TestCase):
         self.assertGreaterEqual(unreal["operations"], 100)
         self.assertGreaterEqual(unreal["plugin_functions"], 20)
         self.assertGreaterEqual(unreal["unreal_tools_functions"], 200)
-        self.assertGreater(unreal["base_unreal_python_api"], 100_000)
+        provider = inventory["lazy_provider_status"]["unreal_python_api"]
+        if provider["available"]:
+            self.assertGreater(unreal["base_unreal_python_api"], 100_000)
+        else:
+            self.assertEqual(0, unreal["base_unreal_python_api"])
+            self.assertIn(
+                provider["reason"],
+                {"reflection_index_missing", "reflection_index_has_no_unreal_rows"},
+            )
         self.assertEqual(
             unreal["base_unreal_python_api"],
             inventory["lazy_providers"]["unreal_python_api"],
         )
         self.assertLess(inventory["materialized_count"], 2_000)
-        self.assertGreater(inventory["total_callable_surface"], 100_000)
+        if provider["available"]:
+            self.assertGreater(inventory["total_callable_surface"], 100_000)
+        else:
+            self.assertGreaterEqual(
+                inventory["total_callable_surface"],
+                unreal["operations"] + unreal["unreal_tools_functions"],
+            )
 
     def test_requirement_ledger_does_not_truncate_thirty_part_requests(self) -> None:
         requirements = [f"validate requirement {index}" for index in range(1, 31)]
@@ -321,6 +335,22 @@ class TestDynamicPipelineCompilerService(unittest.TestCase):
         self.assertNotIn("selection", arguments)
         self.assertFalse(plan["execution_ready"])
 
+        workflow = workflow_plan_from_action_graph(plan)
+        self.assertIsNotNone(workflow)
+        missing_rows = [
+            (step, param)
+            for step in workflow["steps"]
+            for param in step["params"]
+            if (step.get("literal_value_details") or {}).get(param["name"], {}).get("missing")
+        ]
+        self.assertTrue(missing_rows)
+        for step, param in missing_rows:
+            self.assertTrue(param["required"])
+            self.assertEqual(
+                "required_user_input",
+                step["literal_value_provenance"][param["name"]],
+            )
+
     def test_defaults_off_accepts_explicit_custom_destination(self) -> None:
         plan = compile_dynamic_pipeline(
             "Export a static mesh from Blender to C:/tmp/prop.fbx and import it into Unreal.",
@@ -343,6 +373,68 @@ class TestDynamicPipelineCompilerService(unittest.TestCase):
             "destination_path",
             {row["argument"] for row in plan["required_inputs"]},
         )
+
+    def test_processed_prop_objects_flow_into_blender_export(self) -> None:
+        plan = compile_dynamic_pipeline(
+            "Build a Blender to Unreal prop pipeline: clean selected mesh names, "
+            "apply transforms, generate LOD0 and LOD1, export FBX to "
+            "C:/tmp/tc_review_prop.fbx, then import into Unreal /Game/Props/Test."
+        )
+        processor = next(
+            row
+            for row in plan["stages"]
+            if row["operation"] == "pipeline.process_meshes_for_transfer"
+        )
+        exporter = next(
+            row
+            for row in plan["stages"]
+            if row["host"] == "blender" and row["role"] == "export"
+        )
+
+        self.assertEqual(
+            "dcc_export_scope_v1",
+            processor["params"]["objects"]["$pipeline_context"],
+        )
+        self.assertEqual(
+            "selected_or_scene_meshes",
+            processor["params"]["objects"]["scope"],
+        )
+        self.assertEqual(
+            {
+                "from_action": processor["id"],
+                "result_path": "export_objects",
+            },
+            exporter["params"]["selection"],
+        )
+        self.assertTrue(
+            any(
+                edge["from"] == processor["id"]
+                and edge["output"] == "export_objects"
+                and edge["to"] == exporter["id"]
+                and edge["input"] == "selection"
+                for edge in plan["data_edges"]
+            ),
+            plan["data_edges"],
+        )
+
+    def test_rig_export_uses_live_rig_contents_when_no_object_set_is_upstream(self) -> None:
+        plan = compile_dynamic_pipeline(
+            "Export the Blender rigged character animation as FBX to "
+            "C:/tmp/character.fbx and import it into Unreal /Game/Characters/Test."
+        )
+        exporter = next(
+            row
+            for row in plan["stages"]
+            if row["host"] == "blender" and row["role"] == "export"
+        )
+        self.assertEqual("dcc_export_scope_v1", exporter["params"]["selection"]["$pipeline_context"])
+        self.assertEqual("rig_contents", exporter["params"]["selection"]["scope"])
+        provenance = next(
+            row
+            for row in plan["parameter_provenance"]
+            if row["stage"] == exporter["id"] and row["parameter"] == "selection"
+        )
+        self.assertEqual("runtime_host_context", provenance["source"])
 
 
 if __name__ == "__main__":

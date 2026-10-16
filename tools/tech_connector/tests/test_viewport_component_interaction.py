@@ -98,6 +98,24 @@ def test_edge_click_and_vertex_marquee_update_component_selection() -> None:
     assert not widget.selected_mesh_edges
 
 
+def test_face_click_reuses_projected_raycast_structure() -> None:
+    QApplication.instance() or QApplication([])
+    widget = ThreeDMeshPainterViewport()
+    widget.canvas.resize(800, 600)
+    topology, _raycast, projected, _camera = widget._project_mesh_component_data()
+    face = topology.faces[0]
+    center = QPointF(
+        sum(projected[index][0] for index in face) / len(face),
+        sum(projected[index][1] for index in face) / len(face),
+    )
+    widget.select_mesh_component_at_viewport_position(center, "Face")
+    raycaster = widget._component_face_raycaster
+
+    widget.select_mesh_component_at_viewport_position(center, "Face")
+
+    assert widget._component_face_raycaster is raycaster
+
+
 def test_component_keyboard_modes_and_accessibility_metadata() -> None:
     QApplication.instance() or QApplication([])
     widget = ThreeDMeshPainterViewport()

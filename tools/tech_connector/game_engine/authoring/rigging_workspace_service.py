@@ -36,6 +36,8 @@ _CAPABILITY_ROWS = (
     ("definition.import", "Import Character Definition", "definition", ("definition",), (), "metadata"),
     ("definition.export", "Export Character Definition", "definition", (), ("path",), "metadata"),
     ("rig.build_full", "Build Full Control Rig", "build", ("definition",), ("modules", "options"), "bake"),
+    ("rig.place_joints", "Place Character Joints", "build", (), ("mesh", "definition", "positions", "solver", "preview", "replace_existing"), "skeleton"),
+    ("rig.set_t_pose", "Set T-Pose", "build", ("definition",), ("pose_matrices", "ground", "options"), "skeleton"),
     ("rig.build_module", "Build Rig Module", "build", ("module", "definition"), ("options",), "bake"),
     ("rig.remove_module", "Remove Rig Module", "build", ("module",), (), "bake"),
     ("rig.rebuild_module", "Rebuild Rig Module", "build", ("module", "definition"), ("options",), "bake"),
@@ -98,6 +100,45 @@ FINGER_SLOTS = tuple(
     for side in ("Left", "Right")
     for finger in FINGER_NAMES[1:]
 )
+
+THUMB_RIG_CONTRACT_REVISION = 1
+
+
+def thumb_rig_contract(definition: "CharacterDefinition | dict[str, Any]") -> list[dict[str, Any]]:
+    """Return the Maya-compatible thumb-control contract for every mapped side."""
+    slots = definition.slots if isinstance(definition, CharacterDefinition) else dict(
+        (definition.get("slots") or definition) if isinstance(definition, dict) else {}
+    )
+    contracts = []
+    for side, side_token in (("left", "Left"), ("right", "Right")):
+        thumb_slots = [f"{side_token}HandThumb{index}" for index in range(1, 5)]
+        joints = [str(slots.get(slot) or "") for slot in thumb_slots]
+        if not all(joints):
+            continue
+
+        def control_base(joint_id: str) -> str:
+            short_name = str(joint_id).replace("\\", "|").rsplit("|", 1)[-1].rsplit(":", 1)[-1]
+            return short_name[:-4] if short_name.endswith("_jnt") else short_name
+
+        fk_controls = [control_base(joint) + "_ctrl" for joint in joints[:3]]
+        root_base = control_base(joints[0])
+        thumb_base = re.sub(r"(?:_?0?1)$", "", root_base) or root_base
+        contracts.append({
+            "side": side,
+            "slots": thumb_slots,
+            "joints": joints,
+            "fk_joints": joints[:3],
+            "endpoint_joint": joints[3],
+            "fk_controls": fk_controls,
+            "ik_control": thumb_base + "_ikh_ctrl",
+            "pole_control": control_base(joints[1]) + "_ik_ctrl",
+            "solver": "rotate_plane",
+            "controls_world_oriented": True,
+            "bind_pose_preserved": True,
+            "channels_locked": False,
+            "revision": THUMB_RIG_CONTRACT_REVISION,
+        })
+    return contracts
 
 FACE_SLOTS = (
     "Jaw", "LeftEye", "RightEye", "LeftBrow", "RightBrow",
@@ -447,6 +488,7 @@ __all__ = [
     "ALL_CHARACTER_SLOTS", "CHARACTER_DEFINITION_SCHEMA", "CharacterDefinition",
     "CharacterDefinitionValidation", "FACE_SLOTS", "FINGER_SLOTS", "OPTIONAL_BODY_SLOTS",
     "REQUIRED_BODY_SLOTS", "RIGGING_CAPABILITIES", "RIGGING_WORKSPACE_SCHEMA",
+    "THUMB_RIG_CONTRACT_REVISION", "thumb_rig_contract",
     "RiggingCapability", "RiggingHostAdapter", "RiggingOperationResult",
     "RiggingWorkspaceController", "auto_map_character", "list_rigging_capabilities",
     "mirror_character_slots", "validate_character_definition", "validate_operation_payload",

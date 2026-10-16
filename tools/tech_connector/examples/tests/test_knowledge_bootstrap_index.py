@@ -72,6 +72,45 @@ class TestKnowledgeBootstrapIndex(unittest.TestCase):
         self.assertEqual("C:/example/project", env["TECH_CONNECTOR_PROJECT_ROOT"])
         self.assertEqual(str(cwd), env["PYTHONPATH"].split(os.pathsep)[0])
 
+    def test_bootstrap_worker_passes_every_project_root_to_indexer(self) -> None:
+        roots = ["C:/studio/game", "D:/shared/art", "C:/depot/tools"]
+        worker = KnowledgeBuildWorker(
+            project_roots=roots,
+            phase=KnowledgeBuildPhase.BOOTSTRAP_SYMBOLS,
+            python_exe="python",
+        )
+
+        _label, cmd = worker._phase_cmds()[0]
+        indexed_roots = [cmd[index + 1] for index, value in enumerate(cmd) if value == "--root"]
+        _cwd, env = worker._subprocess_context()
+
+        self.assertEqual(roots, indexed_roots)
+        self.assertEqual(roots[0], env["TECH_CONNECTOR_PROJECT_ROOT"])
+        self.assertEqual(os.pathsep.join(roots), env["AI_KNOWLEDGE_ROOTS"])
+
+    def test_stale_plan_removes_files_from_detached_project_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            former_root = base / "former"
+            current_root = base / "current"
+            former_root.mkdir()
+            current_root.mkdir()
+            source = former_root / "old_tool.py"
+            source.write_text("def old_tool():\n    return True\n", encoding="utf-8")
+            conn = sqlite3.connect(":memory:")
+            self.addCleanup(conn.close)
+            init_db(conn)
+            self.assertTrue(index_file(conn, former_root, source, symbols_only=True))
+
+            _changed, missing, counts = stale_file_plan(
+                conn,
+                [current_root],
+                prune_detached_roots=True,
+            )
+
+            self.assertEqual([source.resolve()], missing)
+            self.assertEqual(1, counts["detached"])
+
 
 if __name__ == "__main__":
     unittest.main()

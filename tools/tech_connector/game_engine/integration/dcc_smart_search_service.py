@@ -41,6 +41,13 @@ HOST_TOOL_PACKAGES = {
     "desktop": (),
 }
 
+_CONNECTED_ACCOUNT_BY_APP = {
+    "slack": "slack",
+    "discord": "discord",
+    "jira": "atlassian",
+    "confluence": "atlassian",
+}
+
 _REFERENCE_RE = re.compile(r"(?<!\w)@([A-Za-z0-9_./:-]+)")
 _CLASS_REFERENCE_RE = re.compile(r"(?<!\w)(@?[A-Za-z0-9_]+)!([A-Za-z0-9_./:-]+)")
 _FUNCTION_KINDS = {"function", "async_function", "method", "classmethod", "staticmethod"}
@@ -381,6 +388,184 @@ def _application_candidates(
     )[:limit]
 
 
+def _app_context_for_name(value: str):
+    """Resolve non-DCC applications through the shared application registry."""
+
+    try:
+        from tech_connector.services.app_context_service import app_context_for_token
+
+        return app_context_for_token(value)
+    except Exception:
+        return None
+
+
+def _connection_detail(app_id: str, settings: dict[str, Any] | None) -> tuple[bool | None, str]:
+    """Return a sanitized connection summary without ever exposing credentials."""
+
+    account_id = _CONNECTED_ACCOUNT_BY_APP.get(str(app_id or "").lower())
+    if not account_id:
+        return None, "installed integration"
+    try:
+        from tech_connector.services.connected_account_service import connected_account_status
+
+        status = connected_account_status(dict(settings or {}), account_id)
+        connected = bool(status.get("connected"))
+        mode = str(status.get("mode") or "").strip()
+        if connected:
+            return True, f"connected ({mode})" if mode else "connected"
+        missing = ", ".join(str(item) for item in status.get("missing_fields") or [] if item)
+        detail = mode or "not configured"
+        if missing:
+            detail = f"{detail}; missing {missing}"
+        return False, detail
+    except Exception:
+        return False, "connection status unavailable"
+
+
+def _safe_reference_segment(value: str) -> str:
+    text = str(value or "").strip().lstrip("@#")
+    text = re.sub(r"\s+", "_", text)
+    return re.sub(r"[^A-Za-z0-9_-]+", "", text)
+
+
+def _connected_application_candidates(
+    context: Any,
+    query: str,
+    *,
+    settings: dict[str, Any] | None,
+    limit: int,
+) -> list[SmartSearchCandidate]:
+    """Build target completions for messaging, ops, and installed integrations."""
+
+    app_id = str(getattr(context, "id", "") or "").lower()
+    connected, status_detail = _connection_detail(app_id, settings)
+    settings = dict(settings or {})
+    if app_id == "jira":
+        project_values = [
+            settings.get("jira_project_key") or settings.get("atlassian_project_key"),
+            *(settings.get("jira_projects") or []),
+        ]
+        projects = list(dict.fromkeys(_safe_reference_segment(item) for item in project_values if item))
+        if "." in query:
+            project_query, issue_query = query.split(".", 1)
+            project = next((item for item in projects if item.casefold() == project_query.casefold()), "")
+            if not project:
+                return []
+            actions = ("task", "bug", "story", "epic", "subtask")
+            return [
+                SmartSearchCandidate(
+                    token=f"{context.name}.{project}.{action}",
+                    label=f"Create {action.replace('subtask', 'sub-task')}",
+                    kind="Jira issue target",
+                    value=f"{project}.{action}",
+                    source=context.name,
+                    detail=f"project {project}; {status_detail}",
+                    priority=95 if connected else 70,
+                )
+                for action in actions
+                if not issue_query or action.startswith(issue_query.lower())
+            ][:limit]
+        return [
+            SmartSearchCandidate(
+                token=f"{context.name}.{project}.",
+                label=project,
+                kind="Jira project",
+                value=project,
+                source=context.name,
+                detail=f"choose an issue type; {status_detail}",
+                priority=95 if connected else 70,
+            )
+            for project in projects
+            if _matches(query, project)
+        ][:limit]
+    if app_id == "confluence":
+        space_values = [
+            settings.get("confluence_space_id"),
+            *(settings.get("confluence_spaces") or []),
+        ]
+        spaces = list(dict.fromkeys(_safe_reference_segment(item) for item in space_values if item))
+        return [
+            SmartSearchCandidate(
+                token=f"{context.name}.{space}",
+                label=space,
+                kind="Confluence space",
+                value=space,
+                source=context.name,
+                detail=f"new page destination; {status_detail}",
+                priority=95 if connected else 70,
+            )
+            for space in spaces
+            if _matches(query, space)
+        ][:limit]
+
+    try:
+        from tech_connector.services.asset_mention_service import candidates_from_app_context
+
+        targets = candidates_from_app_context(context, settings=settings)
+    except Exception:
+        targets = []
+    results: list[SmartSearchCandidate] = []
+    for target in targets:
+        segment = _safe_reference_segment(getattr(target, "token", ""))
+        if not segment:
+            continue
+        label = str(getattr(target, "label", "") or segment)
+        value = str(getattr(target, "value", "") or segment)
+        detail = str(getattr(target, "detail", "") or "application target")
+        if not _matches(query, segment, label, value, detail):
+            continue
+        results.append(
+            SmartSearchCandidate(
+                token=f"{_safe_reference_segment(context.name) or context.id}.{segment}",
+                label=label,
+                kind=str(getattr(target, "kind", "integration target") or "integration target"),
+                value=value,
+                source=context.name,
+                detail=f"{detail}; {status_detail}",
+                priority=95 if connected else 70,
+            )
+        )
+    return sorted(results, key=lambda item: (-item.priority, item.token.lower()))[:limit]
+
+
+def _connected_application_roots(
+    query: str,
+    *,
+    settings: dict[str, Any] | None,
+) -> list[SmartSearchCandidate]:
+    try:
+        from tech_connector.services.app_context_service import installed_app_contexts
+
+        contexts = installed_app_contexts()
+    except Exception:
+        return []
+    results: list[SmartSearchCandidate] = []
+    for context in contexts:
+        if _host_for_name(context.id):
+            continue
+        if not _matches(query, context.id, context.name, context.category, *context.aliases):
+            continue
+        connected, status_detail = _connection_detail(context.id, settings)
+        results.append(
+            SmartSearchCandidate(
+                token=f"{_safe_reference_segment(context.name) or context.id}.",
+                label=context.name,
+                kind=(
+                    "connected application"
+                    if connected is True
+                    else "application setup required"
+                    if connected is False
+                    else "installed integration"
+                ),
+                value=context.id,
+                source="application registry",
+                detail=f"targets and references; {status_detail}",
+                priority=110 if connected else 80,
+            )
+        )
+    return results
+
+
 def _global_package_function_candidates(
     query: str,
     *,
@@ -429,6 +614,7 @@ def smart_search_suggestions(
     package_dirs: Sequence[Path] | None = None,
     db_path: Path | None = None,
     limit: int = 20,
+    settings: dict[str, Any] | None = None,
 ) -> list[SmartSearchCandidate]:
     """Return hierarchical suggestions for text following ``@``.
 
@@ -488,6 +674,14 @@ def smart_search_suggestions(
                 db_path=Path(db_path),
                 limit=limit,
             )
+        app_context = _app_context_for_name(owner)
+        if app_context is not None:
+            return _connected_application_candidates(
+                app_context,
+                action_query,
+                settings=settings,
+                limit=limit,
+            )
         package = owner.lower()
         if package in packages:
             return _package_function_candidates(
@@ -528,6 +722,7 @@ def smart_search_suggestions(
                 priority=90,
             )
         )
+    roots.extend(_connected_application_roots(text, settings=settings))
     function_matches = _global_package_function_candidates(
         text,
         package_dirs=packages,
@@ -563,7 +758,12 @@ def active_hosts_from_context(context: str) -> tuple[str, ...]:
     return tuple(host for host, label in HOST_LABELS.items() if f"active dcc host: {label.lower()}" in lower)
 
 
-def smart_search_context_block(text: str, *, db_path: Path | None = None) -> str:
+def smart_search_context_block(
+    text: str,
+    *,
+    db_path: Path | None = None,
+    settings: dict[str, Any] | None = None,
+) -> str:
     """Resolve selected Smart Search references into deterministic prompt evidence."""
 
     db_path = Path(db_path) if db_path is not None else project_index_db_path()
@@ -606,6 +806,31 @@ def smart_search_context_block(text: str, *, db_path: Path | None = None) -> str
                             f"- @{token}: matched indexed tool function `{item.value}` from `{item.detail}`"
                         )
                     continue
+            app_context = _app_context_for_name(owner)
+            if app_context is not None:
+                connected, status_detail = _connection_detail(app_context.id, settings)
+                matches = _connected_application_candidates(
+                    app_context,
+                    operation_key,
+                    settings=settings,
+                    limit=20,
+                )
+                exact = next(
+                    (item for item in matches if item.token.lower() == token.lower()),
+                    None,
+                )
+                if exact is not None:
+                    readiness = "ready" if connected else "setup required"
+                    lines.append(
+                        f"- @{token}: {app_context.name} target `{exact.value}`; "
+                        f"connection={readiness} ({status_detail}). Do not silently substitute another target."
+                    )
+                else:
+                    lines.append(
+                        f"- @{token}: unresolved {app_context.name} target; connection={status_detail}. "
+                        "Resolve or ask for clarification before acting."
+                    )
+                continue
             if owner.lower() in package_dirs:
                 matches = _package_function_candidates(
                     owner.lower(), operation_key, db_path=Path(db_path), limit=10

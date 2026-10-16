@@ -224,15 +224,97 @@ class ThreeDMeshPainterViewportMixin05:
 
     def configure_transform_snapping(
         self, *, translation: float | None = None, rotation: float | None = None,
-        scale: float | None = None,
-    ) -> dict[str, float]:
+        scale: float | None = None, enabled: bool | None = None,
+        target: str | None = None, snap_base: str | None = None,
+    ) -> dict[str, Any]:
         """Configure editor transform snapping; zero disables an individual channel."""
         settings = dict(getattr(self, "_transform_snap_settings", {}) or {})
         settings.setdefault("translation", 0.0); settings.setdefault("rotation", 0.0); settings.setdefault("scale", 0.0)
+        settings.setdefault("enabled", False); settings.setdefault("target", "increment"); settings.setdefault("snap_base", "pivot")
         for key, value in (("translation", translation), ("rotation", rotation), ("scale", scale)):
             if value is not None: settings[key] = max(0.0, float(value))
+        if enabled is not None: settings["enabled"] = bool(enabled)
+        if target is not None:
+            resolved = str(target or "off").strip().casefold().replace("vertex", "point")
+            if resolved not in {"off", "increment", "grid", "point"}: resolved = "increment"
+            settings["target"] = resolved
+            if enabled is None:
+                settings["enabled"] = resolved != "off"
+        if snap_base is not None:
+            resolved_base = str(snap_base or "pivot").strip().casefold()
+            settings["snap_base"] = resolved_base if resolved_base in {"pivot", "active", "median", "closest"} else "pivot"
         self._transform_snap_settings = settings
         return dict(settings)
+
+    def configure_transform_pivot(self, mode: str, custom_position: tuple[float, float, float] | None = None) -> str:
+        label = str(mode or "object").strip().casefold()
+        if "selection" in label or "median" in label: resolved = "selection"
+        elif "world" in label: resolved = "world"
+        elif "custom" in label or "cursor" in label: resolved = "custom"
+        else: resolved = "object"
+        self.transform_pivot_mode = resolved
+        if custom_position is not None:
+            self.transform_pivot_custom_shared = tuple(float(value) for value in custom_position[:3])
+            self.transform_pivot_mode = "custom"
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return self.transform_pivot_mode
+
+    def transform_pivot_display(self, proxy: SceneProxyInstance | dict[str, Any] | None = None) -> tuple[float, float, float] | None:
+        proxy = proxy or getattr(self, "_selected_scene_proxy", None)
+        mode = str(getattr(self, "transform_pivot_mode", "object") or "object")
+        if mode == "world": return self.shared_local_to_display_local((0.0, 0.0, 0.0))
+        if mode == "custom" and getattr(self, "transform_pivot_custom_shared", None) is not None:
+            return self.shared_local_to_display_local(tuple(self.transform_pivot_custom_shared))
+        if mode == "selection":
+            selected = list(getattr(self, "selected_level_actor_proxies", lambda: [])())
+            centers = [value for value in (self._proxy_center_display(item) for item in selected) if value is not None]
+            if centers: return tuple(sum(point[index] for point in centers) / len(centers) for index in range(3))
+        return self._proxy_center_display(proxy) if isinstance(proxy, (dict, SceneProxyInstance)) else None
+
+    def toggle_transform_pivot_edit(self, enabled: bool | None = None) -> bool:
+        self.pivot_edit_mode = not bool(getattr(self, "pivot_edit_mode", False)) if enabled is None else bool(enabled)
+        if self.pivot_edit_mode and getattr(self, "transform_pivot_custom_shared", None) is None:
+            display = self.transform_pivot_display()
+            if display is not None: self.transform_pivot_custom_shared = self.display_local_to_shared_local(display)
+            self.transform_pivot_mode = "custom"
+        self._resolved_shaded_status = "Edit Pivot: drag the center or axes; X snaps to grid, V snaps to another pivot." if self.pivot_edit_mode else "Pivot editing finished"
+        self.update_viewport_status()
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return self.pivot_edit_mode
+
+    def center_selected_transform_pivot(self) -> bool:
+        display = self.transform_pivot_display(getattr(self, "_selected_scene_proxy", None))
+        proxy = getattr(self, "_selected_scene_proxy", None)
+        if not isinstance(proxy, (dict, SceneProxyInstance)): return False
+        display = self._proxy_center_display(proxy)
+        if display is None: return False
+        self.transform_pivot_custom_shared = self.display_local_to_shared_local(display)
+        self.transform_pivot_mode = "custom"
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return True
+
+    def snap_transform_pivot(self, target: str = "grid") -> bool:
+        pivot = self.transform_pivot_display()
+        if pivot is None: return False
+        shared = self.display_local_to_shared_local(pivot)
+        kind = str(target or "grid").casefold()
+        if kind in {"world", "origin"}: snapped = (0.0, 0.0, 0.0)
+        elif kind in {"point", "vertex", "pivot"}:
+            selected = getattr(self, "_selected_scene_proxy", None)
+            candidates = []
+            for item in list(getattr(self.mesh, "scene_proxy_objects", []) or []):
+                if item is selected: continue
+                center = self._proxy_center_display(item) if isinstance(item, (dict, SceneProxyInstance)) else None
+                if center is not None: candidates.append(self.display_local_to_shared_local(center))
+            if not candidates: return False
+            snapped = min(candidates, key=lambda point: sum((float(point[i]) - float(shared[i])) ** 2 for i in range(3)))
+        else:
+            step = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 1.0)
+            snapped = tuple(round(float(value) / step) * step for value in shared)
+        self.transform_pivot_custom_shared = tuple(float(value) for value in snapped)
+        self.transform_pivot_mode = "custom"
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return True
 
     def configure_asset_placement(
         self, *, grid_snap: bool | None = None, grid_size: float | None = None,
@@ -261,6 +343,31 @@ class ThreeDMeshPainterViewportMixin05:
         self.update_viewport_status()
         return True
 
+    def preview_asset_placement(
+        self, payload: dict[str, Any], screen_position: QPointF,
+        view_width: float, view_height: float,
+    ) -> dict[str, Any]:
+        """Update the non-destructive placement ghost shown while an asset is dragged."""
+        world_position = self._asset_drop_world_position(screen_position, view_width, view_height)
+        settings = self.configure_asset_placement()
+        preview = {
+            "name": Path(str(payload.get("path") or payload.get("name") or "Asset")).stem,
+            "type_id": str(payload.get("type_id") or ""),
+            "screen": [float(screen_position.x()), float(screen_position.y())],
+            "world": [float(value) for value in world_position],
+            "grid_snap": bool(settings["grid_snap"]),
+            "grid_size": float(settings["grid_size"]),
+        }
+        self._asset_placement_preview = preview
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+        return preview
+
+    def clear_asset_placement_preview(self) -> None:
+        self._asset_placement_preview = None
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.update()
+
     def place_asset_from_browser(
         self,
         payload: dict[str, Any],
@@ -273,6 +380,7 @@ class ThreeDMeshPainterViewportMixin05:
         asset_id = str(payload.get("asset_id") or "")
         if not path or not type_id:
             return None
+        self._asset_placement_preview = None
         selected = getattr(self, "_selected_scene_proxy", None)
         if type_id in {"tc.texture", "tc.video", "tc.image_project"} and selected is not None:
             if not selected.get("materials"):
@@ -409,6 +517,121 @@ class ThreeDMeshPainterViewportMixin05:
         if not result and isinstance(selected, (dict, SceneProxyInstance)) and str(selected.get("provider_id") or "") == "tech_connector": result.append(selected)
         return result
 
+    def is_scene_proxy_selected(self, proxy: SceneProxyInstance | dict[str, Any]) -> bool:
+        """Return selection state for both the primary actor and outliner multi-selection."""
+        if str(proxy.get("provider_id") or "") != "tech_connector":
+            return proxy is getattr(self, "_selected_scene_proxy", None)
+        return any(candidate is proxy for candidate in self.selected_level_actor_proxies())
+
+    def set_selected_level_actor_ids(self, entity_ids: list[str] | tuple[str, ...], *, primary_id: str = "") -> int:
+        tree = getattr(self, "scene_outliner", None)
+        wanted = {str(value) for value in entity_ids if str(value)}
+        primary = str(primary_id or (next(iter(wanted), "")))
+        selected_proxy = None
+
+        def visit(item) -> None:
+            nonlocal selected_proxy
+            data = item.data(0, Qt.UserRole) or {}
+            proxy = data.get("proxy") if isinstance(data, dict) else None
+            entity_id = str(proxy.get("entity_id") or proxy.get("native_id") or "") if isinstance(proxy, (dict, SceneProxyInstance)) else ""
+            item.setSelected(entity_id in wanted)
+            if entity_id == primary: selected_proxy = proxy
+            for index in range(item.childCount()): visit(item.child(index))
+
+        if tree is not None and hasattr(tree, "topLevelItemCount"):
+            tree.blockSignals(True)
+            for index in range(tree.topLevelItemCount()): visit(tree.topLevelItem(index))
+            tree.blockSignals(False)
+        if selected_proxy is None:
+            selected_proxy = next((
+                proxy for proxy in getattr(self.mesh, "scene_proxy_objects", []) or []
+                if isinstance(proxy, (dict, SceneProxyInstance))
+                and str(proxy.get("entity_id") or proxy.get("native_id") or "") == primary
+            ), None)
+        self._selected_scene_proxy = selected_proxy
+        self.update_instance_details_panel()
+        self.update_viewport_status()
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return len(wanted)
+
+    def select_level_actor_proxy(
+        self, proxy: SceneProxyInstance | dict[str, Any] | None, *, additive: bool = False, toggle: bool = False,
+    ) -> int:
+        if not isinstance(proxy, (dict, SceneProxyInstance)):
+            return self.set_selected_level_actor_ids(())
+        entity_id = str(proxy.get("entity_id") or proxy.get("native_id") or "")
+        if str(proxy.get("provider_id") or "") != "tech_connector" or not entity_id:
+            self._selected_scene_proxy = proxy
+            self.update_instance_details_panel(); self.update_viewport_status()
+            return 1
+        selected = {
+            str(item.get("entity_id") or item.get("native_id") or "")
+            for item in self.selected_level_actor_proxies()
+        } if additive or toggle else set()
+        if toggle and entity_id in selected: selected.remove(entity_id)
+        else: selected.add(entity_id)
+        return self.set_selected_level_actor_ids(tuple(selected), primary_id=entity_id if entity_id in selected else "")
+
+    def _editable_selected_level_actor_proxies(self) -> list[SceneProxyInstance | dict[str, Any]]:
+        result = []
+        for proxy in self.selected_level_actor_proxies():
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is not None and not bool(entity.get("editor_locked", False)): result.append(proxy)
+        return result
+
+    def set_selected_level_actors_locked(self, locked: bool | None = None) -> int:
+        proxies = self.selected_level_actor_proxies()
+        if not proxies: return 0
+        entities = [self._runtime_entity_for_proxy(proxy) for proxy in proxies]
+        entities = [entity for entity in entities if entity is not None]
+        target = not all(bool(entity.get("editor_locked", False)) for entity in entities) if locked is None else bool(locked)
+        self._push_level_actor_undo(f"{'Lock' if target else 'Unlock'} level actors")
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is not None: entity["editor_locked"] = target; proxy["editor_locked"] = target
+        self._finish_level_actor_edit(f"{'Locked' if target else 'Unlocked'} {len(entities)} actor(s)")
+        return len(entities)
+
+    def hide_selected_level_actors(self) -> int:
+        proxies = self.selected_level_actor_proxies()
+        if not proxies: return 0
+        self._push_level_actor_undo("Hide selected actors")
+        changed = 0
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is None: continue
+            entity["visible"] = False; proxy["visible"] = False; changed += 1
+        self._finish_level_actor_edit(f"Hid {changed} actor(s)")
+        return changed
+
+    def isolate_selected_level_actors(self) -> int:
+        proxies = self.selected_level_actor_proxies()
+        selected_ids = {str(proxy.get("entity_id") or proxy.get("native_id") or "") for proxy in proxies}
+        if not selected_ids: return 0
+        self._push_level_actor_undo("Isolate selected actors")
+        previous: dict[str, bool] = {}
+        for entity in self._runtime_world_state.get("entities") or ():
+            if not isinstance(entity, dict): continue
+            entity_id = str(entity.get("entity_id") or ""); previous[entity_id] = bool(entity.get("visible", True))
+            entity["visible"] = entity_id in selected_ids
+        self._runtime_world_state["editor_isolation_visibility"] = previous
+        for proxy in getattr(self.mesh, "scene_proxy_objects", []) or []:
+            if isinstance(proxy, (dict, SceneProxyInstance)) and str(proxy.get("provider_id") or "") == "tech_connector":
+                proxy["visible"] = str(proxy.get("entity_id") or proxy.get("native_id") or "") in selected_ids
+        self._finish_level_actor_edit(f"Isolated {len(selected_ids)} actor(s)")
+        return len(selected_ids)
+
+    def show_all_level_actors(self) -> int:
+        entities = [entity for entity in self._runtime_world_state.get("entities") or () if isinstance(entity, dict)]
+        if not entities: return 0
+        self._push_level_actor_undo("Show all actors")
+        for entity in entities: entity["visible"] = True
+        self._runtime_world_state.pop("editor_isolation_visibility", None)
+        for proxy in getattr(self.mesh, "scene_proxy_objects", []) or []:
+            if isinstance(proxy, (dict, SceneProxyInstance)) and str(proxy.get("provider_id") or "") == "tech_connector": proxy["visible"] = True
+        self._finish_level_actor_edit(f"Showing all {len(entities)} actor(s)")
+        return len(entities)
+
     def create_actor_folder(self, name: str) -> bool:
         value = str(name or "").replace("\\", "/").strip(" /")
         if not value: return False
@@ -417,7 +640,7 @@ class ThreeDMeshPainterViewportMixin05:
         return True
 
     def move_selected_level_actors_to_folder(self, folder: str) -> int:
-        proxies = self.selected_level_actor_proxies(); value = str(folder or "").replace("\\", "/").strip(" /")
+        proxies = self._editable_selected_level_actor_proxies(); value = str(folder or "").replace("\\", "/").strip(" /")
         if not proxies: return 0
         self._push_level_actor_undo(f"Move actors to {value or 'root'}"); changed = 0
         if value:
@@ -429,11 +652,16 @@ class ThreeDMeshPainterViewportMixin05:
         self._finish_level_actor_edit(f"Moved {changed} actor(s) to {value or 'root'}"); return changed
 
     def parent_selected_level_actors(self, parent_entity_id: str) -> int:
-        proxies = self.selected_level_actor_proxies(); parent_id = str(parent_entity_id or "")
+        proxies = self._editable_selected_level_actor_proxies(); parent_id = str(parent_entity_id or "")
         selected_ids = {str(proxy.get("entity_id") or "") for proxy in proxies}
         if not proxies or parent_id in selected_ids: return 0
-        known = {str(entity.get("entity_id") or "") for entity in self._runtime_world_state.get("entities") or () if isinstance(entity, dict)}
+        entity_by_id = {str(entity.get("entity_id") or ""): entity for entity in self._runtime_world_state.get("entities") or () if isinstance(entity, dict)}
+        known = set(entity_by_id)
         if parent_id and parent_id not in known: return 0
+        ancestor = parent_id
+        while ancestor:
+            if ancestor in selected_ids: return 0
+            ancestor = str(dict(entity_by_id.get(ancestor) or {}).get("parent_entity_id") or "")
         self._push_level_actor_undo("Parent level actors"); changed = 0
         for proxy in proxies:
             entity = self._runtime_entity_for_proxy(proxy)
@@ -441,7 +669,7 @@ class ThreeDMeshPainterViewportMixin05:
         self._finish_level_actor_edit(f"Updated hierarchy for {changed} actor(s)"); return changed
 
     def transform_selected_level_actors(self, *, translation: tuple[float, float, float] = (0.0, 0.0, 0.0), rotation: tuple[float, float, float] = (0.0, 0.0, 0.0), scale_multiplier: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> int:
-        proxies = self.selected_level_actor_proxies()
+        proxies = self._editable_selected_level_actor_proxies()
         if not proxies: return 0
         self._push_level_actor_undo("Transform actor group")
         for proxy in proxies:
@@ -452,31 +680,40 @@ class ThreeDMeshPainterViewportMixin05:
             self._offset_proxy_preview(proxy, tuple(float(value) for value in translation)); local = dict(proxy.get("local_transform") or {}); local.update({"translation": new_position, "rotation": transform["rotation"], "scale": transform["scale"]}); proxy["local_transform"] = local
         self._finish_level_actor_edit(f"Transformed {len(proxies)} actor(s)"); return len(proxies)
 
+    def duplicate_selected_level_actors(self) -> int:
+        sources = [(proxy, self._runtime_entity_for_proxy(proxy)) for proxy in self._editable_selected_level_actor_proxies()]
+        sources = [(proxy, entity) for proxy, entity in sources if entity is not None]
+        if not sources: return 0
+        self._push_level_actor_undo(f"Duplicate {len(sources)} actor(s)")
+        entities = self._runtime_world_state.setdefault("entities", [])
+        names = {str(item.get("name") or "") for item in entities if isinstance(item, dict)}
+        new_ids: list[str] = []
+        step = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 100.0)
+        for _proxy, source in sources:
+            duplicate = copy.deepcopy(source); duplicate["entity_id"] = uuid.uuid4().hex; duplicate.pop("parent_entity_id", None)
+            for component in duplicate.get("components") or (): component["component_id"] = uuid.uuid4().hex
+            base_name = str(source.get("name") or "Actor") + "_Copy"; duplicate["name"] = base_name; suffix = 2
+            while duplicate["name"] in names: duplicate["name"] = f"{base_name}_{suffix}"; suffix += 1
+            names.add(duplicate["name"])
+            transform = duplicate.setdefault("transform", {}); position = list(transform.get("position") or (0.0, 0.0, 0.0)); position += [0.0] * (3 - len(position)); position[0] = float(position[0]) + step; transform["position"] = position[:3]
+            entities.append(duplicate); self._append_asset_placeholder_proxy(duplicate, tuple(float(value) for value in position[:3])); new_ids.append(duplicate["entity_id"])
+        self._finish_level_actor_edit(f"Duplicated {len(new_ids)} actor(s)")
+        self.set_selected_level_actor_ids(new_ids, primary_id=new_ids[-1])
+        return len(new_ids)
+
     def duplicate_selected_level_actor(self) -> bool:
-        source_proxy = getattr(self, "_selected_scene_proxy", None); source = self._runtime_entity_for_proxy(source_proxy)
-        if source is None: return False
-        self._push_level_actor_undo(f"Duplicate {source.get('name') or 'actor'}")
-        duplicate = copy.deepcopy(source); duplicate["entity_id"] = uuid.uuid4().hex
-        base_name = str(source.get("name") or "Actor") + "_Copy"; names = {str(item.get("name") or "") for item in self._runtime_world_state.get("entities") or ()}
-        duplicate["name"] = base_name; suffix = 2
-        while duplicate["name"] in names: duplicate["name"] = f"{base_name}_{suffix}"; suffix += 1
-        transform = duplicate.setdefault("transform", {}); position = list(transform.get("position") or (0.0, 0.0, 0.0)); position += [0.0] * (3 - len(position))
-        step = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 100.0); position[0] = float(position[0]) + step; transform["position"] = position[:3]
-        self._runtime_world_state.setdefault("entities", []).append(duplicate)
-        proxy = self._append_asset_placeholder_proxy(duplicate, tuple(float(value) for value in position[:3]))
-        self._selected_scene_proxy = proxy; self._finish_level_actor_edit(f"Duplicated {duplicate['name']}")
-        return True
+        return self.duplicate_selected_level_actors() > 0
 
     def rename_selected_level_actor(self, name: str) -> bool:
         proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy); value = str(name or "").strip()
-        if entity is None or not value: return False
+        if entity is None or bool(entity.get("editor_locked", False)) or not value: return False
         self._push_level_actor_undo(f"Rename {entity.get('name') or 'actor'}")
         entity["name"] = value; proxy["name"] = value; self._finish_level_actor_edit(f"Renamed actor to {value}")
         return True
 
     def update_selected_level_actor(self, values: dict[str, Any]) -> bool:
         proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy)
-        if entity is None: return False
+        if entity is None or bool(entity.get("editor_locked", False)): return False
         self._push_level_actor_undo(f"Edit {entity.get('name') or 'actor'}")
         if str(values.get("name") or "").strip(): entity["name"] = str(values["name"]).strip(); proxy["name"] = entity["name"]
         transform = entity.setdefault("transform", {}); local = dict(proxy.get("local_transform") or {})
@@ -490,9 +727,26 @@ class ThreeDMeshPainterViewportMixin05:
         entity["tags"] = [str(tag).strip() for tag in values.get("tags", entity.get("tags", [])) if str(tag).strip()]
         self._finish_level_actor_edit(f"Updated {entity['name']}"); return True
 
+    def update_selected_level_actors(self, values: dict[str, Any], *, fields: tuple[str, ...] = ("mobility", "visible", "tags")) -> int:
+        """Apply explicitly shared properties without collapsing per-actor transforms."""
+        proxies = self._editable_selected_level_actor_proxies()
+        allowed = {str(field) for field in fields} & {"mobility", "visible", "tags"}
+        if not proxies or not allowed: return 0
+        self._push_level_actor_undo(f"Multi-edit {len(proxies)} actors")
+        changed = 0
+        for proxy in proxies:
+            entity = self._runtime_entity_for_proxy(proxy)
+            if entity is None: continue
+            if "mobility" in allowed: entity["mobility"] = str(values.get("mobility") or entity.get("mobility") or "movable")
+            if "visible" in allowed: entity["visible"] = bool(values.get("visible", entity.get("visible", True))); proxy["visible"] = entity["visible"]
+            if "tags" in allowed: entity["tags"] = [str(tag).strip() for tag in values.get("tags", entity.get("tags", [])) if str(tag).strip()]
+            changed += 1
+        self._finish_level_actor_edit(f"Updated shared properties on {changed} actor(s)")
+        return changed
+
     def add_component_to_selected_level_actor(self, component_type: str) -> dict[str, Any] | None:
         entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
-        if entity is None: return None
+        if entity is None or bool(entity.get("editor_locked", False)): return None
         kind = str(component_type or "").strip().casefold().replace(" ", "_")
         defaults = {
             "static_mesh": {"mesh_asset_id": "", "materials": []}, "skeletal_mesh": {"mesh_asset_id": "", "skeleton_asset_id": "", "materials": []},
@@ -505,9 +759,22 @@ class ThreeDMeshPainterViewportMixin05:
         component = {"component_id": uuid.uuid4().hex, "type": kind, "enabled": True, **copy.deepcopy(defaults[kind])}
         entity.setdefault("components", []).append(component); self._finish_level_actor_edit(f"Added {kind.replace('_', ' ')} component"); return component
 
+    def move_component_on_selected_level_actor(self, component_id: str, offset: int) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        if entity is None or bool(entity.get("editor_locked", False)): return False
+        components = list(entity.get("components") or ())
+        index = next((position for position, item in enumerate(components) if str(item.get("component_id") or "") == str(component_id)), -1)
+        if index < 0 or str(components[index].get("type") or "") == "transform": return False
+        destination = max(1, min(len(components) - 1, index + int(offset)))
+        if destination == index: return False
+        self._push_level_actor_undo(f"Reorder {components[index].get('type') or 'component'}")
+        component = components.pop(index); components.insert(destination, component); entity["components"] = components
+        self._finish_level_actor_edit(f"Moved {str(component.get('type') or 'component').replace('_', ' ')} component")
+        return True
+
     def remove_component_from_selected_level_actor(self, component_id: str) -> bool:
         entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
-        if entity is None: return False
+        if entity is None or bool(entity.get("editor_locked", False)): return False
         components = list(entity.get("components") or []); target = next((item for item in components if str(item.get("component_id") or "") == str(component_id)), None)
         if target is None or str(target.get("type") or "") == "transform": return False
         self._push_level_actor_undo(f"Remove {target.get('type') or 'component'}")
@@ -515,7 +782,7 @@ class ThreeDMeshPainterViewportMixin05:
 
     def update_component_on_selected_level_actor(self, component_id: str, properties: dict[str, Any]) -> bool:
         entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
-        if entity is None: return False
+        if entity is None or bool(entity.get("editor_locked", False)): return False
         component = next((item for item in entity.get("components") or () if str(item.get("component_id") or "") == str(component_id)), None)
         if component is None: return False
         self._push_level_actor_undo(f"Edit {component.get('type') or 'component'}")
@@ -526,21 +793,141 @@ class ThreeDMeshPainterViewportMixin05:
     def set_prefab_override_on_selected_level_actor(self, path: str, value: Any) -> bool:
         entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None)); key = str(path or "").strip()
         instance = entity.get("prefab_instance") if entity else None
-        if not isinstance(instance, dict) or not key: return False
+        if not isinstance(instance, dict) or bool(entity.get("editor_locked", False)) or not key: return False
         self._push_level_actor_undo(f"Override Prefab {key}"); instance.setdefault("overrides", {})[key] = copy.deepcopy(value); instance["override_state"] = "overridden"; self._finish_level_actor_edit(f"Overrode Prefab property {key}"); return True
 
     def remove_prefab_override_from_selected_level_actor(self, path: str) -> bool:
         entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None)); instance = entity.get("prefab_instance") if entity else None; key = str(path or "")
-        if not isinstance(instance, dict) or key not in dict(instance.get("overrides") or {}): return False
+        if not isinstance(instance, dict) or bool(entity.get("editor_locked", False)) or key not in dict(instance.get("overrides") or {}): return False
         self._push_level_actor_undo(f"Revert Prefab {key}"); instance["overrides"].pop(key, None); instance["override_state"] = "overridden" if instance["overrides"] else "inherited"; self._finish_level_actor_edit(f"Reverted Prefab property {key}"); return True
 
+    def unpack_selected_prefab_instance(self) -> int:
+        """Break a Prefab link and materialize its resolved hierarchy as local actors."""
+        root = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        instance = root.get("prefab_instance") if root else None
+        if not isinstance(instance, dict) or bool(root.get("editor_locked", False)):
+            return 0
+        templates = [copy.deepcopy(value) for value in instance.get("entities") or () if isinstance(value, dict)]
+        self._push_level_actor_undo(f"Unpack Prefab {root.get('name') or 'instance'}")
+        root_id = str(root.get("entity_id") or uuid.uuid4().hex); root["entity_id"] = root_id
+        source_id = str(instance.get("source_asset_id") or "")
+        root["unpacked_prefab"] = {"source_asset_id": source_id, "override_count": len(instance.get("overrides") or {})}
+        root.pop("prefab_instance", None)
+        root["components"] = [value for value in root.get("components") or () if str(value.get("type") or "") != "prefab"]
+        asset = dict(root.get("asset_instance") or {})
+        if asset.get("type_id") == "tc.prefab": asset["type_id"] = "tc.prefab_unpacked"
+        root["asset_instance"] = asset
+        origin_values = list(dict(root.get("transform") or {}).get("position") or (0.0, 0.0, 0.0))
+        origin = tuple(float((origin_values + [0.0, 0.0, 0.0])[index]) for index in range(3))
+        materialized: list[str] = []
+        entities = self._runtime_world_state.setdefault("entities", [])
+        existing_names = {str(value.get("name") or "") for value in entities if isinstance(value, dict)}
+
+        def unique_name(requested: str) -> str:
+            base = requested or "PrefabActor"; candidate = base; suffix = 2
+            while candidate in existing_names: candidate = f"{base}_{suffix}"; suffix += 1
+            existing_names.add(candidate); return candidate
+
+        def materialize(values: list[dict[str, Any]], parent_id: str, parent_position: tuple[float, float, float]) -> None:
+            id_map = {str(value.get("entity_id") or index): uuid.uuid4().hex for index, value in enumerate(values)}
+            for index, template in enumerate(values):
+                old_id = str(template.get("entity_id") or index); actor_id = id_map[old_id]
+                transform = dict(template.get("transform") or {})
+                local_values = list(transform.get("position") or transform.get("translation") or (0.0, 0.0, 0.0))
+                local = tuple(float((local_values + [0.0, 0.0, 0.0])[axis]) for axis in range(3))
+                position = tuple(parent_position[axis] + local[axis] for axis in range(3))
+                authored_parent = str(template.get("parent_entity_id") or "")
+                components = template.get("components") or []
+                if isinstance(components, dict):
+                    components = [{"component_id": uuid.uuid4().hex, "type": str(kind), "enabled": True, **(dict(data) if isinstance(data, dict) else {"value": data})} for kind, data in components.items()]
+                else:
+                    components = [dict(value) for value in components if isinstance(value, dict)]
+                    for component in components: component.setdefault("component_id", uuid.uuid4().hex); component.setdefault("enabled", True)
+                if not any(str(value.get("type") or "") == "transform" for value in components): components.insert(0, {"component_id": uuid.uuid4().hex, "type": "transform", "enabled": True})
+                actor = copy.deepcopy(template); actor.update({
+                    "entity_id": actor_id, "name": unique_name(str(template.get("name") or "PrefabActor")),
+                    "parent_entity_id": id_map.get(authored_parent, parent_id), "components": components,
+                    "transform": {**transform, "position": list(position)},
+                    "asset_instance": {"asset_id": source_id, "type_id": "tc.prefab_unpacked", "source": ""},
+                    "unpacked_from_prefab_asset_id": source_id,
+                })
+                nested = [copy.deepcopy(value) for value in actor.pop("resolved_prefab_entities", []) if isinstance(value, dict)]
+                actor.pop("prefab_asset_id", None); actor.pop("prefab_overrides", None); actor.pop("source_asset_id", None)
+                entities.append(actor); self._append_asset_placeholder_proxy(actor, position, queue_native=False); materialized.append(actor_id)
+                if nested: materialize(nested, actor_id, position)
+
+        materialize(templates, root_id, origin)
+        root["unpacked_prefab"]["child_entity_ids"] = list(materialized)
+        self._finish_level_actor_edit(f"Unpacked Prefab into {len(materialized) + 1} editable actor(s)")
+        return len(materialized) + 1
+
+    def delete_selected_level_actors(self) -> int:
+        proxies = self._editable_selected_level_actor_proxies()
+        targets = [(proxy, self._runtime_entity_for_proxy(proxy)) for proxy in proxies]
+        targets = [(proxy, entity) for proxy, entity in targets if entity is not None]
+        if not targets: return 0
+        self._push_level_actor_undo(f"Delete {len(targets)} actor(s)")
+        removed_ids = {str(entity.get("entity_id") or "") for _proxy, entity in targets}
+        self._runtime_world_state["entities"] = [item for item in self._runtime_world_state.get("entities") or () if str(item.get("entity_id") or "") not in removed_ids]
+        for entity in self._runtime_world_state["entities"]:
+            if str(entity.get("parent_entity_id") or "") in removed_ids: entity["parent_entity_id"] = ""
+        for proxy, _entity in targets: proxy["visible"] = False; proxy["deleted"] = True
+        self._selected_scene_proxy = None; self._finish_level_actor_edit(f"Deleted {len(targets)} actor(s)")
+        return len(targets)
+
     def delete_selected_level_actor(self) -> bool:
-        proxy = getattr(self, "_selected_scene_proxy", None); entity = self._runtime_entity_for_proxy(proxy)
-        if entity is None: return False
-        self._push_level_actor_undo(f"Delete {entity.get('name') or 'actor'}")
-        self._runtime_world_state["entities"] = [item for item in self._runtime_world_state.get("entities") or () if item is not entity]
-        proxy["visible"] = False; proxy["deleted"] = True; self._selected_scene_proxy = None
-        self._finish_level_actor_edit(f"Deleted {entity.get('name') or 'actor'}")
+        return self.delete_selected_level_actors() > 0
+
+    def save_camera_bookmark(self, slot: int) -> bool:
+        index = max(1, min(9, int(slot)))
+        self._push_level_actor_undo(f"Save camera bookmark {index}")
+        camera = self.viewport_camera
+        self._runtime_world_state.setdefault("editor_camera_bookmarks", {})[str(index)] = {
+            "eye": list(camera.eye), "target": list(camera.target), "up": list(camera.up),
+            "fov_degrees": float(camera.fov_degrees), "near_clip": float(camera.near_clip), "far_clip": float(camera.far_clip),
+        }
+        self._finish_level_actor_edit(f"Saved camera bookmark {index}")
+        return True
+
+    def recall_camera_bookmark(self, slot: int) -> bool:
+        index = max(1, min(9, int(slot)))
+        bookmark = dict(self._runtime_world_state.get("editor_camera_bookmarks", {}).get(str(index)) or {})
+        if not bookmark: return False
+        self.viewport_camera.eye = tuple(float(value) for value in bookmark["eye"])
+        self.viewport_camera.target = tuple(float(value) for value in bookmark["target"])
+        self.viewport_camera.up = tuple(float(value) for value in bookmark["up"])
+        self.viewport_camera.fov_degrees = float(bookmark.get("fov_degrees", self.viewport_camera.fov_degrees))
+        self.viewport_camera.near_clip = float(bookmark.get("near_clip", self.viewport_camera.near_clip))
+        self.viewport_camera.far_clip = float(bookmark.get("far_clip", self.viewport_camera.far_clip))
+        self._resolved_shaded_status = f"Recalled camera bookmark {index}"; self.update_viewport_status()
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return True
+
+    def pilot_selected_camera_actor(self) -> bool:
+        entity = self._runtime_entity_for_proxy(getattr(self, "_selected_scene_proxy", None))
+        if entity is None or not (entity.get("camera") or any(str(item.get("type") or "") == "camera" for item in entity.get("components") or ())): return False
+        transform = dict(entity.get("transform") or {}); camera = dict(entity.get("camera") or {})
+        position = tuple(float(value) for value in (list(transform.get("position") or (0.0, 0.0, 0.0)) + [0.0, 0.0, 0.0])[:3])
+        target = tuple(float(value) for value in (list(camera.get("look_at") or (position[0], position[1], position[2] + 1.0)) + [0.0, 0.0, 1.0])[:3])
+        self._camera_pilot_previous = copy.deepcopy(self.viewport_camera); self._camera_pilot_entity_id = str(entity.get("entity_id") or "")
+        self.viewport_camera.eye = position; self.viewport_camera.target = target; self.viewport_camera.fov_degrees = float(camera.get("fov_degrees", 60.0))
+        self._resolved_shaded_status = f"Piloting {entity.get('name') or 'camera'}"; self.update_viewport_status()
+        if getattr(self, "canvas", None) is not None: self.canvas.update()
+        return True
+
+    def stop_piloting_camera_actor(self, *, commit: bool = True) -> bool:
+        entity_id = str(getattr(self, "_camera_pilot_entity_id", "") or "")
+        if not entity_id: return False
+        entity = next((item for item in self._runtime_world_state.get("entities") or () if str(item.get("entity_id") or "") == entity_id), None)
+        if commit and entity is not None and not bool(entity.get("editor_locked", False)):
+            self._push_level_actor_undo(f"Pilot {entity.get('name') or 'camera'}")
+            entity.setdefault("transform", {})["position"] = list(self.viewport_camera.eye)
+            entity.setdefault("camera", {})["look_at"] = list(self.viewport_camera.target)
+            entity["camera"]["fov_degrees"] = float(self.viewport_camera.fov_degrees)
+            self._finish_level_actor_edit(f"Updated {entity.get('name') or 'camera'} from piloted view")
+        self._camera_pilot_entity_id = ""
+        if not commit and getattr(self, "_camera_pilot_previous", None) is not None: self.viewport_camera = self._camera_pilot_previous
+        self._camera_pilot_previous = None
         return True
 
     def _finish_level_actor_edit(self, message: str) -> None:
@@ -656,6 +1043,7 @@ class ThreeDMeshPainterViewportMixin05:
             visible=bool(entity.get("visible", True)),
         )
         proxy["entity_id"] = entity_id
+        proxy["editor_locked"] = bool(entity.get("editor_locked", False))
         proxy["asset_id"] = str(asset.get("asset_id") or "")
         proxy["asset_path"] = str(asset.get("source") or "")
         self.mesh.scene_proxy_objects.append(proxy)
@@ -2260,8 +2648,7 @@ class ThreeDMeshPainterViewportMixin05:
                 worker.finished.disconnect(self._capture_usd_composition)
             except Exception:
                 pass
-        thread.quit()
-        thread.wait(2500)
+        self._release_background_thread(thread)
 
     def show_usd_composition_status(self) -> None:
         composition = getattr(self, "_usd_composition", None)
@@ -2464,7 +2851,7 @@ class ThreeDMeshPainterViewportMixin05:
         proxy = proxy or getattr(self, "_selected_scene_proxy", None)
         if not isinstance(proxy, (dict, SceneProxyInstance)) or not getattr(self, "canvas", None):
             return {}
-        center = self._proxy_center_display(proxy)
+        center = self.transform_pivot_display(proxy)
         if center is None:
             return {}
         camera = getattr(self, "viewport_camera", MayaViewportCamera())
@@ -2547,6 +2934,9 @@ class ThreeDMeshPainterViewportMixin05:
         handles = self.transform_gizmo_screen_handles()
         if not handles:
             return ""
+        center = next((item.get("start") for item in handles.values() if isinstance(item.get("start"), QPointF)), None)
+        if isinstance(center, QPointF) and math.hypot(float(pos.x()) - float(center.x()), float(pos.y()) - float(center.y())) <= 13.0:
+            return "XYZ"
         best_axis = ""
         best_distance = 14.0
         for axis, handle in handles.items():
@@ -2554,8 +2944,6 @@ class ThreeDMeshPainterViewportMixin05:
             end = handle.get("end")
             if not isinstance(start, QPointF) or not isinstance(end, QPointF):
                 continue
-            if math.hypot(float(pos.x()) - float(start.x()), float(pos.y()) - float(start.y())) <= 10.0:
-                return ""
             distance = self._distance_to_screen_segment(pos, start, end)
             endpoint_distance = math.hypot(float(pos.x()) - float(end.x()), float(pos.y()) - float(end.y()))
             distance = min(distance, endpoint_distance)
@@ -2604,12 +2992,24 @@ class ThreeDMeshPainterViewportMixin05:
                 -float(delta_y) * screen_to_view / scale,
                 0.0,
             )
+        if bool(getattr(self, "pivot_edit_mode", False)):
+            display = self.transform_pivot_display(proxy)
+            if display is None: return
+            current = tuple(getattr(self, "transform_pivot_custom_shared", None) or self.display_local_to_shared_local(display))
+            self.transform_pivot_custom_shared = tuple(float(current[i]) + float(shared_delta[i]) for i in range(3))
+            target = str(getattr(self, "_transient_snap_target", "") or "")
+            if target: self.snap_transform_pivot(target)
+            if hasattr(self, "canvas") and self.canvas: self.canvas.update()
+            return
         raw_total = tuple(
             float(v) + shared_delta[i]
             for i, v in enumerate(proxy.get("_pending_shared_delta") or (0.0, 0.0, 0.0))
         )
         proxy["_pending_shared_delta"] = raw_total
-        snap = float((getattr(self, "_transform_snap_settings", {}) or {}).get("translation", 0.0) or 0.0)
+        settings = dict(getattr(self, "_transform_snap_settings", {}) or {})
+        transient = str(getattr(self, "_transient_snap_target", "") or "")
+        snapping = bool(settings.get("enabled", False) or transient)
+        snap = float(settings.get("translation", 0.0) or (1.0 if snapping else 0.0))
         if snap > 0.0:
             snapped_total = tuple(round(value / snap) * snap for value in raw_total)
             previous = tuple(proxy.get("_pending_shared_snapped_delta") or (0.0, 0.0, 0.0))
@@ -2879,9 +3279,23 @@ class ThreeDMeshPainterViewportMixin05:
             if provider == "tech_connector":
                 entity = self._runtime_entity_for_proxy(proxy)
                 if entity is None: return False, "The selected level actor no longer exists."
+                if bool(entity.get("editor_locked", False)): return False, "The selected level actor is locked."
                 transform = entity.setdefault("transform", {})
+                old_rotation = list(transform.get("rotation") or (0.0, 0.0, 0.0)); old_scale = list(transform.get("scale") or (1.0, 1.0, 1.0))
                 if rotation is not None: transform["rotation"] = [float(v) for v in rotation]
                 if scale is not None: transform["scale"] = [float(v) for v in scale]
+                rotation_delta = [float(transform.get("rotation", old_rotation)[i]) - float(old_rotation[i]) for i in range(3)]
+                scale_ratio = [float(transform.get("scale", old_scale)[i]) / max(1.0e-9, float(old_scale[i])) for i in range(3)]
+                for other_proxy in self._editable_selected_level_actor_proxies():
+                    if other_proxy is proxy: continue
+                    other = self._runtime_entity_for_proxy(other_proxy)
+                    if other is None: continue
+                    other_transform = other.setdefault("transform", {}); local = dict(other_proxy.get("local_transform") or {})
+                    if rotation is not None:
+                        angles = list(other_transform.get("rotation") or (0.0, 0.0, 0.0)); other_transform["rotation"] = [float(angles[i]) + rotation_delta[i] for i in range(3)]; local["rotation"] = list(other_transform["rotation"])
+                    if scale is not None:
+                        values = list(other_transform.get("scale") or (1.0, 1.0, 1.0)); other_transform["scale"] = [float(values[i]) * scale_ratio[i] for i in range(3)]; local["scale"] = list(other_transform["scale"])
+                    other_proxy["local_transform"] = local; other_proxy["sync_state"] = "dirty"
                 proxy["sync_state"] = "dirty"; self._scene_lifecycle.mark_dirty()
                 self._resolved_shaded_status = f"{mode} committed: {entity.get('name') or native_id}"
                 self.auto_key_committed_transform(proxy, "rotate" if rotation is not None else "scale"); self.update_viewport_status()
@@ -2951,7 +3365,15 @@ class ThreeDMeshPainterViewportMixin05:
             if provider == "tech_connector":
                 entity = self._runtime_entity_for_proxy(proxy)
                 if entity is None: return False, "The selected level actor no longer exists."
+                if bool(entity.get("editor_locked", False)): return False, "The selected level actor is locked."
                 transform = entity.setdefault("transform", {}); transform["position"] = [float(v) for v in (proxy.get("local_transform") or {}).get("translation", proxy.get("center") or (0.0, 0.0, 0.0))]
+                for other_proxy in self._editable_selected_level_actor_proxies():
+                    if other_proxy is proxy: continue
+                    other = self._runtime_entity_for_proxy(other_proxy)
+                    if other is None: continue
+                    other_transform = other.setdefault("transform", {}); position = list(other_transform.get("position") or (0.0, 0.0, 0.0))
+                    position = [float(position[i]) + float(shared_delta[i]) for i in range(3)]; other_transform["position"] = position
+                    self._offset_proxy_preview(other_proxy, shared_delta); local = dict(other_proxy.get("local_transform") or {}); local["translation"] = position; other_proxy["local_transform"] = local; other_proxy["sync_state"] = "dirty"
                 proxy["sync_state"] = "dirty"; self._scene_lifecycle.mark_dirty()
                 self._resolved_shaded_status = f"Moved level actor: {entity.get('name') or native_id}"
                 self.auto_key_committed_transform(proxy, "translate"); self.update_viewport_status()

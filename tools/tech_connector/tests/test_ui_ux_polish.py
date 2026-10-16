@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QPushButton, QSplitter, QTreeWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QMainWindow, QPushButton, QSplitter, QTreeWidget, QVBoxLayout, QWidget
 
 from tech_connector.ui.ux_polish import (
     ContextRecipeCard,
@@ -64,6 +64,9 @@ def test_discoverability_fills_accessibility_and_disabled_explanations() -> None
     layout.addWidget(send)
     layout.addWidget(unavailable)
     layout.addWidget(combo)
+    unnamed_tree = QTreeWidget()
+    unnamed_tree.setHeaderLabels(["Asset", "Type"])
+    layout.addWidget(unnamed_tree)
 
     apply_widget_discoverability(root)
     explain_disabled(unavailable, "Create a simulation first.")
@@ -72,6 +75,7 @@ def test_discoverability_fills_accessibility_and_disabled_explanations() -> None
     assert send.accessibleDescription() == send.toolTip()
     assert "Create a simulation first" in unavailable.toolTip()
     assert "simulation quality" in combo.toolTip().lower()
+    assert unnamed_tree.accessibleName() == "Asset and Type tree"
 
 
 class _MainHarness(QWidget):
@@ -103,6 +107,7 @@ def test_main_window_getting_started_card_guides_actions_and_can_reopen() -> Non
     QApplication.processEvents()
 
     assert window.getting_started_card.isVisible()
+    assert len(window._tc_landmark_shortcuts) == 2
     assert window.getting_started_toggle_btn.text() == "Guide"
     buttons = {button.text(): button for button in window.getting_started_card.findChildren(QPushButton)}
     buttons["Choose project"].click()
@@ -116,6 +121,36 @@ def test_main_window_getting_started_card_guides_actions_and_can_reopen() -> Non
     assert window.settings["getting_started_dismissed"]
     window.getting_started_toggle_btn.click()
     assert window.getting_started_card.isVisible()
+
+
+def test_main_window_accessibility_menu_exposes_scaling_and_high_contrast() -> None:
+    _application()
+
+    class Harness(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            self.settings = {}
+            self.service = SimpleNamespace(save_settings=lambda values: None)
+            central = QWidget()
+            root = QVBoxLayout(central)
+            self.top_section_widget = QWidget()
+            self.menu_bar_controls_widget = QWidget()
+            self.menu_bar_controls_widget.setLayout(QHBoxLayout())
+            root.addWidget(self.top_section_widget)
+            root.addWidget(self.menu_bar_controls_widget)
+            self.setCentralWidget(central)
+
+    window = Harness()
+    apply_main_window_ux_polish(window)
+    accessibility = window.accessibility_menu
+    labels = [action.text() for action in accessibility.actions()]
+
+    assert "Increase text size" in labels
+    assert "Decrease text size" in labels
+    assert "High contrast" in labels
+    window.accessibility_high_contrast_action.setChecked(True)
+    assert window.property("accessibilityHighContrast") is True
+    assert window.settings["high_contrast"] is True
 
 
 def test_3d_viewer_orientation_banner_and_outliner_guidance_are_installed_once() -> None:

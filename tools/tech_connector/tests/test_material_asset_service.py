@@ -13,7 +13,8 @@ from tech_connector.game_engine.assets import (
 )
 from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor
 from tech_connector.ui.game_engine.asset_specialized_editors import (
-    MaterialCompileInspectorWidget, MaterialInstanceEditorWidget, TextureInspectorEditorWidget,
+    MaterialCompileInspectorWidget, MaterialInstanceCostEditorWidget, MaterialInstanceEditorWidget,
+    MaterialInstancePreviewEditorWidget, TextureInspectorEditorWidget,
 )
 
 
@@ -155,9 +156,39 @@ def test_shader_graph_and_texture_python_workflows_are_cookable(tmp_path) -> Non
     assert "compile_shader_graph" in api.capability_contract()["shader_operations"]
 
 
+def test_shader_graph_functions_track_dependencies_and_platform_fallbacks(tmp_path) -> None:
+    project = tmp_path / "Project"
+    project.mkdir()
+    api = TCEditorAPI(project)
+    function = api.create_shader_graph("SF_Detail", graph={
+        "nodes": [{"id": "out", "title": "Shader Output", "opcode": "shader_output"}], "connections": [],
+    })
+    consumer = api.create_shader_graph("SG_UsesDetail", graph={
+        "nodes": [
+            {"id": "fn", "title": "Shader Function", "opcode": "material_function", "parameters": {"function_asset_id": function.asset_id}},
+            {"id": "vt", "title": "Virtual Texture", "opcode": "virtual_texture"},
+            {"id": "out", "title": "Shader Output", "opcode": "shader_output"},
+        ],
+        "connections": [{"source": "fn", "target": "out"}],
+    })
+    assert api.database.dependency_edges(consumer.asset_id) == ((function.asset_id, "shader_function"),)
+    diagnostics = api.validate_shader_graph(consumer.asset_id, platform="web")
+    assert any(item["code"] == "platform_preview_fallback" and item["subject"] == "vt" for item in diagnostics)
+
+
 def test_polished_material_instance_texture_and_compile_editors(tmp_path) -> None:
     project, database, materials = _services(tmp_path)
     base = materials.create_material("M_UI", preset="default_lit")
+    materials.update_properties(base.asset_id, {
+        "static_switches": {"USE_DETAIL": False},
+        "graph": {
+            "nodes": [
+                {"id": "detail", "title": "Static Switch", "opcode": "static_switch"},
+                {"id": "out", "title": "Surface Output", "opcode": "surface_output"},
+            ],
+            "connections": [{"source": "detail", "target": "out"}],
+        },
+    })
     instance = materials.create_instance("MI_UI", base.asset_id, overrides={"roughness": 0.25})
     values = json.loads(database.asset(instance.asset_id).source_path.read_text(encoding="utf-8"))["properties"]
 
@@ -165,6 +196,25 @@ def test_polished_material_instance_texture_and_compile_editors(tmp_path) -> Non
     instance_editor.load_settings(values)
     roughness_row = next(row for row in range(instance_editor.parameters.rowCount()) if instance_editor.parameters.item(row, 0).text() == "roughness")
     assert instance_editor.parameters.item(roughness_row, 4).text() == "Overridden"
+    switch_row = next(row for row in range(instance_editor.switches.rowCount()) if instance_editor.switches.item(row, 0).text() == "USE_DETAIL")
+    instance_editor.switches.selectRow(switch_row)
+    instance_editor._override_switch()
+    instance_editor.switches.item(switch_row, 2).setText("true")
+    assert instance_editor.settings()["static_switch_overrides"] == {"USE_DETAIL": True}
+    assert instance_editor.resolved_properties()["roughness"] == 0.25
+
+    preview = MaterialInstancePreviewEditorWidget(project, database, instance.asset_id)
+    preview.load_settings(instance_editor.settings())
+    assert preview.canvas.roughness == 0.25
+    preview.preview_mesh.setCurrentText("Cube")
+    assert preview.settings()["preview_mesh"] == "Cube"
+
+    cost = MaterialInstanceCostEditorWidget(project, database, instance.asset_id)
+    cost.load_settings(instance_editor.settings())
+    assert cost.report()["node_count"] == 2
+    assert cost.report()["permutations"] == 2
+    assert cost.report()["static_overrides"] == 1
+    assert cost.report()["permutation_key"] == "USE_DETAIL=1"
 
     texture_editor = TextureInspectorEditorWidget()
     texture_editor.load_settings({"usage": "normal", "color_space": "srgb", "compression": "bc1"})
@@ -176,5 +226,6 @@ def test_polished_material_instance_texture_and_compile_editors(tmp_path) -> Non
 
     dedicated = DedicatedAssetEditor(project, database)
     assert dedicated.open_asset(instance.asset_id)
-    assert any(key == "__material_instance__" for key, _widget in dedicated._specialized_widgets)
+    specialized = {key for key, _widget in dedicated._specialized_widgets}
+    assert {"__material_instance__", "__material_instance_preview__", "__material_instance_cost__"} <= specialized
     assert dedicated.compile()

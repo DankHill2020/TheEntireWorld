@@ -212,6 +212,16 @@ def _action_line(action: dict[str, Any], index: int) -> str:
 def _summarize_errors(report: dict[str, Any], limit: int = 5) -> list[str]:
     validation = report.get("validation") or {}
     errors = [str(item) for item in validation.get("errors") or []]
+    preflight = report.get("preflight") or {}
+    if isinstance(preflight.get("pipeline_preflight"), dict):
+        preflight = preflight["pipeline_preflight"]
+    for item in preflight.get("errors") or []:
+        if isinstance(item, dict):
+            prefix = str(item.get("host") or item.get("action_id") or "preflight")
+            message = str(item.get("message") or item.get("error") or item.get("status") or item)
+            errors.append(f"{prefix}: {message}")
+        else:
+            errors.append(str(item))
     for action_id, status in (report.get("action_statuses") or {}).items():
         if status.get("status") in {"failed", "skipped"}:
             result = status.get("result") or {}
@@ -237,9 +247,11 @@ def format_action_plan_chat_report(
 
     if simple:
         if status == "approval_required":
+            effects = [str(item.get("effect") or "") for item in mutating if item.get("effect")]
+            detail = f" The first change is: {effects[0]}" if effects else ""
             return (
                 f"I've put together a plan with {len(actions)} steps, but before I execute any changes, I'll need your go-ahead. "
-                f"Specifically, {len(mutating)} of these steps will modify files or tools in your project."
+                f"Specifically, {len(mutating)} of these steps will modify files or tools in your project.{detail}"
             )
         if status in {"completed", "dry_run"}:
             return f"All done! The plan was executed successfully (status: `{status}`). I completed {completed} out of {len(actions)} steps."
@@ -255,6 +267,8 @@ def format_action_plan_chat_report(
         lead = "I've performed a dry run to validate the plan, and everything looks good to go."
     elif status == "rejected":
         lead = "I couldn't run the plan because it didn't pass validation."
+    elif status == "preflight_failed":
+        lead = "I stopped before changing anything because one or more pipeline hosts or functions are not ready."
     else:
         lead = f"The plan execution finished with status `{status}`."
 
@@ -278,8 +292,16 @@ def format_action_plan_chat_report(
                 action_type = str(item.get("action_type") or "action")
                 full_act = action_map.get(action_id)
                 name = _action_name(full_act) if full_act else ""
-                suffix = f": `{name}`" if name else f" `{action_id}`"
-                lines.append(f"- {_label_action(action_type)}{suffix}")
+                host = str(item.get("host") or "").strip()
+                operation = str(item.get("operation") or "").strip()
+                if host and operation:
+                    lines.append(f"- `{host}` → `{operation}`: {item.get('effect') or 'may change the connected host project'}")
+                else:
+                    suffix = f": `{name}`" if name else f" `{action_id}`"
+                    lines.append(f"- {_label_action(action_type)}{suffix}")
+                rollback = [str(value) for value in item.get("rollback") or [] if str(value)]
+                if rollback:
+                    lines.append(f"  - Recovery: {rollback[0]}")
             if len(mutating) > 8:
                 lines.append(f"- ...and {len(mutating) - 8} more approval-gated step(s).")
         else:

@@ -58,6 +58,23 @@ def _sum_inference_metrics(value: Any) -> dict[str, int]:
     return totals
 
 
+_CLOUD_MODEL_PREFIXES = (
+    "anthropic:",
+    "claude:",
+    "openai:",
+    "google:",
+    "gemini:",
+    "x:",
+    "grok:",
+)
+
+
+def _is_explicit_cloud_model(model: str) -> bool:
+    """Return whether a benchmark model explicitly requests cloud transport."""
+
+    return str(model or "").strip().casefold().startswith(_CLOUD_MODEL_PREFIXES)
+
+
 def run_worker(request_path: Path, result_path: Path) -> int:
     """Run Tech Connector and write a machine-readable attempt result.
 
@@ -77,13 +94,23 @@ def run_worker(request_path: Path, result_path: Path) -> int:
     from tech_connector.services.project_edit_workflow_service import (
         run_multi_file_project_edit_workflow,
     )
+    from tech_connector.services.llm_router_service import (
+        locked_model_provider_route,
+        resolve_llm_provider_route,
+    )
     from tech_connector.services.settings_service import load_settings
 
     settings = dict(load_settings())
+    explicit_cloud = _is_explicit_cloud_model(model)
     if model.startswith("ollama:"):
         settings["model_source_mode"] = "local_only"
         selected_model = model.removeprefix("ollama:")
     else:
+        # An explicit benchmark selection takes precedence over the saved UI
+        # preference. Otherwise a cloud-labelled run can silently measure local
+        # Ollama inference.
+        if explicit_cloud:
+            settings["model_source_mode"] = "auto_with_local_fallback"
         selected_model = model
     settings["model"] = selected_model
     settings["cloud_provider_model"] = selected_model
@@ -91,6 +118,27 @@ def run_worker(request_path: Path, result_path: Path) -> int:
 
     started = time.perf_counter()
     workflows = []
+
+    resolved_route = resolve_llm_provider_route(selected_model, settings)
+    if explicit_cloud and not resolved_route.cloud_active:
+        payload = {
+            "status": "provider_unavailable",
+            "ok": False,
+            "model": selected_model,
+            "wall_seconds": round(time.perf_counter() - started, 6),
+            "error": (
+                f"The requested cloud benchmark route {selected_model!r} is not "
+                "authenticated; refusing to substitute a local model."
+            ),
+            "provider_route": {
+                "provider": resolved_route.provider,
+                "model": resolved_route.model,
+                "cloud_active": resolved_route.cloud_active,
+                "transport": resolved_route.transport,
+            },
+        }
+        result_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return 3
 
     def report_status(message: str) -> None:
         """Stream one user-visible workflow status into the attempt log.
@@ -102,19 +150,9 @@ def run_worker(request_path: Path, result_path: Path) -> int:
         print(f"Workflow status: {message}", flush=True)
 
     try:
-        workflow = run_multi_file_project_edit_workflow(
-            prompt,
-            project_root=str(workspace),
-            selected_model=selected_model,
-            settings=settings,
-            timeout=timeout,
-            dry_run=True,
-            max_attempts=max_attempts,
-            original_prompt=prompt,
-            status_callback=report_status,
-        )
-        workflows.append(workflow)
-        if workflow.status == "plan_approval_required" and workflow.approval_id:
+        # Freeze one provider route across planning, generation, review, and
+        # repair. A cloud attempt may not drift to a local stage mid-run.
+        with locked_model_provider_route(resolved_route):
             workflow = run_multi_file_project_edit_workflow(
                 prompt,
                 project_root=str(workspace),
@@ -123,11 +161,24 @@ def run_worker(request_path: Path, result_path: Path) -> int:
                 timeout=timeout,
                 dry_run=True,
                 max_attempts=max_attempts,
-                approved_plan_id=workflow.approval_id,
                 original_prompt=prompt,
                 status_callback=report_status,
             )
             workflows.append(workflow)
+            if workflow.status == "plan_approval_required" and workflow.approval_id:
+                workflow = run_multi_file_project_edit_workflow(
+                    prompt,
+                    project_root=str(workspace),
+                    selected_model=selected_model,
+                    settings=settings,
+                    timeout=timeout,
+                    dry_run=True,
+                    max_attempts=max_attempts,
+                    approved_plan_id=workflow.approval_id,
+                    original_prompt=prompt,
+                    status_callback=report_status,
+                )
+                workflows.append(workflow)
 
         applied_paths: list[str] = []
         rejected_paths: list[str] = []
@@ -162,6 +213,12 @@ def run_worker(request_path: Path, result_path: Path) -> int:
             "workflow_statuses": [item.status for item in workflows],
             "timings": all_timings,
             "implementation_plan": workflow.implementation_plan,
+            "provider_route": {
+                "provider": resolved_route.provider,
+                "model": resolved_route.model,
+                "cloud_active": resolved_route.cloud_active,
+                "transport": resolved_route.transport,
+            },
         }
         result_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         return 0 if applied_paths else 2

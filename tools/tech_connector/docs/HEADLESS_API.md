@@ -30,6 +30,82 @@ through `api.llm_queue_status()` and `api.cancel_llm_request(request_id)`. See
 [LLM_QUEUE_MANAGEMENT.md](LLM_QUEUE_MANAGEMENT.md) for scheduling categories,
 configuration, deadlines, superseding, and cancellation semantics.
 
+## Simple AI API
+
+For direct generation, use the provider-neutral `api.ai` namespace. It keeps
+credentials out of results and makes routing inspectable before a paid call:
+
+```python
+from tech_connector.api import create_api
+
+api = create_api(project_root="C:/project")
+
+catalog = api.ai.models()
+local = api.ai.local_recommendation()
+route = api.ai.route(depth="deep")
+result = api.ai.generate(
+    "Explain the safest way to refactor this Maya exporter.",
+    system="Be concise and cite affected symbols.",
+    depth="deep",
+)
+
+if not result.ok:
+    raise RuntimeError(result.error)
+print(result.result["text"])
+print(result.result["route"])
+```
+
+`local_recommendation()` reports the detected GPU, target models, currently
+active installed fallbacks, missing recommended downloads, and runtime guidance.
+Use `api.ai.benchmark_local()` for a short Ollama speed probe; it reports load
+time and generated tokens per second and does not contact a cloud provider.
+
+Depths are `fast`, `balanced`, `deep`, and `maximum`. With OpenAI automatic
+selection enabled they map to GPT-6 Luna, GPT-6.1 Sol, GPT-6.1 Sol with higher
+reasoning, and GPT-6 Astra respectively. An explicit unrelated model is
+preserved. Cloud failure never silently changes the model during a run;
+`allow_local_fallback=True` must be set explicitly.
+
+Use `api.reasoning` when you need project context, planning, tools, progress
+events, or the full Tech Connector orchestration pipeline.
+
+## Discovering operations and handling errors
+
+The API is self-describing, so integrations do not need to hard-code every
+feature or signature:
+
+```python
+overview = api.describe()
+matches = api.features.search("material generation")
+help_payload = api.features.describe("ai.generate", "generate")
+
+for parameter in help_payload["operations"][0]["parameters"]:
+    print(parameter["name"], parameter["required"], parameter["default"])
+```
+
+Every `APIResult` keeps the existing `ok`, `result`, and `error` fields and now
+also includes `error_detail` with a stable code, retry guidance, and a suggested
+next action. Small scripts can use `unwrap()`:
+
+```python
+try:
+    text = api.ai.generate("Summarize this scene").unwrap()["text"]
+except TechConnectorAPIError as exc:
+    print(exc.code, exc.retryable, exc.suggestion)
+```
+
+The Kingdom namespace also exposes the full project editor contract without
+requiring callers to import internal engine modules:
+
+```python
+operations = api.kingdom.editor_capabilities().unwrap()
+help_payload = api.kingdom.editor_describe("asset_dependency_graph").unwrap()
+graph = api.kingdom.editor_call(
+    "asset_dependency_graph",
+    asset_id="tc.asset.example",
+).unwrap()["value"]
+```
+
 ## Reasoning Runtime API
 
 API version 2 exposes the same shared reasoning runtime used by Tech Connector's
@@ -249,9 +325,11 @@ result = api.execute_prompt_chain(
 )
 ```
 
-`project_roots` is optional, but passing the tagged file/package/workspace scope
-keeps experimentation responsive and matches how the UI should narrow work when
-the user tags a specific source.
+`project_roots` is optional. By default Tech Connector uses the primary project,
+all secondary folders configured with **+ Add Folder**, and the installed tools
+root. The tools root is permanent so built-in APIs remain discoverable even when
+the user's project lives on another drive. Passing `project_roots` explicitly
+narrows one request to the tagged file/package/workspace scope.
 
 ## Calling Functions
 

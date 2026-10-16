@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
+import pytest
+
 from tech_connector.game_engine.authoring.engine_graph_program_service import (
     EngineGraphNode,
     EngineGraphProgram,
@@ -77,3 +81,24 @@ def test_debug_session_manager_lists_and_detaches_instances() -> None:
     assert rows[0]["instance_id"] == "Player_1"
     assert manager.session("session-a") is session
     assert manager.detach("session-a").status == "stopped"
+
+
+def test_runtime_entity_selection_and_failed_hot_swap_roll_back_atomically() -> None:
+    context = {"authority": "local", "actors": {"Player": {"health": 100}, "Enemy": {"health": 25}}, "metadata": {"variables": {}}}
+    session = GraphDebugSession(
+        "runtime-1", "World_1", compile_engine_graph_manifest(_program()), context,
+        execution_mode="runtime_execution", selected_entity_id="Player",
+    )
+    selected = session.select_entity("Enemy")
+    assert selected.execution_mode == "runtime_execution"
+    assert selected.selected_entity_id == "Enemy"
+    assert selected.runtime_state["actors"]["Selected"]["health"] == 25
+
+    before = session.snapshot(); invalid = deepcopy(session.manifest); invalid["valid"] = False
+    with pytest.raises(ValueError, match="invalid graph manifest"):
+        session.hot_swap(invalid)
+    after = session.snapshot()
+    assert after.revision == before.revision
+    assert after.instruction_index == before.instruction_index
+    assert after.hot_reload["rolled_back"] is True
+    assert session.manifest["valid"] is True

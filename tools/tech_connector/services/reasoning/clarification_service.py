@@ -8,6 +8,7 @@ template can ask the user for the missing value without invoking a large model.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -516,12 +517,22 @@ def build_confirmation(
         model_tier_policy="deterministic",
         rendering_mechanism="deterministic",
     )
+    text = render_confirmation(request, context)
+    presentation = confirmation_presentation(request, context)
+    request.confirmation = {
+        **request.confirmation,
+        "schema": "tech_connector.approval_prompt.v1",
+        "approval_id": presentation["approval_id"],
+        "presentation": presentation,
+        "prompt_text": text,
+    }
+    action_label = str(presentation.get("action") or "the prepared operation")
     request.ui_controls = [
         {
             "type": "button",
             "value": "confirm",
             "label": "Approve",
-            "tooltip": "Run this exact prepared operation once",
+            "tooltip": f"Run once: {action_label}",
         },
         {
             "type": "button",
@@ -530,7 +541,6 @@ def build_confirmation(
             "tooltip": "Cancel this operation without making the described change",
         },
     ]
-    text = render_confirmation(request, context)
     return ClarificationRenderResult(
         text=text,
         request=request,
@@ -675,20 +685,37 @@ def render_slot_question(request: ClarificationRequest, slot: ClarificationSlot)
 
 
 def render_confirmation(request: ClarificationRequest, context: RequestContext) -> str:
+    details = confirmation_presentation(request, context)
+    lines = [
+        f"Approval required: {details['action']}",
+        "",
+        "What will happen:",
+        *[f"- {effect}" for effect in details["effects"]],
+    ]
+    if details["inputs"]:
+        lines.extend(["", "Key inputs:", *[f"- {item}" for item in details["inputs"]]])
+    lines.extend(
+        [
+            "",
+            f"Affected scope: {details['affected_scope']}",
+            f"Risk: {details['risk'].title()} — {details['risk_detail']}",
+            f"Undo/recovery: {details['recovery']}",
+            f"Why you are being asked: {details['reason']}",
+            "",
+            "Approval applies only to this exact prepared execution. Future changes are reviewed separately.",
+            f"Approval ID: `{details['approval_id']}`",
+            "Use Approve or Deny below: Approve runs it once; Deny makes no change.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def confirmation_presentation(request: ClarificationRequest, context: RequestContext) -> dict[str, Any]:
+    """Build the stable, redacted approval contract shown in chat and native controls."""
+
     target = request.target or request.intent or "this operation"
     scope = request.confirmation.get("mutation_scope") or request.execution_request.get("mutation_scope") or "the current context"
-    risk = request.confirmation.get("risk_level") or request.execution_request.get("risk_level") or "unknown"
-    if request.confirmation.get("operation") == "unreal_graph_patch":
-        asset = request.confirmation.get("target_asset") or "target asset"
-        graph = request.confirmation.get("target_graph") or "target graph"
-        preview = request.confirmation.get("preview") or {}
-        count = preview.get("operation_count") or "planned"
-        return (
-            f"I'm ready to apply an Unreal graph patch to `{asset}` / `{graph}`.\n\n"
-            f"Planned operations: `{count}`\n"
-            f"This will modify {scope} (Risk level: {risk}). Use Approve or Deny below."
-        )
-    
+    risk = str(request.confirmation.get("risk_level") or request.execution_request.get("risk_level") or "unknown").lower()
     exec_req = request.execution_request or {}
     keyword_args = exec_req.get("keyword_args") or request.route_decision.get("keyword_args") or {}
     positional_args = exec_req.get("positional_args") or request.route_decision.get("positional_args") or []
@@ -697,14 +724,24 @@ def render_confirmation(request: ClarificationRequest, context: RequestContext) 
     code = str(keyword_args.get("code") or "")
     operation = str(request.confirmation.get("operation") or exec_req.get("target_identifier") or target)
 
-    if host.lower() == "maya" and "create_rig_from_mapping" in code:
+    is_graph_patch = request.confirmation.get("operation") == "unreal_graph_patch"
+    if is_graph_patch:
+        asset = request.confirmation.get("target_asset") or "target asset"
+        graph = request.confirmation.get("target_graph") or "target graph"
+        heading = f"Apply an Unreal graph patch to {asset} / {graph}"
+    elif host.lower() == "maya" and "create_rig_from_mapping" in code:
         heading = "Create a control rig in Maya"
     else:
         friendly = operation.rsplit(".", 1)[-1].replace("_", " ").strip()
         heading = f"Run {friendly or 'the prepared operation'} in {host_label}"
 
     effects = []
-    if code:
+    if is_graph_patch:
+        preview = request.confirmation.get("preview") or {}
+        count = preview.get("operation_count") or "the prepared"
+        effects.append(f"Apply {count} graph operation(s) to the selected Unreal graph.")
+        effects.append("Compile and validate the edited graph through the connected Unreal session.")
+    elif code:
         line_count = len(code.splitlines())
         effects.append(f"Run the prepared {line_count}-line Python script in the connected {host_label} session.")
         root_match = re.search(r"\broot_joint\s*=\s*['\"]([^'\"]+)['\"]", code)
@@ -719,7 +756,10 @@ def render_confirmation(request: ClarificationRequest, context: RequestContext) 
     for index, value in enumerate(positional_args[:4], start=1):
         visible_args.append(f"argument {index} = `{str(value)[:120]}`")
     for key, value in keyword_args.items():
-        if key in {"code", "timeout", "timeout_seconds", "maya_port"}:
+        normalized_key = str(key).lower()
+        if key in {"code", "timeout", "timeout_seconds", "maya_port"} or any(
+            secret in normalized_key for secret in ("password", "secret", "token", "credential", "api_key")
+        ):
             continue
         visible_args.append(f"{key} = `{str(value)[:120]}`")
         if len(visible_args) >= 6:
@@ -738,25 +778,50 @@ def render_confirmation(request: ClarificationRequest, context: RequestContext) 
         "low": "This makes a limited state change.",
     }.get(str(risk).lower(), "This operation changes application state.")
 
-    lines = [
-        f"Approval required: {heading}",
-        "",
-        "What will happen:",
-        *[f"- {effect}" for effect in effects],
-    ]
-    if visible_args:
-        lines.extend(["", "Key inputs:", *[f"- {item}" for item in visible_args]])
-    lines.extend(
-        [
-            "",
-            f"Affected scope: {affected}",
-            f"Risk: {str(risk).title()} — {risk_detail}",
-            "",
-            "Approval applies only to this exact prepared execution. Future scene changes will require their own approval.",
-            "Use Approve or Deny below: Approve runs it now; Deny leaves the scene unchanged.",
-        ]
-    )
-    return "\n".join(lines)
+    explicit_recovery = str(
+        request.confirmation.get("recovery")
+        or request.confirmation.get("rollback")
+        or request.dispatch_result.get("recovery")
+        or ""
+    ).strip()
+    if explicit_recovery:
+        recovery = explicit_recovery
+    elif str(scope) == "dcc_scene_mutation":
+        recovery = f"Use {host_label} undo/history when supported; save or checkpoint the scene first for high-risk work."
+    elif str(scope) in {"file_mutation", "project_mutation"}:
+        recovery = "Review the generated diff and use source control or the project backup to revert it."
+    else:
+        recovery = "No automatic rollback is guaranteed; verify the target before approval."
+
+    reason = str(request.confirmation.get("reason") or "The operation mutates project, scene, application, or external state.")
+    fingerprint_payload = {
+        "host": host.lower(),
+        "operation": operation,
+        "scope": str(scope),
+        "target": target,
+        "positional_args": positional_args,
+        "keyword_args": keyword_args,
+        "affected_targets": request.dispatch_result.get("affected_targets") or [],
+    }
+    try:
+        encoded = json.dumps(fingerprint_payload, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        encoded = repr(fingerprint_payload)
+    approval_id = hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return {
+        "action": heading,
+        "host": host,
+        "operation": operation,
+        "target": target,
+        "effects": effects,
+        "inputs": visible_args,
+        "affected_scope": affected,
+        "risk": risk,
+        "risk_detail": risk_detail,
+        "recovery": recovery,
+        "reason": reason,
+        "approval_id": approval_id,
+    }
 
 
 def ui_controls_for_request(request: ClarificationRequest) -> list[dict[str, Any]]:

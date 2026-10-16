@@ -463,6 +463,12 @@ def _symbol_rows_for_file(file_path: str, *, kinds: tuple[str, ...] = ("function
 
 
 def _signature_from_ast(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    def default_text(default: ast.AST) -> str:
+        try:
+            return ast.unparse(default)
+        except Exception:
+            return "..."
+
     names = [arg.arg for arg in [*node.args.posonlyargs, *node.args.args]]
     defaults = [None] * (len(names) - len(node.args.defaults)) + list(node.args.defaults)
     parts: list[str] = []
@@ -470,13 +476,13 @@ def _signature_from_ast(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
         if default is None:
             parts.append(name)
         else:
-            parts.append(f"{name}=...")
+            parts.append(f"{name}={default_text(default)}")
     if node.args.vararg:
         parts.append("*" + node.args.vararg.arg)
     elif node.args.kwonlyargs:
         parts.append("*")
     for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults or []):
-        parts.append(arg.arg if default is None else f"{arg.arg}=...")
+        parts.append(arg.arg if default is None else f"{arg.arg}={default_text(default)}")
     if node.args.kwarg:
         parts.append("**" + node.args.kwarg.arg)
     return f"{node.name}({', '.join(parts)})"
@@ -1162,12 +1168,11 @@ def answer_explicit_symbol_inspection_question(
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return None
 
+    source_location = f"`{rel}`" + (
+        f":{getattr(node, 'lineno', '')}" if getattr(node, "lineno", None) else ""
+    )
     lines = [
-        "What I understood",
-        f"Inspect the exact project symbol `{symbol}` and answer: {', '.join(operations)}.",
-        "",
-        f"Target: `{symbol}`",
-        f"Source: `{rel}`" + (f":{getattr(node, 'lineno', '')}" if getattr(node, "lineno", None) else ""),
+        f"Source: {source_location}",
         "",
     ]
 
@@ -1177,15 +1182,22 @@ def answer_explicit_symbol_inspection_question(
         lines.append(f"Signature: `{_callable_signature_from_ast(node)}`")
     doc = ast.get_docstring(node)
     if doc:
-        lines.extend(["", "Docstring:", _compact_text(doc, 700)])
+        summary = _docstring_summary(doc)
+        if summary:
+            lines.extend(["", "Purpose:", summary])
 
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         params = _parameter_rows_from_ast(node)
+        param_docs, return_doc = _docstring_contract(doc or "")
         if params:
-            lines.extend(["", "Parameters:"])
+            lines.extend(["", "Inputs:"])
             for name, defaulted in params:
                 suffix = " optional/defaulted" if defaulted else " required"
-                lines.append(f"- `{name}`: {suffix}")
+                description = param_docs.get(name, "")
+                lines.append(
+                    f"- `{name}`: {description or suffix.lstrip()}"
+                    + (" (optional)" if description and defaulted else "")
+                )
 
         if "explain_behavior" in operations or "show_implementation" in operations:
             summary = _function_behavior_summary(node)
@@ -1203,7 +1215,7 @@ def answer_explicit_symbol_inspection_question(
             for caller in callers:
                 lines.append(f"- `{caller}`")
 
-        returns = _return_summary(node)
+        returns = return_doc or _return_summary(node)
         if returns:
             lines.extend(["", "Returns:", returns])
 
@@ -1212,19 +1224,47 @@ def answer_explicit_symbol_inspection_question(
         if snippet:
             lines.extend(["", "Implementation excerpt:", "```python", _trim_source(snippet, 80), "```"])
 
-    lines.extend([
-        "",
-        "Resolution: exact qualified symbol. Broad fuzzy project search was not used because the explicit target resolved.",
-    ])
     return "\n".join(lines)
 
 
 def _explicit_qualified_symbol_reference(question: str) -> str:
     match = re.search(
-        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){2,})(?![\w.])",
+        r"(?<![\w.])@([A-Za-z_][A-Za-z0-9_]*(?:(?:[./\\])[A-Za-z_][A-Za-z0-9_]*){1,})(?![\w./\\])",
         question or "",
     )
-    return match.group(1) if match else ""
+    if not match:
+        return ""
+    return re.sub(r"[./\\]+", ".", match.group(1)).strip(".")
+
+
+def _docstring_summary(docstring: str) -> str:
+    lines: list[str] = []
+    for raw in str(docstring or "").splitlines():
+        line = raw.strip()
+        if line.startswith(":param") or line.startswith(":return") or line.startswith(":rtype"):
+            break
+        if line:
+            lines.append(line)
+    return _compact_text(" ".join(lines), 500) if lines else ""
+
+
+def _docstring_contract(docstring: str) -> tuple[dict[str, str], str]:
+    params: dict[str, str] = {}
+    return_text = ""
+    for raw in str(docstring or "").splitlines():
+        line = raw.strip()
+        param_match = re.match(r":param\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*)", line)
+        if param_match:
+            params[param_match.group(1)] = param_match.group(2).strip().rstrip(".")
+            continue
+        return_match = re.match(r":returns?:\s*(.*)", line)
+        if return_match:
+            return_text = return_match.group(1).strip().rstrip(".")
+    if return_text.casefold() in {"none", "null"}:
+        return_text = "Nothing (`None`). No explicit `return` value was detected in the function body."
+    elif return_text:
+        return_text += "."
+    return params, return_text
 
 
 def _symbol_inspection_operations(question: str) -> list[str]:
@@ -1344,8 +1384,8 @@ def _parameter_rows_from_ast(node: ast.FunctionDef | ast.AsyncFunctionDef) -> li
 def _function_behavior_summary(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     summary: list[str] = []
     calls: list[str] = []
-    assignments: list[str] = []
     host_effects: set[str] = set()
+    raises = False
     for child in _walk_function_body_without_nested_defs(node):
         if isinstance(child, ast.Call):
             name = _call_name(child.func)
@@ -1353,17 +1393,39 @@ def _function_behavior_summary(node: ast.FunctionDef | ast.AsyncFunctionDef) -> 
                 calls.append(name)
             if name.startswith("cmds.") or name.startswith("maya.cmds."):
                 host_effects.add("Uses Maya cmds and can mutate/query the current Maya scene.")
-        elif isinstance(child, (ast.Assign, ast.AnnAssign)):
-            targets = child.targets if isinstance(child, ast.Assign) else [child.target]
-            for target in targets:
-                label = _target_name(target)
-                if label and label not in assignments:
-                    assignments.append(label)
-    if calls:
-        summary.append("Calls project/host helpers including " + ", ".join(f"`{name}`" for name in calls[:12]) + ".")
-    if assignments:
-        summary.append("Builds or updates local values including " + ", ".join(f"`{name}`" for name in assignments[:10]) + ".")
+        elif isinstance(child, ast.Raise):
+            raises = True
+
+    maya_scene_calls = any(
+        name.startswith(("cmds.", "maya.cmds."))
+        for name in calls
+    )
+    if maya_scene_calls and any(
+        name.endswith((".get", ".objExists", ".nodeType", ".listRelatives"))
+        for name in calls
+    ):
+        summary.append("Resolves mapped scene objects and validates that the required Maya nodes/hierarchy exist before building.")
+    stage_calls = [
+        name for name in calls
+        if name.rsplit(".", 1)[-1].startswith(("create_", "setup_", "build_", "bake_", "save_"))
+    ]
+    if stage_calls:
+        summary.append(
+            "Runs the main build stages through "
+            + ", ".join(f"`{name}`" for name in stage_calls[:12])
+            + "."
+        )
+    other_calls = [
+        name for name in calls
+        if name not in stage_calls
+        and not name.startswith(("cmds.", "maya.cmds."))
+        and name not in {"print", "len", "zip", "all", "RuntimeError"}
+    ]
+    if other_calls and not stage_calls:
+        summary.append("Calls project helpers including " + ", ".join(f"`{name}`" for name in other_calls[:10]) + ".")
     summary.extend(sorted(host_effects))
+    if raises:
+        summary.append("Raises an error when required source data or scene structure is invalid instead of silently producing a partial result.")
     if not summary:
         summary.append("The body is small or mostly declarative; inspect the implementation excerpt for exact behavior.")
     return summary[:6]
@@ -1453,7 +1515,6 @@ def _walk_function_body_without_nested_defs(node: ast.FunctionDef | ast.AsyncFun
 def _find_symbol_callers(path: Path, function_name: str, project_roots: list[str] | tuple[str, ...], *, limit: int = 8) -> list[str]:
     roots = [Path(root) for root in project_roots if root] or [path.parent]
     callers: list[str] = []
-    pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
     scanned = 0
     for root in roots:
         if not root.exists():
@@ -1463,18 +1524,108 @@ def _find_symbol_callers(path: Path, function_name: str, project_roots: list[str
                 return callers
             scanned += 1
             normalized = str(candidate).replace("\\", "/").lower()
-            if any(part in normalized for part in ("/.git/", "/.venv/", "/venv/", "/__pycache__/")):
+            if any(part in normalized for part in ("/.git/", "/.venv/", "/venv/", "/__pycache__/", "/dist/", "/build/")):
                 continue
             try:
-                for line_no, line in enumerate(candidate.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                    if candidate == path and line_no == 1:
-                        continue
-                    if pattern.search(line):
-                        callers.append(f"{candidate}:{line_no}")
-                        break
+                source = candidate.read_text(encoding="utf-8", errors="replace")
+                if function_name not in source:
+                    continue
+                tree = ast.parse(source)
+                call_lines = sorted({
+                    int(getattr(node, "lineno", 0) or 0)
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and _call_name(node.func).rsplit(".", 1)[-1] == function_name
+                    and int(getattr(node, "lineno", 0) or 0) > 0
+                })
+                for line_no in call_lines:
+                    callers.append(f"{candidate}:{line_no}")
+                    if len(callers) >= limit:
+                        return callers
             except Exception:
                 continue
     return callers
+
+
+def _explicit_caller_target(question: str) -> str:
+    """Return the exact callable named by a callers/called-by request."""
+    text = question or ""
+    patterns = (
+        r"\b(?:find\s+)?(?:all\s+)?callers?\s+(?:of|for)\s+([A-Za-z_][A-Za-z0-9_.]*)",
+        r"\b(?:what|who)\s+calls\s+([A-Za-z_][A-Za-z0-9_.]*)",
+        r"\b([A-Za-z_][A-Za-z0-9_.]*)\s+is\s+called\s+by\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).rsplit(".", 1)[-1]
+    return ""
+
+
+def answer_exact_symbol_callers_question(
+    question: str,
+    *,
+    active_path: str | None = None,
+    project_roots: list[str] | tuple[str, ...] | None = None,
+) -> str | None:
+    """Answer an exact callers request from definition and source call sites."""
+    symbol = _explicit_caller_target(question)
+    if not symbol:
+        return None
+    roots = list(project_roots or _active_project_roots(active_path))
+    definitions = FileIndexService(db_path=Path()).find_python_declaration_candidates(
+        [symbol],
+        roots,
+        kinds=("function", "method"),
+        path_hints=(symbol,),
+        limit=24,
+    )
+    exact = [
+        dict(row) for row in definitions
+        if str(row.get("name") or "").casefold() == symbol.casefold()
+    ]
+    if not exact:
+        return (
+            f"I could not find a project definition for `{symbol}`.\n\n"
+            "Verification: refresh the project index, then retry the exact callers request."
+        )
+
+    definition = exact[0]
+    definition_path = Path(str(definition.get("path") or ""))
+    callers = _find_symbol_callers(definition_path, symbol, roots, limit=24)
+    signature = str(definition.get("signature") or symbol)
+    start_line = int(definition.get("start_line") or 0)
+    lines = [
+        f"Definition: `{signature}`",
+        f"File: `{definition_path}`" + (f":{start_line}" if start_line else ""),
+        "",
+    ]
+
+    behavior: list[str] = []
+    try:
+        source = definition_path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+        node = _find_ast_symbol(tree, [symbol])
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            lines[0] = f"Definition: `{_callable_signature_from_ast(node)}`"
+            behavior = _function_behavior_summary(node)
+    except Exception:
+        behavior = []
+    if behavior:
+        lines.append("Implementation flow:")
+        lines.extend(f"- {item}" for item in behavior)
+        lines.append("")
+
+    if callers:
+        lines.append(f"Direct call sites found: {len(callers)}")
+        lines.extend(f"- `{caller}`" for caller in callers)
+    else:
+        lines.append("Direct call sites found: none in the bounded first-party source scan.")
+    lines.extend([
+        "",
+        "Source: exact project declaration plus bounded first-party Python call-site scan.",
+    ])
+    return "\n".join(lines)
 
 
 def _compact_text(value: str, limit: int) -> str:
@@ -2447,6 +2598,14 @@ def answer_simple_project_index_question(
     lower = (question or "").lower()
     if not is_project_scope_request(question):
         return None
+
+    callers_answer = answer_exact_symbol_callers_question(
+        question,
+        active_path=active_path,
+        project_roots=project_roots,
+    )
+    if callers_answer:
+        return callers_answer
 
     class_location_question = bool(
         re.search(

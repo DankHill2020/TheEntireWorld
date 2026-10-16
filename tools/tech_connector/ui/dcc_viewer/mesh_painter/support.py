@@ -488,6 +488,8 @@ class TransformManipulatorGizmo:
         handles = handles or {}
         if handles:
             self._draw_projected_handles(painter, center_x, center_y, handles)
+            projected_center = next((item.get("start") for item in handles.values() if isinstance(item.get("start"), QPointF)), None)
+            if isinstance(projected_center, QPointF): center_x, center_y = projected_center.x(), projected_center.y()
             painter.setFont(QFont("Consolas", 8, QFont.Bold))
             label = f"{self.orientation_mode} {self.active_axis or self.hover_axis or 'FREE'}"
             painter.setPen(QPen(QColor(2, 8, 12, 220), 3))
@@ -546,9 +548,12 @@ class TransformManipulatorGizmo:
         center_y: float,
         handles: dict[str, dict[str, Any]],
     ) -> None:
-        painter.setBrush(QBrush(QColor(255, 245, 110)))
-        painter.setPen(QPen(QColor(2, 8, 12, 220), 1))
-        painter.drawEllipse(QRectF(center_x - 5, center_y - 5, 10, 10))
+        center_active = self.active_axis == "XYZ"
+        painter.setBrush(QBrush(QColor(255, 255, 255) if center_active else QColor(255, 214, 64)))
+        painter.setPen(QPen(QColor(2, 8, 12, 235), 2))
+        painter.drawEllipse(QRectF(center_x - 8, center_y - 8, 16, 16))
+        painter.setPen(QPen(QColor(255, 255, 255, 210), 1))
+        painter.drawEllipse(QRectF(center_x - 4, center_y - 4, 8, 8))
         for axis in ("X", "Y", "Z"):
             handle = handles.get(axis)
             if not handle:

@@ -1,0 +1,1099 @@
+{
+  "schema": "ai_studio.workflow.v1",
+  "source": "prompt_review_pack",
+  "naming": {
+    "function_suffix": "_git_ingest",
+    "original_function": "review_substance_tech_connector_texture_publish"
+  },
+  "host": "cross_dcc",
+  "goal": "Create a Substance Painter to Tech Connector texture publishing pipeline. Export the current texture sets and import the texture images into project folder Assets/Materials.",
+  "module": "workflows.cross_dcc.review_substance_tech_connector_texture_publish",
+  "function": "review_substance_tech_connector_texture_publish",
+  "function_path": "workflows.cross_dcc.review_substance_tech_connector_texture_publish.review_substance_tech_connector_texture_publish",
+  "selected_capabilities": [
+    {
+      "name": "stage_01_substance_painter_textures_export",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\substance_painter_tools\\textures.py",
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "preset_name",
+          "annotation": "str",
+          "required": false,
+          "default": "PBR Metallic Roughness"
+        },
+        {
+          "name": "resolution",
+          "annotation": "int",
+          "required": false,
+          "default": 2048
+        }
+      ],
+      "outputs": [
+        {
+          "name": "texture_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "substance_painter",
+      "provider_id": "substance_painter",
+      "package": "",
+      "operation": "textures.export",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "substance_painter_tools.textures.export_textures",
+      "module": "",
+      "start_line": 9,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_02_tech_connector_asset_import_interchange",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\tech_connector_pipeline_adapter.py",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "project_root",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets"
+        },
+        {
+          "name": "type_id",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "importer_settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_id",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "asset_type",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_types",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "tech_connector",
+      "provider_id": "tech_connector",
+      "package": "",
+      "operation": "asset.import_interchange",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+      "module": "",
+      "start_line": 13,
+      "source_kind": "callable_definition"
+    }
+  ],
+  "slots": {
+    "step1_output_path": "${pipeline_workspace}/stage_01_substance_painter_textures_export",
+    "step1_preset_name": "PBR Metallic Roughness",
+    "step1_resolution": "2048",
+    "step2_project_root": "C:\\depot\\tools",
+    "step2_folder": "Assets",
+    "step2_type_id": "",
+    "step2_importer_settings": "{}"
+  },
+  "links": [
+    {
+      "from": "step1.texture_paths",
+      "to": "step2.source_file"
+    }
+  ],
+  "validation": {
+    "imports_checked_by_test": true,
+    "scene_objects_checked_at_runtime": true
+  },
+  "prompt_verified": true,
+  "nodes": [
+    {
+      "id": "step1",
+      "label": "stage_01_substance_painter_textures_export",
+      "name": "stage_01_substance_painter_textures_export",
+      "host": "substance_painter",
+      "package": "substance_painter",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "textures.export",
+      "callable": "substance_painter_tools.textures.export_textures",
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "preset_name",
+          "annotation": "str",
+          "required": false,
+          "default": "PBR Metallic Roughness"
+        },
+        {
+          "name": "resolution",
+          "annotation": "int",
+          "required": false,
+          "default": 2048
+        }
+      ],
+      "outputs": [
+        {
+          "name": "texture_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "preset_name": "PBR Metallic Roughness",
+        "resolution": 2048,
+        "output_path": "${pipeline_workspace}/stage_01_substance_painter_textures_export"
+      },
+      "literal_value_provenance": {
+        "preset_name": "operation_default",
+        "resolution": "operation_default",
+        "output_path": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "preset_name": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "resolution": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "int"
+        },
+        "output_path": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "Substance Painter Export Textures writes `output_path` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "substance_painter.operations.textures.export",
+        "host": "substance_painter",
+        "operation": "textures.export",
+        "label": "Substance Painter Export Textures",
+        "callable": "substance_painter_tools.textures.export_textures",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "textures"
+        ],
+        "subjects": [
+          "textures",
+          "material"
+        ],
+        "consumes": [
+          "substance_project"
+        ],
+        "produces": [
+          "texture_paths"
+        ],
+        "required": [
+          "output_path"
+        ],
+        "optional": {
+          "preset_name": "PBR Metallic Roughness",
+          "resolution": 2048
+        },
+        "preconditions": [],
+        "validation": [
+          "exported texture paths exist"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:substance_painter",
+        "metadata": {
+          "description": "Export textured maps to a directory.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 60
+    },
+    {
+      "id": "step2",
+      "label": "stage_02_tech_connector_asset_import_interchange",
+      "name": "stage_02_tech_connector_asset_import_interchange",
+      "host": "tech_connector",
+      "package": "tech_connector",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "asset.import_interchange",
+      "callable": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "project_root",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets"
+        },
+        {
+          "name": "type_id",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "importer_settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_id",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "asset_type",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_types",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "folder": "Assets",
+        "type_id": "",
+        "importer_settings": {},
+        "source_file": {
+          "from_action": "stage_01_substance_painter_textures_export",
+          "result_path": "texture_paths"
+        },
+        "project_root": "C:\\depot\\tools"
+      },
+      "literal_value_provenance": {
+        "folder": "operation_default",
+        "type_id": "operation_default",
+        "importer_settings": "operation_default",
+        "source_file": "upstream_result_reference",
+        "project_root": "planned_value"
+      },
+      "literal_value_details": {
+        "folder": {
+          "source": "operation_default",
+          "resolution": "Import Interchange Asset into Tech Connector uses its registered default for `folder`: 'Assets'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "type_id": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "importer_settings": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "project_root": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "tech_connector.internal.asset.import_interchange",
+        "host": "tech_connector",
+        "operation": "asset.import_interchange",
+        "label": "Import Interchange Asset into Tech Connector",
+        "callable": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+        "provider": "tech_connector_engine",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx",
+          "usd",
+          "abc",
+          "textures"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh",
+          "textures"
+        ],
+        "consumes": [
+          "transfer_path"
+        ],
+        "produces": [
+          "asset_id",
+          "asset_path",
+          "asset_type",
+          "asset_ids",
+          "asset_paths",
+          "asset_types",
+          "asset_count",
+          "imported_paths"
+        ],
+        "required": [
+          "source_file",
+          "project_root"
+        ],
+        "optional": {
+          "folder": "Assets",
+          "type_id": "",
+          "importer_settings": {}
+        },
+        "preconditions": [],
+        "validation": [
+          "asset UUID and project-relative imported path are returned"
+        ],
+        "rollback": [
+          "delete the imported asset by returned UUID"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter",
+        "metadata": {},
+        "executable": true
+      },
+      "x": 360,
+      "y": 60
+    }
+  ],
+  "steps": [
+    {
+      "step_index": 1,
+      "symbol": {
+        "name": "stage_01_substance_painter_textures_export",
+        "kind": "function",
+        "host": "substance_painter",
+        "provider_id": "substance_painter",
+        "pipeline_operation": "dcc_operation",
+        "operation": "textures.export",
+        "function_path": "substance_painter_tools.textures.export_textures",
+        "file_path": "C:\\depot\\tools\\substance_painter_tools\\textures.py",
+        "start_line": 9,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "output_path",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "preset_name",
+            "annotation": "str",
+            "required": false,
+            "default": "PBR Metallic Roughness"
+          },
+          {
+            "name": "resolution",
+            "annotation": "int",
+            "required": false,
+            "default": 2048
+          }
+        ],
+        "outputs": [
+          {
+            "name": "texture_paths",
+            "annotation": "list[str]"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "preset_name",
+          "annotation": "str",
+          "required": false,
+          "default": "PBR Metallic Roughness"
+        },
+        {
+          "name": "resolution",
+          "annotation": "int",
+          "required": false,
+          "default": 2048
+        }
+      ],
+      "outputs": [
+        {
+          "name": "texture_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "preset_name": "PBR Metallic Roughness",
+        "resolution": 2048,
+        "output_path": "${pipeline_workspace}/stage_01_substance_painter_textures_export"
+      },
+      "literal_value_provenance": {
+        "preset_name": "operation_default",
+        "resolution": "operation_default",
+        "output_path": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "preset_name": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "resolution": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "int"
+        },
+        "output_path": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "Substance Painter Export Textures writes `output_path` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "substance_painter.operations.textures.export",
+        "host": "substance_painter",
+        "operation": "textures.export",
+        "label": "Substance Painter Export Textures",
+        "callable": "substance_painter_tools.textures.export_textures",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "textures"
+        ],
+        "subjects": [
+          "textures",
+          "material"
+        ],
+        "consumes": [
+          "substance_project"
+        ],
+        "produces": [
+          "texture_paths"
+        ],
+        "required": [
+          "output_path"
+        ],
+        "optional": {
+          "preset_name": "PBR Metallic Roughness",
+          "resolution": 2048
+        },
+        "preconditions": [],
+        "validation": [
+          "exported texture paths exist"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:substance_painter",
+        "metadata": {
+          "description": "Export textured maps to a directory.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 2,
+      "symbol": {
+        "name": "stage_02_tech_connector_asset_import_interchange",
+        "kind": "function",
+        "host": "tech_connector",
+        "provider_id": "tech_connector",
+        "pipeline_operation": "dcc_operation",
+        "operation": "asset.import_interchange",
+        "function_path": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+        "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\tech_connector_pipeline_adapter.py",
+        "start_line": 13,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "source_file",
+            "annotation": "list[str]",
+            "required": true
+          },
+          {
+            "name": "project_root",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "folder",
+            "annotation": "str",
+            "required": false,
+            "default": "Assets"
+          },
+          {
+            "name": "type_id",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "importer_settings",
+            "annotation": "dict[str, Any]",
+            "required": false,
+            "default": {}
+          }
+        ],
+        "outputs": [
+          {
+            "name": "asset_id",
+            "annotation": "Any"
+          },
+          {
+            "name": "asset_path",
+            "annotation": "str"
+          },
+          {
+            "name": "asset_type",
+            "annotation": "Any"
+          },
+          {
+            "name": "asset_ids",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "asset_paths",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "asset_types",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "asset_count",
+            "annotation": "int"
+          },
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "project_root",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets"
+        },
+        {
+          "name": "type_id",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "importer_settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_id",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "asset_type",
+          "annotation": "Any"
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_types",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "folder": "Assets",
+        "type_id": "",
+        "importer_settings": {},
+        "source_file": {
+          "from_action": "stage_01_substance_painter_textures_export",
+          "result_path": "texture_paths"
+        },
+        "project_root": "C:\\depot\\tools"
+      },
+      "literal_value_provenance": {
+        "folder": "operation_default",
+        "type_id": "operation_default",
+        "importer_settings": "operation_default",
+        "source_file": "upstream_result_reference",
+        "project_root": "planned_value"
+      },
+      "literal_value_details": {
+        "folder": {
+          "source": "operation_default",
+          "resolution": "Import Interchange Asset into Tech Connector uses its registered default for `folder`: 'Assets'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "type_id": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "importer_settings": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "project_root": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "tech_connector.internal.asset.import_interchange",
+        "host": "tech_connector",
+        "operation": "asset.import_interchange",
+        "label": "Import Interchange Asset into Tech Connector",
+        "callable": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset",
+        "provider": "tech_connector_engine",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx",
+          "usd",
+          "abc",
+          "textures"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh",
+          "textures"
+        ],
+        "consumes": [
+          "transfer_path"
+        ],
+        "produces": [
+          "asset_id",
+          "asset_path",
+          "asset_type",
+          "asset_ids",
+          "asset_paths",
+          "asset_types",
+          "asset_count",
+          "imported_paths"
+        ],
+        "required": [
+          "source_file",
+          "project_root"
+        ],
+        "optional": {
+          "folder": "Assets",
+          "type_id": "",
+          "importer_settings": {}
+        },
+        "preconditions": [],
+        "validation": [
+          "asset UUID and project-relative imported path are returned"
+        ],
+        "rollback": [
+          "delete the imported asset by returned UUID"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.tech_connector_pipeline_adapter",
+        "metadata": {},
+        "executable": true
+      }
+    }
+  ],
+  "data_links": [
+    {
+      "from_step": 1,
+      "from_output": "texture_paths",
+      "to_step": 2,
+      "to_input": "source_file",
+      "reason": "Bind typed `texture_paths` output from the planned upstream action."
+    }
+  ],
+  "flow_links": [
+    {
+      "from_step": 1,
+      "to_step": 2,
+      "reason": "Preserve the planned cross-DCC execution order."
+    }
+  ],
+  "prompt_flow_summary": {
+    "schema": "pipeline_prompt_flow_v1",
+    "route": "pipeline_graph",
+    "framework": "dynamic_typed_pipeline_v1",
+    "semantic_verification": {
+      "framework": "verified_pipeline_requirement_ledger_v1",
+      "ledger": {
+        "framework": "pipeline_requirement_ledger_v1",
+        "requirements": [
+          {
+            "id": "clause_1",
+            "requirement": "Create a Substance Painter to Tech Connector texture publishing pipeline",
+            "role": "GOAL",
+            "action": "create",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_tech_connector_asset_import_interchange",
+              "operation": "asset.import_interchange",
+              "score": 1.0333,
+              "matched_terms": [
+                "connector",
+                "painter",
+                "substance",
+                "tech",
+                "texture"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "tech_connector import asset.import_interchange tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset {\"folder\": \"Assets\", \"type_id\": \"\", \"importer_settings\": {}, \"source_file\": {\"from_action\": \"stage_01_substance_painter_textures_export\", \"result_path\": \"texture_paths\"}, \"project_root\": \"C:\\\\depot\\\\tools\"} [\"asset_id\", \"asset_path\", \"asset_type\", \"asset_ids\", \"asset_paths\", \"asset_types\", \"asset_count\", \"imported_paths\"] [\"asset UUID and project-relative imported path are returned\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_01_substance_painter_textures_export",
+                "operation": "textures.export",
+                "score": 0.7,
+                "matched_terms": [
+                  "painter",
+                  "substance",
+                  "texture"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "substance_painter export textures.export substance_painter_tools.textures.export_textures {\"preset_name\": \"PBR Metallic Roughness\", \"resolution\": 2048, \"output_path\": \"${pipeline_workspace}/stage_01_substance_painter_textures_export\"} [\"texture_paths\"] [\"exported texture paths exist\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_2",
+            "requirement": "Export the current texture sets",
+            "role": "GOAL",
+            "action": "export",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_01_substance_painter_textures_export",
+              "operation": "textures.export",
+              "score": 0.5,
+              "matched_terms": [
+                "export",
+                "texture"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "substance_painter export textures.export substance_painter_tools.textures.export_textures {\"preset_name\": \"PBR Metallic Roughness\", \"resolution\": 2048, \"output_path\": \"${pipeline_workspace}/stage_01_substance_painter_textures_export\"} [\"texture_paths\"] [\"exported texture paths exist\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_02_tech_connector_asset_import_interchange",
+                "operation": "asset.import_interchange",
+                "score": 0.5,
+                "matched_terms": [
+                  "export",
+                  "texture"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "tech_connector import asset.import_interchange tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset {\"folder\": \"Assets\", \"type_id\": \"\", \"importer_settings\": {}, \"source_file\": {\"from_action\": \"stage_01_substance_painter_textures_export\", \"result_path\": \"texture_paths\"}, \"project_root\": \"C:\\\\depot\\\\tools\"} [\"asset_id\", \"asset_path\", \"asset_type\", \"asset_ids\", \"asset_paths\", \"asset_types\", \"asset_count\", \"imported_paths\"] [\"asset UUID and project-relative imported path are returned\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_3",
+            "requirement": "import the texture images into project folder Assets/Materials.",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_tech_connector_asset_import_interchange",
+              "operation": "asset.import_interchange",
+              "score": 0.7143,
+              "matched_terms": [
+                "assets",
+                "folder",
+                "import",
+                "project",
+                "texture"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "tech_connector import asset.import_interchange tech_connector.game_engine.integration.tech_connector_pipeline_adapter.import_interchange_asset {\"folder\": \"Assets\", \"type_id\": \"\", \"importer_settings\": {}, \"source_file\": {\"from_action\": \"stage_01_substance_painter_textures_export\", \"result_path\": \"texture_paths\"}, \"project_root\": \"C:\\\\depot\\\\tools\"} [\"asset_id\", \"asset_path\", \"asset_type\", \"asset_ids\", \"asset_paths\", \"asset_types\", \"asset_count\", \"imported_paths\"] [\"asset UUID and project-relative imported path are returned\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_01_substance_painter_textures_export",
+                "operation": "textures.export",
+                "score": 0.1429,
+                "matched_terms": [
+                  "texture"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "substance_painter export textures.export substance_painter_tools.textures.export_textures {\"preset_name\": \"PBR Metallic Roughness\", \"resolution\": 2048, \"output_path\": \"${pipeline_workspace}/stage_01_substance_painter_textures_export\"} [\"texture_paths\"] [\"exported texture paths exist\"]"
+              }
+            ]
+          }
+        ],
+        "requirement_count": 3,
+        "evidence_found": 3,
+        "needs_semantic_check": 0,
+        "all_requirements_accounted_for": true
+      },
+      "semantic_verdict": {
+        "matches_request": false,
+        "reason": "",
+        "covered": [],
+        "missing": [],
+        "distorted": [],
+        "unsupported_claims": [
+          {
+            "plan_claim": "Export current texture sets",
+            "reason": "The request implies exporting existing sets, while the candidate specifies a fixed preset ('PBR Metallic Roughness') which may not match the user's current sets."
+          },
+          {
+            "plan_claim": "Import into Assets/Materials",
+            "reason": "The candidate plan imports to 'Assets' but does not explicitly target the 'Materials' subfolder or confirm the behavior of importing 'texture images'."
+          }
+        ],
+        "confidence": 0.6,
+        "dismissed_missing": [
+          {
+            "request_fragment": "Create a Substance Painter to Tech Connector texture publishing pipeline",
+            "reason": "The candidate plan describes the export and import steps but lacks the explicit creation of the pipeline architecture itself, which is the primary request.",
+            "required_capability": ""
+          },
+          {
+            "request_fragment": "Export current texture sets",
+            "reason": "The candidate step exports textures based on specific parameters (PBR Metallic Roughness) rather than exporting 'current' texture sets as requested.",
+            "required_capability": ""
+          },
+          {
+            "request_fragment": "Import texture images into project folder Assets/Materials",
+            "reason": "The candidate plan imports to a generic 'Assets' folder with an empty type_id and no explicit mapping to the 'Materials' subfolder or specific import behavior for 'texture images'.",
+            "required_capability": ""
+          }
+        ],
+        "framework": "prompt_plan_alignment_v1",
+        "status": "mismatch",
+        "elapsed_ms": 15209.219,
+        "model_role": "semantic_plan_critic",
+        "verifier_tier": "semantic_1_5b",
+        "model_attempts": {
+          "primary_ms": 8742.836,
+          "primary_raw": "{\"match\":false,\"missing\":[{\"text\":\"Create a Substance Painter to Tech Connector texture publishing pipeline\",\"reason\":\"The candidate plan describes the export and import steps but lacks the explicit creation of the pipeline architecture itself, which is the primary request.\",\"capability\":\"\"},{\"text\":\"Export current texture sets\",\"reason\":\"The candidate step exports textures based on specific parameters (PBR Metallic Roughness) rather than exporting 'current' texture sets as requested.\",\"capability\":\"\"},{\"text\":\"Import texture images into project folder Assets/Materials\",\"reason\":\"The candidate plan imports to a generic 'Assets' folder with an empty type_id and no explicit mapping to the 'Materials' subfolder or specific import behavior for 'texture images'.\",\"capability\":\"\"}],\"wrong\":[],\"unsupported\":[{\"claim\":\"Export current texture sets\",\"reason\":\"The request implies exporting existing sets, while the candidate specifies a fixed preset ('PBR Metallic Roughness') which may not match the user's current sets.\"},{\"claim\":\"Import into Assets/Materials\",\"reason\":\"The candidate plan imports to 'Assets' but does not explicitly target the 'Materials' subfolder or confirm the behavior of importing 'texture images'.\"}],\"confidence\":0.6}",
+          "fallback_ms": 6465.91,
+          "fallback_raw": "{\"match\": true, \"reason\": \"The candidate plan correctly implements the requested pipeline by exporting textures from Substance Painter and importing them into the specified project folder.\"}"
+        }
+      },
+      "matches_request": false,
+      "verification_available": true
+    },
+    "timings": {
+      "context_build_ms": 6680.961,
+      "understanding_validation_ms": 0.512,
+      "route_classification_ms": 211.105,
+      "action_planning_ms": 5.469,
+      "plan_alignment_ms": 15209.657,
+      "workflow_materialization_ms": 2000.04,
+      "total_ms": 24116.55
+    },
+    "ui_materialization": {
+      "ok": true,
+      "node_count": 2,
+      "link_count": 2,
+      "execution_order": [
+        "stage_01_substance_painter_textures_export",
+        "stage_02_tech_connector_asset_import_interchange"
+      ]
+    },
+    "python_round_trip_node_count": 2,
+    "understanding_false_negative_waived": false,
+    "semantic_verifier_false_negative_waived": false
+  },
+  "review_scenario": {
+    "category": "material_textures",
+    "file_types": [
+      "Substance Painter project",
+      "texture set images",
+      "Tech Connector texture assets"
+    ]
+  }
+}

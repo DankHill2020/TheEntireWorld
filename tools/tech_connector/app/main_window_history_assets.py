@@ -374,12 +374,11 @@ class MainWindowHistoryAssetsMixin:
         except Exception as exc:
             self.append(f"\n[Knowledge] Component install/update warning: {exc}\n")
 
-        root = ""
+        roots = []
         try:
             roots = self.project_roots()
-            root = roots[0] if roots else ""
         except Exception:
-            root = ""
+            roots = []
 
         if hasattr(self, "index_progress"):
             self.index_progress.setRange(0, 0)
@@ -389,7 +388,7 @@ class MainWindowHistoryAssetsMixin:
 
         self._knowledge_worker_phase = KnowledgeBuildPhase.FULL_REBUILD if full else KnowledgeBuildPhase.BOOTSTRAP_SYMBOLS
         self.index_worker = KnowledgeBuildWorker(
-            project_root=root,
+            project_roots=roots,
             phase=self._knowledge_worker_phase,
             parent=self,
         )
@@ -434,6 +433,9 @@ class MainWindowHistoryAssetsMixin:
 
         if phase == KnowledgeBuildPhase.BOOTSTRAP_SYMBOLS:
             if ok:
+                self.settings["multi_root_index_version"] = 1
+                self.settings["multi_root_index_pending"] = False
+                self.service.save_settings()
                 if hasattr(self, "index_status"):
                     self.index_status.setText("Knowledge: symbols ready; rich search queued")
                 self.set_card("knowledge", "busy", "Symbols ready / search queued")
@@ -491,12 +493,11 @@ class MainWindowHistoryAssetsMixin:
         if worker and worker.isRunning():
             QMessageBox.information(self, "Index running", "Knowledge work is already running.")
             return
-        root = ""
+        roots = []
         try:
             roots = self.project_roots()
-            root = roots[0] if roots else ""
         except Exception:
-            root = ""
+            roots = []
         self.set_card("knowledge", "busy", "Rich search building")
         if hasattr(self, "index_progress"):
             self.index_progress.setRange(0, 0)
@@ -504,7 +505,7 @@ class MainWindowHistoryAssetsMixin:
             self.index_status.setText("Knowledge: building rich search tables...")
         self._knowledge_worker_phase = KnowledgeBuildPhase.QUICK_INDEX
         self.index_worker = KnowledgeBuildWorker(
-            project_root=root,
+            project_roots=roots,
             phase=KnowledgeBuildPhase.QUICK_INDEX,
             parent=self,
         )
@@ -519,12 +520,11 @@ class MainWindowHistoryAssetsMixin:
         if worker and worker.isRunning():
             QMessageBox.information(self, "Index running", "Knowledge work is already running.")
             return
-        root = ""
+        roots = []
         try:
             roots = self.project_roots()
-            root = roots[0] if roots else ""
         except Exception:
-            root = ""
+            roots = []
         self.set_card("knowledge", "busy", "Graph building")
         if hasattr(self, "index_progress"):
             self.index_progress.setRange(0, 0)
@@ -532,7 +532,7 @@ class MainWindowHistoryAssetsMixin:
             self.index_status.setText("Knowledge: rebuilding dependency graph...")
         self._knowledge_worker_phase = KnowledgeBuildPhase.DEPENDENCY_GRAPH
         self.index_worker = KnowledgeBuildWorker(
-            project_root=root,
+            project_roots=roots,
             phase=KnowledgeBuildPhase.DEPENDENCY_GRAPH,
             parent=self,
         )
@@ -2078,7 +2078,7 @@ class MainWindowHistoryAssetsMixin:
                 not self.settings["allow_30b_deep_route"]
                 and str(self.settings.get("router_local_deep", "")).strip() == "qwen3:4b-instruct"
             ):
-                self.settings["router_local_deep"] = "qwen3:4b-instruct"
+                self.settings["router_local_deep"] = "qwen3.5:9b"
             self.settings["ai_work_memory_enabled"] = (
                 ai_work_memory_checkbox.isChecked()
             )

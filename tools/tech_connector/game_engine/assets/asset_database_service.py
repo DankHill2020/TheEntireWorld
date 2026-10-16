@@ -135,7 +135,10 @@ class AssetDatabase:
                 """,
                 (resolved_id, canonical, str(asset_type), content_hash, stat.st_size, stat.st_mtime_ns, revision, metadata_json),
             )
-            self._append_event(connection, "registered" if existing is None else "reindexed", resolved_id, {"hash": content_hash})
+            self._append_event(
+                connection, "registered" if existing is None else "reindexed", resolved_id,
+                {"hash": content_hash, "revision": revision},
+            )
         if dependencies:
             self.set_dependencies(resolved_id, dependencies)
         record = self.asset(resolved_id)
@@ -388,6 +391,54 @@ class AssetDatabase:
             return None
         return DerivedArtifact(row[0], row[1], row[2], row[3], Path(row[4]), _dict(row[5]))
 
+    def derived_artifacts(self, asset_id: str, *, include_invalid: bool = False) -> tuple[DerivedArtifact, ...]:
+        """Return the persisted derived-data inventory for one source asset."""
+
+        source = self.asset(asset_id)
+        if source is None:
+            return ()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT asset_id, artifact_key, source_hash, content_hash, path, metadata_json, valid
+                   FROM derived_artifacts WHERE asset_id = ? ORDER BY artifact_key""",
+                (str(asset_id),),
+            ).fetchall()
+        artifacts = []
+        for row in rows:
+            valid = bool(row[6]) and str(row[2]) == source.content_hash and Path(row[4]).is_file()
+            if valid or include_invalid:
+                artifacts.append(DerivedArtifact(row[0], row[1], row[2], row[3], Path(row[4]), _dict(row[5])))
+        return tuple(artifacts)
+
+    def assets_with_valid_derived_data(self) -> tuple[str, ...]:
+        """Return asset IDs with at least one current on-disk derived artifact."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT d.asset_id, d.source_hash, d.path, a.content_hash
+                   FROM derived_artifacts d JOIN assets a ON a.asset_id = d.asset_id
+                   WHERE d.valid = 1 ORDER BY d.asset_id"""
+            ).fetchall()
+        return tuple(
+            str(row[0]) for row in rows
+            if str(row[1]) == str(row[3]) and Path(row[2]).is_file()
+        )
+
+    def asset_events(self, asset_id: str, *, limit: int = 100) -> tuple[dict[str, Any], ...]:
+        """Return newest-first revision and lifecycle events for an asset."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT sequence, kind, asset_id, created_ns, payload_json FROM events
+                   WHERE asset_id = ? ORDER BY sequence DESC LIMIT ?""",
+                (str(asset_id), max(1, min(1000, int(limit)))),
+            ).fetchall()
+        return tuple(
+            {"sequence": row[0], "kind": row[1], "asset_id": row[2],
+             "created_ns": row[3], "payload": _dict(row[4])}
+            for row in rows
+        )
+
     def poll_events(self, after_sequence: int = 0, *, limit: int = 1000) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -427,7 +478,8 @@ class AssetDatabase:
                 connection,
                 kind,
                 record.asset_id,
-                {"previous_hash": record.content_hash, "content_hash": content_hash, "affected_assets": affected},
+                {"previous_hash": record.content_hash, "content_hash": content_hash,
+                 "affected_assets": affected, "revision": record.revision + 1},
             )
         return AssetChange(sequence, kind, record.asset_id, affected, record.content_hash, content_hash)
 

@@ -164,6 +164,9 @@ class AnimationManagerUI(QtWidgets.QDialog):
         self.namespace_input = QtWidgets.QLineEdit()
         self.skeleton_filter_input = QtWidgets.QLineEdit()
         self.skeleton_input = QtWidgets.QComboBox()
+        self.skeleton_input.setEditable(True)
+        self.skeleton_input.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        self.skeleton_input.lineEdit().setPlaceholderText("Enter target skeleton or connect Unreal")
 
         self.directory_widget = custom_widgets.BrowseDirectory('C:/')
 
@@ -172,10 +175,13 @@ class AnimationManagerUI(QtWidgets.QDialog):
         self.add_button = QtWidgets.QPushButton("Add Animation")
         self.duplicate_button = QtWidgets.QPushButton("Duplicate Animations")
         self.delete_button = QtWidgets.QPushButton("Delete Animations")
-        self.unreal_checkbox = QtWidgets.QCheckBox("Import into Unreal")
+        self.unreal_checkbox = QtWidgets.QCheckBox("Publish to Unreal after export")
         self.unreal_checkbox.setChecked(True)
-        self.export_button = QtWidgets.QPushButton("Export Animations")
-        self.export_cinematics_button = QtWidgets.QPushButton("Export For Cinematic")
+        self.engine_status = QtWidgets.QLabel()
+        self.connect_engine_button = QtWidgets.QPushButton("Connect Unreal Project…")
+        self.export_button = QtWidgets.QPushButton("Export Selected FBX")
+        self.publish_gameplay_button = QtWidgets.QPushButton("Export + Publish Gameplay")
+        self.export_cinematics_button = QtWidgets.QPushButton("Export + Publish Cinematic")
         self.anim_dict = dict()
         self.skeletons = None
         self.uproject = None
@@ -255,8 +261,10 @@ class AnimationManagerUI(QtWidgets.QDialog):
         right_layout.addWidget(QtWidgets.QLabel("Namespace:"))
         right_layout.addWidget(self.namespace_input)
 
-        right_layout.addWidget(QtWidgets.QLabel("Skeleton:"))
-        self.skeleton_filter_input.setPlaceholderText("Filter skeletons...")
+        skeleton_label = QtWidgets.QLabel("Target Engine Skeleton:")
+        skeleton_label.setToolTip("Optional for local FBX export. Type a skeleton manually when Unreal is offline.")
+        right_layout.addWidget(skeleton_label)
+        self.skeleton_filter_input.setPlaceholderText("Filter connected skeletons…")
         right_layout.addWidget(self.skeleton_filter_input)
         right_layout.addWidget(self.skeleton_input)
         self.skeleton_filter_input.textChanged.connect(self.filter_skeletons)
@@ -273,14 +281,19 @@ class AnimationManagerUI(QtWidgets.QDialog):
         self.add_button.clicked.connect(self.add_animation)
         self.duplicate_button.clicked.connect(self.duplicate_animation)
         self.delete_button.clicked.connect(self.delete_animation)
-        self.export_button.clicked.connect(self.export_animation)
+        self.export_button.clicked.connect(lambda: self.export_animation(publish=False))
+        self.publish_gameplay_button.clicked.connect(lambda: self.export_animation(publish=True))
         self.export_cinematics_button.clicked.connect(self.export_cinematic)
+        self.connect_engine_button.clicked.connect(self.update_project)
 
         right_layout.addWidget(self.add_button)
         right_layout.addWidget(self.duplicate_button)
         right_layout.addWidget(self.delete_button)
-        right_layout.addWidget(self.unreal_checkbox)
+        right_layout.addWidget(self.engine_status)
+        right_layout.addWidget(self.connect_engine_button)
+        self.unreal_checkbox.setVisible(False)
         right_layout.addWidget(self.export_button)
+        right_layout.addWidget(self.publish_gameplay_button)
         right_layout.addWidget(self.export_cinematics_button)
 
         scroll_area = QtWidgets.QScrollArea()
@@ -301,17 +314,16 @@ class AnimationManagerUI(QtWidgets.QDialog):
             self.anim_dict, self.skeletons, self.uproject, self.export_dir = self.load_data()
 
         if not self.skeletons:
-            if not self.uproject or os.path.exists(os.path.dirname(self.uproject)):
-                self.uproject = self.get_uproject("C:/")
-                http_server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "unreal_tools", "http_server.py").replace('\\', '/')
-
-                upd.add_unreal_startup_script(self.uproject, http_server_path)
-            if self.uproject:
+            # Offline is a supported state. Do not interrupt local authoring
+            # with an Unreal project picker during window creation.
+            self.skeletons = []
+            if self.uproject and os.path.isfile(self.uproject):
                 self.log_path = upd.get_latest_unreal_log(self.uproject)
                 self.cmd_path = upd.get_unreal_cmd_exe(self.uproject)
                 self.update_skeleton_list()
         else:
             self.skeleton_input.addItems(self.skeletons)
+        self._update_engine_state()
 
         if os.path.exists(self.export_dir):
             self.directory_widget.dir_name.setText(self.export_dir)
@@ -365,9 +377,29 @@ class AnimationManagerUI(QtWidgets.QDialog):
         :param text: Text to filter by
         :return:
         """
+        manual_value = self.skeleton_input.currentText().strip()
+        self.skeleton_input.blockSignals(True)
         self.skeleton_input.clear()
-        filtered = [s for s in self.skeletons if text.lower() in s.lower()]
+        filtered = [s for s in (self.skeletons or []) if text.lower() in s.lower()]
         self.skeleton_input.addItems(filtered)
+        self.skeleton_input.setEditText(manual_value)
+        self.skeleton_input.blockSignals(False)
+
+    def _update_engine_state(self):
+        connected = bool(self.uproject and os.path.isfile(self.uproject))
+        if connected:
+            self.engine_status.setText("Engine: Unreal project connected")
+            self.engine_status.setStyleSheet("color: #76c893;")
+            self.connect_engine_button.setText("Change Unreal Project…")
+        else:
+            self.engine_status.setText("Engine: Offline — local export is available")
+            self.engine_status.setStyleSheet("color: #d5ad5c;")
+            self.connect_engine_button.setText("Connect Unreal Project…")
+        self.unreal_checkbox.setEnabled(connected)
+        self.publish_gameplay_button.setEnabled(connected)
+        self.export_cinematics_button.setEnabled(connected)
+        if not connected:
+            self.unreal_checkbox.setChecked(False)
 
     def _on_file_open_completed(self, *args):
         """Internal method triggered when a new scene is opened."""
@@ -400,8 +432,8 @@ class AnimationManagerUI(QtWidgets.QDialog):
             add_facial_joints_action = ""
 
         select_all_namespace_action = context_menu.addAction("Select All with Namespace")
-        refresh_skeletons_action = context_menu.addAction("Refresh Skeletons for uproject")
-        update_uproject_path_action = context_menu.addAction("Select new uproject path")
+        refresh_skeletons_action = context_menu.addAction("Refresh Connected Skeletons")
+        update_uproject_path_action = context_menu.addAction("Connect / Change Unreal Project")
         update_export_directory_action = context_menu.addAction("Update Export Directory")
         if PYQT_VERSION == 6:
             action = context_menu.exec(self.table_widget.mapToGlobal(pos))
@@ -471,6 +503,10 @@ class AnimationManagerUI(QtWidgets.QDialog):
         :return:
         """
         current_skel = self.skeleton_input.currentText()
+        if not self.uproject or not os.path.isfile(self.uproject):
+            self.skeletons = self.skeletons or []
+            self._update_engine_state()
+            return
         skel_data = usp.run_get_skeletons(self.uproject, self.log_path, self.cmd_path)
         if type(skel_data) == str:
             self.skeletons = parse_literal_collection(skel_data, list, [])
@@ -479,10 +515,12 @@ class AnimationManagerUI(QtWidgets.QDialog):
         self.skeleton_input.clear()
         self.skeleton_input.addItems(self.skeletons)
 
-        if current_skel in self.skeletons:
-            index = self.skeleton_input.findText(current_skel)
-            if index != -1:
-                self.skeleton_input.setCurrentIndex(index)
+        index = self.skeleton_input.findText(current_skel)
+        if index != -1:
+            self.skeleton_input.setCurrentIndex(index)
+        else:
+            self.skeleton_input.setEditText(current_skel)
+        self._update_engine_state()
 
     def update_project(self):
         """
@@ -490,17 +528,24 @@ class AnimationManagerUI(QtWidgets.QDialog):
         :return:
         """
         uproject = self.uproject
-        self.uproject = self.get_uproject(os.path.dirname(self.uproject))
+        start_directory = os.path.dirname(self.uproject) if self.uproject else "C:/"
+        self.uproject = self.get_uproject(start_directory)
         refresh_skeletons = True
         if not self.uproject:
             self.uproject = uproject
             refresh_skeletons = False
 
         if self.uproject:
+            http_server_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(script_dir))),
+                "unreal_tools", "http_server.py",
+            ).replace('\\', '/')
+            upd.add_unreal_startup_script(self.uproject, http_server_path)
             self.log_path = upd.get_latest_unreal_log(self.uproject)
             self.cmd_path = upd.get_unreal_cmd_exe(self.uproject)
             if refresh_skeletons:
                 self.update_skeleton_list()
+        self._update_engine_state()
 
     def update_selected_column(self, column, value):
         """
@@ -541,9 +586,9 @@ class AnimationManagerUI(QtWidgets.QDialog):
         missing_fields = []
         self.table_widget.blockSignals(True)
         tested_widgets = [self.animation_name_input.text().strip(), self.directory_widget.dir_name.text().strip(),
-                          self.namespace_input.text().strip(), self.skeleton_input.currentText().strip()]
-        tested_labels = ["Animation Name", "Export Directory", "Namespace", "Skeleton"]
-        tested_args = [anim, directory, namespace, skeleton]
+                          self.namespace_input.text().strip()]
+        tested_labels = ["Animation Name", "Export Directory", "Namespace"]
+        tested_args = [anim, directory, namespace]
         for index, widget in enumerate(tested_widgets):
             if not widget:
                 if not tested_args[index]:
@@ -551,7 +596,8 @@ class AnimationManagerUI(QtWidgets.QDialog):
 
         if missing_fields:
             error_message = f"Text must be entered for Animation Entry.\nMissing data: {', '.join(missing_fields)}"
-            message = QtWidgets.QMessageBox.critical(None, "Missing Data", error_message)
+            self.table_widget.blockSignals(False)
+            QtWidgets.QMessageBox.critical(None, "Missing Data", error_message)
             return
 
         row_position = self.table_widget.rowCount()
@@ -1021,7 +1067,7 @@ class AnimationManagerUI(QtWidgets.QDialog):
             if index != -1:
                 self.skeleton_input.setCurrentIndex(index)
             else:
-                print(f"'{skeleton_text}' not found in combo box.")
+                self.skeleton_input.setEditText(skeleton_text)
 
         if item_name and item_name.background():
             item_color = item_name.background().color()
@@ -1033,15 +1079,39 @@ class AnimationManagerUI(QtWidgets.QDialog):
         Exports the selected animations and imports the data into Unreal.
         :return:
         """
-        self.export_animation(cinematic=True)
+        self.export_animation(cinematic=True, publish=True)
 
-    def export_animation(self, cinematic = False):
+    def export_animation(self, cinematic=False, publish=None):
         """
         Exports the selected animations and imports the data into Unreal.
         :return:
         """
+        should_publish = self.unreal_checkbox.isChecked() if publish is None else bool(publish)
+        if should_publish and (not self.uproject or not os.path.isfile(self.uproject)):
+            QtWidgets.QMessageBox.information(
+                self, "Engine Offline",
+                "Connect an Unreal project before publishing. Local FBX export remains available.",
+            )
+            return
         selected_anim_dict = dict()
         selected_rows = self.table_widget.selectionModel().selectedRows()
+        if should_publish:
+            missing_targets = []
+            for selected_row in selected_rows:
+                row_index = selected_row.row()
+                namespace_item = self.table_widget.item(row_index, 4)
+                skeleton_item = self.table_widget.item(row_index, 5)
+                namespace = namespace_item.text().strip() if namespace_item else ""
+                skeleton = skeleton_item.text().strip() if skeleton_item else ""
+                if namespace and namespace != "CAM" and not skeleton:
+                    name_item = self.table_widget.item(row_index, 0)
+                    missing_targets.append(name_item.text() if name_item else f"Row {row_index + 1}")
+            if missing_targets:
+                QtWidgets.QMessageBox.information(
+                    self, "Publish Preflight",
+                    "Enter a target skeleton before publishing: " + ", ".join(missing_targets),
+                )
+                return
         export_paths = []
         for r in selected_rows:
             path = os.path.join(self.table_widget.item(r.row(), 1).text(),
@@ -1165,12 +1235,12 @@ class AnimationManagerUI(QtWidgets.QDialog):
                 if cinematic:
                     sequence_dict = sequence_utils.generate_sequence_dict_from_anim_dict(selected_anim_dict)
                     json_data.save_dict_to_json(sequence_dict, json_path, changelist=cl_id)
-                    if self.unreal_checkbox.isChecked():
+                    if should_publish:
                         usp.run_create_cinematic_sequence(json_path, "/Game/" + CINEMATIC_FOLDER,
                                                       self.uproject, self.log_path, self.cmd_path)
                 else:
                     json_data.save_dict_to_json(selected_anim_dict, json_path, changelist=cl_id)
-                    if self.unreal_checkbox.isChecked():
+                    if should_publish:
                         usp.run_import_gameplay_animations(json_path, self.uproject, self.log_path, self.cmd_path)
 
         if len(export_processes) and is_maya():

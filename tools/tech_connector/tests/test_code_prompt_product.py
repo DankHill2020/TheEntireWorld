@@ -48,9 +48,10 @@ def test_read_only_modes_override_stale_mutation_permission() -> None:
 
 
 def test_depth_presets_map_to_distinct_openai_models_and_effort() -> None:
-    assert preferred_openai_model("fast") == "gpt-5.6-luna"
-    assert preferred_openai_model("balanced") == "gpt-5.6-terra"
-    assert preferred_openai_model("maximum") == "gpt-5.6-sol"
+    assert preferred_openai_model("fast") == "gpt-6-luna"
+    assert preferred_openai_model("balanced") == "gpt-6.1-sol"
+    assert preferred_openai_model("deep") == "gpt-6.1-sol"
+    assert preferred_openai_model("maximum") == "gpt-6-astra"
     maximum = openai_execution_options({"depth": "maximum"})
     assert maximum["reasoning_effort"] == "max"
     assert maximum["reasoning_mode"] == "pro"

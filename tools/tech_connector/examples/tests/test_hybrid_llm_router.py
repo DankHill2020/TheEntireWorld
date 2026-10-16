@@ -7,6 +7,7 @@ import io
 from types import SimpleNamespace
 import pytest
 
+from tech_connector.services import settings_service
 from tech_connector.services.settings_service import load_settings, save_settings, SETTINGS_PATH
 from tech_connector.services.llm_router_service import (
     LLMCloudProviderError,
@@ -27,56 +28,24 @@ from tech_connector.services.model_provider_service import (
 
 @pytest.fixture
 def temp_settings():
-    backup = None
-    if SETTINGS_PATH.exists():
-        try:
-            backup = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    yield
-    if backup is not None:
-        try:
-            SETTINGS_PATH.write_text(json.dumps(backup, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+    """Restore both JSON preferences and DPAPI secrets after each test."""
 
-
-class MockHTTPErrorOpener:
-    """Mock Opener to simulate HTTP Errors (e.g. 402 Payment Required)."""
-    def __init__(self, code=402, msg="Payment Required"):
-        self.code = code
-        self.msg = msg
-        self.ollama_calls = 0
-
-    def open(self, request, timeout=None):
-        url = request.get_full_url()
-        if "api.openai.com" in url:
-            # Raise HTTPError for OpenAI
-            raise urllib.error.HTTPError(
-                url=url,
-                code=self.code,
-                msg=self.msg,
-                hdrs={},
-                fp=io.BytesIO(b"")
-            )
-        elif "11434" in url or "api/generate" in url:
-            self.ollama_calls += 1
-
-
-@pytest.fixture
-def temp_settings():
-    backup = None
-    if SETTINGS_PATH.exists():
-        try:
-            backup = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    yield
-    if backup is not None:
-        try:
-            SETTINGS_PATH.write_text(json.dumps(backup, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+    settings_existed = SETTINGS_PATH.exists()
+    settings_backup = SETTINGS_PATH.read_bytes() if settings_existed else b""
+    credential_store = settings_service._credential_store()
+    credential_backup = {
+        key: credential_store.load(key)
+        for key in settings_service._SECRET_SETTING_KEYS
+    }
+    try:
+        yield
+    finally:
+        if settings_existed:
+            SETTINGS_PATH.write_bytes(settings_backup)
+        elif SETTINGS_PATH.exists():
+            SETTINGS_PATH.unlink()
+        for key, value in credential_backup.items():
+            credential_store.save(key, value)
 
 
 class MockHTTPErrorOpener:

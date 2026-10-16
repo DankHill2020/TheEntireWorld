@@ -1,0 +1,51 @@
+{
+  "captured": [
+    {
+      "case_id": "studio_danni_young",
+      "joint_count": 328,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/Danni_Young/danni_young_rig.ma"
+    },
+    {
+      "case_id": "studio_grandma",
+      "joint_count": 278,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/Grandma_LadywithCart/Grandma_LadywithCart_rig.ma"
+    },
+    {
+      "case_id": "studio_indian_woman_young",
+      "joint_count": 280,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/IndianWoman_Young/work/Indian_Woman_Young_rig1.ma"
+    },
+    {
+      "case_id": "studio_john_healthy",
+      "joint_count": 281,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/John_Healthy/johnHealthy_rig.ma"
+    },
+    {
+      "case_id": "studio_lj_healthy",
+      "joint_count": 280,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/LJ_Healthy/LJHealthy_rig.ma"
+    },
+    {
+      "case_id": "studio_mayan_woman",
+      "joint_count": 283,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/MayanWomen/Mayan_Woman_rig.ma"
+    },
+    {
+      "case_id": "studio_tay_infant",
+      "joint_count": 286,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/Tay_Infant/tay_infant_rig.ma"
+    },
+    {
+      "case_id": "studio_tay_teen",
+      "joint_count": 288,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/Tay_Teen/tay_teen_rig.ma"
+    },
+    {
+      "case_id": "studio_tay_toddler",
+      "joint_count": 295,
+      "source_scene": "P:/The Other Side/Production/Assets/Chars/Tay_Toddler/tay_toddler_rig.ma"
+    }
+  ],
+  "failures": [],
+  "schema_version": 1
+}

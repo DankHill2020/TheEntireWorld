@@ -20,7 +20,7 @@ Repository model: **complete public source-available monorepo**
 > must also be registered.
 >
 > Copyright remains with **The Entire World, LLC**. Read the repository
-> [LICENSE](LICENSE), the controlling
+> [LICENSE](LICENSE.md), the controlling
 > [Tech Connector Community Source License](tools/tech_connector/LICENSE.md),
 > and the [source-access model](tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md).
 

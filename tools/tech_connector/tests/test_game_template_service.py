@@ -30,6 +30,7 @@ def test_playable_sandbox_creates_dependency_closed_ready_project(tmp_path: Path
     )
 
     assert receipt["ready_to_play"] is True
+    assert receipt["quality_profile"] == "retro"
     assert receipt["validation"]["issues"] == []
     assert len(receipt["created_asset_ids"]) == 15
     assert {api.database.asset(asset_id).asset_type for asset_id in receipt["created_asset_ids"]} == {
@@ -99,7 +100,8 @@ def test_playable_sandbox_creates_dependency_closed_ready_project(tmp_path: Path
     [
         ("third_person", "exploration"), ("third_person", "combat"),
         ("first_person", "shooter"), ("side_scroller", "platformer"),
-        ("fighting", "versus"),
+        ("fighting", "versus"), ("top_down", "action"),
+        ("pixel_platformer", "8bit"),
     ],
 )
 def test_every_catalog_variant_is_instantiable_and_has_conflict_free_input(
@@ -155,10 +157,14 @@ def test_python_api_advertises_project_template_parity(tmp_path: Path) -> None:
 
     assert {row["qualified_id"] for row in catalog} >= {
         "playable_sandbox/standard", "third_person/exploration", "first_person/shooter",
-        "side_scroller/platformer", "fighting/versus",
+        "side_scroller/platformer", "fighting/versus", "top_down/action", "pixel_platformer/8bit",
+    }
+    assert {row["profile_id"] for row in api.available_game_quality_profiles()} == {
+        "cinematic", "high", "balanced", "performance", "low_spec", "retro",
     }
     assert contract["project_template_operations"] == [
-        "available_game_templates", "create_game_project_from_template", "validate_playable_project",
+        "available_game_templates", "available_game_quality_profiles",
+        "create_game_project_from_template", "validate_playable_project",
     ]
     assert contract["locomotion_operations"] == [
         "create_locomotion_controller", "validate_locomotion_controller", "cook_locomotion_controller",
@@ -269,3 +275,21 @@ def test_starter_game_dialog_exposes_choices_and_uses_python_api(tmp_path: Path,
     assert dialog.receipt["ready_to_play"] is True
     assert dialog.receipt["template_id"] == "side_scroller"
     assert dialog.receipt["visual_style"] == "pixel_8bit"
+    assert dialog.receipt["quality_profile"] == "retro"
+
+
+def test_explicit_quality_profile_is_shared_by_level_and_build(tmp_path: Path) -> None:
+    api = TCEditorAPI(tmp_path)
+    receipt = api.create_game_project_from_template(
+        template_id="top_down", variant_id="action", project_name="TopDown",
+        quality_profile="low_spec",
+    )
+
+    level = api.database.asset(receipt["level_asset_id"])
+    document, _ = load_federated_scene(level.source_path)
+    rendering = document.metadata["runtime_world"]["rendering"]
+    build = api.properties(receipt["build_profile_asset_id"])
+    assert receipt["quality_profile"] == "low_spec"
+    assert (rendering["output_width"], rendering["output_height"]) == (1280, 720)
+    assert document.metadata["presentation_compile_plan"]["quality_profile"]["profile_id"] == "low_spec"
+    assert build["quality_profile"] == "low_spec"

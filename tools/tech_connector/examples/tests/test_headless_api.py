@@ -13,6 +13,7 @@ from tech_connector.api import (
     plan_prompt_chain,
     reasoning_capabilities,
     run_reasoning,
+    run_reasoning_chain,
     verify_license,
 )
 from tech_connector.services.license_entitlement_service import make_license_token
@@ -417,6 +418,67 @@ class HeadlessAPITests(unittest.TestCase):
             "Keep the full context.",
             observed["context"].extras["conversation_history"][0]["content"],
         )
+
+    def test_reasoning_chain_carries_context_through_many_prompts_with_bounded_history(self):
+        secret = "api-secret"
+        observed = []
+
+        class FakeRequestEngine:
+            def __init__(self, **_kwargs):
+                pass
+
+            def process(self, context):
+                observed.append(context)
+                return EngineResult(
+                    action="answer",
+                    label="Reasoning",
+                    text=f"answered {len(observed)}",
+                    metadata={"selected_file": "sample_tool.py", "result_type": "answer"},
+                )
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            result = run_reasoning_chain(
+                [f"Inspect step {index}" for index in range(100)],
+                settings=self._settings(secret),
+                license_secret=secret,
+            )
+
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(100, result.result["completed_steps"])
+        self.assertEqual("sample_tool.py", observed[1].extras["operation_memory"]["selected_file"])
+        self.assertEqual("sample_tool.py", observed[99].extras["operation_memory"]["selected_file"])
+        self.assertLessEqual(len(observed[99].extras["conversation_history"]), 12)
+        self.assertEqual("sample_tool.py", result.result["state"]["operation_memory"]["selected_file"])
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            resumed = run_reasoning_chain(
+                ["Explain that file"], context=result.result["state"],
+                settings=self._settings(secret), license_secret=secret,
+            )
+        self.assertTrue(resumed.ok, resumed.error)
+        self.assertEqual("sample_tool.py", observed[100].extras["operation_memory"]["selected_file"])
+
+    def test_reasoning_chain_stops_before_following_clarification(self):
+        secret = "api-secret"
+        calls = []
+
+        class FakeRequestEngine:
+            def __init__(self, **_kwargs):
+                pass
+
+            def process(self, context):
+                calls.append(context.text)
+                return EngineResult(action="clarify", label="Question", text="Which file?")
+
+        with patch("tech_connector.engine.request_engine.RequestEngine", FakeRequestEngine):
+            result = run_reasoning_chain(
+                ["Edit that file", "Run tests"],
+                settings=self._settings(secret), license_secret=secret,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(["Edit that file"], calls)
+        self.assertEqual("Step 1 needs clarification.", result.result["stop_reason"])
 
     def test_runtime_tools_are_discoverable_and_mutation_requires_approval(self):
         secret = "api-secret"

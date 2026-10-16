@@ -92,8 +92,10 @@ def navigation_mesh_defaults() -> dict[str, Any]:
         "agents": [{"name": "Humanoid", "radius": 34.0, "height": 180.0,
                     "step_height": 45.0, "maximum_slope": 45.0}],
         "voxel_size": 10.0, "tile_size": 1024.0, "region_minimum_area": 2.0,
-        "areas": [{"name": "Walkable", "cost": 1.0}, {"name": "Blocked", "cost": -1.0}],
-        "off_mesh_links": [], "dynamic_obstacles": True, "runtime_generation": "dynamic_modifiers",
+        "areas": [{"name": "Walkable", "cost": 1.0, "color": "#45d6bb"},
+                  {"name": "Blocked", "cost": -1.0, "color": "#d95763"}],
+        "modifiers": [], "off_mesh_links": [], "dynamic_obstacles": True,
+        "runtime_generation": "dynamic_modifiers",
         "draw": {"polygons": True, "links": True, "tile_bounds": False},
     }
 
@@ -288,11 +290,34 @@ def validate_world_asset(type_id: str, values: Mapping[str, Any]) -> list[WorldA
         agents = [dict(row) for row in values.get("agents") or ()]
         if not agents:
             error("agents", "Add at least one navigation agent profile.", "agents")
+        agent_names = [str(row.get("name") or "").strip() for row in agents]
+        if any(not name for name in agent_names) or len(set(agent_names)) != len(agent_names):
+            error("agent_names", "Navigation agent names must be present and unique.", "agents")
         for row in agents:
             if float(row.get("radius", 0.0)) <= 0.0 or float(row.get("height", 0.0)) <= 0.0:
                 error("agent_size", "Navigation agents require positive radius and height.", str(row.get("name") or "agents"))
+            if float(row.get("step_height", 0.0)) < 0.0 or not 0.0 <= float(row.get("maximum_slope", 0.0)) <= 90.0:
+                error("agent_movement", "Agent step height cannot be negative and slope must be between 0 and 90 degrees.", str(row.get("name") or "agents"))
         if float(values.get("voxel_size", 0.0)) <= 0.0 or float(values.get("tile_size", 0.0)) <= 0.0:
             error("navigation_grid", "Navigation voxel and tile sizes must be positive.")
+        areas = [dict(row) for row in values.get("areas") or ()]
+        area_names = [str(row.get("name") or "").strip() for row in areas]
+        if "Walkable" not in area_names or any(not name for name in area_names) or len(set(area_names)) != len(area_names):
+            error("navigation_areas", "Navigation areas must be uniquely named and include Walkable.", "areas")
+        known_areas = set(area_names)
+        for modifier in values.get("modifiers") or ():
+            row = dict(modifier)
+            if str(row.get("area") or "Walkable") not in known_areas:
+                error("modifier_area", "Every navigation modifier must reference a known area.", str(row.get("id") or "modifiers"))
+            minimum, maximum = list(row.get("minimum") or ()), list(row.get("maximum") or ())
+            if len(minimum) < 2 or len(maximum) < 2 or float(minimum[0]) > float(maximum[0]) or float(minimum[-1]) > float(maximum[-1]):
+                error("modifier_bounds", "Navigation modifier bounds must contain ordered minimum and maximum points.", str(row.get("id") or "modifiers"))
+        for link in values.get("off_mesh_links") or ():
+            row = dict(link); start, end = list(row.get("start") or ()), list(row.get("end") or ())
+            if len(start) < 2 or len(end) < 2:
+                error("navigation_link", "Off-mesh links require start and end points.", str(row.get("id") or "links"))
+            if str(row.get("area") or "Walkable") not in known_areas:
+                error("link_area", "Every off-mesh link must reference a known area.", str(row.get("id") or "links"))
     elif type_id == "tc.lighting_scenario":
         if str(values.get("mode") or "") not in {"baked", "dynamic", "hybrid"}:
             error("mode", "Lighting mode must be baked, dynamic, or hybrid.", "mode")
@@ -427,16 +452,139 @@ def build_navigation_preview(values: Mapping[str, Any], *, extent: tuple[float, 
     tile_size = max(1.0, float(values.get("tile_size", 1024.0)))
     columns = max(1, min(128, math.ceil(float(extent[0]) / tile_size)))
     rows = max(1, min(128, math.ceil(float(extent[1]) / tile_size)))
+    areas = {str(row.get("name") or "Walkable"): dict(row) for row in values.get("areas") or ()}
+    areas.setdefault("Walkable", {"name": "Walkable", "cost": 1.0, "color": "#45d6bb"})
+    modifiers = [dict(row) for row in values.get("modifiers") or () if bool(dict(row).get("enabled", True))]
     tiles = []
     for z in range(rows):
         for x in range(columns):
+            center = ((x + 0.5) / columns, (z + 0.5) / rows)
+            area_name = "Walkable"
+            for modifier in modifiers:
+                minimum = _navigation_point(modifier.get("minimum"), extent)
+                maximum = _navigation_point(modifier.get("maximum"), extent)
+                if minimum[0] <= center[0] <= maximum[0] and minimum[1] <= center[1] <= maximum[1]:
+                    area_name = str(modifier.get("area") or "Walkable")
+            descriptor = areas.get(area_name, areas["Walkable"])
+            cost = float(descriptor.get("cost", 1.0))
             tiles.append({"id": f"nav:{x}:{z}", "x": x, "z": z,
                           "bounds": [x * tile_size, z * tile_size,
                                      min((x + 1) * tile_size, extent[0]), min((z + 1) * tile_size, extent[1])],
-                          "area": "Walkable", "state": "built"})
+                          "center": [center[0], center[1]], "area": area_name, "cost": cost,
+                          "color": str(descriptor.get("color") or "#45d6bb"),
+                          "state": "built" if cost >= 0.0 else "blocked"})
     return {"schema": "tech_connector.navigation_preview.v1", "columns": columns, "rows": rows,
             "tiles": tiles, "agents": deepcopy(list(values.get("agents") or ())),
+            "areas": list(areas.values()), "modifiers": deepcopy(modifiers),
             "off_mesh_links": deepcopy(list(values.get("off_mesh_links") or ()))}
+
+
+def query_navigation_path(
+    values: Mapping[str, Any], *, start: tuple[float, float], goal: tuple[float, float],
+    agent_name: str = "", extent: tuple[float, float] = (10000.0, 10000.0),
+) -> dict[str, Any]:
+    """Run a deterministic cost-aware path query over the authored preview tiles."""
+    preview = build_navigation_preview(values, extent=extent)
+    columns, rows = int(preview["columns"]), int(preview["rows"])
+    agents = [dict(row) for row in preview.get("agents") or ()]
+    chosen = next((row for row in agents if str(row.get("name") or "") == str(agent_name)), agents[0] if agents else {})
+    start_cell = _navigation_cell(start, columns, rows); goal_cell = _navigation_cell(goal, columns, rows)
+    tiles = {(int(row["x"]), int(row["z"])): row for row in preview["tiles"]}
+    if tiles[start_cell]["cost"] < 0.0 or tiles[goal_cell]["cost"] < 0.0:
+        return {"schema": "tech_connector.navigation_query.v1", "status": "blocked", "agent": chosen,
+                "start": list(start), "goal": list(goal), "cells": [], "points": [], "cost": None,
+                "visited": 0, "used_links": []}
+    adjacency: dict[tuple[int, int], list[tuple[tuple[int, int], float, str]]] = {}
+    for cell, tile in tiles.items():
+        if float(tile["cost"]) < 0.0:
+            continue
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            neighbor = (cell[0] + dx, cell[1] + dz)
+            if neighbor in tiles and float(tiles[neighbor]["cost"]) >= 0.0:
+                adjacency.setdefault(cell, []).append((neighbor, max(0.001, float(tiles[neighbor]["cost"])), ""))
+    for index, raw in enumerate(preview.get("off_mesh_links") or ()):
+        link = dict(raw)
+        if not bool(link.get("enabled", True)):
+            continue
+        a = _navigation_cell(_navigation_point(link.get("start"), extent), columns, rows)
+        b = _navigation_cell(_navigation_point(link.get("end"), extent), columns, rows)
+        if a not in tiles or b not in tiles or float(tiles[a]["cost"]) < 0.0 or float(tiles[b]["cost"]) < 0.0:
+            continue
+        link_id = str(link.get("id") or f"link:{index}"); cost = max(0.001, float(link.get("cost", 1.0)))
+        adjacency.setdefault(a, []).append((b, cost, link_id))
+        if bool(link.get("bidirectional", True)):
+            adjacency.setdefault(b, []).append((a, cost, link_id))
+    import heapq
+    frontier = [(0.0, start_cell)]; best = {start_cell: 0.0}
+    previous: dict[tuple[int, int], tuple[tuple[int, int], str]] = {}; visited = 0
+    while frontier:
+        cost, cell = heapq.heappop(frontier)
+        if cost != best.get(cell):
+            continue
+        visited += 1
+        if cell == goal_cell:
+            break
+        for neighbor, edge_cost, link_id in adjacency.get(cell, ()):
+            candidate = cost + edge_cost
+            if candidate < best.get(neighbor, math.inf):
+                best[neighbor] = candidate; previous[neighbor] = (cell, link_id)
+                heapq.heappush(frontier, (candidate, neighbor))
+    if goal_cell not in best:
+        return {"schema": "tech_connector.navigation_query.v1", "status": "unreachable", "agent": chosen,
+                "start": list(start), "goal": list(goal), "cells": [], "points": [], "cost": None,
+                "visited": visited, "used_links": []}
+    cells = [goal_cell]; used_links: list[str] = []
+    while cells[-1] != start_cell:
+        parent, link_id = previous[cells[-1]]
+        if link_id: used_links.append(link_id)
+        cells.append(parent)
+    cells.reverse(); used_links.reverse()
+    points = [[(x + 0.5) / columns, (z + 0.5) / rows] for x, z in cells]
+    return {"schema": "tech_connector.navigation_query.v1", "status": "success", "agent": chosen,
+            "start": list(start), "goal": list(goal), "cells": [list(cell) for cell in cells],
+            "points": points, "cost": round(best[goal_cell], 6), "visited": visited,
+            "used_links": used_links}
+
+
+def plan_navigation_rebuild(
+    previous: Mapping[str, Any], current: Mapping[str, Any], *,
+    extent: tuple[float, float] = (10000.0, 10000.0),
+) -> dict[str, Any]:
+    """Describe the minimum preview-tile rebuild needed after an authoring change."""
+    before = build_navigation_preview(previous, extent=extent)
+    after = build_navigation_preview(current, extent=extent)
+    reasons: list[str] = []
+    structural_keys = ("tile_size", "voxel_size", "agents", "terrain_asset_ids", "source_level_ids")
+    full = any(previous.get(key) != current.get(key) for key in structural_keys)
+    if full:
+        reasons.append("grid, source, or agent settings changed")
+    old_tiles = {row["id"]: (row["area"], row["cost"]) for row in before["tiles"]}
+    new_tiles = {row["id"]: (row["area"], row["cost"]) for row in after["tiles"]}
+    dirty = sorted(new_tiles) if full else sorted(key for key in set(old_tiles) | set(new_tiles) if old_tiles.get(key) != new_tiles.get(key))
+    if previous.get("off_mesh_links") != current.get("off_mesh_links"):
+        reasons.append("off-mesh links changed")
+    if previous.get("areas") != current.get("areas") and not dirty:
+        dirty = sorted(new_tiles); reasons.append("area costs changed")
+    if previous.get("modifiers") != current.get("modifiers") and not reasons:
+        reasons.append("area modifiers changed")
+    changed = (bool(dirty) or previous.get("off_mesh_links") != current.get("off_mesh_links")
+               or previous.get("modifiers") != current.get("modifiers"))
+    return {"schema": "tech_connector.navigation_rebuild_plan.v1", "status": "dirty" if changed else "clean",
+            "full_rebuild": full, "dirty_tiles": dirty, "dirty_tile_count": len(dirty),
+            "reused_tile_count": max(0, len(new_tiles) - len(dirty)), "total_tile_count": len(new_tiles),
+            "reasons": reasons}
+
+
+def _navigation_point(value: Any, extent: tuple[float, float]) -> tuple[float, float]:
+    point = list(value or (0.0, 0.0)); x = float(point[0]) if point else 0.0
+    z = float(point[-1]) if len(point) > 1 else 0.0
+    if abs(x) > 1.0 or abs(z) > 1.0:
+        x /= max(1.0, float(extent[0])); z /= max(1.0, float(extent[1]))
+    return max(0.0, min(1.0, x)), max(0.0, min(1.0, z))
+
+
+def _navigation_cell(point: tuple[float, float], columns: int, rows: int) -> tuple[int, int]:
+    return min(columns - 1, max(0, int(float(point[0]) * columns))), min(rows - 1, max(0, int(float(point[1]) * rows)))
 
 
 def build_lighting_preview(values: Mapping[str, Any]) -> dict[str, Any]:
@@ -578,5 +726,6 @@ __all__ = [
     "defaults_for_world_asset", "foliage_type_defaults", "hlod_layer_defaults",
     "lighting_scenario_defaults", "navigation_mesh_defaults", "terrain_defaults",
     "validate_world_asset", "world_partition_defaults", "apply_terrain_brush", "apply_foliage_brush",
-    "build_terrain_preview", "build_navigation_preview", "build_lighting_preview", "build_partition_preview", "build_hlod_preview",
+    "build_terrain_preview", "build_navigation_preview", "query_navigation_path", "plan_navigation_rebuild",
+    "build_lighting_preview", "build_partition_preview", "build_hlod_preview",
 ]

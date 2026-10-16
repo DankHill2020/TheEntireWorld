@@ -9,6 +9,8 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 from .asset_database_service import AssetDatabase, DerivedArtifact
 from .asset_operations_service import AssetOperationsService
+from .asset_bulk_operation_service import BulkAssetOperationService
+from .content_browser_lifecycle_service import ContentBrowserLifecycleService
 from .asset_production_service import AssetCookReceipt, AssetProductionService
 from .asset_type_registry import AssetTypeRegistry, builtin_asset_type_registry
 from .asset_metadata_service import read_asset_metadata, write_asset_metadata
@@ -30,11 +32,11 @@ from .physics_asset_service import (
     validate_physics_asset_properties,
 )
 from .character_asset_service import (
-    compile_skeletal_mesh_plan,
+    compile_skeletal_mesh_plan, compile_skeleton_payload,
     compile_skin_binding_payload,
     generate_bone_lods,
     recommended_mesh_lods,
-    validate_character_lods,
+    validate_character_lods, validate_skeleton_properties,
     validate_skin_binding_properties,
 )
 from .rig_asset_service import (
@@ -63,11 +65,13 @@ from .prefab_service import PrefabService
 from .material_asset_service import MaterialService, analyze_material_graph, material_preset, shader_backend_capabilities
 from .animation_asset_service import AnimationAssetService
 from .effect_asset_service import EffectAssetService
+from .input_map_service import audit_input_map
 from .audio_asset_service import AudioAssetService, AUDIO_ASSET_TYPES
 from .sequence_asset_service import (
     SequenceAssetService, add_channel_key, build_render_jobs, evaluate_channel, evaluate_sequence,
     native_to_unity_timeline, native_to_unreal_level_sequence,
-    new_binding, new_level_blend_section, new_section, new_track, track_preset, unity_timeline_to_native,
+    new_binding, new_level_blend_section, new_section, new_sequence_folder, new_track,
+    track_preset, unity_timeline_to_native,
     unreal_level_sequence_to_native,
 )
 from .gameplay_foundation_service import GameplayFoundationService, GAMEPLAY_FOUNDATION_TYPES
@@ -77,6 +81,7 @@ from .image_project_asset_service import ImageProjectAssetService
 from .world_asset_service import (
     WORLD_ASSET_TYPES, WorldAssetService, apply_foliage_brush, apply_terrain_brush,
     build_hlod_preview, build_lighting_preview, build_navigation_preview,
+    plan_navigation_rebuild, query_navigation_path,
     build_partition_preview, build_terrain_preview,
 )
 from .world_build_service import WorldBuildService
@@ -94,6 +99,7 @@ from tech_connector.game_engine.runtime.graph_debugger_service import default_gr
 from tech_connector.game_engine.authoring.tc_physics_joint_service import create_physics_joint, remove_physics_joint
 from tech_connector.game_engine.authoring.tc_physics_joint_editor_service import PhysicsJointEditorModel
 from tech_connector.game_engine.authoring.tc_ragdoll_service import generate_ragdoll
+from tech_connector.game_engine.authoring.level_actor_authoring_service import LevelActorAuthoringService
 from tech_connector.game_engine.runtime.tc_physics_stress_service import audit_physics_stress_scene, build_physics_stress_scene
 from tech_connector.game_engine.runtime.tc_simulation_service import create_soft_body_from_geometry
 from tech_connector.game_engine.runtime.tc_ocean_surface_service import OceanSurface, create_ocean_surface
@@ -113,8 +119,15 @@ class TCEditorAPI:
         self.registry = registry or builtin_asset_type_registry()
         self.database = database or AssetDatabase(self.project_root / ".tech_connector" / "assets.sqlite3")
         self.assets = AssetOperationsService(self.project_root, self.database, self.registry)
-        self.exports = AssetExportService(self.project_root, self.database)
+        self.content_browser = ContentBrowserLifecycleService(
+            self.project_root, self.database, self.registry, self.assets,
+        )
+        self.exports = AssetExportService(self.project_root, self.database, self.registry)
         self.production = AssetProductionService(self.project_root, self.database, self.registry)
+        self.bulk_assets = BulkAssetOperationService(
+            self.project_root, self.database, operations=self.assets,
+            production=self.production, exports=self.exports,
+        )
         self.prefabs = PrefabService(self.project_root, self.database)
         self.materials = MaterialService(self.project_root, self.database)
         self.animation = AnimationAssetService(self.project_root, self.database)
@@ -128,11 +141,124 @@ class TCEditorAPI:
         self.world = WorldAssetService(self.project_root, self.database)
         self.world_builds = WorldBuildService(self.project_root, self.database)
         self.procedural = ProceduralGraphAssetService(self.project_root, self.database)
+        self.level_authoring = LevelActorAuthoringService(self.project_root, self.database)
         self._procedural_simulations: dict[str, ProceduralSimulationSession] = {}
         self.gameplay_debug_sessions = default_graph_debug_session_manager()
 
     def create_asset(self, type_id: str, name: str, *, folder: str | Path = "Assets", properties: Mapping[str, Any] | None = None):
         return self.assets.create_asset(type_id, name, folder=folder, properties=dict(properties or {}))
+
+    def content_browser_assets(self, *, query: str = "", collection: str = "") -> tuple[dict[str, Any], ...]:
+        """Return authored assets and recognized source files using the same rules as the UI."""
+
+        records_by_path = {
+            str(record.source_path).casefold(): record for record in self.database.list_assets()
+        }
+        cooked_asset_ids = set(self.database.assets_with_valid_derived_data())
+        documents_by_path = {
+            key: self.content_browser.asset_document(
+                record.source_path, record.asset_type, record.asset_id,
+                cooked=record.asset_id in cooked_asset_ids,
+            )
+            for key, record in records_by_path.items()
+        }
+        if self.project_root.is_dir():
+            for path in self.project_root.rglob("*"):
+                if not path.is_file() or path.name.endswith(".tcmeta") or ".tech_connector" in path.parts:
+                    continue
+                descriptor = self.registry.infer(path)
+                if descriptor is None:
+                    continue
+                key = str(path.resolve()).casefold()
+                documents_by_path.setdefault(
+                    key, self.content_browser.asset_document(path, descriptor.type_id, cooked=False),
+                )
+        documents = tuple(documents_by_path.values())
+        query_terms = self.content_browser.compile_query(query)
+        selected_collection = self.content_browser.collection(collection) if collection else None
+        static_collection_ids = set(selected_collection.asset_ids) if selected_collection and selected_collection.kind == "static" else set()
+        dynamic_collection_terms = self.content_browser.compile_query(selected_collection.query) if selected_collection and selected_collection.kind == "dynamic" else ()
+        return tuple(
+            document for document in documents
+            if self.content_browser.matches_compiled(document, query_terms)
+            and (not collection or bool(selected_collection and (
+                self.content_browser.matches_compiled(document, dynamic_collection_terms)
+                if selected_collection.kind == "dynamic"
+                else document["asset_id"] in static_collection_ids
+            )))
+        )
+
+    def content_browser_search_help(self) -> dict[str, Any]:
+        return self.content_browser.search_help()
+
+    def content_browser_collections(self) -> tuple[dict[str, Any], ...]:
+        return tuple(collection.to_dict() for collection in self.content_browser.collections())
+
+    def save_content_browser_collection(
+        self, name: str, *, asset_ids: Iterable[str] = (), query: str = "", kind: str = "static",
+    ) -> dict[str, Any]:
+        return self.content_browser.save_collection(
+            name, asset_ids=asset_ids, query=query, kind=kind,
+        ).to_dict()
+
+    def delete_content_browser_collection(self, name: str) -> bool:
+        return self.content_browser.delete_collection(name)
+
+    def queue_asset_imports(
+        self, source_paths: Iterable[str | Path], *, folder: str = "Assets", type_id: str = "",
+    ) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            item.to_dict() for item in self.content_browser.import_queue.enqueue(
+                source_paths, folder=folder, type_id=type_id,
+            )
+        )
+
+    def process_asset_import_queue(self) -> tuple[dict[str, Any], ...]:
+        return tuple(item.to_dict() for item in self.content_browser.import_queue.process_all())
+
+    def cancel_asset_import(self, queue_id: str) -> bool:
+        return self.content_browser.import_queue.cancel(queue_id)
+
+    def asset_revision_history(self, asset_id: str, *, limit: int = 50) -> tuple[dict[str, Any], ...]:
+        return self.content_browser.revision_history(asset_id, limit=limit)
+
+    def asset_source_control_status(self, asset_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        paths = [record.source_path for value in asset_ids if (record := self.database.asset(str(value))) is not None]
+        return self.content_browser.source_control_snapshot(paths)
+
+    def asset_source_control_history(self, asset_id: str, *, limit: int = 25) -> tuple[dict[str, Any], ...]:
+        record = self.database.asset(asset_id)
+        if record is None:
+            raise KeyError(f"Unknown asset: {asset_id}")
+        return self.content_browser.perforce_history(record.source_path, limit=limit)
+
+    def perforce_changelists(self, *, status: str = "pending", limit: int = 50) -> tuple[dict[str, Any], ...]:
+        return self.content_browser.perforce_changelists(status=status, limit=limit)
+
+    def perforce_asset_action(
+        self, asset_ids: Iterable[str], action: str, *, changelist: str = "", confirmed: bool = False,
+    ) -> dict[str, Any]:
+        paths = [record.source_path for value in asset_ids if (record := self.database.asset(str(value))) is not None]
+        return self.content_browser.perforce_action(
+            paths, action, changelist=changelist, confirmed=confirmed,
+        )
+
+    def content_browser_reference_health(self) -> dict[str, Any]:
+        return self.content_browser.reference_health()
+
+    def repair_content_browser_references(self, *, prune_stale_redirectors: bool = True) -> dict[str, Any]:
+        return self.assets.repair_project_references(prune_stale_redirectors=prune_stale_redirectors)
+
+    def qualify_content_browser(
+        self, *, sample_count: int = 50_000, query_budget_ms: float = 750.0,
+        inventory_budget_ms: float = 2_000.0,
+    ) -> dict[str, Any]:
+        from tech_connector.game_engine.integration.content_browser_qualification_service import qualify_content_browser_scale
+
+        return qualify_content_browser_scale(
+            self.content_browser, sample_count=sample_count, query_budget_ms=query_budget_ms,
+            inventory_budget_ms=inventory_budget_ms,
+        ).to_dict()
 
     def create_world_asset(
         self, type_id: str, name: str, *, folder: str | Path = "Assets/World",
@@ -196,6 +322,14 @@ class TCEditorAPI:
 
     def build_world_backend(self, asset_id: str, *, platform: str = "desktop", quality: str = "high") -> dict[str, Any]:
         return self.world_builds.build(asset_id, platform=platform, quality=quality).to_dict()
+
+    def query_navigation_path(
+        self, asset_id: str, *, start: tuple[float, float], goal: tuple[float, float], agent_name: str = "",
+    ) -> dict[str, Any]:
+        return query_navigation_path(self.world.properties(asset_id), start=start, goal=goal, agent_name=agent_name)
+
+    def plan_navigation_rebuild(self, asset_id: str, previous_values: Mapping[str, Any]) -> dict[str, Any]:
+        return plan_navigation_rebuild(previous_values, self.world.properties(asset_id))
 
     def open_world_streaming_runtime(self, world_partition_asset_id: str) -> WorldStreamingRuntime:
         receipt = self.world_builds.build(world_partition_asset_id)
@@ -275,9 +409,56 @@ class TCEditorAPI:
         if session is not None: session.reset()
         return session is not None
 
-    def export_assets(self, asset_ids: Iterable[str], destination: str | Path, *, target: str = "generic", include_dependencies: bool = True) -> dict[str, Any]:
+    def export_assets(
+        self, asset_ids: Iterable[str], destination: str | Path, *, target: str = "generic",
+        include_dependencies: bool = True, require_ready: bool = False,
+    ) -> dict[str, Any]:
         """Export a dependency-closed package for Unreal, Unity, Blender, Maya, Houdini, or generic interchange."""
-        return self.exports.export_assets(asset_ids, destination, target=target, include_dependencies=include_dependencies).to_dict()
+        return self.exports.export_assets(
+            asset_ids, destination, target=target, include_dependencies=include_dependencies,
+            require_ready=require_ready,
+        ).to_dict()
+
+    def asset_conversion_coverage(self) -> dict[str, Any]:
+        """Report conversion classification/readiness for every registered asset type and target."""
+        return self.exports.conversion_coverage()
+
+    def asset_dependency_graph(
+        self, asset_id: str, *, include_referencers: bool = True, max_depth: int = 32,
+    ) -> dict[str, Any]:
+        """Return dependencies, referencers, cycle diagnostics, and package contribution."""
+        from .asset_dependency_graph_service import AssetDependencyGraphService
+
+        return AssetDependencyGraphService(self.project_root, self.database).analyze(
+            asset_id, include_referencers=include_referencers, max_depth=max_depth,
+        ).to_dict()
+
+    def plan_asset_reference_replacement(
+        self, asset_id: str, replacement_asset_id: str, *, owner_asset_ids: Iterable[str] = (),
+    ) -> dict[str, Any]:
+        """Preview every database and authored-file reference affected by replacement."""
+        return self.assets.plan_reference_replacement(
+            asset_id, replacement_asset_id, owner_asset_ids=tuple(owner_asset_ids),
+        ).to_dict()
+
+    def replace_asset_references(
+        self, asset_id: str, replacement_asset_id: str, *, owner_asset_ids: Iterable[str] = (),
+    ) -> dict[str, Any]:
+        """Replace selected references as one undoable editor operation."""
+        return self.assets.replace_asset_references(
+            asset_id, replacement_asset_id, owner_asset_ids=tuple(owner_asset_ids),
+        ).to_dict()
+
+    def plan_bulk_asset_operation(
+        self, operation: str, asset_ids: Iterable[str], *, options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.bulk_assets.plan(operation, asset_ids, options=options).to_dict()
+
+    def execute_bulk_asset_operation(
+        self, operation: str, asset_ids: Iterable[str], *, options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        plan = self.bulk_assets.plan(operation, asset_ids, options=options)
+        return self.bulk_assets.execute(plan).to_dict()
 
     def create_level_sequence(
         self, name: str, *, folder: str | Path = "Assets/Cinematics",
@@ -296,6 +477,10 @@ class TCEditorAPI:
                            parent_binding_id=parent_binding_id, component_path=component_path,
                            bone_name=bone_name, socket_name=socket_name,
                            skeleton_asset_id=skeleton_asset_id)
+
+    @staticmethod
+    def sequence_folder(name: str, *, parent_id: str = "") -> dict[str, Any]:
+        return new_sequence_folder(name, parent_id=parent_id)
 
     @staticmethod
     def sequence_track(track_type: str, name: str = "", *, binding_id: str = "", parent_id: str = "") -> dict[str, Any]:
@@ -334,14 +519,20 @@ class TCEditorAPI:
     def add_sequence_binding(self, asset_id: str, name: str, **target: Any) -> dict[str, Any]:
         return self.sequence.add_binding(asset_id, name, **target)
 
+    def add_sequence_folder(self, asset_id: str, name: str, *, parent_id: str = "") -> dict[str, Any]:
+        return self.sequence.add_folder(asset_id, name, parent_id=parent_id)
+
     def add_sequence_track(self, asset_id: str, track_type: str, name: str = "", *, binding_id: str = "", parent_id: str = "") -> dict[str, Any]:
         return self.sequence.add_track(asset_id, track_type, name, binding_id=binding_id, parent_id=parent_id)
 
     def add_sequence_section(self, asset_id: str, track_id: str, name: str, start_frame: int, end_frame: int, *, referenced_asset_id: str = "", row: int = 0) -> dict[str, Any]:
         return self.sequence.add_section(asset_id, track_id, name, start_frame, end_frame, referenced_asset_id=referenced_asset_id, row=row)
 
-    def add_sequence_key(self, asset_id: str, track_id: str, section_id: str, channel_name: str, frame: float, value: Any, *, interpolation: str = "linear") -> dict[str, Any]:
-        return self.sequence.add_key(asset_id, track_id, section_id, channel_name, frame, value, interpolation=interpolation)
+    def add_sequence_key(self, asset_id: str, track_id: str, section_id: str, channel_name: str, frame: float, value: Any, *, interpolation: str = "linear", in_tangent: float = 0.0, out_tangent: float = 0.0) -> dict[str, Any]:
+        return self.sequence.add_key(asset_id, track_id, section_id, channel_name, frame, value, interpolation=interpolation, in_tangent=in_tangent, out_tangent=out_tangent)
+
+    def transform_sequence_keys(self, asset_id: str, track_id: str, section_id: str, channel_name: str, **transform: float) -> dict[str, Any]:
+        return self.sequence.transform_keys(asset_id, track_id, section_id, channel_name, **transform)
 
     def remove_sequence_track(self, asset_id: str, track_id: str) -> bool:
         return self.sequence.remove_track(asset_id, track_id)
@@ -447,13 +638,22 @@ class TCEditorAPI:
         graph: Mapping[str, Any] | None = None, include_asset_ids: Sequence[str] = (),
         folder: str | Path = "Assets/Shaders",
     ):
+        graph_values = dict(graph or {"nodes": [], "connections": []})
         receipt = self.assets.create_asset(
             "tc.shader_graph", name, folder=folder,
             properties={"shader_version": 2, "stage": stage, "language": language,
-                        "graph": dict(graph or {"nodes": [], "connections": []}),
+                        "graph": graph_values,
                         "include_asset_ids": list(include_asset_ids)},
         )
-        self.database.set_dependencies(receipt.asset_id, [(str(value), "shader_include") for value in include_asset_ids])
+        dependencies = [(str(value), "shader_include") for value in include_asset_ids]
+        dependencies.extend(
+            (function_id, "shader_function")
+            for node in graph_values.get("nodes") or () if isinstance(node, Mapping)
+            and str(node.get("opcode") or "") == "material_function"
+            if (function_id := str(dict(node.get("parameters") or {}).get("function_asset_id") or ""))
+            and function_id != receipt.asset_id and self.database.asset(function_id) is not None
+        )
+        self.database.set_dependencies(receipt.asset_id, sorted(set(dependencies)))
         return receipt
 
     def shader_backend_capabilities(self) -> dict[str, Any]:
@@ -498,6 +698,23 @@ class TCEditorAPI:
             dependencies=self.database.dependency_edges(record.asset_id),
         )
         return settings
+
+    def input_map_audit(self, asset_id: str) -> dict[str, Any]:
+        record = self.database.asset(asset_id)
+        if record is None or record.asset_type != "tc.input_map":
+            raise ValueError(f"Asset is not an Input Map: {asset_id}")
+        return audit_input_map(self.properties(asset_id)).to_dict()
+
+    def update_input_map(self, asset_id: str, values: Mapping[str, Any], *, replace: bool = False) -> dict[str, Any]:
+        record = self.database.asset(asset_id)
+        if record is None or record.asset_type != "tc.input_map":
+            raise ValueError(f"Asset is not an Input Map: {asset_id}")
+        candidate = {} if replace else self.properties(asset_id)
+        candidate.update(dict(values or {}))
+        audit = audit_input_map(candidate)
+        if not audit.valid:
+            raise ValueError("Input Map has conflicts: " + "; ".join(item.message for item in audit.diagnostics if item.severity == "error"))
+        return self.set_properties(asset_id, candidate, replace=True)
 
     def create_prefab_variant(
         self, name: str, base_prefab_id: str, *, overrides: Mapping[str, Any] | None = None,
@@ -548,12 +765,20 @@ class TCEditorAPI:
 
         return available_game_templates()
 
+    def available_game_quality_profiles(self) -> tuple[dict[str, Any], ...]:
+        """List the same resolution and scalability presets shown by the New Game UI."""
+
+        from tech_connector.game_engine.authoring.game_template_service import available_game_quality_profiles
+
+        return available_game_quality_profiles()
+
     def create_game_project_from_template(
         self,
         *,
         template_id: str = "playable_sandbox",
         variant_id: str = "",
         visual_style: str = "",
+        quality_profile: str = "",
         project_name: str = "StarterGame",
         platform: str = "windows",
         root_folder: str | Path = "Assets",
@@ -566,6 +791,7 @@ class TCEditorAPI:
             template_id=template_id,
             variant_id=variant_id,
             visual_style=visual_style,
+            quality_profile=quality_profile,
             project_name=project_name,
             platform=platform,
             root_folder=root_folder,
@@ -579,6 +805,64 @@ class TCEditorAPI:
         return GameTemplateService(self.project_root, self.database, self.registry).validate_project(
             ruleset_asset_id, build_profile_asset_id,
         )
+
+    def level_actors(self, level_asset_id: str) -> tuple[dict[str, Any], ...]:
+        """Return editable actor data from a saved Level."""
+
+        return self.level_authoring.actors(level_asset_id)
+
+    def transform_level_actors(
+        self, level_asset_id: str, actor_ids: Iterable[str], *,
+        translation: Iterable[float] = (0.0, 0.0, 0.0),
+        rotation: Iterable[float] = (0.0, 0.0, 0.0),
+        scale_multiplier: Iterable[float] = (1.0, 1.0, 1.0),
+    ) -> dict[str, Any]:
+        return self.level_authoring.transform(
+            level_asset_id, actor_ids, translation=translation, rotation=rotation,
+            scale_multiplier=scale_multiplier,
+        )
+
+    def set_level_actor_visibility(
+        self, level_asset_id: str, actor_ids: Iterable[str], visible: bool,
+    ) -> dict[str, Any]:
+        return self.level_authoring.set_visibility(level_asset_id, actor_ids, visible)
+
+    def isolate_level_actors(self, level_asset_id: str, actor_ids: Iterable[str]) -> dict[str, Any]:
+        return self.level_authoring.isolate(level_asset_id, actor_ids)
+
+    def show_all_level_actors(self, level_asset_id: str) -> dict[str, Any]:
+        return self.level_authoring.show_all(level_asset_id)
+
+    def set_level_actor_lock(
+        self, level_asset_id: str, actor_ids: Iterable[str], locked: bool,
+    ) -> dict[str, Any]:
+        return self.level_authoring.set_locked(level_asset_id, actor_ids, locked)
+
+    def duplicate_level_actors(self, level_asset_id: str, actor_ids: Iterable[str]) -> dict[str, Any]:
+        return self.level_authoring.duplicate(level_asset_id, actor_ids)
+
+    def delete_level_actors(self, level_asset_id: str, actor_ids: Iterable[str]) -> dict[str, Any]:
+        return self.level_authoring.delete(level_asset_id, actor_ids)
+
+    def move_level_actors_to_folder(
+        self, level_asset_id: str, actor_ids: Iterable[str], folder: str,
+    ) -> dict[str, Any]:
+        return self.level_authoring.move_to_folder(level_asset_id, actor_ids, folder)
+
+    def parent_level_actors(
+        self, level_asset_id: str, actor_ids: Iterable[str], parent_actor_id: str = "",
+    ) -> dict[str, Any]:
+        return self.level_authoring.parent(level_asset_id, actor_ids, parent_actor_id)
+
+    def reorder_level_actor_component(
+        self, level_asset_id: str, actor_id: str, component_id: str, new_index: int,
+    ) -> dict[str, Any]:
+        return self.level_authoring.reorder_component(level_asset_id, actor_id, component_id, new_index)
+
+    def save_level_camera_bookmark(
+        self, level_asset_id: str, slot: int, camera: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return self.level_authoring.save_camera_bookmark(level_asset_id, slot, dict(camera))
 
     def create_locomotion_controller(
         self,
@@ -720,6 +1004,7 @@ class TCEditorAPI:
         self, asset_id: str, *, instance_id: str = "EditorPreview",
         session_id: str = "", context: Mapping[str, Any] | None = None,
         breakpoints: Sequence[str] = (), watches: Sequence[str] = (),
+        execution_mode: str = "editor_simulation", selected_entity_id: str = "",
     ) -> dict[str, Any]:
         identifier = str(session_id or f"{asset_id}:{instance_id}")
         seeded_context = self.gameplay_classes.debug_context(asset_id, context)
@@ -733,8 +1018,10 @@ class TCEditorAPI:
             attach_context = context
         session = self.gameplay_debug_sessions.attach(
             identifier, instance_id, self.gameplay_classes.debug_manifest(asset_id),
-            attach_context,
+            attach_context, execution_mode=execution_mode, selected_entity_id=selected_entity_id,
         )
+        if selected_entity_id:
+            session.select_entity(selected_entity_id)
         session.set_breakpoints(breakpoints); session.set_watches(watches)
         return session.start().to_dict()
 
@@ -747,9 +1034,11 @@ class TCEditorAPI:
         elif action == "stop": snapshot = session.stop(keep_changes=bool(options.get("keep_changes", False)))
         elif action == "breakpoints": snapshot = session.set_breakpoints(options.get("node_ids") or ())
         elif action == "watches": snapshot = session.set_watches(options.get("paths") or ())
+        elif action in {"select_entity", "entity"}: snapshot = session.select_entity(str(options.get("entity_id") or ""))
         elif action == "hot_swap":
             asset_id = str(options.get("asset_id") or session.program_id.removeprefix("gameplay_class_"))
-            snapshot = session.hot_swap(self.gameplay_classes.debug_manifest(asset_id))
+            try: snapshot = session.hot_swap(self.gameplay_classes.debug_manifest(asset_id))
+            except Exception as exc: snapshot = session.reject_hot_swap(str(exc))
         elif action in {"snapshot", "status"}: snapshot = session.snapshot()
         else: raise ValueError(f"Unknown gameplay debug command: {command}")
         return snapshot.to_dict()
@@ -847,6 +1136,16 @@ class TCEditorAPI:
 
     def evaluate_blend_space(self, asset_id: str, x: float, y: float = 0.0) -> dict[str, float]:
         return self.animation.evaluate_blend_space(asset_id, x, y)
+
+    def evaluate_animation_controller(
+        self, asset_id: str, *, parameter_values: Mapping[str, Any] | None = None,
+        layer_id: str = "", current_state: str = "", normalized_time: float = 0.0,
+    ) -> dict[str, Any]:
+        """Preview one deterministic controller step using unspecialized runtime inputs."""
+        return self.animation.evaluate_controller(
+            asset_id, parameter_values=parameter_values, layer_id=layer_id,
+            current_state=current_state, normalized_time=normalized_time,
+        )
 
     def cook_animation_asset(self, asset_id: str, *, platform: str = "desktop", quality: str = "high") -> DerivedArtifact:
         return self.animation.cook(asset_id, platform=platform, quality=quality)
@@ -1059,6 +1358,21 @@ class TCEditorAPI:
             compile_rig_asset_payload(record.asset_type, self.properties(asset_id), platform=platform, quality=quality),
             metadata={"platform": platform, "quality": quality}, extension=".tcrigbin",
         )
+
+    def create_skeleton(
+        self, name: str, *, bones: Iterable[Mapping[str, Any]], sockets: Iterable[Mapping[str, Any]] = (),
+        retarget_pose: Mapping[str, Any] | None = None, preserve_bones: Iterable[str] = (),
+        folder: str | Path = "Assets/Characters/Rig",
+    ):
+        properties = {
+            "bones": [dict(item) for item in bones], "sockets": [dict(item) for item in sockets],
+            "retarget_pose": dict(retarget_pose or {}),
+            "preserve_bones": list(dict.fromkeys(str(item) for item in preserve_bones)),
+        }
+        errors = [item.message for item in validate_skeleton_properties(properties) if item.severity == "error"]
+        if errors:
+            raise ValueError("Skeleton has validation errors: " + "; ".join(errors))
+        return self.assets.create_asset("tc.skeleton", name, folder=folder, properties=properties)
 
     def create_skin_binding(
         self,
@@ -1316,21 +1630,50 @@ class TCEditorAPI:
 
     def validate_character_asset(self, asset_id: str) -> list[dict[str, Any]]:
         record = self.database.asset(asset_id)
-        if record is None or record.asset_type not in {"tc.skeletal_mesh", "tc.skin_binding"}:
-            raise ValueError(f"Asset is not a Skeletal Mesh or Skin Binding: {asset_id}")
-        validator = validate_character_lods if record.asset_type == "tc.skeletal_mesh" else validate_skin_binding_properties
+        if record is None or record.asset_type not in {"tc.skeleton", "tc.skeletal_mesh", "tc.skin_binding"}:
+            raise ValueError(f"Asset is not a Skeleton, Skeletal Mesh, or Skin Binding: {asset_id}")
+        validator = {"tc.skeleton": validate_skeleton_properties, "tc.skeletal_mesh": validate_character_lods, "tc.skin_binding": validate_skin_binding_properties}[record.asset_type]
         return [issue.__dict__.copy() for issue in validator(self.properties(asset_id))]
+
+    def update_character_asset(
+        self, asset_id: str, values: Mapping[str, Any], *, replace: bool = False,
+    ) -> dict[str, Any]:
+        record = self.database.asset(asset_id)
+        if record is None or record.asset_type not in {"tc.skeleton", "tc.skeletal_mesh", "tc.skin_binding"}:
+            raise ValueError(f"Asset is not a Skeleton, Skeletal Mesh, or Skin Binding: {asset_id}")
+        candidate = {} if replace else self.properties(asset_id)
+        candidate.update(dict(values or {}))
+        validator = {"tc.skeleton": validate_skeleton_properties, "tc.skeletal_mesh": validate_character_lods, "tc.skin_binding": validate_skin_binding_properties}[record.asset_type]
+        errors = [item.message for item in validator(candidate) if item.severity == "error"]
+        if errors:
+            raise ValueError("Character asset has validation errors: " + "; ".join(errors))
+        updated = self.set_properties(asset_id, candidate, replace=True)
+        if record.asset_type == "tc.skin_binding":
+            dependencies = []
+            for key, kind in (("mesh_id", "skeletal_mesh"), ("skeleton_id", "skeleton")):
+                reference = str(updated.get(key) or "")
+                if reference and self.database.asset(reference) is not None:
+                    dependencies.append((reference, kind))
+            transfer_source = str(dict(updated.get("transfer") or {}).get("source_skin_binding_id") or "")
+            if transfer_source and transfer_source != asset_id and self.database.asset(transfer_source) is not None:
+                dependencies.append((transfer_source, "skin_transfer_source"))
+            self.database.set_dependencies(asset_id, dependencies)
+        return updated
 
     def cook_character_asset(self, asset_id: str, *, platform: str = "desktop", quality: str = "high") -> DerivedArtifact:
         record = self.database.asset(asset_id)
-        if record is None or record.asset_type not in {"tc.skeletal_mesh", "tc.skin_binding"}:
-            raise ValueError(f"Asset is not a Skeletal Mesh or Skin Binding: {asset_id}")
+        if record is None or record.asset_type not in {"tc.skeleton", "tc.skeletal_mesh", "tc.skin_binding"}:
+            raise ValueError(f"Asset is not a Skeleton, Skeletal Mesh, or Skin Binding: {asset_id}")
         if record.asset_type == "tc.skin_binding":
             kind, extension, payload = "skin_binding_runtime", ".tcskinbin", compile_skin_binding_payload(
                 self.properties(asset_id), platform=platform, quality=quality,
             )
-        else:
+        elif record.asset_type == "tc.skeletal_mesh":
             kind, extension, payload = "skeletal_mesh_plan", ".tcskmeshbin", compile_skeletal_mesh_plan(
+                self.properties(asset_id), platform=platform, quality=quality,
+            )
+        else:
+            kind, extension, payload = "skeleton_runtime", ".tcskeletonbin", compile_skeleton_payload(
                 self.properties(asset_id), platform=platform, quality=quality,
             )
         return self.database.store_derived(
@@ -1598,28 +1941,32 @@ class TCEditorAPI:
     def capability_contract(self) -> dict[str, Any]:
         return {
             "schema": "tech_connector.editor_python_api.v1",
-            "asset_operations": ["create_asset", "import_asset", "properties", "set_properties", "cook"],
-            "launch_operations": ["audit_launch_readiness", "qualify_playable_project", "qualify_realtime_fx", "qualify_world_production", "qualify_content_production", "qualify_capability_evidence"],
+            "asset_operations": ["create_asset", "import_asset", "properties", "set_properties", "cook", "export_assets", "asset_conversion_coverage", "asset_dependency_graph", "plan_asset_reference_replacement", "replace_asset_references", "plan_bulk_asset_operation", "execute_bulk_asset_operation"],
+            "content_browser_operations": ["content_browser_assets", "content_browser_search_help", "content_browser_collections", "save_content_browser_collection", "delete_content_browser_collection", "queue_asset_imports", "process_asset_import_queue", "cancel_asset_import", "asset_revision_history", "asset_source_control_status", "asset_source_control_history", "perforce_changelists", "perforce_asset_action", "content_browser_reference_health", "repair_content_browser_references", "qualify_content_browser"],
+            "launch_operations": ["audit_launch_readiness", "qualify_playable_project", "qualify_realtime_fx", "qualify_world_production", "qualify_content_production", "qualify_capability_evidence", "qualify_dcc_release"],
             "prefab_operations": ["create_prefab", "create_prefab_variant", "resolve_prefab", "instantiate_prefab", "apply_prefab_overrides", "revert_prefab_overrides", "validate_prefab", "cook_prefab"],
             "material_operations": ["material_presets", "create_material", "apply_material_preset", "create_material_instance", "resolve_material", "set_material_instance_overrides", "revert_material_instance_overrides", "assign_material_texture", "material_graph_statistics", "validate_material", "cook_material"],
             "shader_operations": ["create_shader_graph", "validate_shader_graph", "compile_shader_graph", "shader_backend_capabilities"],
             "texture_operations": ["texture_import_settings", "set_texture_import_settings", "assign_material_texture"],
-            "project_template_operations": ["available_game_templates", "create_game_project_from_template", "validate_playable_project"],
+            "input_operations": ["properties", "update_input_map", "input_map_audit"],
+            "project_template_operations": ["available_game_templates", "available_game_quality_profiles", "create_game_project_from_template", "validate_playable_project"],
+            "level_actor_operations": ["level_actors", "transform_level_actors", "set_level_actor_visibility", "isolate_level_actors", "show_all_level_actors", "set_level_actor_lock", "duplicate_level_actors", "delete_level_actors", "move_level_actors_to_folder", "parent_level_actors", "reorder_level_actor_component", "save_level_camera_bookmark"],
             "locomotion_operations": ["create_locomotion_controller", "validate_locomotion_controller", "cook_locomotion_controller"],
-            "animation_operations": ["create_animation_clip", "create_blend_space", "create_animation_mask", "create_animation_controller", "animation_properties", "set_animation_properties", "validate_animation_asset", "evaluate_blend_space", "cook_animation_asset", "convert_unreal_animation", "convert_unity_animation", "convert_animation_export_file", "convert_live_unity_animation", "convert_live_unreal_animation", "export_animation_interchange", "import_animation_interchange"],
+            "animation_operations": ["create_animation_clip", "create_blend_space", "create_animation_mask", "create_animation_controller", "animation_properties", "set_animation_properties", "validate_animation_asset", "evaluate_blend_space", "evaluate_animation_controller", "cook_animation_asset", "convert_unreal_animation", "convert_unity_animation", "convert_animation_export_file", "convert_live_unity_animation", "convert_live_unreal_animation", "export_animation_interchange", "import_animation_interchange"],
+            "sequence_operations": ["create_level_sequence", "get_level_sequence", "update_level_sequence", "validate_level_sequence", "evaluate_level_sequence", "level_sequence_render_jobs", "cook_level_sequence", "sequence_binding", "sequence_folder", "sequence_track", "sequence_section", "sequence_level_blend", "sequence_key", "add_sequence_binding", "add_sequence_folder", "add_sequence_track", "add_sequence_section", "add_sequence_key", "transform_sequence_keys", "remove_sequence_track", "remove_sequence_section", "sequence_from_unreal", "sequence_from_unity", "sequence_to_unreal", "sequence_to_unity"],
             "effect_operations": ["effect_presets", "effect_module_library", "create_effect_system", "apply_effect_preset", "effect_properties", "set_effect_properties", "validate_effect_system", "estimate_effect_cost", "cook_effect_system", "convert_unreal_effects", "convert_unity_effects"],
             "audio_operations": ["audio_clip_settings", "set_audio_clip_settings", "create_sound_cue", "create_audio_mixer", "create_audio_attenuation", "create_audio_reverb", "validate_audio_asset", "cook_audio_asset", "convert_unreal_audio", "convert_unity_audio"],
             "gameplay_foundation_operations": ["create_project_settings", "create_data_schema", "create_struct", "create_enum", "create_typed_data_asset", "create_data_table", "create_component_archetype", "create_character_definition", "resolve_data_schema", "validate_gameplay_foundation_asset", "cook_gameplay_foundation_asset", "convert_unreal_data_assets", "convert_unity_scriptable_objects"],
             "gameplay_class_operations": ["create_gameplay_class", "resolve_gameplay_class", "validate_gameplay_class", "compile_gameplay_class", "debug_gameplay_class", "begin_gameplay_class_debug_session", "gameplay_class_debug_command", "list_gameplay_class_debug_sessions", "end_gameplay_class_debug_session"],
             "behavior_graph_operations": ["create_behavior", "create_gameplay_graph", "validate_behavior_graph", "cook_behavior_graph", "execute_behavior_graph"],
             "image_project_operations": ["create_image_project", "validate_image_project", "flatten_image_project", "cook_image_project"],
-            "world_operations": ["create_world_asset", "get_world_asset", "update_world_asset", "validate_world_asset", "preview_world_asset", "compile_world_asset", "sculpt_terrain", "paint_terrain_layer", "paint_foliage", "world_asset_visualization", "build_world_backend", "open_world_streaming_runtime"],
+            "world_operations": ["create_world_asset", "get_world_asset", "update_world_asset", "validate_world_asset", "preview_world_asset", "compile_world_asset", "sculpt_terrain", "paint_terrain_layer", "paint_foliage", "world_asset_visualization", "query_navigation_path", "plan_navigation_rebuild", "build_world_backend", "open_world_streaming_runtime"],
             "procedural_geometry_operations": ["create_procedural_graph", "get_procedural_graph", "set_procedural_graph", "validate_procedural_graph", "cook_procedural_graph", "procedural_operation_catalog", "procedural_execution_plan", "procedural_native_document", "import_procedural_native_document", "procedural_diagnostics", "cook_procedural_tasks", "step_procedural_simulation", "reset_procedural_simulation"],
             "starter_character_operations": ["create_starter_character"],
             "cloth_operations": ["create_cloth", "create_fabric_material", "auto_setup_cloth", "set_cloth_map", "validate_cloth", "cook_cloth"],
             "physics_operations": ["create_physics_asset", "auto_setup_physics_asset", "create_physics_constraint", "validate_physics", "cook_physics", "create_runtime_physics_joint", "edit_runtime_physics_joints", "remove_runtime_physics_joint", "generate_runtime_ragdoll", "build_physics_stress_scene"],
             "simulation_authoring_operations": ["create_runtime_soft_body", "create_ocean_surface", "sample_ocean_surface", "generate_ocean_patch", "add_ocean_wake"],
-            "character_operations": ["create_skin_binding", "create_skeletal_mesh_asset", "assign_skin_binding", "generate_character_lods", "generate_mesh_lod_geometry", "validate_character_asset", "cook_character_asset"],
+            "character_operations": ["create_skeleton", "create_skin_binding", "create_skeletal_mesh_asset", "assign_skin_binding", "generate_character_lods", "generate_mesh_lod_geometry", "update_character_asset", "validate_character_asset", "cook_character_asset"],
             "rig_operations": ["create_control_rig", "create_ik_rig", "create_ik_retargeter", "auto_setup_ik_rig", "auto_map_ik_retargeter", "validate_rig_asset", "cook_rig_asset"],
             "geometry_optimization_operations": ["create_geometry_optimization_profile", "assign_geometry_optimization_profile", "plan_geometry_optimization", "validate_geometry_optimization", "cook_geometry_optimization", "generate_mesh_lod_geometry"],
             "groom_operations": ["create_groom", "create_groom_binding", "create_hair_material", "generate_groom_lods", "project_groom_binding", "validate_groom", "cook_groom"],
@@ -1630,7 +1977,42 @@ class TCEditorAPI:
     def audit_launch_readiness(self, *, production: bool = False) -> dict[str, Any]:
         from tech_connector.game_engine.integration.launch_readiness_service import audit_launch_readiness
 
-        return audit_launch_readiness(self.project_root, editor_api=self, production=production)
+        # Release/package controls describe the installed Tech Connector product,
+        # not the user's game project.  Project qualification receipts are still
+        # resolved from ``self.project_root`` by the audit service through this
+        # editor API instance.
+        source_root = Path(__file__).resolve().parents[3]
+        return audit_launch_readiness(source_root, editor_api=self, production=production)
+
+    def qualify_dcc_release(
+        self,
+        host: str,
+        *,
+        workspace: str | Path | None = None,
+        session_port: int | None = None,
+        confirm_mutating: bool = False,
+        install_recovery_verified: bool = False,
+        progress_callback: Any | None = None,
+        cancellation_event: Any | None = None,
+    ) -> dict[str, Any]:
+        """Collect all release receipts for one exact live DCC session."""
+
+        from tech_connector.game_engine.integration.dcc_release_qualification_runner import (
+            qualify_dcc_release_host,
+        )
+
+        output = Path(workspace).expanduser() if workspace else (
+            self.project_root / ".tech_connector" / "qualification" / "dcc" / str(host)
+        )
+        return qualify_dcc_release_host(
+            host,
+            workspace=output,
+            session_port=session_port,
+            confirm_mutating=confirm_mutating,
+            install_recovery_verified=install_recovery_verified,
+            progress_callback=progress_callback,
+            cancellation_event=cancellation_event,
+        )
 
     def qualify_playable_project(
         self, player_executable: str | Path, *, frames: int = 120,

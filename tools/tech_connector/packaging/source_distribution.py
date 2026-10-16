@@ -86,13 +86,13 @@ def validate_public_landing(root: Path, entries: tuple[tuple[Path, Path], ...] |
         if any(marker in content for marker in PEM_MARKERS):
             raise RuntimeError(f"public landing payload contains private-key material: {relative.as_posix()}")
     readme = (root / "README.md").read_text(encoding="utf-8").casefold()
-    license_text = (root / "LICENSE").read_text(encoding="utf-8").casefold()
+    license_text = (root / "LICENSE.md").read_text(encoding="utf-8").casefold()
     if "account activation is required" not in readme:
         raise RuntimeError("public landing README lacks the account-activation warning")
     if "official tools bundle" not in readme or "official_tools_bundle" not in readme:
         raise RuntimeError("public landing README lacks the Official Tools entitlement warning")
     if "source-available" not in license_text or "activated entitlement" not in license_text:
-        raise RuntimeError("public landing LICENSE lacks source-available activation terms")
+        raise RuntimeError("public landing LICENSE.md lacks source-available activation terms")
 
 
 def write_public_manifest(root: Path) -> Path:

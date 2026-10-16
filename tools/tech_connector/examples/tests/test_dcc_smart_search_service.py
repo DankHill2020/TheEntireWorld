@@ -189,6 +189,87 @@ class TestDccSmartSearchService(unittest.TestCase):
         self.assertIn("indexed tool class", block)
         self.assertIn("maya_tools.ui.spin_box.FrameSpinBox", block)
 
+    def test_connected_service_root_reports_readiness_and_continues(self):
+        suggestions = smart_search_suggestions(
+            "sla",
+            package_dirs=self.package_dirs,
+            db_path=self.db_path,
+            settings={"slack_webhook_url": "https://hooks.slack.invalid/test"},
+        )
+
+        slack = next(item for item in suggestions if item.token == "Slack.")
+        self.assertTrue(slack.continues)
+        self.assertEqual("connected application", slack.kind)
+        self.assertIn("connected", slack.detail)
+
+    def test_connected_service_dot_lists_configured_targets(self):
+        suggestions = smart_search_suggestions(
+            "sLaCk.pipe",
+            package_dirs=self.package_dirs,
+            db_path=self.db_path,
+            settings={
+                "slack_bot_token": "xoxb-test",
+                "slack_channels": ["pipeline-alerts", "general"],
+            },
+        )
+
+        self.assertEqual(["Slack.pipeline-alerts"], [item.token for item in suggestions])
+        self.assertIn("connected", suggestions[0].detail)
+
+    def test_connected_service_context_never_hides_missing_setup(self):
+        block = smart_search_context_block(
+            "Send this to @Slack.here",
+            db_path=self.db_path,
+            settings={},
+        )
+
+        self.assertIn("Slack target `here`", block)
+        self.assertIn("connection=setup required", block)
+        self.assertIn("Do not silently substitute another target", block)
+
+    def test_unknown_connected_service_target_is_explicitly_unresolved(self):
+        block = smart_search_context_block(
+            "Send this to @Slack.does-not-exist",
+            db_path=self.db_path,
+            settings={"slack_webhook_url": "https://hooks.slack.invalid/test"},
+        )
+
+        self.assertIn("unresolved Slack target", block)
+        self.assertIn("Resolve or ask for clarification before acting", block)
+
+    def test_jira_completion_requires_project_before_issue_type(self):
+        settings = {
+            "atlassian_site_url": "https://example.atlassian.net",
+            "atlassian_email": "artist@example.com",
+            "atlassian_api_token": "secret",
+            "jira_project_key": "ART",
+        }
+
+        projects = smart_search_suggestions(
+            "Jira.", package_dirs=self.package_dirs, db_path=self.db_path, settings=settings
+        )
+        issue_types = smart_search_suggestions(
+            "Jira.ART.b", package_dirs=self.package_dirs, db_path=self.db_path, settings=settings
+        )
+
+        self.assertEqual(["Jira.ART."], [item.token for item in projects])
+        self.assertTrue(projects[0].continues)
+        self.assertEqual(["Jira.ART.bug"], [item.token for item in issue_types])
+
+    def test_confluence_completion_uses_configured_space_not_page_placeholder(self):
+        settings = {
+            "atlassian_site_url": "https://example.atlassian.net",
+            "atlassian_email": "artist@example.com",
+            "atlassian_api_token": "secret",
+            "confluence_space_id": "ARTDOCS",
+        }
+
+        suggestions = smart_search_suggestions(
+            "Confluence.", package_dirs=self.package_dirs, db_path=self.db_path, settings=settings
+        )
+
+        self.assertEqual(["Confluence.ARTDOCS"], [item.token for item in suggestions])
+
 
 if __name__ == "__main__":
     unittest.main()

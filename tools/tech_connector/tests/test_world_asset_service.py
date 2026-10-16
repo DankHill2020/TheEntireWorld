@@ -15,9 +15,10 @@ from tech_connector.game_engine.assets import (
 from tech_connector.game_engine.assets.world_asset_service import (
     apply_foliage_brush, apply_terrain_brush, build_hlod_preview,
     build_lighting_preview, build_navigation_preview, build_partition_preview,
+    navigation_mesh_defaults, plan_navigation_rebuild, query_navigation_path,
 )
 from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor, editor_pages_for_asset
-from tech_connector.ui.game_engine.world_asset_editors import WorldAssetAuthoringWidget
+from tech_connector.ui.game_engine.world_asset_editors import NavigationToolsEditorWidget, WorldAssetAuthoringWidget
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -143,6 +144,47 @@ def test_world_build_previews_cover_navigation_lighting_partition_and_hlod() -> 
     assert len(partition["cells"]) == 9 and 0 < partition["loaded_cells"] < 9
     hlod = build_hlod_preview({"reduction_ratio": 0.2}, source_triangles=50000)
     assert hlod["proxy_triangles"] == 10000 and hlod["triangle_reduction_percent"] == 80.0
+
+
+def test_navigation_modifiers_path_queries_links_and_incremental_plan() -> None:
+    original = navigation_mesh_defaults()
+    edited = navigation_mesh_defaults()
+    edited["tile_size"] = 1000.0
+    edited["modifiers"] = [{
+        "id": "wall", "area": "Blocked", "minimum": [0.4, 0.0],
+        "maximum": [0.6, 1.0], "enabled": True,
+    }]
+    preview = build_navigation_preview(edited)
+    assert {row["state"] for row in preview["tiles"]} == {"built", "blocked"}
+    blocked = query_navigation_path(edited, start=(0.1, 0.5), goal=(0.9, 0.5), agent_name="Humanoid")
+    assert blocked["status"] == "unreachable"
+
+    edited["off_mesh_links"] = [{
+        "id": "jump-wall", "start": [0.35, 0.55], "end": [0.65, 0.55],
+        "area": "Walkable", "cost": 2.0, "bidirectional": True, "enabled": True,
+    }]
+    linked = query_navigation_path(edited, start=(0.1, 0.5), goal=(0.9, 0.5))
+    assert linked["status"] == "success"
+    assert linked["used_links"] == ["jump-wall"]
+
+    original["tile_size"] = 1000.0
+    plan = plan_navigation_rebuild(original, edited)
+    assert plan["status"] == "dirty" and not plan["full_rebuild"]
+    assert 0 < plan["dirty_tile_count"] < plan["total_tile_count"]
+    assert plan["reused_tile_count"] + plan["dirty_tile_count"] == plan["total_tile_count"]
+
+
+def test_navigation_dedicated_pages_expose_structured_editors(tmp_path) -> None:
+    database = AssetDatabase(tmp_path / ".tech_connector" / "assets.sqlite3")
+    service = WorldAssetService(tmp_path, database)
+    navigation = service.create("tc.navigation_mesh", "NavTools")
+    editor = DedicatedAssetEditor(tmp_path, database)
+    assert editor.open_asset(navigation.asset_id)
+    tools = editor.findChildren(NavigationToolsEditorWidget)
+    assert {widget.page for widget in tools} == {"Agents", "Areas & Costs", "Links", "Build", "Runtime Debug"}
+    agents = next(widget for widget in tools if widget.page == "Agents")
+    agents._add_row(agents.agents, ["Drone", "20", "80", "15", "60"])
+    assert any(row["name"] == "Drone" for row in agents.settings()["agents"])
 
 
 def test_world_authoring_widget_edits_and_completes_lighting_build(tmp_path) -> None:

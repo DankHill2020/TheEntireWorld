@@ -13,8 +13,8 @@ from tech_connector.game_engine.assets.sequence_asset_service import (
     TRACK_DEFINITIONS, TRACK_TYPES, SequenceAssetService, add_channel_key,
     build_render_jobs, evaluate_channel, evaluate_sequence, native_to_unity_timeline,
     native_to_unreal_level_sequence, new_binding, new_section, new_track,
-    new_level_blend_section, sequence_defaults, track_preset, unity_timeline_to_native,
-    validate_sequence,
+    new_level_blend_section, new_sequence_folder, sequence_defaults, track_preset,
+    transform_channel_keys, unity_timeline_to_native, validate_sequence,
 )
 from tech_connector.game_engine.runtime.level_sequence_runtime_service import LevelSequenceRuntimeDirector
 from tech_connector.ui.game_engine.asset_editor_workspace import DedicatedAssetEditor, editor_pages_for_asset
@@ -160,6 +160,39 @@ def test_sequence_validation_catches_authoring_errors() -> None:
     assert {"invalid_tracks", "unknown_track_type", "missing_binding"}.issubset(codes)
 
 
+def test_sequence_hierarchy_rejects_cycles_and_editor_round_trips_nested_tracks() -> None:
+    values = sequence_defaults()
+    editorial = new_sequence_folder("Editorial")
+    cameras = new_sequence_folder("Cameras", parent_id=editorial["id"])
+    track = new_track("camera_cut", "Cuts", parent_id=cameras["id"])
+    values["folders"] = [editorial, cameras]; values["tracks"] = [track]
+    assert not [issue for issue in validate_sequence(values) if issue.severity == "error"]
+
+    widget = SequenceEditorWidget(); widget.load_settings(values)
+    assert widget.outliner.topLevelItem(0).child(0).child(0).text(0) == "Cuts"
+    animation_folder = widget.add_folder("Animation", editorial["id"])
+    animation_track = widget.add_track("animation", "Hero")
+    widget._select_track(animation_track); widget.set_selected_parent(animation_folder)
+    nested = next(row for row in widget.settings()["tracks"] if row["id"] == animation_track)
+    assert nested["parent_id"] == animation_folder
+
+    values["folders"][0]["parent_id"] = cameras["id"]
+    assert "recursive_folder_hierarchy" in {issue.code for issue in validate_sequence(values)}
+
+
+def test_curve_easing_tangents_and_batch_key_transforms() -> None:
+    channel = {"name": "value", "keys": [
+        {"frame": 0, "value": 0.0, "interpolation": "bezier", "out_tangent": 2.0},
+        {"frame": 10, "value": 10.0, "interpolation": "bezier", "in_tangent": 0.0},
+    ]}
+    assert evaluate_channel(channel, 5) == pytest.approx(7.5)
+    channel["keys"][0]["interpolation"] = "smooth"
+    assert evaluate_channel(channel, 2.5) == pytest.approx(1.5625)
+    transformed = transform_channel_keys(channel, frame_offset=2, value_scale=2, snap_interval=1)
+    assert [key["frame"] for key in transformed["keys"]] == [2, 12]
+    assert [key["value"] for key in transformed["keys"]] == [0.0, 20.0]
+
+
 def test_sequence_editor_round_trips_tracks_sections_and_transport() -> None:
     widget = SequenceEditorWidget()
     widget.load_settings(sequence_defaults(duration_frames=180, fps=30))
@@ -189,7 +222,11 @@ def test_sequence_curve_binding_and_render_pages_patch_one_document() -> None:
 
     curves = SequenceCurveEditorWidget(); curves.load_settings(values); curves.add_key(25, 12.5, "bezier"); curves.apply_to(values)
     keys = values["tracks"][0]["sections"][0]["channels"][0]["keys"]
-    assert keys == [{"frame": 25.0, "value": 12.5, "interpolation": "bezier"}]
+    assert keys == [{"frame": 25.0, "value": 12.5, "interpolation": "bezier", "in_tangent": 0.0, "out_tangent": 0.0}]
+    curves.table.selectRow(0); curves.interpolation.setCurrentText("ease_out"); curves.out_tangent.setValue(1.25)
+    curves.apply_selected_style(); curves.transform_selected(frame_offset=5); curves.apply_to(values)
+    assert values["tracks"][0]["sections"][0]["channels"][0]["keys"][0]["frame"] == 30.0
+    assert values["tracks"][0]["sections"][0]["channels"][0]["keys"][0]["interpolation"] == "ease_out"
 
     bindings = SequenceBindingsEditorWidget(); bindings.load_settings(values); bindings.add_binding("spawnable")
     assert len(bindings.bindings()) == 2
@@ -198,6 +235,19 @@ def test_sequence_curve_binding_and_render_pages_patch_one_document() -> None:
     assert render.render_settings()["resolution"] == [3840, 2160]
     assert render.jobs.rowCount() == 1
     assert not render.validation_issues()
+
+
+def test_render_page_reviews_and_steps_camera_cut_shots() -> None:
+    values = sequence_defaults(duration_frames=120, fps=24)
+    cuts = new_track("camera_cut", "Cuts")
+    cuts["sections"] = [new_section("Wide", 0, 48, asset_id="camera.wide"),
+                        new_section("Close", 48, 120, asset_id="camera.close")]
+    values["tracks"].append(cuts)
+    render = SequenceRenderExportWidget(); render.load_settings(values)
+    assert render.preview.result["camera_cut"]["name"] == "Wide"
+    render._step_shot(1)
+    assert render.review_frame.value() == 48
+    assert render.preview.result["camera_cut"]["asset_id"] == "camera.close"
 
 
 def test_python_api_exposes_sequence_authoring_and_editor_opens(tmp_path) -> None:
@@ -215,6 +265,11 @@ def test_python_api_exposes_sequence_authoring_and_editor_opens(tmp_path) -> Non
     api.add_sequence_key(receipt.asset_id, track["id"], section["id"], "translation.x", 0, 0.0)
     api.add_sequence_key(receipt.asset_id, track["id"], section["id"], "translation.x", 30, 10.0)
     assert api.evaluate_level_sequence(receipt.asset_id, 15)["active_sections"][0]["evaluated_channels"]["translation.x"] == 5.0
+    folder = api.add_sequence_folder(receipt.asset_id, "Hero Tracks")
+    assert folder["id"].startswith("folder_")
+    transformed = api.transform_sequence_keys(receipt.asset_id, track["id"], section["id"], "translation.x", frame_offset=5.0)
+    assert [key["frame"] for key in transformed["keys"]] == [5.0, 35.0]
+    assert {"add_sequence_folder", "transform_sequence_keys"}.issubset(api.capability_contract()["sequence_operations"])
 
     editor = DedicatedAssetEditor(tmp_path, api.database)
     assert editor.open_asset(receipt.asset_id)

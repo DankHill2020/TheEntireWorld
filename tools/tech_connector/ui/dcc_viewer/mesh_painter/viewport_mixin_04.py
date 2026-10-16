@@ -403,6 +403,8 @@ class ThreeDMeshPainterViewportMixin04:
                 state = str(proxy.get("sync_state") or representation or "clean")
                 if not is_visible:
                     state = "hidden"
+                elif bool(proxy.get("editor_locked", False)):
+                    state = "locked"
                 item = QTreeWidgetItem([name, str(proxy.get("type") or "object"), state])
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(0, Qt.Checked if is_visible else Qt.Unchecked)
@@ -689,6 +691,12 @@ class ThreeDMeshPainterViewportMixin04:
         if not isinstance(proxy, (dict, SceneProxyInstance)):
             return
         visible = item.checkState(0) == Qt.Checked
+        current_visible = bool(proxy.get("visible", True))
+        if visible == current_visible:
+            return
+        push_undo = getattr(self, "_push_level_actor_undo", None)
+        if str(proxy.get("provider_id") or "") == "tech_connector" and callable(push_undo):
+            push_undo(f"{'Show' if visible else 'Hide'} {proxy.get('name') or 'actor'}")
         proxy["visible"] = visible
         if str(proxy.get("provider_id") or "") == "tech_connector":
             entity = getattr(self, "_runtime_entity_for_proxy", lambda _proxy: None)(proxy)
@@ -709,8 +717,13 @@ class ThreeDMeshPainterViewportMixin04:
             return
         items = tree.selectedItems()
         if not items:
+            self._selected_scene_proxy = None
+            self.update_instance_details_panel(); self.update_viewport_status()
+            if hasattr(self, "canvas") and self.canvas: self.canvas.update()
             return
-        data = items[0].data(0, Qt.UserRole) or {}
+        current = tree.currentItem()
+        active_item = current if current in items else items[0]
+        data = active_item.data(0, Qt.UserRole) or {}
         kind = data.get("kind")
         if kind == "object":
             proxy = data.get("proxy")
@@ -965,19 +978,30 @@ class ThreeDMeshPainterViewportMixin04:
         if kind == "object":
             proxy = data.get("proxy")
             if not isinstance(proxy, (dict, SceneProxyInstance)): return
-            self._selected_scene_proxy = proxy
+            selector = getattr(self, "select_level_actor_proxy", None)
+            if callable(selector) and not getattr(self, "is_scene_proxy_selected", lambda _proxy: False)(proxy): selector(proxy)
+            else: self._selected_scene_proxy = proxy
             menu = QMenu(tree)
             menu.addAction("Focus Selected", self.focus_selected_scene_element)
-            menu.addAction("Hide" if bool(proxy.get("visible", True)) else "Show", self.toggle_selected_proxy_visibility)
-            menu.addAction("Show Only Selected", self.show_only_selected_proxy)
+            if str(proxy.get("provider_id") or "") == "tech_connector":
+                menu.addAction("Hide Selected", self.hide_selected_level_actors)
+                menu.addAction("Isolate Selected", self.isolate_selected_level_actors)
+                menu.addAction("Show All", self.show_all_level_actors)
+                menu.addAction("Lock / Unlock Selected", lambda: self.set_selected_level_actors_locked(None))
+            else:
+                menu.addAction("Hide" if bool(proxy.get("visible", True)) else "Show", self.toggle_selected_proxy_visibility)
+                menu.addAction("Show Only Selected", self.show_only_selected_proxy)
             if str(proxy.get("provider_id") or "") == "tech_connector" and proxy.get("entity_id"):
                 menu.addSeparator()
-                menu.addAction("Duplicate", self.duplicate_selected_level_actor)
+                menu.addAction("Duplicate", self.duplicate_selected_level_actors)
                 def rename_actor() -> None:
                     value, accepted = QInputDialog.getText(tree, "Rename Actor", "Name", text=str(proxy.get("name") or "Actor"))
                     if accepted: self.rename_selected_level_actor(value)
                 menu.addAction("Rename…", rename_actor)
-                menu.addAction("Delete", self.delete_selected_level_actor)
+                menu.addAction("Delete", self.delete_selected_level_actors)
+                entity = self._runtime_entity_for_proxy(proxy)
+                if entity and (entity.get("camera") or any(str(component.get("type") or "") == "camera" for component in entity.get("components") or ())):
+                    menu.addSeparator(); menu.addAction("Pilot Camera", self.pilot_selected_camera_actor)
             else:
                 menu.addSeparator(); source_action = menu.addAction("Select in Source DCC", self.select_selected_proxy_in_source)
                 source_action.setEnabled(dcc_provider_base_key(str(proxy.get("provider_id") or "")) in {"maya", "blender", "unreal"})
@@ -1696,6 +1720,20 @@ class ThreeDMeshPainterViewportMixin04:
         selected_text = "none"
         if isinstance(selected, (dict, SceneProxyInstance)):
             selected_text = f"{selected.get('provider_id')}:{selected.get('name') or selected.get('native_id')}"
+            selection_provider = getattr(self, "selected_level_actor_proxies", None)
+            selected_proxies = selection_provider() if callable(selection_provider) else []
+            if len(selected_proxies) > 1:
+                selected_text = f"{len(selected_proxies)} actors (primary {selected.get('name') or selected.get('native_id')})"
+            entity_provider = getattr(self, "_runtime_entity_for_proxy", None)
+            entity = entity_provider(selected) if callable(entity_provider) else None
+            if isinstance(entity, dict):
+                transform = dict(entity.get("transform") or {})
+                position = list(transform.get("position") or (0.0, 0.0, 0.0))
+                rotation = list(transform.get("rotation") or (0.0, 0.0, 0.0))
+                scale = list(transform.get("scale") or (1.0, 1.0, 1.0))
+                selected_text += "  T:" + ",".join(f"{float(value):.2f}" for value in position[:3])
+                selected_text += "  R:" + ",".join(f"{float(value):.1f}" for value in rotation[:3])
+                selected_text += "  S:" + ",".join(f"{float(value):.2f}" for value in scale[:3])
             materials = selected.get("materials") or []
             mesh_data = selected.get("mesh_data")
             if isinstance(mesh_data, SceneProxyMeshData):
@@ -1961,10 +1999,11 @@ class ThreeDMeshPainterViewportMixin04:
         live_enabled = bool(getattr(self, "live_dcc_refresh_btn", None) and self.live_dcc_refresh_btn.isChecked())
         if pending and live_enabled and self.isVisible():
             elapsed_ms = (time.perf_counter() - started_s) * 1000.0 if started_s > 0.0 else 0.0
-            target_ms = float(getattr(self, "timeline_refresh_interval_ms", 42) or 42)
+            target_ms = float(getattr(self, "live_interactive_refresh_interval_ms", 83) or 83)
             delay_ms = max(0, int(round(target_ms - elapsed_ms)))
             providers = list(getattr(self, "_loaded_scene_providers", []) or [])
-            if providers:
+            timer = getattr(self, "live_refresh_timer", None)
+            if providers and not bool(timer is not None and timer.isActive()):
                 QTimer.singleShot(delay_ms, lambda keys=providers: self._request_async_fast_dcc_scene_refresh(keys))
 
     def _apply_async_fast_dcc_scene_snapshots(
@@ -2041,7 +2080,7 @@ class ThreeDMeshPainterViewportMixin04:
             self._resolved_shaded_status = f"Live sampled {sum(len(s.get('objects') or []) for s in processed.values())} object(s)"
             self.update_viewport_status()
             if hasattr(self, "canvas") and self.canvas:
-                self.canvas.update()
+                self.schedule_paint_canvas_update(interval_ms=34)
         else:
             self._dcc_scene_snapshots.update({
                 provider: self._merged_fast_transform_snapshot(provider, snapshot)
@@ -2163,7 +2202,7 @@ class ThreeDMeshPainterViewportMixin04:
                 if getattr(self, "dcc_scene_provider_combo", None) is not None:
                     provider = str(self.dcc_scene_provider_combo.currentData() or "maya")
                 self._loaded_scene_providers = self._scene_snapshot_provider_keys(provider)
-            self.live_refresh_timer.setInterval(int(getattr(self, "timeline_refresh_interval_ms", 42) or 42))
+            self.live_refresh_timer.setInterval(int(getattr(self, "live_interactive_refresh_interval_ms", 83) or 83))
             self.live_refresh_timer.start()
         else:
             self.live_refresh_timer.stop()
@@ -2297,13 +2336,11 @@ class ThreeDMeshPainterViewportMixin04:
             thread.requestInterruption()
         except Exception:
             pass
-        thread.quit()
-        thread.wait(3000)
+        self._release_background_thread(thread)
         self._dcc_camera_possession_thread = None
         self._dcc_camera_possession_worker = None
         self._dcc_camera_possession_payload_keys = {}
         self._dcc_camera_possession_results = {}
-        thread.setParent(QApplication.instance())
 
     def _allow_dcc_outbound(self, kind: str, *, reason: str = "") -> bool:
         """Central outbound bridge policy.
@@ -2443,15 +2480,21 @@ class ThreeDMeshPainterViewportMixin04:
         return True, f"Driving selected camera {provider}:{native_id} from TC view."
 
     def focus_selected_scene_element(self) -> bool:
+        selected_provider = getattr(self, "selected_level_actor_proxies", None)
+        proxies = list(selected_provider()) if callable(selected_provider) else []
         proxy = getattr(self, "_selected_scene_proxy", None)
-        if not isinstance(proxy, (dict, SceneProxyInstance)):
+        if not proxies and isinstance(proxy, (dict, SceneProxyInstance)): proxies = [proxy]
+        pivots = [pivot for pivot in (self._proxy_center_display(item) for item in proxies) if pivot is not None]
+        if not pivots:
             return False
-        pivot = self._proxy_center_display(proxy)
-        if pivot is None:
-            return False
-        self._camera_pivot_source_key = self._proxy_source_key(proxy)
-        self.viewport_camera.focus(pivot)
-        self._resolved_shaded_status = f"Focused {proxy.get('provider_id')}:{proxy.get('name') or proxy.get('native_id')}"
+        self._camera_pivot_source_key = self._proxy_source_key(proxy) if isinstance(proxy, (dict, SceneProxyInstance)) else ""
+        if len(pivots) == 1:
+            self.viewport_camera.focus(pivots[0])
+        else:
+            minimum = tuple(min(point[axis] for point in pivots) for axis in range(3))
+            maximum = tuple(max(point[axis] for point in pivots) for axis in range(3))
+            self.viewport_camera.frame_bounds(minimum, maximum)
+        self._resolved_shaded_status = f"Focused {len(pivots)} selected actor(s)"
         self.schedule_dcc_camera_drive("focus selection")
         self.schedule_resolved_shaded_refresh("focus selection")
         self.update_viewport_status()

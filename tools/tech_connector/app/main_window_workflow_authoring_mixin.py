@@ -54,7 +54,50 @@ from tech_connector.ui.chat_worker_dialogs import WorkflowOutputSelectorDialog
 from tech_connector.ui.pipeline_node_view import pipeline_tool_query_rank
 
 
+class PipelineContextValueWorker(QThread):
+    """Read DCC context without blocking the Qt event loop."""
+
+    completed = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, router, *, host: str, input_name: str, multiple: bool, parent=None):
+        super().__init__(parent)
+        self.router = router
+        self.host = str(host)
+        self.input_name = str(input_name)
+        self.multiple = bool(multiple)
+
+    def run(self):
+        try:
+            from tech_connector.services.pipeline_context_value_service import (
+                read_pipeline_host_selection,
+            )
+
+            result = read_pipeline_host_selection(
+                self.router,
+                host=self.host,
+                input_name=self.input_name,
+                multiple=self.multiple,
+            )
+            self.completed.emit(dict(result or {}))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class MainWindowWorkflowAuthoringMixin:
+    def _add_builder_step_deferred(self, symbol):
+        """Use bulk-add support while preserving older/test composer adapters."""
+        import inspect
+
+        add_step = self.add_builder_step
+        try:
+            supports_deferred = "defer_updates" in inspect.signature(add_step).parameters
+        except (TypeError, ValueError):
+            supports_deferred = False
+        if supports_deferred:
+            return add_step(custom_sym=symbol, defer_updates=True)
+        return add_step(custom_sym=symbol)
+
     def save_new_workflow(self):
         if not self._ensure_pipeline_composer_unlocked("Create or select a pipeline before saving."):
             return
@@ -105,7 +148,9 @@ class MainWindowWorkflowAuthoringMixin:
         empty_params = []
         for idx, step in enumerate(self.wf_builder_steps, start=1):
             sym = step["symbol"]
-            params_table = step["table"]
+            params_table = step.get("table")
+            if params_table is None:
+                continue
             for r in range(params_table.rowCount()):
                 param_name_item = params_table.item(r, 0)
                 cell_widget = params_table.cellWidget(r, 1)
@@ -191,8 +236,41 @@ class MainWindowWorkflowAuthoringMixin:
 
         for idx, step in enumerate(self.wf_builder_steps, start=1):
             sym = step["symbol"]
-            params_table = step["table"]
+            params_table = step.get("table")
             selected_symbols.append(sym)
+
+            if params_table is None:
+                step_id = str(step.get("graph_step_id") or "")
+                literals = dict(step.get("literal_values") or {})
+                view = getattr(self, "wf_node_view", None)
+                for param in step.get("params") or sym.get("params") or []:
+                    p_name = str(param.get("name") or "")
+                    if not p_name:
+                        continue
+                    incoming = next(
+                        (
+                            link for link in getattr(view, "links", [])
+                            if link.link_type == "data"
+                            and link.to_step == step_id
+                            and link.to_input == p_name
+                        ),
+                        None,
+                    )
+                    if incoming is not None:
+                        source_index = next(
+                            (
+                                source_idx for source_idx, source_step in enumerate(self.wf_builder_steps, start=1)
+                                if source_step.get("graph_step_id") == incoming.from_step
+                            ),
+                            0,
+                        )
+                        if source_index:
+                            workflow_links.append(
+                                f"step{source_index}.{incoming.from_output} -> step{idx}.{p_name}"
+                            )
+                    elif p_name in literals:
+                        slots[f"step{idx}_{p_name}"] = literals[p_name]
+                continue
 
             for r in range(params_table.rowCount()):
                 param_name_item = params_table.item(r, 0)
@@ -245,6 +323,8 @@ class MainWindowWorkflowAuthoringMixin:
                 selected_items=selected_symbols,
             )
 
+            self._persist_pipeline_graph_manifest(saved.manifest_path)
+
             self.refresh_workflows_list()
 
             # Select the newly created workflow
@@ -273,6 +353,7 @@ class MainWindowWorkflowAuthoringMixin:
                     selected_symbols=selected_symbols,
                     host=wf_host,
                 )
+                self._persist_pipeline_graph_manifest(saved.manifest_path)
                 self.refresh_workflows_list()
                 for i in range(self.workflows_list.count()):
                     item = self.workflows_list.item(i)
@@ -297,6 +378,67 @@ class MainWindowWorkflowAuthoringMixin:
     # ------------------------------------------------------------------
     # Pipeline attribute editor / export / primary-view workflow UX
     # ------------------------------------------------------------------
+    def _persist_pipeline_graph_manifest(self, manifest_path):
+        """Persist editable graph state alongside the runnable workflow manifest."""
+
+        import copy
+        import json
+
+        path = Path(manifest_path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        steps = list(getattr(self, "wf_builder_steps", []) or [])
+        index_by_id = {
+            str(step.get("graph_step_id") or ""): index
+            for index, step in enumerate(steps, start=1)
+        }
+        data["steps"] = [
+            {
+                "step_index": index,
+                "symbol": copy.deepcopy(step.get("symbol") or {}),
+                "params": copy.deepcopy(step.get("params") or []),
+                "outputs": copy.deepcopy(step.get("outputs") or []),
+                "literal_values": copy.deepcopy(step.get("literal_values") or {}),
+                "literal_value_provenance": copy.deepcopy(
+                    step.get("literal_value_provenance") or {}
+                ),
+                "literal_value_details": copy.deepcopy(
+                    step.get("literal_value_details") or {}
+                ),
+                "unresolved_inputs": copy.deepcopy(step.get("unresolved_inputs") or []),
+                "operation_contract": copy.deepcopy(step.get("operation_contract") or {}),
+            }
+            for index, step in enumerate(steps, start=1)
+        ]
+        data_links = []
+        flow_links = []
+        view = getattr(self, "wf_node_view", None)
+        for link in getattr(view, "links", []) if view is not None else []:
+            source_index = index_by_id.get(str(link.from_step or ""))
+            target_index = index_by_id.get(str(link.to_step or ""))
+            if not source_index or not target_index:
+                continue
+            if link.link_type == "data":
+                data_links.append({
+                    "from_step": source_index,
+                    "from_output": link.from_output,
+                    "to_step": target_index,
+                    "to_input": link.to_input,
+                })
+            elif link.link_type == "flow":
+                flow_links.append({
+                    "from_step": source_index,
+                    "to_step": target_index,
+                })
+        data["data_links"] = data_links
+        data["flow_links"] = flow_links
+        try:
+            from tech_connector.services.pipeline_graph_intelligence_service import graph_snapshot_from_view
+
+            data["nodes"] = list((graph_snapshot_from_view(view) or {}).get("nodes") or [])
+        except Exception:
+            pass
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
     def _pipeline_params_for_symbol(self, symbol: dict):
         if (symbol or {}).get("kind") == "class":
             try:
@@ -346,12 +488,6 @@ class MainWindowWorkflowAuthoringMixin:
                 facts.append(f"{key.replace('_', ' ')}={value}")
         suffix = f" ({', '.join(facts)})" if facts else ""
         self._report_workflow_builder_event(f"[{status}] {label}{suffix}")
-        try:
-            from PySide6.QtWidgets import QApplication
-
-            QApplication.processEvents()
-        except Exception:
-            pass
 
     def _format_pipeline_data_flow_issues(self, issues, limit: int = 10) -> str:
         shown = []
@@ -418,10 +554,41 @@ class MainWindowWorkflowAuthoringMixin:
     def _handle_pipeline_graph_changed(self, *args, **kwargs):
         if getattr(self, "_syncing_workflow_python_to_graph", False):
             return
+        timer = getattr(self, "_pipeline_graph_refresh_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._flush_pipeline_graph_changed)
+            self._pipeline_graph_refresh_timer = timer
+        timer.start(90)
+
+    def _flush_pipeline_graph_changed(self):
+        """Coalesce graph signal bursts into one moderately expensive UI refresh."""
+        if getattr(self, "_syncing_workflow_python_to_graph", False):
+            return
+        started = time.perf_counter()
         self._refresh_pipeline_attribute_connection_state()
+        attribute_ms = (time.perf_counter() - started) * 1000.0
         self._refresh_pipeline_auto_metadata()
+        metadata_ms = (time.perf_counter() - started) * 1000.0 - attribute_ms
         self.update_builder_code_preview()
+        codegen_ms = (time.perf_counter() - started) * 1000.0 - attribute_ms - metadata_ms
         self._refresh_pipeline_data_flow_warnings()
+        total_ms = (time.perf_counter() - started) * 1000.0
+        if total_ms >= 80 and hasattr(self, "record_ui_diagnostic_event"):
+            try:
+                self.record_ui_diagnostic_event(
+                    "pipeline_graph_refresh",
+                    {
+                        "duration_ms": round(total_ms, 1),
+                        "attribute_ms": round(attribute_ms, 1),
+                        "metadata_ms": round(metadata_ms, 1),
+                        "codegen_ms": round(codegen_ms, 1),
+                        "node_count": len(getattr(self, "wf_builder_steps", []) or []),
+                    },
+                )
+            except Exception:
+                pass
 
     def _handle_pipeline_node_deleted(self, node_ids):
         node_ids = set(node_ids or [])
@@ -440,9 +607,7 @@ class MainWindowWorkflowAuthoringMixin:
             else:
                 kept.append(step)
         self.wf_builder_steps = kept
-        self._refresh_pipeline_auto_metadata()
-        self.update_builder_code_preview()
-        self._refresh_pipeline_data_flow_warnings()
+        self._handle_pipeline_graph_changed()
 
     def _schedule_workflow_python_to_graph_sync(self):
         if getattr(self, "_updating_workflow_python_from_graph", False):
@@ -620,7 +785,7 @@ class MainWindowWorkflowAuthoringMixin:
                     symbol["outputs"] = parsed_symbol.get("outputs")
                 if parsed_symbol.get("file_path"):
                     symbol["file_path"] = parsed_symbol.get("file_path")
-                step_data = self.add_builder_step(custom_sym=symbol)
+                step_data = self._add_builder_step_deferred(symbol)
                 if not step_data:
                     continue
                 step_data["literal_values"] = copy.deepcopy(parsed_step.get("literal_values") or {})
@@ -636,7 +801,7 @@ class MainWindowWorkflowAuthoringMixin:
             if view is not None:
                 for step in added_steps:
                     if hasattr(view, "refresh_node_literals"):
-                        view.refresh_node_literals(step)
+                        view.refresh_node_literals(step, emit_signal=False)
             self._workflow_python_manually_edited = previous_manual_state
             self._report_workflow_builder_event(
                 f"Synced Pipeline Python into graph: {len(added_steps)} node(s), "
@@ -647,7 +812,13 @@ class MainWindowWorkflowAuthoringMixin:
             self._workflow_python_manually_edited = previous_manual_state
             raise
 
-    def _sync_builder_step_to_graph(self, step_data: dict):
+    def _sync_builder_step_to_graph(
+        self,
+        step_data: dict,
+        *,
+        emit_signals: bool = True,
+        push_undo: bool = True,
+    ):
         view = getattr(self, "wf_node_view", None)
         if not view or not step_data or step_data.get("graph_step_id"):
             return
@@ -655,7 +826,13 @@ class MainWindowWorkflowAuthoringMixin:
             symbol = step_data.get("symbol") or {}
             params = step_data.get("params") or self._pipeline_params_for_symbol(symbol)
             outputs = step_data.get("outputs") or self._pipeline_outputs_for_symbol(symbol)
-            view.add_pipeline_step(step_data, params, outputs)
+            view.add_pipeline_step(
+                step_data,
+                params,
+                outputs,
+                emit_signals=emit_signals,
+                push_undo=push_undo,
+            )
         except Exception as exc:
             try:
                 self._report_workflow_builder_event(f"Could not add step to node graph: {exc}")
@@ -686,7 +863,12 @@ class MainWindowWorkflowAuthoringMixin:
             view.scene_obj.addItem(view.empty)
             for step in getattr(self, "wf_builder_steps", []) or []:
                 step.pop("graph_step_id", None)
-                self._sync_builder_step_to_graph(step)
+                self._sync_builder_step_to_graph(
+                    step,
+                    emit_signals=False,
+                    push_undo=False,
+                )
+            view.refresh_links(rebuild=True)
             view.graphChanged.emit()
             view.orderChanged.emit(view.execution_order())
         except Exception as exc:
@@ -721,6 +903,12 @@ class MainWindowWorkflowAuthoringMixin:
             )
         except Exception:
             pass
+        try:
+            editor.contextValueRequested.connect(
+                self._handle_pipeline_context_value_requested
+            )
+        except Exception:
+            pass
 
     def _handle_pipeline_node_selected(self, step_data: dict):
         editor = getattr(self, "wf_attribute_editor", None)
@@ -731,12 +919,50 @@ class MainWindowWorkflowAuthoringMixin:
             editor.set_node(None)
             return
         connected_inputs = {}
+        connected_input_details = {}
         if view is not None and hasattr(view, "connected_input_sources"):
             try:
                 connected_inputs = view.connected_input_sources(step_data)
             except Exception:
                 connected_inputs = {}
+        if view is not None and hasattr(view, "connected_input_details"):
+            try:
+                connected_input_details = view.connected_input_details(step_data)
+            except Exception:
+                connected_input_details = {}
+        symbol = step_data.get("symbol") or {}
+        params = step_data.get("params") or symbol.get("params") or []
+        connection_signature = (
+            str(step_data.get("graph_step_id") or ""),
+            tuple(sorted((str(key), str(value)) for key, value in connected_inputs.items())),
+            tuple(
+                sorted(
+                    (
+                        str(key),
+                        str((value or {}).get("source_type") or ""),
+                        bool((value or {}).get("compatible", True)),
+                    )
+                    for key, value in connected_input_details.items()
+                )
+            ),
+            tuple(
+                (
+                    str(param.get("name") or ""),
+                    str(param.get("annotation") or ""),
+                    bool(param.get("required")),
+                )
+                for param in params
+            ),
+            str(symbol.get("file_path") or symbol.get("source_path") or ""),
+        )
+        if (
+            getattr(editor, "step_data", None) is step_data
+            and getattr(editor, "_pipeline_connection_signature", None) == connection_signature
+        ):
+            return
         step_data["_connected_inputs"] = connected_inputs
+        step_data["_connected_input_details"] = connected_input_details
+        editor._pipeline_connection_signature = connection_signature
         editor.set_node(step_data)
 
     def _refresh_pipeline_attribute_connection_state(self):
@@ -760,13 +986,86 @@ class MainWindowWorkflowAuthoringMixin:
         view = getattr(self, "wf_node_view", None)
         if view and hasattr(view, "refresh_node_literals"):
             view.refresh_node_literals(step_data)
+        # refresh_node_literals emits graphChanged; the graph refresh timer
+        # regenerates code once after typing pauses instead of on every key.
         try:
-            self._report_workflow_builder_event(
-                f"Set node attribute: {payload.get('input')} = {payload.get('value')!r}"
-            )
+            if hasattr(self, "wf_test_status"):
+                self.wf_test_status.setText(
+                    f"Set node attribute: {payload.get('input')}"
+                )
         except Exception:
             pass
-        self.update_builder_code_preview()
+
+    def _handle_pipeline_context_value_requested(self, payload: dict):
+        editor = getattr(self, "wf_attribute_editor", None)
+        input_name = str((payload or {}).get("input") or "")
+        host = str((payload or {}).get("host") or "")
+        if editor is None or not input_name or not host:
+            return
+        active = getattr(self, "_pipeline_context_value_worker", None)
+        if active is not None and active.isRunning():
+            self._report_workflow_builder_event(
+                "A live host selection is already being read."
+            )
+            return
+        editor.set_context_busy(input_name, True)
+        worker = PipelineContextValueWorker(
+            getattr(self, "command_router", None),
+            host=host,
+            input_name=input_name,
+            multiple=bool((payload or {}).get("multiple", True)),
+            parent=self,
+        )
+        self._pipeline_context_value_worker = worker
+        worker.completed.connect(
+            lambda result, n=input_name, h=host: self._finish_pipeline_context_value(
+                n, h, result
+            )
+        )
+        worker.failed.connect(
+            lambda message, n=input_name, h=host: self._fail_pipeline_context_value(
+                n, h, message
+            )
+        )
+        worker.finished.connect(self._cleanup_pipeline_context_value_worker)
+        worker.start()
+
+    def _finish_pipeline_context_value(self, input_name: str, host: str, result: dict):
+        editor = getattr(self, "wf_attribute_editor", None)
+        if editor is None:
+            return
+        editor.set_context_busy(input_name, False)
+        if not result.get("ok"):
+            message = str(result.get("error") or "Could not read the live selection.")
+            self._report_workflow_builder_event(message)
+            QMessageBox.warning(self, "Selection Unavailable", message)
+            return
+        try:
+            editor.apply_context_value(
+                input_name,
+                result.get("value"),
+                source=f"{host}_live_selection",
+            )
+            self._report_workflow_builder_event(
+                f"Set {input_name} from {result.get('host_label') or host} selection "
+                f"({result.get('count') or 0} item(s))."
+            )
+        except Exception as exc:
+            self._fail_pipeline_context_value(input_name, host, str(exc))
+
+    def _fail_pipeline_context_value(self, input_name: str, host: str, message: str):
+        editor = getattr(self, "wf_attribute_editor", None)
+        if editor is not None:
+            editor.set_context_busy(input_name, False)
+        text = f"Could not read {host} selection for {input_name}: {message}"
+        self._report_workflow_builder_event(text)
+        QMessageBox.warning(self, "Selection Unavailable", text)
+
+    def _cleanup_pipeline_context_value_worker(self):
+        worker = getattr(self, "_pipeline_context_value_worker", None)
+        if worker is not None:
+            worker.deleteLater()
+        self._pipeline_context_value_worker = None
 
     def _handle_pipeline_attribute_open_file(self, payload):
         if isinstance(payload, dict):

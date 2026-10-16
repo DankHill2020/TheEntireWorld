@@ -137,17 +137,14 @@ def provider_account_status(
     try:
         completed = subprocess.run(
             _build_cmd(executable, _status_args(provider_id)),
-            capture_output=True,
-            text=True,
-            timeout=max(1, timeout),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=max(1, min(3, timeout)),
             check=False,
         )
         connected = completed.returncode == 0
-        detail = (
-            (completed.stdout or completed.stderr or "Connected through official account login.").strip()
-            if connected
-            else (completed.stderr or completed.stdout or "Sign in is required.").strip()
-        )
+        detail = "Connected through official account login." if connected else "Sign in is required."
     except (OSError, subprocess.SubprocessError) as exc:
         connected = False
         detail = f"Could not check login status: {exc}"

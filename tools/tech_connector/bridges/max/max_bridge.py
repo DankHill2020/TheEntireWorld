@@ -100,7 +100,7 @@ def _handle(conn):
             if not _tech_connector_bridge_authorized(request):
                 response = {
                     "ok": False,
-                    "error": "Tech Connector activation is required for this DCC bridge.",
+                    "error": "A valid local Tech Connector bridge session is required.",
                     "code": "bridge_authorization_required",
                 }
                 conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
@@ -191,7 +191,7 @@ class MaxBridge(DCCBridgeDelegateMixin):
         default_port=7091,
         setup_script="bridges/max/max_bridge.py",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
     DEFAULT_PORT = 7091
     PORT_FILES = [str(APP_DIR / "3dsmax_port.txt"), str(TOOLS_ROOT / "3dsmax_port.txt")]

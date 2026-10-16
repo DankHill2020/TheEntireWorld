@@ -99,11 +99,23 @@ def test_gameplay_class_python_api_and_editor_pages_have_full_workflow(tmp_path)
             {"id": "set_value_again", "title": "Set Value Again", "opcode": "variable.set", "inputs": ["name:str", "value:any"], "outputs": ["value:any"], "parameters": {"name": "Enabled", "value": True}},
         ], "connections": [],
     }})
+    debugger = GameplayClassDebuggerWidget(tmp_path, database, receipt.asset_id)
+    debugger.breakpoints.setText("set_value_again"); debugger.watches.setText("metadata.variables.Enabled")
+    ui_started = debugger.attach()
+    assert ui_started["execution_mode"] == "editor_simulation"
+    assert debugger.nodes.rowCount() == 2
+    assert debugger.watch_values.rowCount() == 1
+    assert "SIMULATION" in debugger.status.text()
+    debugger.stop()
+
     live_context = {"metadata": {"variables": {}}}
     started = api.begin_gameplay_class_debug_session(
         receipt.asset_id, context=live_context, breakpoints=["set_value_again"], watches=["metadata.variables.Enabled"],
+        execution_mode="runtime_execution", selected_entity_id="Self",
     )
     assert started["status"] == "paused" and started["watches"]["metadata.variables.Enabled"] is False
+    assert started["execution_mode"] == "runtime_execution" and started["selected_entity_id"] == "Self"
+    assert api.gameplay_class_debug_command(started["session_id"], "select_entity", entity_id="Self")["selected_entity_id"] == "Self"
     stepped = api.gameplay_class_debug_command(started["session_id"], "step")
     assert stepped["status"] == "complete" and stepped["watches"]["metadata.variables.Enabled"] is True
     assert live_context["metadata"]["variables"]["Enabled"] is True

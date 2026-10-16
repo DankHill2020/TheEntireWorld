@@ -251,7 +251,7 @@ class PhotoshopBridge:
         default_port=7061,
         setup_script="bridges/photoshop/photoshop_bridge.py",
         supports_direct_execute=False,
-        supports_mcp=False,
+        supports_mcp=True,
     )
     PORT_FILES = [
         str(APP_DIR / "photoshop_port.txt"),
@@ -262,6 +262,11 @@ class PhotoshopBridge:
         str(TOOLS_ROOT),
         str(APP_ROOT),
     ]
+
+    def session_registry(self, host: str = "127.0.0.1") -> dict[str, Any]:
+        from tech_connector.bridges.session_discovery import bridge_session_diagnostics
+
+        return bridge_session_diagnostics("photoshop", self, host=host)
 
     def find_port(self, host: str = "127.0.0.1") -> int | None:
         ports = self.find_ports(host=host)

@@ -2146,7 +2146,7 @@ class TargetDiscoveryEditProvider:
                 context.model
                 or settings.get("code_model")
                 or settings.get("model")
-                or "qwen2.5-coder:7b"
+                or "qwen3.5:4b"
             ),
             settings=settings,
             timeout=float(settings.get("llm_timeout") or 210.0),

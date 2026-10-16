@@ -91,6 +91,27 @@ class InteractionLifecycleManager:
             return False
         return self.cancel_operation(self._active_operation_id, reason=reason)
 
+    def complete_operation(self, operation_id: str) -> bool:
+        """Mark an active operation complete without misreporting it as cancelled."""
+
+        operation = self.get_operation(operation_id)
+        if not operation or operation.status != "active":
+            return False
+        operation.status = "completed"
+        operation.cancellation_reason = ""
+        operation.updated_at = time.time()
+        for request in operation.provider_requests.values():
+            if request.status == "running":
+                request.status = "completed"
+        if self._active_operation_id == operation.operation_id:
+            self._active_operation_id = ""
+        return True
+
+    def complete_current(self) -> bool:
+        if not self._active_operation_id:
+            return False
+        return self.complete_operation(self._active_operation_id)
+
     def start_provider_request(self, *, operation_id: str, continuation_id: str, slot_name: str) -> ProviderGeneration:
         operation = self.get_operation(operation_id)
         if not operation or operation.status != "active":

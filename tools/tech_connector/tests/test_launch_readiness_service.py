@@ -54,6 +54,20 @@ def test_editor_api_launch_contract_contains_only_callable_operations(tmp_path) 
     assert api.audit_launch_readiness()["schema"] == "tech_connector.launch_readiness.v1"
 
 
+def test_editor_api_launch_audit_supports_non_git_project_roots(tmp_path) -> None:
+    project_root = tmp_path / "artist-project"
+    project_root.mkdir()
+    api = TCEditorAPI(
+        project_root,
+        database=AssetDatabase(tmp_path / "non-git-project-assets.sqlite3"),
+    )
+
+    audit = api.audit_launch_readiness()
+
+    assert audit["schema"] == "tech_connector.launch_readiness.v1"
+    assert next(row for row in audit["gates"] if row["gate"] == "public_package")["status"] == "passed"
+
+
 def test_launch_readiness_panel_exposes_fail_closed_gates(tmp_path) -> None:
     from tech_connector.ui.game_engine.production_tools import LaunchReadinessPanel
 

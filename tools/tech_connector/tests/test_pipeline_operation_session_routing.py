@@ -26,6 +26,7 @@ def test_generic_python_host_operation_stays_on_explicit_session(monkeypatch) ->
     assert result == {"host": "3dsmax", "port": 7094}
     assert calls[0][1] == 7094
     assert operation.function in calls[0][0]
+    assert "json.dumps(result, default=str)" in calls[0][0]
 
 
 def test_photoshop_and_gimp_operations_stay_on_explicit_sessions(monkeypatch) -> None:

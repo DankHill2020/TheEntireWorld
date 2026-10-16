@@ -113,6 +113,169 @@ def _unwrap(response: Any) -> dict[str, Any]:
     return {"result": payload}
 
 
+def _read_dcc_export_scope(
+    host: str,
+    spec: dict[str, Any],
+    *,
+    session_port: int | None,
+    timeout_seconds: float,
+) -> list[str]:
+    scope = str(spec.get("scope") or "current_selection_or_subject")
+    subject = str(spec.get("subject") or "asset")
+    if host == "blender":
+        from tech_connector.bridges.blender.blender_bridge import BlenderBridge
+
+        code = f'''import bpy, json
+scope = {scope!r}
+subject = {subject!r}
+selected = list(bpy.context.selected_objects)
+scene_objects = list(bpy.context.scene.objects)
+result = []
+def add(obj):
+    if obj is not None and obj.name not in result:
+        result.append(obj.name)
+if scope == "scene_contents":
+    for obj in scene_objects:
+        if obj.type in {{"MESH", "ARMATURE", "EMPTY", "CURVE"}}:
+            add(obj)
+elif scope == "active_object":
+    add(bpy.context.object)
+elif scope == "rig_contents":
+    armatures = []
+    for obj in selected + ([bpy.context.object] if bpy.context.object else []):
+        armature = obj if obj and obj.type == "ARMATURE" else (obj.find_armature() if obj else None)
+        if armature is not None and armature not in armatures:
+            armatures.append(armature)
+    if not armatures:
+        armatures = [obj for obj in scene_objects if obj.type == "ARMATURE" and getattr(getattr(obj, "animation_data", None), "action", None)]
+    if not armatures and len([obj for obj in scene_objects if obj.type == "ARMATURE"]) == 1:
+        armatures = [obj for obj in scene_objects if obj.type == "ARMATURE"]
+    for armature in armatures:
+        add(armature)
+        for obj in scene_objects:
+            if obj.find_armature() == armature:
+                add(obj)
+            parent = obj.parent
+            while parent is not None:
+                if parent == armature:
+                    add(obj)
+                    break
+                parent = parent.parent
+    if not result:
+        for obj in selected:
+            add(obj)
+elif scope == "selected_or_scene_meshes":
+    meshes = [obj for obj in selected if obj.type == "MESH"] or [obj for obj in scene_objects if obj.type == "MESH"]
+    for obj in meshes:
+        add(obj)
+else:
+    candidates = selected
+    if not candidates and subject == "static_mesh":
+        candidates = [obj for obj in scene_objects if obj.type == "MESH"]
+    for obj in candidates:
+        add(obj)
+print(json.dumps({{"selection": result, "scope": scope}}))'''
+        bridge = BlenderBridge()
+        response = (
+            bridge.execute_on_port(code, port=int(session_port), timeout=timeout_seconds)
+            if session_port is not None
+            else bridge.execute(code, timeout=timeout_seconds)
+        )
+    elif host == "maya":
+        from tech_connector.bridges.maya.maya_bridge import MayaBridge
+
+        code = f'''import json
+import maya.cmds as cmds
+scope = {scope!r}
+selected = cmds.ls(selection=True, long=True) or []
+result = []
+def add(values):
+    for value in values or []:
+        if value and value not in result:
+            result.append(value)
+if scope == "scene_contents":
+    add(cmds.ls(dag=True, long=True, type="transform") or [])
+elif scope == "active_object":
+    add(selected[:1])
+elif scope == "rig_contents":
+    joints = cmds.ls(selected, dag=True, long=True, type="joint") or []
+    add(joints)
+    skin_clusters = set()
+    for value in selected + joints:
+        history = cmds.listHistory(value) or []
+        skin_clusters.update(cmds.ls(history, type="skinCluster") or [])
+    for skin in skin_clusters:
+        add(cmds.skinCluster(skin, query=True, geometry=True) or [])
+    add(selected)
+else:
+    add(selected)
+print(json.dumps({{"selection": result, "scope": scope}}))'''
+        bridge = MayaBridge()
+        response = (
+            bridge.execute_on_port(code, port=int(session_port), timeout=timeout_seconds)
+            if session_port is not None
+            else bridge.execute(code, timeout=timeout_seconds)
+        )
+    else:
+        raise RuntimeError(f"Live export-scope resolution is not implemented for {host!r}.")
+    payload = _unwrap(response)
+    selection = payload.get("selection") or payload.get("objects") or []
+    resolved = [str(value) for value in selection if str(value)]
+    if not resolved:
+        raise RuntimeError(
+            f"The {spec.get('label') or scope} export scope resolved no {host} objects."
+        )
+    return resolved
+
+
+def resolve_pipeline_context_params(
+    params: dict[str, Any] | None,
+    *,
+    host: str,
+    session_port: int | None = None,
+    timeout_seconds: float = 120.0,
+    context_reader: Callable[[dict[str, Any]], Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve typed live-context markers immediately before host dispatch."""
+
+    def resolve(value: Any) -> Any:
+        marker = value.get("$pipeline_context") if isinstance(value, dict) else ""
+        if marker in {"dcc_export_scope_v1", "dcc_input_context_v1"}:
+            context_spec = dict(value)
+            if marker == "dcc_input_context_v1":
+                context_spec["scope"] = (
+                    "active_object"
+                    if value.get("context_kind") == "active_object"
+                    else "current_selection"
+                )
+            result = (
+                context_reader(dict(context_spec))
+                if context_reader is not None
+                else _read_dcc_export_scope(
+                    host,
+                    context_spec,
+                    session_port=session_port,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+            resolved = [str(item) for item in (result or []) if str(item)]
+            if not resolved:
+                raise RuntimeError(
+                    f"The {value.get('label') or value.get('scope') or value.get('context_kind')} "
+                    "context resolved no objects."
+                )
+            return resolved if bool(value.get("multiple", True)) else resolved[0]
+        if isinstance(value, dict):
+            return {key: resolve(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [resolve(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(resolve(item) for item in value)
+        return value
+
+    return {key: resolve(value) for key, value in dict(params or {}).items()}
+
+
 def _execute_pipeline_operation_once(
     host: str,
     operation: str,
@@ -203,6 +366,16 @@ def _execute_pipeline_operation_once(
         bridge = UnityBridge()
         command = callable_name.removeprefix("unity.command.")
         return _unwrap(bridge.execute_command(command, kwargs, port=session_port))
+
+    if host == "tech_connector":
+        import importlib
+
+        module_name, separator, function_name = callable_name.rpartition(".")
+        if not separator:
+            raise ValueError(f"Tech Connector callable must be module-qualified: {callable_name}")
+        function = getattr(importlib.import_module(module_name), function_name)
+        result = function(**kwargs)
+        return _unwrap(result)
 
     bridge_types = {}
     if host == "maya":
@@ -306,11 +479,22 @@ def execute_pipeline_operation(
         publish("cancelled", 0, message)
         raise PipelineOperationCancelled(message)
 
+    try:
+        resolved_params = resolve_pipeline_context_params(
+            params,
+            host=normalized_host,
+            session_port=session_port,
+            timeout_seconds=bounded_timeout,
+        )
+    except Exception as error:
+        publish("failed", 0, f"Could not resolve live pipeline context: {error}")
+        raise
+
     for attempt in range(1, maximum_attempts + 1):
         publish("dispatching", attempt, f"Dispatching to {normalized_host or 'host'}.")
         try:
             result = _execute_pipeline_operation_once(
-                normalized_host, normalized_operation, normalized_callable, params,
+                normalized_host, normalized_operation, normalized_callable, resolved_params,
                 session_port=session_port, timeout_seconds=bounded_timeout,
             )
         except Exception as error:
@@ -336,5 +520,6 @@ __all__ = [
     "PIPELINE_OPERATION_EVENT_SCHEMA",
     "PipelineOperationCancelled",
     "execute_pipeline_operation",
+    "resolve_pipeline_context_params",
 ]
 

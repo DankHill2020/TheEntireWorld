@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from tech_connector.services.credential_store import default_credential_store
@@ -105,6 +106,8 @@ def _credential_store(store=None):
 def load_settings(*, credential_store=None) -> dict:
     defaults = {
         "extra_dirs": [],
+        "multi_root_index_version": 0,
+        "multi_root_index_pending": True,
         "tool_bundle_dirs": [],
         "first_run_complete": False,
         "model": DEFAULT_MODEL,
@@ -240,12 +243,15 @@ def load_settings(*, credential_store=None) -> dict:
         "viewport_environment_texture": "",
         "viewport_environment_exposure": 1.0,
         "router_embed": "nomic-embed-text",
-        "router_local_code": "qwen2.5-coder:7b",
-        "router_local_plan": "qwen3:4b-instruct",
-        "router_local_deep": "qwen3:4b-instruct",
-        "router_visual_media": "qwen3:4b-instruct",
-        "router_fast_llm_model": "qwen3:4b-instruct",
-        "ollama_keep_alive": "10m",
+        "local_model_policy": "hardware_aware",
+        "local_speed_target_tokens_per_second": 40.0,
+        "local_quality_escalation_enabled": True,
+        "router_local_code": "qwen3.5:4b",
+        "router_local_plan": "qwen3.5:4b",
+        "router_local_deep": "qwen3.5:9b",
+        "router_visual_media": "qwen3.5:4b",
+        "router_fast_llm_model": "qwen3.5:4b",
+        "ollama_keep_alive": "30m",
         "ollama_lazy_start": True,
         "ollama_preload_on_startup": False,
         "ollama_unload_on_idle": True,
@@ -269,17 +275,17 @@ def load_settings(*, credential_store=None) -> dict:
         "deep_route_scope": "engine_complex_only",
         "deep_code_complexity_threshold": 7,
         "allow_30b_deep_route": False,
-        "semantic_intent_model": "qwen3:4b-instruct",
-        "semantic_verifier_model": "qwen3:4b-instruct",
-        "semantic_alignment_model": "qwen3:4b-instruct",
-        "causal_repair_model": "qwen3:4b-instruct",
-        "fast_general_model": "qwen3:4b-instruct",
-        "visual_media_model": "qwen3:4b-instruct",
-        "fast_code_model": "qwen2.5-coder:7b",
+        "semantic_intent_model": "qwen3.5:4b",
+        "semantic_verifier_model": "qwen3.5:4b",
+        "semantic_alignment_model": "qwen3.5:4b",
+        "causal_repair_model": "qwen3.5:4b",
+        "fast_general_model": "qwen3.5:4b",
+        "visual_media_model": "qwen3.5:4b",
+        "fast_code_model": "qwen3.5:4b",
         "embedding_model": "nomic-embed-text:latest",
-        "fallback_general_model": "qwen3:4b-instruct",
-        "fallback_semantic_intent_model": "qwen3:4b-instruct",
-        "fallback_code_model": "qwen2.5-coder:7b",
+        "fallback_general_model": "qwen3.5:4b",
+        "fallback_semantic_intent_model": "qwen3.5:4b",
+        "fallback_code_model": "qwen3.5:4b",
         "ollama_preload_models": [],
         "custom_model_mappings": {},
         "custom_provider_function_bindings": {},
@@ -299,7 +305,7 @@ def load_settings(*, credential_store=None) -> dict:
         "gemini_api_key": "",
         "xai_api_key": "",
         "provider_executables": {},
-        "cloud_provider_model": "gpt-4o",
+        "cloud_provider_model": "openai:gpt-6.1-sol",
         "asset_optimizer_provider_module": "default",
         "use_websocket_bridge": False,
         "chatbot_provider_module": "default",
@@ -336,13 +342,35 @@ def load_settings(*, credential_store=None) -> dict:
             merged = dict(defaults)
             merged.update(data)
             merged = _apply_resource_profile_migration(merged, data)
+            try:
+                indexed_scope_version = int(data.get("multi_root_index_version") or 0)
+            except (TypeError, ValueError):
+                indexed_scope_version = 0
+            if indexed_scope_version < 1:
+                merged["multi_root_index_pending"] = True
             for key in _SECRET_SETTING_KEYS:
                 merged[key] = store.load(key)
-            if (
-                not bool(merged.get("allow_30b_deep_route", False))
-                and str(merged.get("router_local_deep", "")).strip() == "qwen3:4b-instruct"
-            ):
-                merged["router_local_deep"] = "qwen3:4b-instruct"
+            legacy_model_defaults = {
+                "router_local_code": {"qwen2.5-coder:7b": "qwen3.5:4b"},
+                "router_local_plan": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "router_local_deep": {"qwen3:4b-instruct": "qwen3.5:9b"},
+                "router_visual_media": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "router_fast_llm_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "semantic_intent_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "semantic_verifier_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "semantic_alignment_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "causal_repair_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "fast_general_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "visual_media_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "fast_code_model": {"qwen2.5-coder:7b": "qwen3.5:4b"},
+                "fallback_general_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "fallback_semantic_intent_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
+                "fallback_code_model": {"qwen2.5-coder:7b": "qwen3.5:4b"},
+            }
+            for key, replacements in legacy_model_defaults.items():
+                current = str(merged.get(key, "") or "").strip()
+                if current in replacements:
+                    merged[key] = replacements[current]
             return merged
         except Exception:
             pass
@@ -371,6 +399,72 @@ def install_components_to_tools() -> None:
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def resolve_mcp_python_command() -> str:
+    """Return a Python executable that can import the packaged FastMCP runtime."""
+    override = str(os.environ.get("TECH_CONNECTOR_MCP_PYTHON", "") or "").strip()
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", "")) if os.environ.get("LOCALAPPDATA") else None
+    candidates = [Path(override)] if override else []
+    virtual_environment = str(os.environ.get("VIRTUAL_ENV", "") or "").strip()
+    if virtual_environment:
+        candidates.append(Path(virtual_environment) / "Scripts" / "python.exe")
+    candidates.extend((
+        APP_ROOT.parent / ".venv" / "Scripts" / "python.exe",
+        APP_ROOT / ".venv" / "Scripts" / "python.exe",
+    ))
+    if local_app_data is not None:
+        candidates.extend(
+            local_app_data / "Programs" / "Python" / version / "python.exe"
+            for version in ("Python314", "Python313", "Python312", "Python311", "Python310")
+        )
+    discovered = ""
+    for command in ("python3.14", "python"):
+        resolved = shutil.which(command)
+        if resolved:
+            candidates.append(Path(resolved))
+            if not discovered:
+                discovered = resolved
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        path = str(candidate.expanduser())
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized in seen or not candidate.is_file():
+            continue
+        seen.add(normalized)
+        try:
+            probe = subprocess.run(
+                [path, "-c", "import fastmcp"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5.0,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0:
+            return path
+    return override or discovered or "python"
+
+
+def managed_host_mcp_server_specs() -> dict[str, dict]:
+    """Return repo-owned MCP sidecars generated from the shared host facade."""
+    server = APP_ROOT / "bridges" / "host_mcp_server.py"
+    python_command = resolve_mcp_python_command()
+    hosts = (
+        "maya", "blender", "houdini", "unity", "motionbuilder",
+        "3dsmax", "substance_painter", "photoshop", "gimp",
+    )
+    return {
+        host: {
+            "type": "stdio",
+            "command": python_command,
+            "args": [str(server), "--host", host],
+        }
+        for host in hosts
+        if server.exists()
+    }
+
+
 def update_mcp_config() -> str:
     import stat
 
@@ -390,38 +484,25 @@ def update_mcp_config() -> str:
         data = {"mcpServers": {}}
 
     servers = data.setdefault("mcpServers", {})
-    for managed_name in ("knowledge", "maya", "motionbuilder", "unreal", "unrealgenai"):
+    python_command = resolve_mcp_python_command()
+    for managed_name in (
+        "knowledge", "maya", "blender", "houdini", "unity", "motionbuilder",
+        "3dsmax", "substance_painter", "photoshop", "gimp", "unreal", "unrealgenai",
+    ):
         servers.pop(managed_name, None)
 
     servers["knowledge"] = {
         "type": "stdio",
-        "command": "python",
+        "command": python_command,
         "args": [str(APP_ROOT / "knowledge" / "knowledge_mcp_server_v2.py")],
     }
-    motionbuilder_server = APP_ROOT / "bridges" / "motionbuilder" / "motionbuilder_mcp_server.py"
-    if motionbuilder_server.exists():
-        servers["motionbuilder"] = {
-            "type": "stdio",
-            "command": "python",
-            "args": [str(motionbuilder_server)],
-        }
+    servers.update(managed_host_mcp_server_specs())
     unreal_server = APP_ROOT / "bridges" / "unreal" / "unreal_mcp_server.py"
     if unreal_server.exists():
         servers["unreal"] = {
             "type": "stdio",
-            "command": "python",
+            "command": python_command,
             "args": [str(unreal_server)],
-        }
-    maya_candidates = [
-        APP_ROOT / "maya_mcp_server_quiet.py",
-        Path(r"C:\Desktop\UnrealGenAISupport\Content\Python\maya_mcp_server_quiet.py"),
-    ]
-    maya_server = next((path for path in maya_candidates if path.exists()), None)
-    if maya_server:
-        servers["maya"] = {
-            "type": "stdio",
-            "command": "python",
-            "args": [str(maya_server)],
         }
     servers["ludus-mcp"] = {
         "type": "stdio",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from tech_connector.game_engine.assets import (
     AssetDatabase,
+    BulkAssetOperationService,
     AssetInUseError,
     AssetOperationsService,
     AssetProductionService,
@@ -19,8 +21,36 @@ from tech_connector.game_engine.assets import (
     builtin_asset_type_registry,
     read_asset_metadata,
 )
+from tech_connector.game_engine.assets.editor_python_api import TCEditorAPI
 from tech_connector.ui.game_engine.asset_browser import AssetBrowserWidget
+from tech_connector.ui.game_engine.bulk_asset_dialog import BulkAssetOperationsDialog
 from tech_connector.ui.game_engine.asset_editor_routing import AssetEditorRouter
+
+
+def test_asset_metadata_write_retries_transient_windows_replace_error(tmp_path, monkeypatch) -> None:
+    from tech_connector.game_engine.assets import asset_metadata_service
+
+    source = tmp_path / "M_Demo.material.tcasset"
+    source.write_text("{}", encoding="utf-8")
+    actual_replace = asset_metadata_service.os.replace
+    attempts = []
+
+    def transient_replace(source_path, target_path):
+        attempts.append((source_path, target_path))
+        if len(attempts) < 3:
+            raise PermissionError("temporary scanner lock")
+        return actual_replace(source_path, target_path)
+
+    monkeypatch.setattr(asset_metadata_service.os, "replace", transient_replace)
+    written = asset_metadata_service.write_asset_metadata(
+        source,
+        asset_id="tc.asset.demo",
+        type_id="tc.material",
+    )
+
+    assert written.is_file()
+    assert len(attempts) == 3
+    assert not list(tmp_path.glob(".M_Demo.material.tcasset.tcmeta.*.tmp"))
 
 
 def _application() -> QApplication:
@@ -130,6 +160,33 @@ def test_reimport_refreshes_content_without_changing_identity(tmp_path) -> None:
     assert record.revision == 2
 
 
+def test_import_presets_and_conflict_policies_preserve_safe_asset_identity(tmp_path) -> None:
+    project = tmp_path / "Project"
+    project.mkdir()
+    external = tmp_path / "crate.png"
+    external.write_bytes(b"first")
+    database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    operations = AssetOperationsService(project, database)
+
+    first = operations.import_asset(
+        external, importer_settings={"compression": "high_quality"}, conflict_policy="rename",
+    )
+    initial_record = database.asset(first.asset_id)
+    assert initial_record is not None
+    assert initial_record.metadata["importer_settings"]["compression"] == "high_quality"
+    external.write_bytes(b"second")
+    renamed = operations.import_asset(external, conflict_policy="rename")
+    replaced = operations.import_asset(external, conflict_policy="replace")
+
+    first_record = database.asset(first.asset_id)
+    renamed_record = database.asset(renamed.asset_id)
+    replaced_record = database.asset(replaced.asset_id)
+    assert first_record is not None
+    assert renamed_record is not None and renamed_record.source_path.name.casefold() == "crate_copy.png"
+    assert replaced.asset_id == first.asset_id
+    assert replaced_record is not None and replaced_record.source_path.read_bytes() == b"second"
+
+
 def test_reference_report_and_legacy_path_fixup(tmp_path) -> None:
     project = tmp_path / "Project"
     assets = project / "Assets"
@@ -215,6 +272,95 @@ def test_validation_and_create_undo_are_user_recoverable(tmp_path) -> None:
 
     operations.undo_last()
     assert database.asset(created.asset_id) is None
+
+
+def test_bulk_asset_plan_executes_one_undoable_rename_and_tag_transaction(tmp_path) -> None:
+    project = tmp_path / "Project"; project.mkdir()
+    database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    operations = AssetOperationsService(project, database)
+    first = operations.create_asset("tc.data", "First")
+    second = operations.create_asset("tc.data", "Second")
+    bulk = BulkAssetOperationService(project, database, operations=operations)
+
+    plan = bulk.plan("rename", [first.asset_id, second.asset_id], options={
+        "template": "{prefix}{name}_{index}", "prefix": "Batch_", "start_index": 1, "digits": 2,
+    })
+    assert plan.executable and plan.ready_count == 2
+    assert [Path(item.destination_path).stem for item in plan.items] == ["Batch_First_01", "Batch_Second_02"]
+    receipt = bulk.execute(plan)
+    assert receipt.undoable and operations.undo_label == "Bulk Rename (2 assets)"
+    assert database.asset(first.asset_id).source_path.stem.casefold() == "batch_first_01"
+    operations.undo_last()
+    assert database.asset(first.asset_id).source_path.stem.casefold() == "first"
+    assert database.asset(second.asset_id).source_path.stem.casefold() == "second"
+
+    tags = bulk.plan("tag", [first.asset_id, second.asset_id], options={"add_tags": "hero, gameplay"})
+    bulk.execute(tags)
+    assert set(database.asset(first.asset_id).metadata["tags"]) == {"hero", "gameplay"}
+    assert operations.undo_label == "Bulk Tag (2 assets)"
+    operations.undo_last()
+    assert not database.asset(first.asset_id).metadata.get("tags")
+
+
+def test_bulk_preflight_blocks_conflicts_and_rejects_stale_plans(tmp_path) -> None:
+    project = tmp_path / "Project"; project.mkdir()
+    database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    operations = AssetOperationsService(project, database)
+    first = operations.create_asset("tc.data", "One")
+    second = operations.create_asset("tc.data", "Two")
+    bulk = BulkAssetOperationService(project, database, operations=operations)
+    conflict = bulk.plan("rename", [first.asset_id, second.asset_id], options={"template": "Same"})
+    assert not conflict.executable and conflict.blocked_count == 1
+    with pytest.raises(ValueError, match="blocked"):
+        bulk.execute(conflict)
+
+    stale = bulk.plan("move", [first.asset_id], options={"destination_folder": "Assets/Moved"})
+    operations.set_asset_tags(first.asset_id, add=("changed",))
+    with pytest.raises(RuntimeError, match="stale"):
+        bulk.execute(stale)
+
+
+def test_bulk_validate_cook_export_and_python_api_are_dry_run_first(tmp_path) -> None:
+    project = tmp_path / "Project"; project.mkdir()
+    api = TCEditorAPI(project)
+    first = api.create_asset("tc.data", "One")
+    second = api.create_asset("tc.data", "Two")
+    identifiers = [first.asset_id, second.asset_id]
+
+    preview = api.plan_bulk_asset_operation("validate", identifiers)
+    assert preview["executable"] and preview["ready_count"] == 2
+    validated = api.execute_bulk_asset_operation("validate", identifiers)
+    assert len(validated["results"]) == 2 and not validated["undoable"]
+    cooked = api.execute_bulk_asset_operation("cook", identifiers)
+    assert cooked["results"][0]["asset_ids"]
+    exported = api.execute_bulk_asset_operation("export", identifiers, options={
+        "destination": str(project / "Exports" / "Batch"), "target": "generic",
+    })
+    assert Path(exported["results"][0]["manifest_path"]).is_file()
+    assert {"plan_bulk_asset_operation", "execute_bulk_asset_operation"}.issubset(
+        api.capability_contract()["asset_operations"]
+    )
+
+
+def test_bulk_asset_dialog_previews_each_asset_before_execution(tmp_path) -> None:
+    _application()
+    project = tmp_path / "Project"; project.mkdir()
+    database = AssetDatabase(project / ".tech_connector" / "assets.sqlite3")
+    operations = AssetOperationsService(project, database)
+    first = operations.create_asset("tc.data", "Alpha")
+    second = operations.create_asset("tc.data", "Beta")
+    service = BulkAssetOperationService(project, database, operations=operations)
+    dialog = BulkAssetOperationsDialog(service, [first.asset_id, second.asset_id])
+    dialog.operation.setCurrentIndex(dialog.operation.findData("rename"))
+    dialog.rename_template.setText("{prefix}{name}_{index}")
+    dialog.rename_prefix.setText("Set_")
+    dialog.refresh_plan()
+    assert dialog.preview.rowCount() == 2
+    assert dialog.execute_button.isEnabled()
+    assert dialog.preview.item(0, 4).text() == "READY"
+    dialog.execute_plan()
+    assert dialog.receipt is not None and dialog.receipt.undoable
+    assert operations.undo_label == "Bulk Rename (2 assets)"
 
 
 def test_typed_asset_defaults_and_dependency_closed_cook_manifest(tmp_path) -> None:

@@ -36,17 +36,18 @@ def _function_mentions(text: str) -> list[str]:
 
 def _looks_like_pipeline_request(text: str) -> bool:
     lower = (text or "").lower()
-    # Check for multiple DCC hosts
-    hosts = []
-    for host in ("maya", "unreal", "blender", "substance_painter", "unity", "motionbuilder"):
-        if host in lower or host.replace("_", " ") in lower:
-            hosts.append(host)
-    if len(hosts) >= 2:
+    # Use the same host vocabulary as the typed compiler so planner routing
+    # cannot silently exclude newer hosts such as 3ds Max, Houdini, or TC Engine.
+    from tech_connector.game_engine.integration.dynamic_pipeline_compiler_service import (
+        extract_ordered_hosts,
+    )
+
+    if len(extract_ordered_hosts(text)) >= 2:
         return True
     return bool(
         re.search(
             r"\b("
-            r"pipeline|workflow|node|graph|connected|connection|flow|bind|mapping|maping|bridge|transfer|"
+            r"pipeline|workflow|node|graph|connected|connection|bind|mapping|maping|bridge|transfer|"
             r"multi[- ]?step|step\s+\d+|chain|chained|sequence|sequential|compose|composer|wire|"
             r"node\s+view|builder|data\s+link|data\s+links|flow\s+link|flow\s+links"
             r")\b",
@@ -887,39 +888,95 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
     steps: list[dict[str, Any]] = []
     data_links: list[dict[str, Any]] = []
     flow_links: list[dict[str, Any]] = []
+    provenance_by_stage = {
+        (str(row.get("stage") or ""), str(row.get("parameter") or "")): dict(row)
+        for row in graph.get("parameter_provenance") or []
+        if isinstance(row, dict)
+    }
+    unresolved_by_stage = {
+        (str(row.get("stage") or ""), str(row.get("argument") or "")): dict(row)
+        for row in graph.get("required_inputs") or []
+        if isinstance(row, dict)
+    }
 
     for index, action in enumerate(actions, start=1):
         args = dict(action.get("args") or {})
         host = str(args.get("host") or "").lower()
         operation = str(args.get("operation") or "")
         params = dict(args.get("params") or {})
+        operation_contract = dict(args.get("operation_contract") or {})
+        required_parameter_order = [
+            str(name) for name in operation_contract.get("required") or [] if str(name)
+        ]
+        required_parameters = set(required_parameter_order)
+        optional_defaults = dict(operation_contract.get("optional") or {})
+        action_id = str(action.get("id") or f"step_{index}")
         produces = [str(name) for name in args.get("produces") or [] if str(name)]
         list_string_contract_names = {
+            "animation_paths",
             "armatures",
+            "asset_ids",
+            "asset_paths",
+            "asset_types",
+            "export_objects",
             "imported_paths",
             "joints",
             "materials",
             "meshes",
+            "nodes",
+            "object_names",
             "objects",
             "saved_paths",
             "selection",
+            "texture_paths",
         }
         list_mapping_contract_names = {"assets", "imported_assets"}
+        parameter_names = list(
+            dict.fromkeys(
+                [*required_parameter_order, *optional_defaults.keys(), *params.keys()]
+            )
+        )
         param_contracts = [
             {
                 "name": str(name),
                 "annotation": (
                     "list[str]"
                     if str(name) in list_string_contract_names
+                    or (
+                        isinstance(params.get(name), dict)
+                        and str(params.get(name, {}).get("result_path") or "").split(".", 1)[0]
+                        in list_string_contract_names
+                    )
                     else "list[dict[str, Any]]"
                     if str(name) in list_mapping_contract_names
                     else "str"
-                    if name == "code" or isinstance(value, str)
+                    if name == "code"
+                    or isinstance(params.get(name, optional_defaults.get(name)), str)
+                    or str(name).endswith(("_path", "_file", "_name", "_root"))
+                    or str(name) in {"filepath", "filename", "file", "path"}
+                    else "bool"
+                    if isinstance(params.get(name, optional_defaults.get(name)), bool)
+                    else "int"
+                    if isinstance(params.get(name, optional_defaults.get(name)), int)
+                    else "float"
+                    if isinstance(params.get(name, optional_defaults.get(name)), float)
+                    else "dict[str, Any]"
+                    if isinstance(params.get(name, optional_defaults.get(name)), dict)
+                    else "list[Any]"
+                    if isinstance(params.get(name, optional_defaults.get(name)), list)
                     else "Any"
                 ),
-                "required": True,
+                "required": (
+                    str(name) in required_parameters
+                    or (action_id, str(name)) in unresolved_by_stage
+                ),
+                **(
+                    {"default": optional_defaults[str(name)]}
+                    if str(name) in optional_defaults
+                    else {}
+                ),
             }
-            for name, value in params.items()
+            for name in parameter_names
         ]
         output_contracts = [
             {
@@ -929,14 +986,78 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
                     if name in list_string_contract_names
                     else "list[dict[str, Any]]"
                     if name in list_mapping_contract_names
+                    else "str"
+                    if str(name).endswith(("_path", "_file", "_name", "_root"))
+                    or str(name) in {
+                        "filepath", "filename", "file", "path", "transfer_path",
+                        "fbx_path", "usd_path", "abc_path",
+                    }
+                    else "int"
+                    if str(name).endswith("_count")
                     else "Any"
                 ),
             }
             for name in produces
         ]
         literal_values: dict[str, Any] = {}
+        literal_value_provenance: dict[str, str] = {}
+        literal_value_details: dict[str, dict[str, Any]] = {}
 
         for param_name, value in params.items():
+            parameter_name = str(param_name)
+            provenance = provenance_by_stage.get((action_id, parameter_name), {})
+            source = str(
+                "required_user_input"
+                if (action_id, parameter_name) in unresolved_by_stage
+                else provenance.get("source")
+                or (
+                    "operation_default"
+                    if parameter_name in optional_defaults
+                    and value == optional_defaults.get(parameter_name)
+                    else "planned_value"
+                )
+            )
+            literal_value_provenance[parameter_name] = source
+            literal_value_details[parameter_name] = {
+                "source": source,
+                "resolution": str(provenance.get("resolution") or ""),
+                "required": (
+                    parameter_name in required_parameters
+                    or (action_id, parameter_name) in unresolved_by_stage
+                ),
+                "missing": (action_id, parameter_name) in unresolved_by_stage,
+                "question": str(
+                    unresolved_by_stage.get((action_id, parameter_name), {}).get("question")
+                    or ""
+                ),
+                "expected_type": next(
+                    (
+                        str(row.get("annotation") or "Any")
+                        for row in param_contracts
+                        if row.get("name") == parameter_name
+                    ),
+                    "Any",
+                ),
+            }
+            if isinstance(value, dict) and "from_action" in value and "result_path" in value:
+                source_index = action_indexes.get(str(value.get("from_action") or ""))
+                source_output = str(value.get("result_path") or "").split(".", 1)[0]
+                if source_index and source_output:
+                    data_links.append(
+                        {
+                            "from_step": source_index,
+                            "from_output": source_output,
+                            "to_step": index,
+                            "to_input": str(param_name),
+                            "reason": f"Bind typed `{source_output}` output from the planned upstream action.",
+                        }
+                    )
+                    # Preserve the structured reference as a code-generation
+                    # fallback. UI graph views consume ``data_links``; direct
+                    # API callers that pass only ``steps`` still compile the
+                    # same typed handoff through _pipeline_literal_expr.
+                    literal_values[str(param_name)] = value
+                    continue
             if isinstance(value, str) and value.startswith("$"):
                 output_name = value[1:]
                 producer = produced_by.get(output_name)
@@ -951,10 +1072,47 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
                             "reason": f"Bind `{source_output}` from the prior DCC stage.",
                         }
                     )
-                continue
+                    continue
             literal_values[str(param_name)] = value
 
-        action_id = str(action.get("id") or f"step_{index}")
+        # Required arguments may intentionally be absent from ``params`` when
+        # the compiler could not resolve them. Keep them in the editable graph
+        # with explicit missing provenance instead of silently dropping them.
+        for parameter_name in parameter_names:
+            if parameter_name in literal_value_details:
+                continue
+            unresolved = unresolved_by_stage.get((action_id, parameter_name), {})
+            source = "required_user_input" if unresolved else "operation_default"
+            literal_value_provenance[parameter_name] = source
+            literal_value_details[parameter_name] = {
+                "source": source,
+                "resolution": "",
+                "required": bool(unresolved) or parameter_name in required_parameters,
+                "missing": bool(unresolved),
+                "question": str(unresolved.get("question") or ""),
+                "expected_type": next(
+                    (
+                        str(row.get("annotation") or "Any")
+                        for row in param_contracts
+                        if row.get("name") == parameter_name
+                    ),
+                    "Any",
+                ),
+            }
+
+        function_path = str(args.get("callable") or "")
+        try:
+            from tech_connector.services.pipeline_source_location_service import (
+                resolve_pipeline_source_location,
+            )
+
+            source_location = resolve_pipeline_source_location(
+                function_path,
+                operation=operation,
+                host=host,
+            )
+        except Exception:
+            source_location = {}
         steps.append(
             {
                 "id": action_id,
@@ -965,7 +1123,8 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
                     "provider_id": host,
                     "pipeline_operation": "dcc_operation",
                     "operation": operation,
-                    "function_path": str(args.get("callable") or ""),
+                    "function_path": function_path,
+                    **source_location,
                     "params": param_contracts,
                     "outputs": output_contracts,
                     "return_annotation": "dict[str, Any]",
@@ -973,6 +1132,14 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
                 "params": param_contracts,
                 "outputs": output_contracts,
                 "literal_values": literal_values,
+                "literal_value_provenance": literal_value_provenance,
+                "literal_value_details": literal_value_details,
+                "unresolved_inputs": [
+                    dict(row)
+                    for (stage, _parameter), row in unresolved_by_stage.items()
+                    if stage == action_id
+                ],
+                "operation_contract": operation_contract,
             }
         )
         for output_name in produces:
@@ -989,6 +1156,90 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
                     }
                 )
 
+    context_diagnostics: list[str] = []
+    project_root = str(graph.get("project_root") or "").strip()
+    if project_root:
+        try:
+            from tech_connector.services.pipeline_usage_context_service import (
+                infer_project_usage_context,
+            )
+
+            usage_context = infer_project_usage_context(steps, [project_root])
+            observed_links = list(usage_context.get("links") or [])
+            observed_values = list(usage_context.get("values") or [])
+        except Exception as exc:
+            observed_links = []
+            observed_values = []
+            context_diagnostics.append(f"Project call-site context could not be inspected: {exc}")
+        occupied_inputs = {
+            (int(link.get("to_step") or 0), str(link.get("to_input") or ""))
+            for link in data_links
+        }
+        added_context_links = 0
+        for link in observed_links:
+            target_key = (int(link.get("to_step") or 0), str(link.get("to_input") or ""))
+            if target_key in occupied_inputs or not (0 < target_key[0] <= len(steps)):
+                continue
+            target_step = steps[target_key[0] - 1]
+            existing_source = str(
+                (target_step.get("literal_value_provenance") or {}).get(target_key[1])
+                or ""
+            )
+            if existing_source in {"user_prompt", "user_prompt_or_derived", "user_setting"}:
+                continue
+            data_links.append(link)
+            occupied_inputs.add(target_key)
+            target_step.setdefault("literal_value_provenance", {})[
+                target_key[1]
+            ] = "project_call_site"
+            target_step.setdefault("literal_value_details", {}).setdefault(
+                target_key[1], {}
+            ).update({
+                "source": "project_call_site",
+                "missing": False,
+                "resolution": str(link.get("reason") or ""),
+                "evidence": dict(link.get("evidence") or {}),
+            })
+            added_context_links += 1
+        if added_context_links:
+            context_diagnostics.append(
+                f"Resolved {added_context_links} data link(s) from observed project call sites."
+            )
+        added_context_values = 0
+        for observation in observed_values:
+            target_key = (
+                int(observation.get("to_step") or 0),
+                str(observation.get("to_input") or ""),
+            )
+            if target_key in occupied_inputs or not (0 < target_key[0] <= len(steps)):
+                continue
+            target_step = steps[target_key[0] - 1]
+            existing_source = str(
+                (target_step.get("literal_value_provenance") or {}).get(target_key[1])
+                or ""
+            )
+            if existing_source in {"user_prompt", "user_prompt_or_derived", "user_setting"}:
+                continue
+            target_step.setdefault("literal_values", {})[target_key[1]] = observation.get("value")
+            target_step.setdefault("literal_value_provenance", {})[target_key[1]] = "project_call_site"
+            target_step.setdefault("literal_value_details", {}).setdefault(target_key[1], {}).update({
+                "source": "project_call_site",
+                "missing": False,
+                "resolution": str(observation.get("reason") or ""),
+                "evidence": dict(observation.get("evidence") or {}),
+                "evidence_count": int(observation.get("evidence_count") or 1),
+            })
+            target_step["unresolved_inputs"] = [
+                row
+                for row in target_step.get("unresolved_inputs") or []
+                if str(row.get("argument") or "") != target_key[1]
+            ]
+            added_context_values += 1
+        if added_context_values:
+            context_diagnostics.append(
+                f"Resolved {added_context_values} argument value(s) from observed project call sites."
+            )
+
     unresolved = [
         {
             "step": item.get("stage"),
@@ -997,6 +1248,15 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
             "host": item.get("host"),
         }
         for item in graph.get("required_inputs") or []
+        if not any(
+            str(step.get("id") or "") == str(item.get("stage") or "")
+            and not bool(
+                (step.get("literal_value_details") or {}).get(
+                    str(item.get("argument") or ""), {}
+                ).get("missing", True)
+            )
+            for step in steps
+        )
     ]
     for index, action in enumerate(actions, start=1):
         args = dict(action.get("args") or {})
@@ -1010,7 +1270,7 @@ def workflow_plan_from_action_graph(graph: dict[str, Any]) -> dict[str, Any] | N
         "steps": steps,
         "data_links": data_links,
         "flow_links": flow_links,
-        "diagnostics": list(graph.get("diagnostics") or []),
+        "diagnostics": [*list(graph.get("diagnostics") or []), *context_diagnostics],
         "capability_gaps": list(graph.get("capability_gaps") or []),
         "unresolved_inputs": unresolved,
         "source_action_graph_intent": graph.get("intent") or "",

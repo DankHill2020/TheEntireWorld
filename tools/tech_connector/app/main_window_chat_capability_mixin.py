@@ -316,7 +316,10 @@ class MainWindowChatCapabilityMixin:
                         window=self,
                         workflow=workflow,
                         approved=False,
-                        policy={"goal": plan.get("goal") or ""},
+                        policy={
+                            "goal": plan.get("goal") or "",
+                            "pipeline_live_preflight": "required",
+                        },
                     ),
                 )
                 self._last_action_graph = plan
@@ -972,7 +975,20 @@ class MainWindowChatCapabilityMixin:
                 and not from_control
                 and not bool(pending_state.get("allow_text_approval"))
             ):
-                self.append("\nASSISTANT [Approval]:\nUse the Approve or Deny button for this operation. If you want to change the request, cancel it and send a new follow-up.\n")
+                confirmation = dict(pending_state.get("confirmation") or {})
+                prompt_text = str(confirmation.get("prompt_text") or "").strip()
+                if prompt_text:
+                    message = (
+                        "Approval is still pending; typing here cannot authorize a mutation. "
+                        "Review the exact operation below, then use Approve or Deny.\n\n"
+                        f"{prompt_text}"
+                    )
+                else:
+                    message = (
+                        "Approval is still pending. Use Approve to run the prepared operation once, "
+                        "or Deny to cancel it without making a change."
+                    )
+                self.append(f"\nASSISTANT [Approval]:\n{message}\n")
                 self.set_live_process("Waiting for approval button")
                 return True
             kind = classify_continuation_reply(reply)
@@ -2765,6 +2781,7 @@ class MainWindowChatCapabilityMixin:
             query_str,
             active_hosts=active_hosts_from_context(active_context),
             limit=16,
+            settings=getattr(self, "settings", {}) or {},
         )
         structured = any(marker in (query_str or "") for marker in (".", "/", "!"))
         if structured:

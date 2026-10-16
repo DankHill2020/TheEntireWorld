@@ -43,7 +43,7 @@ def resolve_installed_ollama_model(
 
     requested = (model or "").replace("ollama:", "", 1).strip()
     if not installed:
-        return requested or "qwen2.5-coder:3b"
+        return requested or "qwen3.5:4b"
 
     installed_names = [m.lower() for m in installed]
     req_lower = requested.lower()
@@ -1016,7 +1016,7 @@ def local_answer_about_file(path: str, question: str, text: str = None, query_ll
             patch = None
             
             if use_llm:
-                model = settings.get("model") or "qwen2.5-coder:7b"
+                model = settings.get("model") or "qwen3.5:4b"
 
                 if not edit_mode:
                     system_prompt = (
