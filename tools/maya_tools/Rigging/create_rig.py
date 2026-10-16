@@ -94,7 +94,6 @@ BUILDER_OWNED_CONTROL_ROOTS = (
     # These secondary face controls can survive in old extension manifests
     # from scenes built before Other Face Joints stored complete ownership.
     # Keep the stems registered even when a pad is currently missing.
-    "baby_neck_ctrl_pad",
     "l_chin_ctrl_pad",
     "l_mandible_ctrl_pad",
     "r_chin_ctrl_pad",
@@ -963,6 +962,11 @@ _BUILDER_CONTROL_ROOT_SUFFIXES = (
     "_sub_ctrl_pad",
     "_sub_ctrl_sdk",
 )
+USER_AUTHORED_EXTENSION_STEMS = (
+    # Baby Neck is a separately authored control system, not part of the
+    # fixed face module, even when its source joint belongs to the skeleton.
+    "baby_neck",
+)
 
 
 def _is_builder_owned_extension_root(node, owned, known_bases):
@@ -973,11 +977,14 @@ def _is_builder_owned_extension_root(node, owned, known_bases):
     custom systems with unrelated stems remain visible as external systems.
     """
     short = _short_scene_name(node)
+    stem = _extension_base_name(short)
+    if stem in USER_AUTHORED_EXTENSION_STEMS:
+        return False
     if short in set(owned or ()):
         return True
     if not short.endswith(_BUILDER_CONTROL_ROOT_SUFFIXES):
         return False
-    return _extension_base_name(short) in set(known_bases or ())
+    return stem in set(known_bases or ())
 
 
 def _set_store_json(attribute, value):

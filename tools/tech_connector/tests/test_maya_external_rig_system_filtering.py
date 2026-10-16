@@ -37,7 +37,10 @@ def _ownership_helpers():
             isinstance(node, ast.Assign)
             and any(
                 isinstance(target, ast.Name)
-                and target.id == "_BUILDER_CONTROL_ROOT_SUFFIXES"
+                and target.id in {
+                    "_BUILDER_CONTROL_ROOT_SUFFIXES",
+                    "USER_AUTHORED_EXTENSION_STEMS",
+                }
                 for target in node.targets
             )
         )
@@ -58,7 +61,6 @@ def test_fixed_face_control_roots_are_not_external_systems() -> None:
     helpers = _ownership_helpers()
     is_owned = helpers["_is_builder_owned_extension_root"]
     known_face_bases = {
-        "baby_neck",
         "l_chin",
         "l_mandible",
         "nose_root",
@@ -78,12 +80,12 @@ def test_legacy_face_roots_remain_owned_when_the_live_pad_is_missing() -> None:
     roots = set(_literal_assignment("BUILDER_OWNED_CONTROL_ROOTS"))
 
     assert {
-        "baby_neck_ctrl_pad",
         "l_chin_ctrl_pad",
         "l_mandible_ctrl_pad",
         "r_chin_ctrl_pad",
         "r_mandible_ctrl_pad",
     }.issubset(roots)
+    assert "baby_neck_ctrl_pad" not in roots
 
     source = CREATE_RIG.read_text(encoding="utf-8")
     ownership_body = source.split("def _metadata_rig_ownership(", 1)[1].split(
@@ -101,6 +103,11 @@ def test_unrelated_custom_control_system_remains_external() -> None:
     assert not is_owned(
         "|rig|cape_secondary_ctrl_pad",
         owned=set(),
+        known_bases={"baby_neck", "nose_root"},
+    )
+    assert not is_owned(
+        "|rig|baby_neck_ctrl_pad",
+        owned={"baby_neck_ctrl_pad"},
         known_bases={"baby_neck", "nose_root"},
     )
     assert not is_owned(
