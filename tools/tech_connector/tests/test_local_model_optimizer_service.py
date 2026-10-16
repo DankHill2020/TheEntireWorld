@@ -32,7 +32,7 @@ def test_new_fast_model_becomes_active_as_soon_as_it_is_installed():
     assert result["active"]["intent"] == "qwen3.5:4b"
     assert result["active"]["general"] == "qwen3.5:4b"
     assert result["active"]["code"] == "qwen3.5:4b"
-    assert result["active"]["deep"] == "qwen3.5:4b"
+    assert result["active"]["deep"] == "qwen2.5-coder:7b"
 
 
 def test_large_gpu_gets_specialized_local_deep_lane():

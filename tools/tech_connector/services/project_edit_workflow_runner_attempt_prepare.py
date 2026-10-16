@@ -9,6 +9,16 @@ from tech_connector.services.project_edit_workflow_runner_control import (
 )
 
 
+def _behavior_harness_generation_model(
+    settings: dict[str, _deps.Any], selected_model: str
+) -> str:
+    """Keep local proof generation on the chosen coder; preserve cloud routing."""
+
+    if str(settings.get("model_source_mode") or "") == "local_only" and selected_model:
+        return selected_model.removeprefix("ollama:")
+    return _deps._small_owner_reasoning_model(settings, selected_model)
+
+
 def _validation_cycle_fingerprint(
     candidate: str,
     *,
@@ -489,7 +499,7 @@ class _ProjectEditAttemptPreparePhase:
                                 )
                             self.batch_response, self.batch_timing = _deps._query_stage(
                                 self.batch_stage,
-                                selected_model=_deps._small_owner_reasoning_model(
+                                selected_model=_behavior_harness_generation_model(
                                     self.settings, self.selected_model
                                 ),
                                 settings=self.settings,
@@ -628,7 +638,7 @@ class _ProjectEditAttemptPreparePhase:
                             self.harness_response, self.harness_timing = (
                                 _deps._query_stage(
                                     self.current_harness_stage,
-                                    selected_model=_deps._small_owner_reasoning_model(
+                                    selected_model=_behavior_harness_generation_model(
                                         self.settings, self.selected_model
                                     ),
                                     settings=self.settings,

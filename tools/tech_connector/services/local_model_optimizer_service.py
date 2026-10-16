@@ -76,7 +76,7 @@ def recommend_local_models(
         "intent": ("qwen3.5:4b", "qwen3:4b-instruct", "qwen2.5-coder:3b"),
         "general": ("qwen3.5:4b", "qwen3:4b-instruct", "qwen2.5-coder:3b"),
         "code": ("qwen3.5:9b", "qwen3.5:4b", "qwen2.5-coder:7b", "qwen2.5-coder:3b"),
-        "deep": ("qwen3-coder:30b", "qwen3.5:9b", "qwen3.5:4b", "qwen2.5-coder:7b"),
+        "deep": ("qwen3-coder:30b", "qwen3.5:9b", "qwen2.5-coder:7b", "qwen3.5:4b"),
         "visual": ("qwen3.5:9b", "qwen3.5:4b", "qwen3:4b-instruct"),
     }
     active = {}

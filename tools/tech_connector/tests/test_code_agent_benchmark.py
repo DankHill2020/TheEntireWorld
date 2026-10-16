@@ -1669,6 +1669,22 @@ def test_local_causal_repair_respects_selected_coder_model() -> None:
     assert _causal_repair_reasoning_model(settings, "qwen3.5:4b") == "qwen3.5:4b"
 
 
+def test_local_behavior_harness_uses_selected_coder_model() -> None:
+    """A weaker default model should not author proof for a chosen local coder."""
+
+    from tech_connector.services.project_edit_workflow_runner_attempt_prepare import (
+        _behavior_harness_generation_model,
+    )
+
+    local_settings = {
+        "model_source_mode": "local_only",
+        "local_small_code_model": "qwen3.5:4b",
+    }
+    assert _behavior_harness_generation_model(local_settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    cloud_settings = {**local_settings, "model_source_mode": "auto_with_local_fallback"}
+    assert _behavior_harness_generation_model(cloud_settings, "qwen2.5-coder:7b") == "qwen3.5:4b"
+
+
 def test_missing_symbol_splicer_adds_one_wrapped_class_member() -> None:
     """Insert a bounded missing method without regenerating its accepted class."""
 
