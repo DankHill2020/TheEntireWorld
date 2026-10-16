@@ -1611,6 +1611,62 @@ def test_semantic_review_cannot_claim_present_state_methods_are_unimplemented() 
     )
     assert _semantic_review_finding_is_contradicted_by_source(signed_owner_error, files)
     assert _semantic_review_finding_is_contradicted_by_source(return_error, files)
+    absent_methods_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.can_retry(key): "
+        "unmet R7 'remaining(key) returns available attempts and can_retry(key) "
+        "reports whether another failure may be recorded'. Evidence: The Tracker "
+        "class does not implement the required methods.. Smallest repair: Add them."
+    )
+    absent_reset_error = (
+        "Final requirement review [api] tracker.py:Tracker.reset: "
+        "unmet R8 'reset(key) removes a key and returns whether it existed'. "
+        "Evidence: The Tracker class does not contain the 'reset' method.. "
+        "Smallest repair: Add it."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(absent_methods_error, files)
+    assert not _semantic_review_finding_is_contradicted_by_source(absent_reset_error, files)
+    with_reset = source + "\n    def reset(self, key):\n        return self.items.pop(key, None) is not None\n"
+    assert _semantic_review_finding_is_contradicted_by_source(
+        absent_reset_error, [("tracker.py", with_reset, with_reset)]
+    )
+    missing_reset_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.reset: "
+        "unmet R8 'reset(key) removes a key'. Evidence: The method `reset` is "
+        "missing from the provided code.. Smallest repair: Add reset."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(
+        missing_reset_error, [("tracker.py", with_reset, with_reset)]
+    )
+    assert not _semantic_review_finding_is_contradicted_by_source(
+        missing_reset_error, files
+    )
+    with_length = with_reset + "\n    def __len__(self):\n        return len(self.items)\n"
+    missing_length_error = (
+        "Final requirement review [implementation] tracker.py:Tracker.__len__: "
+        "unmet R9 'len(tracker) reports tracked keys'. Evidence: The __len__ method "
+        "is missing from the Tracker class.. Smallest repair: Add it."
+    )
+    assert _semantic_review_finding_is_contradicted_by_source(
+        missing_length_error, [("tracker.py", with_length, with_length)]
+    )
+
+
+def test_local_causal_repair_respects_selected_coder_model() -> None:
+    """A 7B local code run must not fall back to the default 4B repair model."""
+
+    from tech_connector.services.project_edit_workflow_part_09 import (
+        _causal_repair_escalation_model,
+        _causal_repair_reasoning_model,
+    )
+
+    settings = {
+        "model_source_mode": "local_only",
+        "causal_repair_model": "qwen3.5:4b",
+        "router_local_code": "qwen3.5:4b",
+    }
+    assert _causal_repair_reasoning_model(settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    assert _causal_repair_escalation_model(settings, "qwen2.5-coder:7b") == "qwen2.5-coder:7b"
+    assert _causal_repair_reasoning_model(settings, "qwen3.5:4b") == "qwen3.5:4b"
 
 
 def test_missing_symbol_splicer_adds_one_wrapped_class_member() -> None:

@@ -1102,6 +1102,7 @@ class TechConnectorHeadlessAPI:
         self.ai = AIAPINamespace(self)
         self.reasoning = ReasoningRuntimeNamespace(self)
         self.runtime = self.reasoning
+        self.integrations = IntegrationsAPINamespace(self)
         self.features = APIFeatureNamespace(self)
 
     def entitlement(self) -> LicenseEntitlement:
@@ -1194,6 +1195,7 @@ class TechConnectorHeadlessAPI:
                 "ai": "Provider-neutral model discovery, routing, benchmarking, and generation.",
                 "reasoning": "Project-aware reasoning, runtime tools, and progress events.",
                 "features": "Searchable capability catalog and generic invocation.",
+                "integrations": "Connected-account status, smart references, target discovery, and approved dispatch.",
                 "dcc": "Maya, Blender, Unreal, Unity, Houdini, and other host operations.",
                 "kingdom": "Game-engine authoring and runtime operations.",
                 "garden": "DCC scene viewer and authoring operations.",
@@ -1216,6 +1218,84 @@ class TechConnectorHeadlessAPI:
                 "serialize": "result.to_dict()",
                 "raise_on_error": "result.unwrap()",
                 "structured_error": "result.error_detail",
+            },
+        }
+
+    def surface(self) -> dict[str, Any]:
+        """Return every supported public namespace operation and signature."""
+
+        self._require_unlocked()
+        namespaces = {
+            "ai": self.ai,
+            "reasoning": self.reasoning,
+            "features": self.features,
+            "integrations": self.integrations,
+            "dcc": self.dcc,
+            "kingdom": self.kingdom,
+            "garden": self.garden,
+            "ophanim": self.ophanim,
+            "ui": self.ui,
+        }
+        excluded = {
+            "attach_window",
+            "feature_handlers",
+            "active_viewer_payload",
+        }
+        operations: list[dict[str, Any]] = []
+        for namespace, instance in namespaces.items():
+            for name, member in inspect.getmembers(type(instance), predicate=callable):
+                if name.startswith("_") or name in excluded:
+                    continue
+                handler = getattr(instance, name, None)
+                if not callable(handler):
+                    continue
+                operations.append({
+                    "path": f"api.{namespace}.{name}",
+                    "namespace": namespace,
+                    "operation": name,
+                    "signature": str(inspect.signature(handler)),
+                    "documentation": inspect.getdoc(handler) or "",
+                })
+        core_methods = (
+            "verify_license",
+            "entitlement_status",
+            "capabilities",
+            "describe",
+            "surface",
+            "llm_queue_status",
+            "cancel_llm_request",
+            "plan_prompt",
+            "plan_prompt_chain",
+            "execute_action_graph",
+            "execute_prompt_chain",
+            "generate_pipeline_from_prompt",
+            "call_function",
+            "dry_run_prompt",
+        )
+        for name in core_methods:
+            handler = getattr(self, name)
+            operations.append({
+                "path": f"api.{name}",
+                "namespace": "core",
+                "operation": name,
+                "signature": str(inspect.signature(handler)),
+                "documentation": inspect.getdoc(handler) or "",
+            })
+        operations.sort(key=lambda item: item["path"])
+        by_namespace: dict[str, int] = {}
+        for item in operations:
+            by_namespace[item["namespace"]] = by_namespace.get(item["namespace"], 0) + 1
+        return {
+            "schema": f"{API_SCHEMA}.surface",
+            "api_version": API_VERSION,
+            "operation_count": len(operations),
+            "namespace_counts": by_namespace,
+            "operations": operations,
+            "dynamic_surfaces": {
+                "dcc_functions": "api.dcc.catalog()",
+                "kingdom_editor_operations": "api.kingdom.editor_capabilities()",
+                "ui_actions": "api.ui.catalog()",
+                "runtime_tools": "api.reasoning.tools()",
             },
         }
 
@@ -1292,6 +1372,13 @@ class TechConnectorHeadlessAPI:
                 "describe": self.features.describe,
                 "manifest": self.features.manifest,
             },
+            lifecycle_stage="discovery",
+        )
+        add(
+            "api.surface",
+            "api",
+            "List every supported public namespace operation and its signature.",
+            {"list": self.surface},
             lifecycle_stage="discovery",
         )
         add(
@@ -1466,6 +1553,23 @@ class TechConnectorHeadlessAPI:
                 "aliases": self.dcc.aliases,
             },
             lifecycle_stage="evidence",
+        )
+        add(
+            "integrations.connected_services",
+            "integrations",
+            "Inspect connected applications, resolve smart references, discover live targets, and dispatch approved integration actions.",
+            {
+                "status": self.integrations.status,
+                "applications": self.integrations.applications,
+                "suggest": self.integrations.suggest,
+                "resolve": self.integrations.resolve,
+                "targets": self.integrations.targets,
+                "oauth_url": self.integrations.oauth_url,
+                "dispatch": self.integrations.dispatch,
+            },
+            permissions=("official_api_access", "explicit_approval_for_mutation"),
+            lifecycle_stage="integration",
+            source="tech_connector.api.IntegrationsAPINamespace",
         )
         add(
             "api.license",
@@ -2063,6 +2167,237 @@ class TechConnectorHeadlessAPI:
     def dry_run_prompt(self, prompt: str) -> dict[str, Any]:
         graph = self.plan_prompt(prompt)
         return self.execute_action_graph(graph, dry_run=True)
+
+
+class IntegrationsAPINamespace:
+    """Connected services and chat smart-function operations."""
+
+    def __init__(self, api: TechConnectorHeadlessAPI) -> None:
+        self._api = api
+
+    def _run(self, operation: str, action: Callable[[], Any]) -> APIResult:
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            return APIResult(
+                ok=True,
+                result={
+                    "schema": f"{API_SCHEMA}.integrations",
+                    "operation": operation,
+                    "value": _serialize_public_value(action()),
+                },
+                entitlement=entitlement.to_dict(),
+            )
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
+
+    def status(self, account_id: str = "") -> APIResult:
+        """Return sanitized configuration status for one account or every account."""
+
+        def _status() -> Any:
+            from tech_connector.services.connected_account_service import (
+                connected_account_status,
+                connected_account_status_rows,
+            )
+
+            if str(account_id or "").strip():
+                return connected_account_status(self._api.settings, account_id)
+            return connected_account_status_rows(self._api.settings)
+
+        return self._run("integrations.status", _status)
+
+    def applications(self) -> APIResult:
+        """Return combined DCC bridge, license, and connected-service status."""
+
+        from tech_connector.services.connected_account_service import connected_application_status
+
+        return self._run(
+            "integrations.applications",
+            lambda: connected_application_status(self._api.settings, self._api.command_router),
+        )
+
+    def suggest(
+        self,
+        query: str = "",
+        *,
+        active_hosts: Iterable[str] = (),
+        limit: int = 20,
+    ) -> APIResult:
+        """Return typed chat smart-function completions such as Slack and Maya targets."""
+
+        def _suggest() -> Any:
+            from tech_connector.game_engine.integration.dcc_smart_search_service import (
+                smart_search_suggestions,
+            )
+
+            return smart_search_suggestions(
+                query,
+                active_hosts=active_hosts,
+                limit=max(1, min(int(limit), 100)),
+                settings=self._api.settings,
+            )
+
+        return self._run("integrations.suggest", _suggest)
+
+    def resolve(self, text: str) -> APIResult:
+        """Resolve selected smart references into deterministic, setup-aware context."""
+
+        def _resolve() -> str:
+            from tech_connector.game_engine.integration.dcc_smart_search_service import (
+                smart_search_context_block,
+            )
+
+            return smart_search_context_block(text, settings=self._api.settings)
+
+        return self._run("integrations.resolve", _resolve)
+
+    def targets(self, provider: str, *, refresh: bool = False) -> APIResult:
+        """List cached or live Slack/Discord channels and users without returning tokens."""
+
+        provider_id = str(provider or "").strip().lower()
+
+        def _targets() -> dict[str, Any]:
+            if provider_id not in {"slack", "discord"}:
+                raise ValueError("provider must be 'slack' or 'discord'.")
+            channel_key = f"{provider_id}_channels"
+            user_key = f"{provider_id}_users"
+            if not refresh:
+                return {
+                    "provider": provider_id,
+                    "source": "cache",
+                    "channels": list(self._api.settings.get(channel_key) or []),
+                    "users": list(self._api.settings.get(user_key) or []),
+                }
+            from tech_connector.services.notification_service import (
+                fetch_discord_channels_and_users,
+                fetch_slack_channels_and_users,
+            )
+
+            fetch = (
+                fetch_slack_channels_and_users
+                if provider_id == "slack"
+                else fetch_discord_channels_and_users
+            )
+            ok, data, message = fetch(self._api.settings)
+            if not ok:
+                raise RuntimeError(message)
+            self._api.settings[channel_key] = list(data.get("channels") or [])
+            self._api.settings[user_key] = list(data.get("users") or [])
+            return {"provider": provider_id, "source": "live", **data, "message": message}
+
+        return self._run("integrations.targets", _targets)
+
+    def oauth_url(
+        self,
+        provider: str,
+        *,
+        client_id: str = "",
+        redirect_uri: str = "",
+    ) -> APIResult:
+        """Return the official setup or OAuth authorization URL for a provider."""
+
+        provider_id = str(provider or "").strip().lower()
+
+        def _url() -> dict[str, str]:
+            from tech_connector.services.connected_account_service import (
+                get_atlassian_oauth_authorize_url,
+                get_clickup_oauth_authorize_url,
+                get_discord_oauth_authorize_url,
+                get_slack_oauth_authorize_url,
+            )
+
+            handlers = {
+                "slack": get_slack_oauth_authorize_url,
+                "discord": get_discord_oauth_authorize_url,
+                "atlassian": get_atlassian_oauth_authorize_url,
+                "jira": get_atlassian_oauth_authorize_url,
+                "confluence": get_atlassian_oauth_authorize_url,
+                "clickup": get_clickup_oauth_authorize_url,
+            }
+            handler = handlers.get(provider_id)
+            if handler is None:
+                raise ValueError(f"Unsupported integration provider: {provider_id or '<empty>'}")
+            return {
+                "provider": provider_id,
+                "url": handler(client_id=client_id, redirect_uri=redirect_uri),
+            }
+
+        return self._run("integrations.oauth_url", _url)
+
+    def dispatch(
+        self,
+        text: str,
+        *,
+        default_title: str = "Tech Connector Output",
+        approved: bool = False,
+        dry_run: bool = False,
+    ) -> APIResult:
+        """Preview or execute inline Slack, Discord, Jira, Confluence, or ClickUp actions."""
+
+        references = [
+            {
+                "provider": match.group(1).lower(),
+                "target": str(match.group(2) or "").strip(),
+            }
+            for match in re.finditer(
+                r"(?<!\w)@(slack|discord|jira|confluence|clickup|docs)(?:\.([A-Za-z0-9_.-]+))?",
+                str(text or ""),
+                re.IGNORECASE,
+            )
+        ]
+        if not references:
+            return APIResult(ok=False, error="No supported inline integration reference was found.")
+        if dry_run:
+            return self._run(
+                "integrations.dispatch.preview",
+                lambda: {
+                    "dry_run": True,
+                    "approved": False,
+                    "references": references,
+                    "text": str(text or ""),
+                    "default_title": default_title,
+                },
+            )
+        if not approved:
+            return APIResult(
+                ok=False,
+                error="Integration dispatch requires approved=True; use dry_run=True to preview.",
+            )
+
+        entitlement = None
+        try:
+            entitlement = self._api._require_unlocked()
+            from tech_connector.services.notification_service import parse_and_dispatch_inline_messaging
+
+            results = parse_and_dispatch_inline_messaging(
+                text,
+                self._api.settings,
+                default_title=default_title,
+            )
+            failures = [item for item in results if not item.get("ok")]
+            payload = {
+                "schema": f"{API_SCHEMA}.integrations",
+                "operation": "integrations.dispatch",
+                "value": {"references": references, "results": results},
+            }
+            if failures:
+                return APIResult(
+                    ok=False,
+                    result=payload,
+                    error="; ".join(str(item.get("message") or "Dispatch failed") for item in failures),
+                    entitlement=entitlement.to_dict(),
+                )
+            return APIResult(ok=True, result=payload, entitlement=entitlement.to_dict())
+        except Exception as exc:
+            return APIResult(
+                ok=False,
+                error=str(exc),
+                entitlement=entitlement.to_dict() if entitlement is not None else None,
+            )
 
 
 class DccHostAPINamespace:
@@ -2962,6 +3297,35 @@ def call_dcc_function(entry_point: str, *args: Any, **kwargs: Any) -> APIResult:
     }
     call_kwargs = kwargs.pop("kwargs", None)
     return TechConnectorHeadlessAPI(**api_kwargs).call_dcc_function(entry_point, *args, kwargs=call_kwargs, **kwargs)
+
+
+def integration_status(account_id: str = "", **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for ``api.integrations.status``."""
+
+    return _reasoning_api_from_kwargs(kwargs).integrations.status(account_id)
+
+
+def integration_suggestions(query: str = "", **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for smart integration completions."""
+
+    api = _reasoning_api_from_kwargs(kwargs)
+    return api.integrations.suggest(
+        query,
+        active_hosts=kwargs.pop("active_hosts", ()),
+        limit=kwargs.pop("limit", 20),
+    )
+
+
+def dispatch_integration(text: str, **kwargs: Any) -> APIResult:
+    """Module-level convenience wrapper for approval-aware integration dispatch."""
+
+    api = _reasoning_api_from_kwargs(kwargs)
+    return api.integrations.dispatch(
+        text,
+        default_title=kwargs.pop("default_title", "Tech Connector Output"),
+        approved=bool(kwargs.pop("approved", False)),
+        dry_run=bool(kwargs.pop("dry_run", False)),
+    )
 
 
 def _reasoning_api_from_kwargs(kwargs: dict[str, Any]) -> TechConnectorHeadlessAPI:

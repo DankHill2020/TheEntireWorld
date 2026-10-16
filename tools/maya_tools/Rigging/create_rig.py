@@ -91,6 +91,14 @@ BUILDER_OWNED_CONTROL_ROOTS = (
     # Principal nose controls are created inside Other Face Joints but are not
     # one-control-per-joint, so legacy metadata discovery cannot infer them.
     "nose_root_ctrl_pad",
+    # These secondary face controls can survive in old extension manifests
+    # from scenes built before Other Face Joints stored complete ownership.
+    # Keep the stems registered even when a pad is currently missing.
+    "baby_neck_ctrl_pad",
+    "l_chin_ctrl_pad",
+    "l_mandible_ctrl_pad",
+    "r_chin_ctrl_pad",
+    "r_mandible_ctrl_pad",
 )
 
 def _mapped_existing_joint(mapping, slot):
@@ -1344,6 +1352,11 @@ def _metadata_rig_ownership():
             if node:
                 base_joints.add(_short_scene_name(node))
     for root_name in BUILDER_OWNED_CONTROL_ROOTS:
+        # Register the authored stem even when the control is temporarily
+        # missing. This lets get_external_rig_systems discard stale manifest
+        # rows such as a removed l_chin_ctrl_pad instead of presenting them as
+        # user-authored modules.
+        known_bases.add(_extension_base_name(root_name))
         roots = cmds.ls(root_name, long=True) or []
         if len(roots) != 1:
             continue

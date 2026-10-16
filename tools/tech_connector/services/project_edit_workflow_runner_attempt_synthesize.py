@@ -83,6 +83,40 @@ def _semantic_review_finding_is_contradicted_by_source(
 
     evidence = text.split("Evidence:", 1)[-1].split("Smallest repair:", 1)[0]
     evidence_lower = evidence.casefold()
+    if _deps.re.search(
+        r"\bmethod\b(?:\s+`?[A-Za-z_]\w*`?)?\s+is\s+missing\s+from\b",
+        evidence_lower,
+    ):
+        return all(
+            owner.rsplit(".", 1)[-1].casefold() in evidence_lower
+            and any(
+                isinstance(node, _deps.ast.Return) and node.value is not None
+                for node in _deps.ast.walk(callable_nodes[owner])
+            )
+            for owner in requested_owners
+            if owner in callable_nodes
+        ) and all(owner in callable_nodes for owner in requested_owners)
+    if (
+        "does not implement the required methods" in evidence_lower
+        or _deps.re.search(r"does not contain the ['\"`]?\w+['\"`]? method", evidence_lower)
+    ):
+        requirement = text.split("unmet R", 1)[-1].split("Evidence:", 1)[0]
+        required_methods = set(
+            _deps.re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\([^)]*\)", requirement)
+        )
+        class_names = {owner.rsplit(".", 1)[0] for owner in requested_owners}
+        if not required_methods or any(name not in class_nodes for name in class_names):
+            return False
+        return all(
+            isinstance(method := callable_nodes.get(f"{class_name}.{name}"),
+                       (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+            and any(
+                isinstance(node, _deps.ast.Return) and node.value is not None
+                for node in _deps.ast.walk(method)
+            )
+            for class_name in class_names
+            for name in required_methods
+        )
     if "lacks type hints and docstrings" in evidence_lower:
         data_owners = [
             owner for owner in owners if isinstance(owner, _deps.ast.ClassDef)

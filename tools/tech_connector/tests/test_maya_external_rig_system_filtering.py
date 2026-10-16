@@ -8,6 +8,19 @@ TOOLS_ROOT = Path(__file__).resolve().parents[2]
 CREATE_RIG = TOOLS_ROOT / "maya_tools" / "Rigging" / "create_rig.py"
 
 
+def _literal_assignment(name):
+    tree = ast.parse(CREATE_RIG.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise AssertionError("Assignment not found: {}".format(name))
+
+
 def _ownership_helpers():
     tree = ast.parse(CREATE_RIG.read_text(encoding="utf-8"))
     names = {
@@ -59,6 +72,26 @@ def test_fixed_face_control_roots_are_not_external_systems() -> None:
             owned=set(),
             known_bases=known_face_bases,
         )
+
+
+def test_legacy_face_roots_remain_owned_when_the_live_pad_is_missing() -> None:
+    roots = set(_literal_assignment("BUILDER_OWNED_CONTROL_ROOTS"))
+
+    assert {
+        "baby_neck_ctrl_pad",
+        "l_chin_ctrl_pad",
+        "l_mandible_ctrl_pad",
+        "r_chin_ctrl_pad",
+        "r_mandible_ctrl_pad",
+    }.issubset(roots)
+
+    source = CREATE_RIG.read_text(encoding="utf-8")
+    ownership_body = source.split("def _metadata_rig_ownership(", 1)[1].split(
+        "def record_rig_owned_nodes(", 1
+    )[0]
+    add_stem = "known_bases.add(_extension_base_name(root_name))"
+    lookup_root = "roots = cmds.ls(root_name, long=True) or []"
+    assert ownership_body.index(add_stem) < ownership_body.index(lookup_root)
 
 
 def test_unrelated_custom_control_system_remains_external() -> None:

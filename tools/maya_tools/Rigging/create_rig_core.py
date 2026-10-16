@@ -393,6 +393,31 @@ def _joint_segment_axis(joint):
     return "XYZ"[axis_index], float(values[axis_index])
 
 
+def _isolate_joint_from_parent_volume_scale(joint):
+    """Prevent a rigid extremity joint from inheriting limb volume scaling."""
+    if (
+        not joint
+        or not cmds.objExists(joint)
+        or cmds.nodeType(joint) != "joint"
+        or not cmds.attributeQuery(
+            "segmentScaleCompensate", node=joint, exists=True
+        )
+    ):
+        return False
+
+    cmds.setAttr(f"{joint}.segmentScaleCompensate", True)
+    parents = cmds.listRelatives(
+        joint, parent=True, type="joint", fullPath=True
+    ) or []
+    if parents and cmds.objExists(f"{joint}.inverseScale"):
+        _connect_attr_once(
+            f"{parents[0]}.scale",
+            f"{joint}.inverseScale",
+            force=True,
+        )
+    return True
+
+
 def _create_stretch_ratio_network(
         prefix,
         current_distance_attr,
@@ -964,6 +989,16 @@ def create_ik_fk_limb(sel, root_parent):
         if cmds.objExists(jnt) and cmds.nodeType(jnt) == "joint":
             cmds.setAttr(f"{jnt}.drawStyle", 2)
 
+    # Volume preservation belongs to the fleshy upper/lower limb segments.
+    # The rigid boundary starts at the hand for arms and at the ankle for
+    # legs; all later joints (toes and optional tips) must retain unit world
+    # scale instead of inheriting the parent's perpendicular volume scale.
+    volume_scale_isolated_joints = []
+    for chain in (sel, fk_joints, ik_joints, driver_joints):
+        for joint in chain[ik_end_index:]:
+            if _isolate_joint_from_parent_volume_scale(joint):
+                volume_scale_isolated_joints.append(joint)
+
     fk_ctrls = create_joint_controls(fk_joints, control_shape="cube", root_parent=root_parent)
     for i, jnt in enumerate(fk_joints):
         if joint_count > 3:
@@ -1288,6 +1323,9 @@ def create_ik_fk_limb(sel, root_parent):
         ik_ctrl,
         switch_ctrl_name,
         scale_reference=root_parent,
+    )
+    stretch_data["scale_isolated_joints"] = list(
+        dict.fromkeys(volume_scale_isolated_joints)
     )
 
     print("IK/FK limb created (joint-count driven).")
