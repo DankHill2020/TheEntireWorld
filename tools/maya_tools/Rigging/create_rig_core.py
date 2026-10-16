@@ -1223,13 +1223,21 @@ def create_ik_fk_limb(sel, root_parent):
 
         cmds.setAttr(f"{orient_con}.interpType", 2)
 
-        scale_con = cmds.scaleConstraint(
-            fk_joints[i],
-            ik_joints[i],
-            driver_joints[i],
-            mo=False,
-            n=f"{driver_joints[i]}_scaleConstraint"
-        )[0]
+        # Volume preservation is applied to the upper and lower fleshy
+        # segments only. A scaleConstraint on the ankle/hand (or any joints
+        # beyond it, such as toes) copies volume-compensated scale from the IK
+        # chain back onto those joints, bypassing their
+        # segmentScaleCompensate/inverseScale setup. Keep the authored local
+        # scale on the rigid end of the chain instead.
+        if i < ik_end_index:
+            scale_con = cmds.scaleConstraint(
+                fk_joints[i],
+                ik_joints[i],
+                driver_joints[i],
+                mo=False,
+                n=f"{driver_joints[i]}_scaleConstraint"
+            )[0]
+            blend_scale_constraints.append(scale_con)
 
         # Segment length is stored on the child joint's local translation.
         # Orientation/scale blending alone leaves the driver chain at its rest
@@ -1246,11 +1254,11 @@ def create_ik_fk_limb(sel, root_parent):
 
         blend_constraints.append(orient_con)
         blend_point_constraints.append(point_con)
-        blend_scale_constraints.append(scale_con)
 
     for i in range(joint_count):
         cmds.parentConstraint(driver_joints[i], sel[i], mo=False)
-        cmds.scaleConstraint(driver_joints[i], sel[i], mo=False)
+        if i < ik_end_index:
+            cmds.scaleConstraint(driver_joints[i], sel[i], mo=False)
     hand_joint = driver_joints[ik_end_index].replace('_driver', '')
 
     switch_ctrl_name = f"{hand_joint}_switch_ctrl"
