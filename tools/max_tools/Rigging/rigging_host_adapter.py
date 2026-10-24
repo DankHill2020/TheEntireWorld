@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import re
 from typing import Any, Iterable
 
@@ -13,12 +14,30 @@ from tech_connector.services.dcc.rigging_workspace_service import (
     auto_map_character,
     mirror_character_slots,
     thumb_rig_contract,
+    twist_driver_contract,
     validate_character_definition,
 )
 
 
 HOST = "3dsmax"
-RIG_BEHAVIOR_REVISION = 6
+RIG_BEHAVIOR_REVISION = 7
+
+
+def reload_dependencies() -> int:
+    """Refresh the shared portable contract used by this live Max host."""
+    global CharacterDefinition, FINGER_SLOTS, RiggingOperationResult
+    global auto_map_character, mirror_character_slots, thumb_rig_contract, twist_driver_contract
+    global validate_character_definition
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    for name in (
+        "CharacterDefinition", "FINGER_SLOTS", "RiggingOperationResult",
+        "auto_map_character", "mirror_character_slots", "thumb_rig_contract", "twist_driver_contract",
+        "validate_character_definition",
+    ):
+        globals()[name] = getattr(contract, name)
+    return RIG_BEHAVIOR_REVISION
 
 
 def _rt():
@@ -417,7 +436,24 @@ def _build_thumb_rigs(definition: CharacterDefinition, blend: float) -> list[str
         if float(rt.length(pole_direction)) <= 1.0e-8:
             pole_direction = rt.Point3(0.0, 0.0, 1.0)
         pole_direction = rt.normalize(pole_direction)
+        hand_slot = "LeftHand" if contract["side"] == "left" else "RightHand"
+        hand_name = definition.slots.get(hand_slot)
+        if hand_name:
+            dorsal_direction = -_node(hand_name).transform.row3
+            if float(rt.dot(dorsal_direction, rt.Point3(0.0, 0.0, 1.0))) < 0.0:
+                dorsal_direction *= -1.0
+            if line_length_squared > 1.0e-12:
+                dorsal_direction -= thumb_line * (
+                    float(rt.dot(dorsal_direction, thumb_line))
+                    / line_length_squared
+                )
+            if (
+                float(rt.length(dorsal_direction)) > 1.0e-8
+                and float(rt.dot(pole_direction, dorsal_direction)) < 0.0
+            ):
+                pole_direction *= -1.0
         pole_control.position = pole_origin + pole_direction * 5.0
+        _set_tag(pole_control, "tc_pole_side", contract["pole_side"])
 
         goal = rt.IKSys.ikChain(joints[0], joints[-1], "IKHISolver")
         if goal is None:
@@ -656,12 +692,31 @@ def _op_rig_create_ribbon(payload: dict[str, Any]) -> dict[str, Any]:
 def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
     start, end = _node(payload["start"]), _node(payload["end"])
     module = str(payload.get("module") or f"{start.name}_twist")
+    start_parent = start.parent
+    default_world_up = (
+        str(start_parent.name)
+        if start_parent is not None and _rt().isValidNode(start_parent)
+        else str(start.name)
+    )
+    settings = twist_driver_contract(
+        str(start.name),
+        parent=str(payload.get("parent") or default_world_up),
+        module=module,
+        overrides=payload,
+    )
     base_name = str(start.name)
     name = base_name[:-7] + "_twist_driver" if base_name.endswith("_driver") else base_name + "_twist_driver"
     twist_driver = _control(name, end, module, size=float(payload.get("size", 3.0) or 3.0), parent=start)
     _set_tag(twist_driver, "tc_twist_driver", True)
-    _set_tag(twist_driver, "tc_world_up_bone", str(start.name))
-    _set_tag(twist_driver, "tc_aim_target_bone", str(start.name))
+    _set_tag(twist_driver, "tc_twist_contract_revision", settings["revision"])
+    _set_tag(twist_driver, "tc_world_up_bone", settings["world_up_object"])
+    _set_tag(twist_driver, "tc_aim_target_bone", settings["aim_target"])
+    _set_tag(twist_driver, "tc_world_up_vector", settings["world_up_vector"])
+    _set_tag(twist_driver, "tc_up_vector", settings["up_vector"])
+    _set_tag(twist_driver, "tc_maintain_offset", settings["maintain_offset"])
+    _set_tag(twist_driver, "tc_constraint_weight", settings["weight"])
+    if settings["aim_offset"] is not None:
+        _set_tag(twist_driver, "tc_aim_offset", settings["aim_offset"])
     twist_nodes = [_node(value) for value in payload.get("twist_joints") or []]
     created = [str(twist_driver.name)]
     count = len(twist_nodes)
@@ -672,7 +727,8 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
         created.append(str(twist.name))
     return _result(True, "rig.create_twist", "Created 3ds Max twist distribution.", created_ids=created,
                    data={"twist_driver": str(twist_driver.name), "parent": str(start.name),
-                         "world_up_object": str(start.name)})
+                         "world_up_object": settings["world_up_object"],
+                         "constraint_settings": settings})
 
 
 def _op_skin_surface_spatial_smooth_brush(payload: dict[str, Any]) -> dict[str, Any]:

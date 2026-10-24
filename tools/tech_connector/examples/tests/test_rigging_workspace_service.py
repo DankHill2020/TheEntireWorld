@@ -11,6 +11,7 @@ from tech_connector.services.dcc.rigging_workspace_service import (
     RIGGING_CAPABILITIES,
     RiggingWorkspaceController,
     auto_map_character,
+    twist_driver_contract,
     validate_character_definition,
 )
 
@@ -102,7 +103,7 @@ def test_tc_adapter_builds_and_rebuilds_portable_modules() -> None:
 
     assert result.ok, result.message
     assert result.data["t_pose"]["ok"]
-    assert result.data["behavior_revision"] == 6
+    assert result.data["behavior_revision"] == 7
     assert "left_arm_ik_solver" in graph.constraints
     assert "right_leg_ik_solver" in graph.constraints
     assert any((node.get("attributes") or {}).get("rig_module") == "spine" for node in graph.nodes.values())
@@ -173,7 +174,7 @@ def test_tc_joint_placement_can_preview_selected_mesh_bounds() -> None:
     )
 
     assert preview.ok and not preview.data["applied"]
-    assert preview.data["behavior_revision"] == 6
+    assert preview.data["behavior_revision"] == 7
     assert set(("LeftArm", "RightArm", "LeftFoot", "RightFoot")) <= set(preview.data["positions"])
 
 
@@ -337,6 +338,45 @@ def test_tc_aim_constraint_uses_maya_style_aim_and_world_up_vectors() -> None:
     assert abs(aim_axis[0]) < 1.0e-6
     assert aim_axis[1] > 0.999
     assert abs(aim_axis[2]) < 1.0e-6
+
+
+def test_portable_thigh_twist_contract_matches_authored_constraint_values() -> None:
+    expected = {
+        "world_up_vector": [1.0, 0.0, 0.0],
+        "up_vector": [0.0, 1.0, 0.0],
+        "aim_offset": [0.0, 0.0, 0.0],
+        "maintain_offset": True,
+        "weight": 1.0,
+    }
+    for start in ("l_thigh_driver", "r_thigh_driver", "LeftUpLeg", "RightUpperLeg"):
+        settings = twist_driver_contract(start, parent="hipswing_ctrl")
+        assert settings["segment"] == "thigh"
+        assert settings["world_up_object"] == "hipswing_ctrl"
+        for key, value in expected.items():
+            assert settings[key] == value
+
+    upperarm = twist_driver_contract("l_upperarm_driver", parent="l_clavicle_ctrl")
+    assert upperarm["world_up_vector"] == [0.0, 1.0, 0.0]
+    assert upperarm["aim_offset"] is None
+
+
+def test_tc_twist_driver_stores_the_portable_thigh_profile() -> None:
+    graph = EditableRigGraph()
+    hips = graph.add_node("Hips", "dag.transform", node_id="hips")
+    thigh = graph.add_node("Left Thigh", "dag.transform", parent_id=hips, node_id="l_thigh_driver")
+    knee = graph.add_node("Left Knee", "dag.transform", parent_id=thigh, node_id="l_knee_driver")
+    controller = RiggingWorkspaceController(create_rigging_adapter("tc", graph=graph))
+
+    result = controller.run("rig.create_twist", start=thigh, end=knee)
+    attributes = graph.nodes["l_thigh_twist_driver"]["attributes"]
+
+    assert result.ok
+    assert attributes["world_up_object"] == hips
+    assert attributes["world_up_vector"] == [1.0, 0.0, 0.0]
+    assert attributes["up_vector"] == [0.0, 1.0, 0.0]
+    assert attributes["aim_offset"] == [0.0, 0.0, 0.0]
+    assert attributes["maintain_offset"] is True
+    assert attributes["constraint_weight"] == 1.0
 
 
 def test_tc_pose_reader_evaluates_driver_rotation_locally() -> None:

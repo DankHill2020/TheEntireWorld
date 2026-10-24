@@ -20,11 +20,12 @@ from tech_connector.game_engine.authoring.rigging_workspace_service import (
     auto_map_character,
     mirror_character_slots,
     thumb_rig_contract,
+    twist_driver_contract,
     validate_character_definition,
 )
 
 
-RIG_BEHAVIOR_REVISION = 6
+RIG_BEHAVIOR_REVISION = 7
 
 
 def _stable_ribbon_grid(
@@ -579,6 +580,15 @@ class TCRiggingHostAdapter:
         start, end = str(payload["start"]), str(payload["end"])
         twists = [str(value) for value in payload.get("twist_joints") or []]
         module = str(payload.get("module") or f"{start}_twist")
+        start_parent = ""
+        if start in self.graph.nodes:
+            start_parent = str(self.graph.nodes[start].get("dag_parent_id") or "")
+        settings = twist_driver_contract(
+            start,
+            parent=str(payload.get("parent") or start_parent or start),
+            module=module,
+            overrides=payload,
+        )
         driver_id = (
             start[:-7] + "_twist_driver" if start.endswith("_driver")
             else start + "_twist_driver"
@@ -594,8 +604,15 @@ class TCRiggingHostAdapter:
                 "rig_module": module,
                 "twist_driver": True,
                 "driver_parent": start,
-                "world_up_object": start,
-                "aim_target": start,
+                "twist_contract_revision": settings["revision"],
+                "world_up_object": settings["world_up_object"],
+                "aim_target": settings["aim_target"],
+                "world_up_type": settings["world_up_type"],
+                "world_up_vector": settings["world_up_vector"],
+                "up_vector": settings["up_vector"],
+                "aim_offset": settings["aim_offset"],
+                "maintain_offset": settings["maintain_offset"],
+                "constraint_weight": settings["weight"],
         }
         if driver_id in self.graph.nodes:
             driver_node = self.graph.nodes[driver_id]
@@ -615,7 +632,12 @@ class TCRiggingHostAdapter:
                                                                "rig_module": module}))
         return self._ok(
             "rig.create_twist", "Created twist distribution.", created_ids=created,
-            data={"twist_driver": driver_id, "parent": start, "world_up_object": start},
+            data={
+                "twist_driver": driver_id,
+                "parent": start,
+                "world_up_object": settings["world_up_object"],
+                "constraint_settings": settings,
+            },
         )
 
     def _op_skin_surface_spatial_smooth_brush(self, payload: dict[str, Any]) -> RiggingOperationResult:
@@ -1270,6 +1292,23 @@ class TCRiggingHostAdapter:
             _size, pole_origin, pole_direction = max(deviations, key=lambda item: item[0])
             if float(np.linalg.norm(pole_direction)) <= 1.0e-8:
                 pole_direction = np.asarray((0.0, 0.0, 1.0), dtype=float)
+            hand_slot = "LeftHand" if contract["side"] == "left" else "RightHand"
+            hand_joint = definition.slots.get(hand_slot, "")
+            if hand_joint in self.graph.joints:
+                dorsal_direction = -np.asarray(
+                    self._joint_world_matrix(hand_joint)[8:11], dtype=float
+                )
+                if float(np.dot(dorsal_direction, (0.0, 1.0, 0.0))) < 0.0:
+                    dorsal_direction *= -1.0
+                if axis_length_sq > 1.0e-12:
+                    dorsal_direction -= axis * (
+                        float(np.dot(dorsal_direction, axis)) / axis_length_sq
+                    )
+                if (
+                    float(np.linalg.norm(dorsal_direction)) > 1.0e-8
+                    and float(np.dot(pole_direction, dorsal_direction)) < 0.0
+                ):
+                    pole_direction *= -1.0
             pole_position = pole_origin + pole_direction / max(float(np.linalg.norm(pole_direction)), 1.0e-12) * 5.0
             pole_control = str(contract["pole_control"])
             pole_matrix = list(IDENTITY_MATRIX)
@@ -1284,6 +1323,7 @@ class TCRiggingHostAdapter:
                         "control_shape": "diamond",
                         "rig_module": module,
                         "thumb_role": "pole_vector",
+                        "pole_side": contract["pole_side"],
                         "world_oriented": True,
                         "channels_locked": False,
                         "space": 0,
@@ -1314,7 +1354,6 @@ class TCRiggingHostAdapter:
 
             # Match Maya's IK/hand/composite PV spaces with matched child
             # targets so changing space never snaps the control.
-            hand_joint = definition.slots.get("LeftHand" if contract["side"] == "left" else "RightHand", "")
             space_parents = [ik_control, hand_joint, ""]
             space_names = ["ik", "hand", "composite"]
             space_targets = []

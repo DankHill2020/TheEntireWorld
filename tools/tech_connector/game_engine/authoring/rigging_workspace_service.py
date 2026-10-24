@@ -47,7 +47,14 @@ _CAPABILITY_ROWS = (
     ("rig.set_ik_fk_blend", "Set IK/FK Blend", "solvers", ("limb", "blend"), (), "bake"),
     ("rig.create_reverse_foot", "Create Reverse Foot", "solvers", ("ankle", "ball", "toe"), ("heel", "bank"), "bake"),
     ("rig.create_ribbon", "Create Ribbon Rig", "solvers", ("joint_chain",), ("control_count",), "bake"),
-    ("rig.create_twist", "Create Twist Distribution", "solvers", ("start", "end"), ("twist_joints",), "bake"),
+    (
+        "rig.create_twist", "Create Twist Distribution", "solvers", ("start", "end"),
+        (
+            "twist_joints", "parent", "surface", "module", "world_up_object",
+            "world_up_vector", "up_vector", "aim_offset", "maintain_offset", "weight",
+        ),
+        "bake",
+    ),
     ("rig.create_motion_path", "Create Motion Path Rig", "solvers", ("target", "curve"), ("follow",), "bake"),
     ("rig.create_curve_joints", "Create Joints Along Curve", "solvers", ("curve",), ("joint_count", "keep_attached", "name_prefix"), "bake"),
     ("rig.create_space_switch", "Create Space Switch", "constraints", ("driven", "targets"), ("mode",), "bake"),
@@ -101,7 +108,55 @@ FINGER_SLOTS = tuple(
     for finger in FINGER_NAMES[1:]
 )
 
-THUMB_RIG_CONTRACT_REVISION = 1
+THUMB_RIG_CONTRACT_REVISION = 2
+TWIST_DRIVER_CONTRACT_REVISION = 1
+
+
+def twist_driver_contract(
+        start: str,
+        *,
+        parent: str = "",
+        module: str = "",
+        overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return portable constraint settings for a limb twist endpoint driver.
+
+    Maya authors the reference behavior, while other DCC adapters translate
+    these values into native constraints, custom properties, or solver recipe
+    metadata.  Upper-leg names are recognized across common Maya and HIK
+    conventions so ``thigh``, ``UpLeg``, and ``upper_leg`` receive the same
+    stable hips-relative frame.
+    """
+    values = dict(overrides or {})
+    leaf = str(start).replace("\\", "|").rsplit("|", 1)[-1].rsplit(":", 1)[-1]
+    compact = re.sub(r"[^a-z0-9]+", "", leaf.lower())
+    is_thigh = any(token in compact for token in ("thigh", "upleg", "upperleg"))
+
+    def vector(name: str, default: tuple[float, float, float] | None):
+        raw = values.get(name, default)
+        if raw is None:
+            return None
+        result = [float(component) for component in raw]
+        if len(result) != 3:
+            raise ValueError(f"{name} requires exactly three numeric values")
+        return result
+
+    default_offset = (0.0, 0.0, 0.0) if is_thigh else None
+    return {
+        "revision": TWIST_DRIVER_CONTRACT_REVISION,
+        "segment": "thigh" if is_thigh else "other",
+        "aim_target": str(values.get("aim_target") or start),
+        "world_up_object": str(values.get("world_up_object") or parent or start),
+        "world_up_type": str(values.get("world_up_type") or "objectrotation"),
+        "world_up_vector": vector(
+            "world_up_vector", (1.0, 0.0, 0.0) if is_thigh else (0.0, 1.0, 0.0)
+        ),
+        "up_vector": vector("up_vector", (0.0, 1.0, 0.0)),
+        "aim_offset": vector("aim_offset", default_offset),
+        "maintain_offset": bool(values.get("maintain_offset", True)),
+        "weight": float(values.get("weight", 1.0)),
+        "module": str(module or values.get("module") or ""),
+    }
 
 
 def thumb_rig_contract(definition: "CharacterDefinition | dict[str, Any]") -> list[dict[str, Any]]:
@@ -133,6 +188,7 @@ def thumb_rig_contract(definition: "CharacterDefinition | dict[str, Any]") -> li
             "ik_control": thumb_base + "_ikh_ctrl",
             "pole_control": control_base(joints[1]) + "_ik_ctrl",
             "solver": "rotate_plane",
+            "pole_side": "dorsal",
             "controls_world_oriented": True,
             "bind_pose_preserved": True,
             "channels_locked": False,
@@ -488,7 +544,8 @@ __all__ = [
     "ALL_CHARACTER_SLOTS", "CHARACTER_DEFINITION_SCHEMA", "CharacterDefinition",
     "CharacterDefinitionValidation", "FACE_SLOTS", "FINGER_SLOTS", "OPTIONAL_BODY_SLOTS",
     "REQUIRED_BODY_SLOTS", "RIGGING_CAPABILITIES", "RIGGING_WORKSPACE_SCHEMA",
-    "THUMB_RIG_CONTRACT_REVISION", "thumb_rig_contract",
+    "THUMB_RIG_CONTRACT_REVISION", "TWIST_DRIVER_CONTRACT_REVISION",
+    "thumb_rig_contract", "twist_driver_contract",
     "RiggingCapability", "RiggingHostAdapter", "RiggingOperationResult",
     "RiggingWorkspaceController", "auto_map_character", "list_rigging_capabilities",
     "mirror_character_slots", "validate_character_definition", "validate_operation_payload",

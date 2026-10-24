@@ -19,6 +19,7 @@ from tech_connector.services.dcc.rigging_workspace_service import (
     RiggingOperationResult,
     auto_map_character,
     mirror_character_slots,
+    twist_driver_contract,
     validate_character_definition,
 )
 
@@ -28,17 +29,37 @@ HOST = "maya"
 
 def reload_dependencies() -> str:
     """Refresh the complete Maya rig stack for bridge-driven operations."""
-    global create_rig, joint_placer, setup_hik
+    global create_rig, joint_placer, setup_hik, twist_driver_contract
+
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    twist_driver_contract = contract.twist_driver_contract
 
     from maya_tools.Rigging import create_rig_core
     from maya_tools.Rigging import create_rig_modules
     from maya_tools.Rigging import enum_attrs
+    from maya_tools.Rigging import joint_placement_regression
     from maya_tools.Rigging import rig_template
     from maya_tools.Rigging import skinning_utils
+    from maya_tools.Rigging import unreal_skeletal_export
+    from maya_tools.Rigging import vehicle_rig
     from maya_tools.Utilities import dag, joints
 
     importlib.invalidate_caches()
-    for module in (enum_attrs, skinning_utils, joints, dag, rig_template, setup_hik, create_rig_core):
+    for module in (
+            enum_attrs,
+            skinning_utils,
+            joints,
+            dag,
+            rig_template,
+            vehicle_rig,
+            joint_placer,
+            joint_placement_regression,
+            unreal_skeletal_export,
+            setup_hik,
+            create_rig_core,
+    ):
         importlib.reload(module)
 
     modules_name = "maya_tools.Rigging.create_rig_modules"
@@ -52,7 +73,6 @@ def reload_dependencies() -> str:
         importlib.reload(create_rig_modules)
 
     create_rig = importlib.reload(create_rig)
-    joint_placer = importlib.reload(joint_placer)
     setup_hik = sys.modules["maya_tools.Rigging.mocap.setup_hik"]
     return str(getattr(create_rig_core, "RIG_BUILD_REVISION", "unknown"))
 
@@ -382,11 +402,23 @@ def _op_skin_surface_spatial_smooth_brush(payload: dict[str, Any]) -> dict[str, 
 
 
 def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = twist_driver_contract(
+        str(payload["start"]),
+        parent=str(payload.get("parent") or payload["start"]),
+        module=str(payload.get("module") or ""),
+        overrides=payload,
+    )
     result = create_rig.create_twist_driver(
         payload["start"], payload["end"],
         str(payload.get("parent") or ""), str(payload.get("surface") or ""),
+        constraint_settings=payload,
     )
-    return _result(True, "rig.create_twist", "Created Maya twist distribution.", data={"maya_result": result})
+    return _result(
+        True,
+        "rig.create_twist",
+        "Created Maya twist distribution.",
+        data={"maya_result": result, "constraint_settings": settings},
+    )
 
 
 def _op_rig_create_motion_path(payload: dict[str, Any]) -> dict[str, Any]:

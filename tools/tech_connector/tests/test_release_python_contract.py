@@ -74,6 +74,8 @@ def test_release_tiers_exclude_generated_runtime_state() -> None:
         "tech_connector/project_analysis/project_analysis.db",
         "tech_connector/project_analysis/project_analysis.db-wal",
         "tech_connector/services/__pycache__/service.cpython-314.pyc",
+        "tech_connector/benchmarks/results/repeat/report.json",
+        "tech_connector/benchmarks/pytest_demo/host_port.txt",
     )
     for tier in manifest["tiers"].values():
         excludes = tier["exclude"]
@@ -85,6 +87,7 @@ def test_staging_skips_generated_state_but_keeps_source() -> None:
         "**/.ai_studio",
         "**/.tech_connector",
         "**/*.pyc",
+        "**/pytest_*",
         "tech_connector/project_analysis/*.db",
     ]
     with TemporaryDirectory() as temp_dir:
@@ -95,6 +98,7 @@ def test_staging_skips_generated_state_but_keeps_source() -> None:
         (source / "game_engine" / "native" / ".tech_connector").mkdir(parents=True)
         (source / "project_analysis").mkdir(parents=True)
         (source / "services" / "__pycache__").mkdir(parents=True)
+        (source / "benchmarks" / "pytest_demo").mkdir(parents=True)
         (source / "services" / "runtime.py").write_text("VALUE = 1\n", encoding="utf-8")
         (source / ".ai_studio" / "request.log").write_text("generated", encoding="utf-8")
         (source / "game_engine" / "native" / ".tech_connector" / "build.ninja").write_text(
@@ -102,6 +106,7 @@ def test_staging_skips_generated_state_but_keeps_source() -> None:
         )
         (source / "project_analysis" / "project_analysis.db").write_bytes(b"generated")
         (source / "services" / "__pycache__" / "runtime.pyc").write_bytes(b"generated")
+        (source / "benchmarks" / "pytest_demo" / "host_port.txt").write_text("7001", encoding="utf-8")
 
         copy_tree_entry(root, "tech_connector", output, excludes)
 
@@ -114,6 +119,25 @@ def test_staging_skips_generated_state_but_keeps_source() -> None:
             output / "tech_connector" / "project_analysis" / "project_analysis.db"
         ).exists()
         assert not (output / "tech_connector" / "services" / "__pycache__").exists()
+        assert not (output / "tech_connector" / "benchmarks" / "pytest_demo").exists()
+
+
+def test_staging_prunes_nested_benchmark_output(tmp_path) -> None:
+    """A package staged below its source must not copy itself recursively."""
+
+    root = tmp_path / "source"
+    source = root / "tech_connector"
+    (source / "services").mkdir(parents=True)
+    (source / "services" / "runtime.py").write_text("VALUE = 1\n", encoding="utf-8")
+    generated = source / "benchmarks" / "results"
+    generated.mkdir(parents=True)
+    (generated / "report.json").write_text("{}", encoding="utf-8")
+    output = generated / "stage"
+
+    copy_tree_entry(root, "tech_connector", output, ["tech_connector/benchmarks/results"])
+
+    assert (output / "tech_connector" / "services" / "runtime.py").is_file()
+    assert not (output / "tech_connector" / "benchmarks").exists()
 
 
 def test_full_tools_stage_uses_canonical_cross_dcc_rig_implementations(tmp_path) -> None:
@@ -193,8 +217,8 @@ def test_blender_and_max_share_current_character_build_behavior() -> None:
     ).read_text(encoding="utf-8")
 
     for source in (blender, max_source):
-        assert "RIG_BEHAVIOR_REVISION = 6" in source
-    assert "RIG_BEHAVIOR_REVISION = 6" in tc_source
+        assert "RIG_BEHAVIOR_REVISION = 7" in source
+    assert "RIG_BEHAVIOR_REVISION = 7" in tc_source
     for source in (blender, max_source, tc_source):
         assert 'if bool(payload.get("preview", False)):' in source
         assert 'if bool(options.get("set_t_pose", True)):' in source
@@ -203,6 +227,8 @@ def test_blender_and_max_share_current_character_build_behavior() -> None:
         assert '"controls_world_oriented": True' in source
         assert '"bind_pose_preserved": True' in source
         assert '"world_up_object"' in source
+        assert "twist_driver_contract" in source
+        assert '"constraint_settings": settings' in source
         assert '"surface_face"' in source
         assert '"y_outward_view_up_alignment"' in source
         assert "under_?eye" in source
@@ -210,6 +236,8 @@ def test_blender_and_max_share_current_character_build_behavior() -> None:
         assert "removed_auto_joint_guides" in source
         assert "brow_shape_rotation_y" in source
         assert "spine_sub_shape_rotation_x" in source
+        assert "pole_side" in source
+        assert "dorsal_direction" in source
     assert 'payload.get("blend", 0.0)' in blender
     assert 'payload.get("blend", 0.0)' in max_source
     assert 'payload.get("blend", 1.0)' in tc_source
@@ -251,6 +279,53 @@ def test_blender_and_max_share_current_character_build_behavior() -> None:
     assert "_spec_from_file_location" in portable_loader
 
 
+def test_cross_dcc_authoring_calls_force_fresh_host_modules() -> None:
+    from tech_connector.game_engine.integration.rigging_host_adapter_service import (
+        PythonHostRiggingAdapter,
+    )
+
+    scripts = []
+
+    def executor(script: str, _timeout: float):
+        scripts.append(script)
+        payload = {
+            "ok": True,
+            "capability": "rig.place_joints",
+            "host": "test",
+            "message": "ok",
+        }
+        return True, "__TC_RIGGING_RESULT__" + json.dumps(payload)
+
+    adapter = PythonHostRiggingAdapter(
+        "test", executor, "test.host_adapter", {"rig.place_joints": "translated"}
+    )
+    result = adapter.execute("rig.place_joints", {})
+
+    assert result.ok
+    assert "_tc_force_reload = True" in scripts[-1]
+    assert "_tc_reload_dependencies()" in scripts[-1]
+
+
+def test_cross_dcc_twist_adapters_consume_the_portable_constraint_profile() -> None:
+    adapter_paths = (
+        "maya_tools/Rigging/rigging_host_adapter.py",
+        "blender_tools/Rigging/rigging_host_adapter.py",
+        "max_tools/Rigging/rigging_host_adapter.py",
+        "houdini_tools/Rigging/rigging_host_adapter.py",
+        "tech_connector/game_engine/integration/tc_rigging_host_adapter.py",
+    )
+    for relative in adapter_paths:
+        source = (TOOLS_ROOT / relative).read_text(encoding="utf-8")
+        compile(source, relative, "exec")
+        assert "twist_driver_contract" in source
+        assert "constraint_settings" in source
+
+    maya_core = (TOOLS_ROOT / "maya_tools/Rigging/create_rig_core.py").read_text(encoding="utf-8")
+    assert "settings = twist_driver_contract(" in maya_core
+    assert 'worldUpVector=tuple(settings["world_up_vector"])' in maya_core
+    assert 'if settings["aim_offset"] is not None:' in maya_core
+
+
 def test_portable_thumb_rig_contract_matches_maya_control_semantics() -> None:
     from tech_connector.services.dcc.rigging_workspace_service import (
         CharacterDefinition,
@@ -278,6 +353,8 @@ def test_portable_thumb_rig_contract_matches_maya_control_semantics() -> None:
     assert contracts[1]["ik_control"] == "r_thumb_ikh_ctrl"
     assert contracts[1]["pole_control"] == "r_thumb_02_ik_ctrl"
     assert all(contract["solver"] == "rotate_plane" for contract in contracts)
+    assert all(contract["pole_side"] == "dorsal" for contract in contracts)
+    assert all(contract["revision"] == 2 for contract in contracts)
     assert all(contract["controls_world_oriented"] for contract in contracts)
     assert all(not contract["channels_locked"] for contract in contracts)
 
@@ -650,8 +727,9 @@ def test_maya_mouth_builder_requires_and_returns_the_overall_lip_control() -> No
         "\ndef ", 1
     )[0]
     assert spine_module_body.count(
-        "sub_ctrl_shape_rotation_x=90.0"
+        "sub_ctrl_shape_rotation_x=0.0"
     ) == 2
+    assert "create_bi_arrow_ctrl already converts" in spine_module_body
     brow_main_body = create_rig.split(
         "def create_brow_main_setup(", 1
     )[1].split("def _safe_rename_hierarchy_tokens(", 1)[0]
@@ -726,7 +804,14 @@ def test_maya_mouth_builder_requires_and_returns_the_overall_lip_control() -> No
     assert 'name="distance_nodes", parent=dnt' in create_rig_core
     assert 'cmds.ls(type="distanceDimShape", long=True)' in create_rig_core
     assert 'name=f"{token}_dim", parent=distance_group' in create_rig_core
-    assert 'RIG_BUILD_REVISION = "rig-spine-sub-shape-x90-face-joints-hidden-v25"' in create_rig_core
+    assert 'RIG_BUILD_REVISION = "rig-nondegenerate-limb-ribbons-v34"' in create_rig_core
+    surface_builder_body = create_rig_core.split(
+        "def create_surface_from_joints_original(", 1
+    )[1].split("def create_loft_surface_with_follicle_joints(", 1)[0]
+    assert "width_direction -= chain_direction *" in surface_builder_body
+    assert "width_direction = om.MVector(0.0, 0.0, 1.0)" in surface_builder_body
+    assert "worldSpace=True" in surface_builder_body
+    assert "cmds.move(0, offset * i, 0" not in surface_builder_body
     assert 'if region == "brow":' in surface_rig_body
     assert "rotate_ctrl_cvs_object_y(ctrl_name, 90.0)" in surface_rig_body
     assert "def _curve_world_up_vector(curve_shape):" in create_rig_core
@@ -768,21 +853,39 @@ def test_maya_mouth_builder_requires_and_returns_the_overall_lip_control() -> No
     )[0]
     assert 'child_tx = cmds.getAttr(child_bone + ".translateX")' in twist_driver_body
     assert "x_val = -1.0 if child_tx >= 0.0 else 1.0" in twist_driver_body
-    assert "worldUpObject=driver_bone" in twist_driver_body
-    assert "worldUpVector=(0, 1, 0)" in twist_driver_body
-    assert "mo=True" in twist_driver_body
+    assert 'driver_token = driver_bone.split("|")[-1].split(":")[-1].lower()' in twist_driver_body
+    assert 'if "lowerarm" in driver_token or "knee" in driver_token:' in twist_driver_body
+    assert "world_up_object = child_bone" in twist_driver_body
+    assert "world_up_object = parent" in twist_driver_body
+    assert "worldUpObject=world_up_object" in twist_driver_body
+    assert "worldUpObject=driver_bone" not in twist_driver_body
+    assert 'name=driver_token.replace("_driver", "_twist_invert_mdl")' not in twist_driver_body
+    assert 'cmds.setAttr(invert_node + ".input2", -1.0)' not in twist_driver_body
+    assert '"upperarm" in driver_token or "thigh" in driver_token' in twist_driver_body
+    assert 'weight_twist = 1.0 - (i / float(num_cvs - 1))' in twist_driver_body
+    assert "settings = twist_driver_contract(" in twist_driver_body
+    assert 'worldUpVector=tuple(settings["world_up_vector"])' in twist_driver_body
+    assert 'mo=settings["maintain_offset"]' in twist_driver_body
+    assert 'if settings["aim_offset"] is not None:' in twist_driver_body
     assert "segment_length_squared = segment * segment" in twist_driver_body
     assert "cmds.pointPosition(cv, world=True)" in twist_driver_body
     assert "'lowerarm' not in driver_bone" not in twist_driver_body
-    assert "for joint, ctrl in (joint_to_ctrl or {}).items():" in twist_driver_body
-    assert 'sdk = ctrl + "_sdk_pad"' in twist_driver_body
-    assert 'name=sdk + "_twistOrientConstraint"' in twist_driver_body
-    assert 'cmds.setAttr(orient_constraint + ".interpType", 2)' in twist_driver_body
-    assert "is_twist_rig = (" in surface_rig_body
-    assert '"twist" in str(loft_name).lower()' in surface_rig_body
-    assert "rotate_source = follicle_shapes[0] + \".outRotate\"" in surface_rig_body
-    assert "cmds.disconnectAttr(rotate_source, rotate_destination)" in surface_rig_body
-    assert "cmds.pointConstraint(follicle_joints[idx], ctrl_pad, mo=True)" in surface_rig_body
+    assert "for joint, ctrl in (joint_to_ctrl or {}).items():" not in twist_driver_body
+    assert 'sdk = ctrl + "_sdk_pad"' not in twist_driver_body
+    assert 'twistOrientConstraint' not in twist_driver_body
+    other_face_body = create_rig.split(
+        "def rig_other_face_module(", 1
+    )[1].split("\ndef ", 1)[0]
+    assert 'existing_pad = f"{fj}_ctrl_pad"' in other_face_body
+    assert "cmds.parent(pad_long, target_long, absolute=True)" in other_face_body
+    extension_restore_body = create_rig.split(
+        "def restore_post_build_extensions(", 1
+    )[1].split("\ndef ", 1)[0]
+    assert "builder_systems = set()" in extension_restore_body
+    assert "_is_builder_owned_extension_root(" in extension_restore_body
+    assert "is_twist_rig = (" not in surface_rig_body
+    assert "cmds.disconnectAttr(rotate_source, rotate_destination)" not in surface_rig_body
+    assert "cmds.parentConstraint(follicle_joints[idx], ctrl_pad, mo=True)" in surface_rig_body
     assert "joint_to_ctrl[joint_chain[-1]] = ctrl_name" in surface_rig_body
     assert "def delete_temp_bones():" in temp_cleanup
     assert "def cleanup_temp_bones(function):" in temp_cleanup
@@ -851,7 +954,14 @@ def test_maya_hik_ui_reloads_rig_core_before_the_public_builder() -> None:
     build_action = hik_ui.split("    def build_full_rig(self):", 1)[1].split(
         "    def remove_full_rig(self):", 1
     )[0]
+    assert "reload_rig_function_stack(force=True)" in build_action
+    assert "Full Build reloaded rig stack" in build_action
     assert "setup_hik.set_t_pose(joint_map=self.default_map)" in build_action
+    assert 'self.fields.get("Head"), "head1_ctrl"' in build_action
+    assert "parent_override=parent_override" in build_action
+    assert "jaw_ctrl_override=jaw_parent" in build_action
+    assert 'if module == "Tongue":' in build_action
+    assert 'module in {"Eyelids (Left)", "Eyelids (Right)"}' in build_action
     assert "create_rig_mapping(refresh_details=False)" in build_action
     assert build_action.index("create_rig.hide_post_build_face_nodes()") > build_action.index(
         "create_rig.restore_all_control_cv_positions()"
@@ -875,9 +985,11 @@ def test_maya_hik_ui_reloads_rig_core_before_the_public_builder() -> None:
     body_build = hik_ui.split("    def create_body_module_setup(self, module, silent=False):", 1)[1].split(
         "    def remove_body_module_setup(self, module):", 1
     )[0]
-    face_build = hik_ui.split("    def create_face_module_setup(self, module, silent=False):", 1)[1].split(
+    face_build = hik_ui.split("    def create_face_module_setup(", 1)[1].split(
         "    def remove_face_module_setup(self, module):", 1
     )[0]
+    assert "parent_override=None" in face_build
+    assert "jaw_ctrl_override=None" in face_build
     assert "if not silent:\n            self.create_rig_mapping()" in body_build
     assert "if not silent:\n            self.create_rig_mapping()" in face_build
     assert "if not silent:\n                self.store_all_face_connections(silent=False)" in body_build
@@ -1164,12 +1276,17 @@ def test_reverse_foot_snap_is_deferred_until_t_pose() -> None:
     assert '"mirrored_ground_pivots": mirrored_ground_pivots' in placer
     assert "heel_forward -= max(foot_length * 0.025" in placer
     assert "toe_forward = (toe_vector - ankle_vector) * forward" in placer
+    assert "search_start = foot_length * 0.35" in placer
+    assert "search_end = min(toe_forward, foot_length * 0.78)" in placer
+    assert "if item[0] >= widest * 0.99" in placer
+    assert "bank_forward = sum(widest_plateau) / len(widest_plateau)" in placer
+    assert "edge_inset = max(bank_width * 0.10" in placer
     assert "edge_clearance = max(bank_width * 0.0125" in placer
-    assert "inner_side = inner_edge - edge_clearance" in placer
+    assert "inner_side = inner_edge + edge_inset" in placer
     assert "outer_side = outer_edge + edge_clearance" in placer
     assert "return (float(position.x), float(ground_y), float(position.z))" in placer
-    assert '"innerBank": _world_position(toe_forward, inner_side)' in placer
-    assert '"outerBank": _world_position(toe_forward, outer_side)' in placer
+    assert '"innerBank": _world_position(bank_forward, inner_side)' in placer
+    assert '"outerBank": _world_position(bank_forward, outer_side)' in placer
     assert "ground_pivots=ground_pivots.get(side)" in placer
     assert '"post_t_pose"' in placer
     assert "snap_all_reverse_foot_helpers_after_skin_import" not in placer
@@ -1280,8 +1397,8 @@ def test_reverse_foot_snap_is_deferred_until_t_pose() -> None:
     assert 'for axis in ("X", "Y", "Z"):' not in setup_hik.split(
         "def _flatten_segment_with_rotation(", 1
     )[1].split("def _skin_mesh_for_joints(", 1)[0]
-    assert "aim_joint_x_axis_to_world_x(l_upperarm)" in t_pose_body
-    assert "aim_joint_x_axis_to_world_x(r_upperarm)" in t_pose_body
+    assert 'aim_joint_x_axis_to_world_x(\n            l_upperarm, side="l"' in t_pose_body
+    assert 'aim_joint_x_axis_to_world_x(\n            r_upperarm, side="r"' in t_pose_body
     aim_body = setup_hik.split("def aim_joint_x_axis_to_world_x(", 1)[1].split(
         "def _toe_tip_from_chain(", 1
     )[0]
@@ -1301,8 +1418,8 @@ def test_reverse_foot_snap_is_deferred_until_t_pose() -> None:
     assert "shortest_arc = current_x.rotateTo(desired_x)" in roll_aim_body
     assert "current_y.rotateBy(shortest_arc)" in roll_aim_body
     assert "current_z.rotateBy(shortest_arc)" in roll_aim_body
-    assert "_aim_frame_preserving_roll(" in aim_body
-    assert '"roll_preserved": True' in aim_body
+    assert "_canonical_t_pose_arm_frame(" in aim_body
+    assert '"roll_normalized": side in ("l", "r")' in aim_body
     assert "def _set_oriented_elbow_prebend(" in setup_hik
     elbow_pose_body = setup_hik.split(
         "def _set_oriented_elbow_prebend(", 1
@@ -1310,7 +1427,7 @@ def test_reverse_foot_snap_is_deferred_until_t_pose() -> None:
     assert 'name=elbow.split("|")[-1].replace(":", "_") + "_tPoseForearmTemp"' in elbow_pose_body
     assert "cmds.orientConstraint(" in elbow_pose_body
     assert "maintainOffset=False" in elbow_pose_body
-    assert "_aim_frame_preserving_roll(" in elbow_pose_body
+    assert "_canonical_t_pose_arm_frame(" in elbow_pose_body
     assert '(cosine, 0.0, -sine if is_right else sine)' in elbow_pose_body
     assert "_set_oriented_elbow_prebend(" in t_pose_body
     assert '"elbow_prebend_reports": elbow_prebend_reports' in t_pose_body
@@ -1635,7 +1752,15 @@ def test_studio_approved_rerun_preserves_scene_positions() -> None:
     )[0]
     assert "is_studio_template_skeleton(" in capture_guard
     assert "_is_generated_joint(existing_root)" not in capture_guard
-    assert "STUDIO_VOLUME_REPORT_ATTR" not in capture_guard
+    # Only a validated fit for the same mesh is approved for position reuse.
+    # A template-shaped but unvalidated rig must take the fresh-fit path.
+    assert "STUDIO_VOLUME_REPORT_ATTR" in capture_guard
+    assert "PLACEMENT_MESH_MESSAGE_ATTR" in capture_guard
+    assert "same_mesh" in capture_guard
+    assert 'prior_validation.get("post_fit_drift_count") == 0' in capture_guard
+    assert 'prior_validation.get("outside_bounds_count") == 0' in capture_guard
+    assert 'prior_validation.get("limb_orientation_issues") == 0' in capture_guard
+    assert "and preserve_approved_fit" in capture_guard
 
 
 def test_studio_arm_hand_uses_reference_landmarks_and_centered_tips() -> None:
@@ -1742,6 +1867,13 @@ def test_thumb_rig_has_three_fk_controls_and_bind_safe_rp_ik_with_pv() -> None:
     assert "pv_constraint = cmds.poleVectorConstraint(" in finger_rig
     assert '"pv_ctrl": pv_ctrl_info["ctrl"]' in finger_rig
     assert "pole_distance = 5.0" in finger_rig
+    assert "dorsal_direction = -om.MVector(*hand_matrix[8:11])" in finger_rig
+    assert "if dorsal_direction * world_up < 0.0:" in finger_rig
+    assert "if pole_direction * dorsal_direction < 0.0:" in finger_rig
+    assert "pole_direction_flipped = True" in finger_rig
+    assert 'if pole_direction_flipped and side != "r":' in finger_rig
+    assert 'ik_handle + ".twist"' in finger_rig
+    assert '"pv_dorsal_aligned": bool(' in finger_rig
     assert 'name=pv_ctrl_info["pad"] + "_space"' in finger_rig
     assert 'driven=pv_ctrl_info["ctrl"]' in finger_rig
     assert "# Align and position the pad in one operation." in finger_rig

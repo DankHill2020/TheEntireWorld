@@ -9,6 +9,7 @@ or SOP skeleton geometry.
 from __future__ import annotations
 
 import json
+import importlib
 from typing import Any
 
 from tech_connector.services.dcc.rigging_workspace_service import (
@@ -16,12 +17,13 @@ from tech_connector.services.dcc.rigging_workspace_service import (
     RiggingOperationResult,
     auto_map_character,
     mirror_character_slots,
+    twist_driver_contract,
     validate_character_definition,
 )
 
 
 HOST = "houdini"
-RIG_BEHAVIOR_REVISION = 1
+RIG_BEHAVIOR_REVISION = 2
 
 
 def _hou():
@@ -111,8 +113,20 @@ def _record(kind: str, payload: dict[str, Any], *, record_id: str = "") -> str:
     return record_id
 
 
-def reload_dependencies() -> None:
-    return None
+def reload_dependencies() -> int:
+    """Refresh the shared portable contract used by this live Houdini host."""
+    global CharacterDefinition, RiggingOperationResult
+    global auto_map_character, mirror_character_slots, twist_driver_contract
+    global validate_character_definition
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    for name in (
+        "CharacterDefinition", "RiggingOperationResult", "auto_map_character",
+        "mirror_character_slots", "twist_driver_contract", "validate_character_definition",
+    ):
+        globals()[name] = getattr(contract, name)
+    return RIG_BEHAVIOR_REVISION
 
 
 def scene_joints() -> dict[str, Any]:
@@ -287,8 +301,21 @@ def _op_rig_create_ribbon(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
-    record = _record("kinefx_twist", payload)
-    return _result(True, "rig.create_twist", "Created Houdini KineFX twist distribution.", created_ids=[record])
+    module = str(payload.get("module") or f"{payload['start']}_twist")
+    settings = twist_driver_contract(
+        str(payload["start"]),
+        parent=str(payload.get("parent") or payload["start"]),
+        module=module,
+        overrides=payload,
+    )
+    record = _record("kinefx_twist", {**payload, "constraint_settings": settings})
+    return _result(
+        True,
+        "rig.create_twist",
+        "Created Houdini KineFX twist distribution.",
+        created_ids=[record],
+        data={"constraint_settings": settings, "behavior_revision": RIG_BEHAVIOR_REVISION},
+    )
 
 
 def _op_rig_create_motion_path(payload: dict[str, Any]) -> dict[str, Any]:

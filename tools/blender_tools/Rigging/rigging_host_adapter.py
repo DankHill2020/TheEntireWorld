@@ -7,6 +7,7 @@ the resulting rigs remain editable without the Tech Connector UI running.
 from __future__ import annotations
 
 import json
+import importlib
 import re
 from typing import Any
 
@@ -19,12 +20,30 @@ from tech_connector.services.dcc.rigging_workspace_service import (
     auto_map_character,
     mirror_character_slots,
     thumb_rig_contract,
+    twist_driver_contract,
     validate_character_definition,
 )
 
 
 HOST = "blender"
-RIG_BEHAVIOR_REVISION = 6
+RIG_BEHAVIOR_REVISION = 7
+
+
+def reload_dependencies() -> int:
+    """Refresh the shared portable contract used by this live Blender host."""
+    global CharacterDefinition, FINGER_SLOTS, RiggingOperationResult
+    global auto_map_character, mirror_character_slots, thumb_rig_contract, twist_driver_contract
+    global validate_character_definition
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    for name in (
+        "CharacterDefinition", "FINGER_SLOTS", "RiggingOperationResult",
+        "auto_map_character", "mirror_character_slots", "thumb_rig_contract", "twist_driver_contract",
+        "validate_character_definition",
+    ):
+        globals()[name] = getattr(contract, name)
+    return RIG_BEHAVIOR_REVISION
 
 
 def _result(ok: bool, capability: str, message: str = "", **kwargs: Any) -> dict[str, Any]:
@@ -485,7 +504,29 @@ def _build_thumb_rigs(definition: CharacterDefinition, blend: float) -> list[str
         if pole_direction.length <= 1.0e-8:
             pole_direction = Vector((0.0, 0.0, 1.0))
         pole_direction.normalize()
+        hand_slot = "LeftHand" if contract["side"] == "left" else "RightHand"
+        hand_id = definition.slots.get(hand_slot)
+        if hand_id:
+            hand_armature, _hand_bone, hand_pose = _resolve_bone(hand_id)
+            if hand_armature == armature:
+                dorsal_direction = -(
+                    hand_armature.matrix_world.to_3x3()
+                    @ hand_pose.matrix.to_3x3().col[2]
+                )
+                if dorsal_direction.dot(Vector((0.0, 0.0, 1.0))) < 0.0:
+                    dorsal_direction.negate()
+                if thumb_line.length_squared > 1.0e-12:
+                    dorsal_direction -= thumb_line * (
+                        dorsal_direction.dot(thumb_line)
+                        / thumb_line.length_squared
+                    )
+                if (
+                    dorsal_direction.length > 1.0e-8
+                    and pole_direction.dot(dorsal_direction) < 0.0
+                ):
+                    pole_direction.negate()
         pole_control.matrix_world.translation = pole_origin + pole_direction * 5.0
+        pole_control["tc_pole_side"] = contract["pole_side"]
 
         ik = _constraint(poses[-2], "IK", f"TC_{contract['side']}_thumb_ik", module)
         ik.target = ik_control
@@ -1472,6 +1513,17 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
     if start_armature != end_armature:
         raise ValueError("A Blender twist distribution must belong to one armature")
     module = str(payload.get("module") or f"{start_bone.name}_twist")
+    default_world_up = (
+        _bone_id(start_armature, start_bone.parent)
+        if start_bone.parent is not None
+        else _bone_id(start_armature, start_bone)
+    )
+    settings = twist_driver_contract(
+        start_bone.name,
+        parent=str(payload.get("parent") or default_world_up),
+        module=module,
+        overrides=payload,
+    )
     base_name = start_bone.name
     name = base_name[:-7] + "_twist_driver" if base_name.endswith("_driver") else base_name + "_twist_driver"
     driver = _control(name, str(payload["end"]), module, display="SPHERE")
@@ -1487,8 +1539,15 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
         driver.parent_bone = start_bone.name
         driver.matrix_world = world_matrix
     driver["tc_twist_driver"] = True
-    driver["tc_world_up_bone"] = _bone_id(start_armature, start_bone)
-    driver["tc_aim_target_bone"] = _bone_id(start_armature, start_bone)
+    driver["tc_twist_contract_revision"] = settings["revision"]
+    driver["tc_world_up_bone"] = settings["world_up_object"]
+    driver["tc_aim_target_bone"] = settings["aim_target"]
+    driver["tc_world_up_vector"] = settings["world_up_vector"]
+    driver["tc_up_vector"] = settings["up_vector"]
+    driver["tc_maintain_offset"] = settings["maintain_offset"]
+    driver["tc_constraint_weight"] = settings["weight"]
+    if settings["aim_offset"] is not None:
+        driver["tc_aim_offset"] = settings["aim_offset"]
 
     created = [driver.name]
     twists = [str(value) for value in payload.get("twist_joints") or []]
@@ -1511,7 +1570,8 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
         data={
             "twist_driver": driver.name,
             "parent": _bone_id(start_armature, start_bone),
-            "world_up_object": _bone_id(start_armature, start_bone),
+            "world_up_object": settings["world_up_object"],
+            "constraint_settings": settings,
         },
     )
 
