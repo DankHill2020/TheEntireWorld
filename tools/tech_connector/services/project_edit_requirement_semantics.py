@@ -15,6 +15,8 @@ def is_project_edit_quality_requirement(text: str) -> bool:
     return bool(re.search(
         r"\b(?:use only|standard library|no external|complete public docstrings?|"
         r"detailed public docstrings?|type hints?|production readiness)\b"
+        r"|\b(?:work|run|import|execute)\s+without\b[^.;]{0,80}"
+        r"\b(?:installed|running|available)\b"
         r"|^\s*(?:modify|edit|change|touch)\s+only\b"
         r"|^\s*do not touch (?:files?|paths?)\b"
         r"|^\s*(?:keep|preserve) (?:the )?(?:existing )?public names?\b"

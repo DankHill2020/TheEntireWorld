@@ -371,6 +371,22 @@ def code_model_for_profile(
     return CODE_MODEL_PROFILES.get(target_profile, CODE_MODEL_PROFILES["small"])
 
 
+def installed_local_quality_model(selected_model: str, settings: dict | None = None) -> str:
+    """Select an installed quality coder for automatic local code work."""
+
+    chosen = str(selected_model or "").removeprefix("ollama:").strip()
+    values = dict(settings or {})
+    if not (
+        values.get("model_source_mode") == "local_only"
+        and values.get("local_model_policy") == "hardware_aware"
+        and chosen.casefold() == "qwen3.5:4b"
+    ):
+        return chosen
+    deep_model = str(code_model_for_profile("quality", values)).removeprefix("ollama:")
+    installed = {name.casefold() for name in installed_ollama_models()}
+    return deep_model if deep_model.casefold() in installed else chosen
+
+
 def is_ollama_running(timeout=2):
     try:
         proxy_handler = urllib.request.ProxyHandler({})

@@ -106,12 +106,20 @@ def _ephemeral_harness_call_graph_errors(
 
     production_functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     production_function_modules: dict[str, str] = {}
+    production_class_methods: dict[str, set[str]] = {}
     connected_methods: set[str] = set()
     for _path, _original, production_source in generated_files:
         try:
             production_tree = ast.parse(production_source)
         except SyntaxError:
             continue
+        for class_node in production_tree.body:
+            if isinstance(class_node, ast.ClassDef):
+                production_class_methods.setdefault(class_node.name, set()).update(
+                    member.name
+                    for member in class_node.body
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+                )
         for node in ast.walk(production_tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 production_functions.setdefault(node.name, node)
@@ -145,6 +153,68 @@ def _ephemeral_harness_call_graph_errors(
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name.startswith("test_")
     ):
+        instance_classes: dict[str, str] = {}
+        for node in ast.walk(test_node):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            if not (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in production_class_methods
+            ):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    instance_classes[target.id] = value.func.id
+        for patch_call in (
+            node for node in ast.walk(test_node)
+            if isinstance(node, ast.Call)
+            and dotted_name(node.func).endswith("patch.object")
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            target_name = patch_call.args[0].id
+            class_name = (
+                target_name if target_name in production_class_methods
+                else instance_classes.get(target_name, "")
+            )
+            method_name = patch_call.args[1].value
+            if not class_name or method_name not in production_class_methods[class_name]:
+                continue
+            subject_names = {
+                name for name, owner in instance_classes.items() if owner == class_name
+            }
+            subject_names.add(class_name)
+            directly_invoked = any(
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == method_name
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id in subject_names
+                for call in ast.walk(test_node)
+            )
+            if method_name == "__init__":
+                directly_invoked = directly_invoked or bool(subject_names - {class_name})
+            if method_name == "__len__":
+                directly_invoked = directly_invoked or any(
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "len"
+                    and call.args
+                    and isinstance(call.args[0], ast.Name)
+                    and call.args[0].id in subject_names
+                    for call in ast.walk(test_node)
+                )
+            if directly_invoked:
+                errors.append(
+                    f"{test_node.name}: never patch the public callable under "
+                    f"test `{class_name}.{method_name}`; invoke production and "
+                    "patch only its external dependencies."
+                )
         called_production = {
             node.func.id
             for node in ast.walk(test_node)
@@ -169,6 +239,24 @@ def _ephemeral_harness_call_graph_errors(
                 "after the signal is wired; patch the imported backend callable "
                 "and assert public widget/status behavior instead: "
                 + ", ".join(patched_connected_slots)
+            )
+        for patch_call in (
+            node for node in ast.walk(test_node)
+            if isinstance(node, ast.Call)
+            and dotted_name(node.func).endswith("patch.object")
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[0].id in production_functions
+            and node.args[1].value in production_functions
+        ):
+            target = patch_call.args[0].id
+            attribute = patch_call.args[1].value
+            errors.append(
+                f"{test_node.name}: patch.object({target}, '{attribute}') targets "
+                "a function as though it were its containing module; patch "
+                "the production consumer's imported dependency instead."
             )
         if not called_production:
             continue
@@ -383,10 +471,13 @@ def _repair_ephemeral_harness_call_graph(
         except SyntaxError:
             continue
         try:
+            root_path = Path(project_root).resolve()
+            source_path = Path(production_path)
+            if not source_path.is_absolute():
+                source_path = root_path / source_path
             module_name = ".".join(
-                Path(production_path)
-                .resolve()
-                .relative_to(Path(project_root).resolve())
+                source_path.resolve()
+                .relative_to(root_path)
                 .with_suffix("")
                 .parts
             )
@@ -1271,6 +1362,16 @@ def _build_ephemeral_harness_audit_stage(
         for issue in known_issues or []
         for match in re.findall(r"\btest_[A-Za-z0-9_]+\b", str(issue))
     }
+    expected_result_guidance = (
+        "\nA validator found an assigned but unused expected_result. In the "
+        "replacement, keep the contract-derived expected_result, capture the "
+        "real public owner's returned value, and assert equality between that "
+        "actual value and expected_result. Do not merely rename or delete the "
+        "fixture, and do not assert a value that the fixture does not derive.\n"
+        if any("fixture variables never consumed: expected_result" in str(issue)
+               for issue in known_issues or [])
+        else ""
+    )
     harness_test_names = failing_test_names or selected_test_names
     if harness_test_names:
         behavior_rows = [
@@ -1343,7 +1444,10 @@ def _build_ephemeral_harness_audit_stage(
             "an unchanged method. A replacement name must exactly equal a test_name "
             "from Approved behavior checks. Never return `_run_as_script`, a main "
             "guard, imports, binding metadata, assignments, or helper functions as "
-            "test-method repairs, even when those names appear in a traceback."
+            "test-method repairs, even when those names appear in a traceback. "
+            "Every replacement must parse as one complete Python method. Keep "
+            "JSON strings and other quoted test data on one source line, or "
+            "escape embedded newlines as a Python string escape."
         ),
         user_prompt=(
             "Approved behavior checks:\n"
@@ -1360,6 +1464,7 @@ def _build_ephemeral_harness_audit_stage(
                 if known_issues
                 else ""
             )
+            + expected_result_guidance
             + """
 Trace each test's fixture state in execution order. For clocks, TTLs, retries,
 ordering, and state transitions, calculate the exact values at every assertion.
@@ -1534,6 +1639,65 @@ def _ensure_ephemeral_behavior_bindings(
     """Inject deterministic behavior ownership metadata when code omitted it."""
 
     text = str(response or "")
+    expected_names = [
+        str(value) for value in (test_names or []) if str(value).strip()
+    ]
+    renamed_methods = False
+    if len(behavior_ids) == len(expected_names) == 1:
+        # A singleton capsule can unambiguously map its sole unittest method
+        # to the approved opaque name. This only renames a method; it neither
+        # changes its oracle nor fabricates missing executable proof.
+        discovered = list(dict.fromkeys(re.findall(
+            r"(?m)^[ \t]*def[ \t]+(test_[A-Za-z0-9_]+)[ \t]*\(",
+            text,
+        )))
+        if len(discovered) == 1 and discovered[0] != expected_names[0]:
+            text = re.sub(
+                r"(?m)^([ \t]*def[ \t]+)"
+                + re.escape(discovered[0])
+                + r"([ \t]*\()",
+                lambda match: match.group(1) + expected_names[0] + match.group(2),
+                text,
+                count=1,
+            )
+            renamed_methods = True
+    elif len(behavior_ids) == len(expected_names) and len(expected_names) > 1:
+        # Complete-harness fallback may use readable owner names while keeping
+        # the approved unique ordinal suffix. Rebind only a one-to-one match;
+        # missing or duplicate methods must still fail validation.
+        discovered = list(dict.fromkeys(re.findall(
+            r"(?m)^[ \t]*def[ \t]+(test_[A-Za-z0-9_]+)[ \t]*\(",
+            text,
+        )))
+        if len(discovered) == len(expected_names):
+            expected_by_ordinal = {
+                match.group(1): name
+                for name in expected_names
+                if (match := re.search(r"_(\d{3})$", name))
+            }
+            discovered_by_ordinal = {
+                match.group(1): name
+                for name in discovered
+                if (match := re.search(r"_(\d{3})$", name))
+            }
+            if (
+                len(expected_by_ordinal) == len(expected_names)
+                and len(discovered_by_ordinal) == len(discovered)
+                and set(expected_by_ordinal) == set(discovered_by_ordinal)
+            ):
+                for ordinal, old_name in discovered_by_ordinal.items():
+                    new_name = expected_by_ordinal[ordinal]
+                    if old_name == new_name:
+                        continue
+                    text = re.sub(
+                        r"(?m)^([ \t]*def[ \t]+)"
+                        + re.escape(old_name)
+                        + r"([ \t]*\()",
+                        lambda match: match.group(1) + new_name + match.group(2),
+                        text,
+                        count=1,
+                    )
+                    renamed_methods = True
     unfenced = re.sub(
         r"^\s*```(?:python)?\s*",
         "",
@@ -1552,6 +1716,11 @@ def _ensure_ephemeral_behavior_bindings(
     if (
         not binding_errors
         and set(behavior_ids).issubset(existing_behavior_ids)
+        and not renamed_methods
+        and not (
+            len(expected_names) == 1
+            and expected_names[0] not in existing_bindings
+        )
     ):
         return text
     text = re.sub(
@@ -1577,7 +1746,7 @@ def _ensure_ephemeral_behavior_bindings(
     if len(names) != len(behavior_ids):
         return text
     bindings: dict[str, list[str]] = {}
-    for test_name, behavior_id in zip(names, behavior_ids, strict=True):
+    for test_name, behavior_id in zip(names, behavior_ids):
         bindings.setdefault(test_name, []).append(behavior_id)
     binding_line = (
         "__TECH_CONNECTOR_BEHAVIOR_BINDINGS__ = "
@@ -1641,6 +1810,72 @@ def _apply_ephemeral_harness_repairs(
             canonical_paths.add(canonical)
         return normalized, canonical_paths
 
+    def escape_literal_newlines(value: str) -> str:
+        """Repair only physical newlines inside a single-line quoted literal."""
+
+        result: list[str] = []
+        quote = ""
+        triple = False
+        escaped = False
+        comment = False
+        index = 0
+        replacements = 0
+        while index < len(value):
+            character = value[index]
+            if comment:
+                result.append(character)
+                if character in "\r\n":
+                    comment = False
+                index += 1
+                continue
+            if not quote:
+                if character == "#":
+                    comment = True
+                elif character in {"'", '"'}:
+                    quote = character
+                    triple = value[index:index + 3] == character * 3
+                    if triple:
+                        result.append(character * 3)
+                        index += 3
+                        continue
+                result.append(character)
+                index += 1
+                continue
+            if escaped:
+                result.append(character)
+                escaped = False
+                index += 1
+                continue
+            if character == "\\":
+                result.append(character)
+                escaped = True
+                index += 1
+                continue
+            if triple and value[index:index + 3] == quote * 3:
+                result.append(quote * 3)
+                quote = ""
+                triple = False
+                index += 3
+                continue
+            if not triple and character == quote:
+                result.append(character)
+                quote = ""
+                index += 1
+                continue
+            if not triple and character in "\r\n":
+                if replacements >= 3:
+                    return value
+                result.append("\\n")
+                replacements += 1
+                if character == "\r" and value[index:index + 2] == "\r\n":
+                    index += 2
+                else:
+                    index += 1
+                continue
+            result.append(character)
+            index += 1
+        return "".join(result) if replacements else value
+
     for repair in repairs:
         test_name = str(repair.get("test") or "")
         replacement = str(repair.get("replacement") or "")
@@ -1650,13 +1885,32 @@ def _apply_ephemeral_harness_repairs(
         try:
             replacement_tree = ast.parse(replacement)
         except SyntaxError as exc:
-            errors.append(f"{test_name}: replacement did not parse: {exc}.")
-            continue
+            if "string literal" not in str(exc):
+                errors.append(f"{test_name}: replacement did not parse: {exc}.")
+                continue
+            normalized = escape_literal_newlines(replacement)
+            try:
+                replacement_tree = ast.parse(normalized)
+            except SyntaxError:
+                errors.append(f"{test_name}: replacement did not parse: {exc}.")
+                continue
+            replacement = normalized
         replacement_nodes = [
             node
             for node in replacement_tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
+        if len(replacement_tree.body) == len(replacement_nodes) == 1:
+            replacement_name = replacement_nodes[0].name
+            expected_ordinal = re.search(r"_(\d{3})$", test_name)
+            actual_ordinal = re.search(r"_(\d{3})$", replacement_name)
+            if (
+                replacement_name.startswith("test_")
+                and expected_ordinal is not None
+                and actual_ordinal is not None
+                and expected_ordinal.group(1) == actual_ordinal.group(1)
+            ):
+                replacement_nodes[0].name = test_name
         if (
             len(replacement_tree.body) != 1
             or len(replacement_nodes) != 1
@@ -2578,6 +2832,120 @@ def _parse_final_requirement_review(
             matches.append((source, symbol))
         return matches
 
+    def code_evidence_belongs_to_owner(owner: str, evidence: str) -> bool:
+        """Reject a quoted code line borrowed from a sibling declaration."""
+
+        quoted_line = evidence.strip().strip("`")
+        if not re.match(r"^(?:return|raise|if|for|while|with|await)\s+", quoted_line):
+            return True
+        matches = matching_owner_sources(owner)
+        if not matches:
+            return True  # Other owner checks handle unresolved reviewer names.
+        for source, symbol in matches:
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            if symbol in {"", "<module>"}:
+                owner_source = source
+            else:
+                nodes: list[ast.AST] = list(tree.body)
+                owner_node: ast.AST | None = None
+                for part in symbol.split("."):
+                    owner_node = next(
+                        (
+                            node for node in nodes
+                            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                            and node.name == part
+                        ),
+                        None,
+                    )
+                    if owner_node is None:
+                        break
+                    nodes = list(owner_node.body) if isinstance(owner_node, ast.ClassDef) else []
+                if owner_node is None:
+                    continue
+                owner_source = ast.get_source_segment(source, owner_node) or ""
+            if quoted_line in owner_source:
+                return True
+        return False
+
+    def review_premise_is_refuted(
+        owner: str,
+        requirement_text: str,
+        evidence_text: str,
+        repair_text: str,
+    ) -> bool:
+        """Reject narrow reviewer claims contradicted by executable owner code."""
+
+        requirement_lower = requirement_text.casefold()
+        evidence_lower = evidence_text.casefold()
+        repair_lower = repair_text.casefold()
+        if (
+            ("in project order" in requirement_lower or "in input order" in requirement_lower)
+            and "does not sort" in evidence_lower
+            and "sort" in repair_lower
+            and "sorted" not in requirement_lower
+        ):
+            # Sorting would violate an input/project-order contract. A separate
+            # concrete ordering defect remains reportable.
+            return True
+        claims_no_none_branch = bool(
+            "none" in evidence_lower
+            and ("no branch" in evidence_lower or "does not have a branch" in evidence_lower)
+        )
+        claims_list_return = "returns a list" in evidence_lower
+        if not (claims_no_none_branch or claims_list_return):
+            return False
+        for source, symbol in matching_owner_sources(owner):
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            nodes = list(tree.body)
+            owner_node: ast.AST | None = None
+            for part in symbol.split("."):
+                owner_node = next(
+                    (
+                        node for node in nodes
+                        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                        and node.name == part
+                    ),
+                    None,
+                )
+                if owner_node is None:
+                    break
+                nodes = list(owner_node.body) if isinstance(owner_node, ast.ClassDef) else []
+            if not isinstance(owner_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            local_nodes: list[ast.AST] = []
+            pending = [owner_node]
+            while pending:
+                node = pending.pop()
+                local_nodes.append(node)
+                pending.extend(
+                    child for child in ast.iter_child_nodes(node)
+                    if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+                )
+            if claims_no_none_branch and any(
+                isinstance(node, ast.Compare)
+                and any(isinstance(value, ast.Constant) and value.value is None
+                        for value in [node.left, *node.comparators])
+                and any(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops)
+                for node in local_nodes
+            ):
+                return True
+            returns = [node for node in local_nodes if isinstance(node, ast.Return)]
+            if claims_list_return and returns and all(
+                isinstance(node.value, ast.Tuple)
+                or isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "tuple"
+                for node in returns
+            ):
+                return True
+        return False
+
     def worker_wiring_is_already_proven(
         owner: str,
         requirement_text: str,
@@ -3232,6 +3600,68 @@ def _parse_final_requirement_review(
                         "declared result contract. Smallest repair: implement the "
                         "authoritative result branches exactly."
                     )
+    def clear_preserves_persistent_sequence(owner: str) -> bool:
+        """Refute a clear/reset claim when only retained events are cleared."""
+
+        if not owner.endswith(".clear"):
+            return False
+        for source, symbol in matching_owner_sources(owner):
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            class_name = symbol.split(".", 1)[0]
+            class_node = next(
+                (node for node in tree.body
+                 if isinstance(node, ast.ClassDef) and node.name == class_name),
+                None,
+            )
+            if class_node is None:
+                continue
+            methods = {
+                node.name: node for node in class_node.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            append = methods.get("append")
+            clear = methods.get("clear")
+            if append is None or clear is None:
+                continue
+            persistent = {
+                node.attr for node in ast.walk(append)
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and isinstance(node.ctx, ast.Store)
+                and any(token in node.attr.casefold()
+                        for token in ("sequence", "counter", "next", "_id", "id"))
+            }
+            if not persistent:
+                continue
+            if any(
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and isinstance(node.ctx, ast.Store)
+                and node.attr in persistent
+                for node in ast.walk(clear)
+            ):
+                continue
+            if any(
+                isinstance(node, ast.Call)
+                and not (
+                    isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Attribute)
+                    and isinstance(node.func.value.value, ast.Name)
+                    and node.func.value.value.id == "self"
+                    and node.func.value.attr == "events"
+                    and node.func.attr == "clear"
+                )
+                for node in ast.walk(clear)
+            ):
+                continue
+            return True
+        return False
+
     for issue in issues:
         if not isinstance(issue, dict):
             continue
@@ -3246,6 +3676,19 @@ def _parse_final_requirement_review(
         missing_observable = str(
             issue.get("missing_observable") or ""
         ).strip()
+        if (
+            category == "implementation"
+            and re.search(r"\b(?:add|write)\s+(?:a\s+)?(?:comment|docstring)\b", repair, re.I)
+            and not re.search(r"\b(?:comment|docstring|documentation)\b", authoritative_requirement, re.I)
+        ):
+            # A requested behavior cannot be repaired by commentary alone.
+            continue
+        if (
+            category == "implementation"
+            and "without reusing sequence" in authoritative_requirement.casefold()
+            and clear_preserves_persistent_sequence(owner)
+        ):
+            continue
         if (
             not owner
             or not evidence_text
@@ -3307,7 +3750,22 @@ def _parse_final_requirement_review(
             for identifier in code_identifiers
         ):
             continue
+        if category in {"implementation", "validation"} and not code_evidence_belongs_to_owner(
+            owner, evidence_text
+        ):
+            errors.append(
+                "Final requirement review supplied ungrounded owner evidence for "
+                f"{requirement_id}: quoted code is not in {owner}."
+            )
+            continue
         if worker_wiring_is_already_proven(
+            owner,
+            authoritative_requirement,
+            evidence_text,
+            repair,
+        ):
+            continue
+        if review_premise_is_refuted(
             owner,
             authoritative_requirement,
             evidence_text,

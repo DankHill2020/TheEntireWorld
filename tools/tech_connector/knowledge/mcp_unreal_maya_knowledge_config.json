@@ -11,14 +11,14 @@
     },
     "knowledge": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\knowledge\\knowledge_mcp_server_v2.py"
       ]
     },
     "maya": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -27,7 +27,7 @@
     },
     "blender": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -36,7 +36,7 @@
     },
     "houdini": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -45,7 +45,7 @@
     },
     "unity": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -54,7 +54,7 @@
     },
     "motionbuilder": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -63,7 +63,7 @@
     },
     "3dsmax": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -72,7 +72,7 @@
     },
     "substance_painter": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -81,7 +81,7 @@
     },
     "photoshop": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -90,7 +90,7 @@
     },
     "gimp": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
         "--host",
@@ -99,7 +99,7 @@
     },
     "unreal": {
       "type": "stdio",
-      "command": "C:\\Users\\Aaron\\AppData\\Local\\Programs\\Python\\Python314\\pythonw.exe",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\unreal\\unreal_mcp_server.py"
       ]

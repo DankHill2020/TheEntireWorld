@@ -351,7 +351,6 @@ def load_settings(*, credential_store=None) -> dict:
             for key in _SECRET_SETTING_KEYS:
                 merged[key] = store.load(key)
             legacy_model_defaults = {
-                "router_local_code": {"qwen2.5-coder:7b": "qwen3.5:4b"},
                 "router_local_plan": {"qwen3:4b-instruct": "qwen3.5:4b"},
                 "router_local_deep": {"qwen3:4b-instruct": "qwen3.5:9b"},
                 "router_visual_media": {"qwen3:4b-instruct": "qwen3.5:4b"},
@@ -362,10 +361,8 @@ def load_settings(*, credential_store=None) -> dict:
                 "causal_repair_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
                 "fast_general_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
                 "visual_media_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
-                "fast_code_model": {"qwen2.5-coder:7b": "qwen3.5:4b"},
                 "fallback_general_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
                 "fallback_semantic_intent_model": {"qwen3:4b-instruct": "qwen3.5:4b"},
-                "fallback_code_model": {"qwen2.5-coder:7b": "qwen3.5:4b"},
             }
             for key, replacements in legacy_model_defaults.items():
                 current = str(merged.get(key, "") or "").strip()

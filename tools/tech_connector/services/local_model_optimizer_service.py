@@ -58,7 +58,10 @@ def recommend_local_models(
         targets = {
             "intent": "qwen3.5:4b",
             "general": "qwen3.5:4b",
-            "code": "qwen3.5:4b",
+            # A focused, hidden-checked code-edit probe favored the installed
+            # 7B coder over the 4B general model on this VRAM tier. Keep the
+            # smaller general model for non-code roles.
+            "code": "qwen2.5-coder:7b",
             "deep": "qwen3.5:9b",
             "visual": "qwen3.5:4b",
         }
@@ -75,7 +78,7 @@ def recommend_local_models(
     fallbacks = {
         "intent": ("qwen3.5:4b", "qwen3:4b-instruct", "qwen2.5-coder:3b"),
         "general": ("qwen3.5:4b", "qwen3:4b-instruct", "qwen2.5-coder:3b"),
-        "code": ("qwen3.5:9b", "qwen3.5:4b", "qwen2.5-coder:7b", "qwen2.5-coder:3b"),
+        "code": ("qwen2.5-coder:7b", "qwen3.5:9b", "qwen3.5:4b", "qwen2.5-coder:3b"),
         "deep": ("qwen3-coder:30b", "qwen3.5:9b", "qwen2.5-coder:7b", "qwen3.5:4b"),
         "visual": ("qwen3.5:9b", "qwen3.5:4b", "qwen3:4b-instruct"),
     }

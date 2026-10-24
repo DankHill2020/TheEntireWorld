@@ -2377,6 +2377,7 @@ class _ProjectEditVerificationPhase:
             ]
         self.starting_attempt = int(self.restored_workflow_state.get("attempt") or 0)
         self.seen_validation_candidate_fingerprints: set[str] = set()
+        self.runtime_audit_repair_counts: dict[str, int] = {}
         self.last_validation_errors = list(
             self.restored_review_errors
             if isinstance(self.restored_review_errors, list)

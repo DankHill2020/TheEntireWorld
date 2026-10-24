@@ -84,6 +84,15 @@ IMPORT_PRESETS = {
 }
 
 
+def _maturity_label(maturity: str) -> str:
+    return {
+        "experimental": "Experimental",
+        "authoring_preview": "Editor preview",
+        "runtime_ready": "Runtime ready; shipping unqualified",
+        "production_ready": "Production ready; check platform scope",
+    }.get(str(maturity), "Maturity unknown")
+
+
 class _AssetDropZone(QLabel):
     filesDropped = Signal(object)
 
@@ -784,8 +793,8 @@ class AssetBrowserWidget(QWidget):
             if family_menu is None:
                 family_menu = menu.addMenu(descriptor.family)
                 family_menus[descriptor.family] = family_menu
-            action = family_menu.addAction(descriptor.display_name)
-            action.setToolTip(f"Create {descriptor.display_name}")
+            action = family_menu.addAction(f"{descriptor.display_name} · {_maturity_label(descriptor.maturity)}")
+            action.setToolTip(f"Create {descriptor.display_name}. {_maturity_label(descriptor.maturity)}")
             action.triggered.connect(
                 lambda _checked=False, type_id=descriptor.type_id: self.create_asset(type_id)
             )
@@ -798,7 +807,8 @@ class AssetBrowserWidget(QWidget):
             if family_menu is None:
                 family_menu = menu.addMenu(descriptor.family)
                 family_menus[descriptor.family] = family_menu
-            action = family_menu.addAction(descriptor.display_name)
+            action = family_menu.addAction(f"{descriptor.display_name} · {_maturity_label(descriptor.maturity)}")
+            action.setToolTip(_maturity_label(descriptor.maturity))
             action.triggered.connect(lambda _checked=False, type_id=descriptor.type_id: self.create_asset(type_id))
         menu._tc_child_menus = list(family_menus.values())
 
@@ -945,10 +955,11 @@ class AssetBrowserWidget(QWidget):
             item.setData(0, ASSET_PATH_ROLE, str(path))
             item.setData(0, ASSET_TYPE_ROLE, type_id)
             item.setData(0, ASSET_DOCUMENT_ROLE, document)
-            item.setData(0, Qt.AccessibleTextRole, f"{path.stem}, {display_type}, {content_label}")
+            maturity_label = _maturity_label(descriptor.maturity) if descriptor else "Maturity unknown"
+            item.setData(0, Qt.AccessibleTextRole, f"{path.stem}, {display_type}, {maturity_label}, {content_label}")
             item.setData(
                 0, Qt.AccessibleDescriptionRole,
-                f"{relative}. {document['cook_label']}. Source control {str(document['vcs']).replace('_', ' ')}.",
+                f"{relative}. {maturity_label}. {document['cook_label']}. Source control {str(document['vcs']).replace('_', ' ')}.",
             )
             if descriptor is not None:
                 detail_icon = self.thumbnails.icon(
@@ -956,7 +967,7 @@ class AssetBrowserWidget(QWidget):
                 )
                 item.setIcon(0, detail_icon)
             item.setToolTip(
-                0, f"{display_type}\n{relative}\n{content_label} • {document['cook_label']}\n"
+                0, f"{display_type} • {maturity_label}\n{relative}\n{content_label} • {document['cook_label']}\n"
                 f"{asset_id or 'Source file—not registered as an authored asset'}"
             )
             self.asset_tree.addTopLevelItem(item)
@@ -964,16 +975,16 @@ class AssetBrowserWidget(QWidget):
                 self.thumbnails.icon(
                     path, descriptor, size=96, badges=(document["state"], document["cook"]),
                 ) if descriptor is not None else item.icon(0),
-                f"{path.stem}\n{display_type}",
+                f"{path.stem}\n{display_type} · {maturity_label}",
             )
             grid_item.setData(ASSET_ID_ROLE, asset_id)
             grid_item.setData(ASSET_PATH_ROLE, str(path))
             grid_item.setData(ASSET_TYPE_ROLE, type_id)
             grid_item.setData(ASSET_DOCUMENT_ROLE, document)
-            grid_item.setData(Qt.AccessibleTextRole, f"{path.stem}, {display_type}, {content_label}")
+            grid_item.setData(Qt.AccessibleTextRole, f"{path.stem}, {display_type}, {maturity_label}, {content_label}")
             grid_item.setData(
                 Qt.AccessibleDescriptionRole,
-                f"{relative}. {document['cook_label']}. Press Enter to open; use the context menu for more actions.",
+                f"{relative}. {maturity_label}. {document['cook_label']}. Press Enter to open; use the context menu for more actions.",
             )
             grid_item.setToolTip(item.toolTip(0))
             grid_item.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
@@ -1282,6 +1293,7 @@ class AssetBrowserWidget(QWidget):
         )
         hot_reload = descriptor.hot_reload_class.replace("_", " ").title() if descriptor else "Unknown"
         self.inspector_details.setText(
+            f"Maturity: {_maturity_label(descriptor.maturity) if descriptor else 'Maturity unknown'}\n"
             f"Content: {document.get('state_label', item.text(2))}\n"
             f"Cook: {document.get('cook_label', '—')}\n"
             f"Source control: {str(document.get('vcs') or 'not_queried').replace('_', ' ').title()}\n"
@@ -1375,18 +1387,27 @@ class AssetBrowserWidget(QWidget):
                 )
                 metadata = {**record.metadata, "importer_settings": properties}
             else:
-                payload = json.loads(record.source_path.read_text(encoding="utf-8"))
-                payload["properties"] = properties
-                record.source_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                if record.asset_type == "tc.ui_document":
+                    from tech_connector.game_engine.assets.ui_document_asset_service import UIDocumentAssetService
+
+                    UIDocumentAssetService(self.project_root, self.database).update(
+                        record.asset_id, properties, replace=True,
+                    )
+                else:
+                    payload = json.loads(record.source_path.read_text(encoding="utf-8"))
+                    payload["properties"] = properties
+                    record.source_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                 metadata = record.metadata
-            self.database.register_asset(
-                record.source_path, record.asset_type, asset_id=record.asset_id,
-                metadata=metadata, dependencies=self.database.dependency_edges(record.asset_id),
-            )
+            if record.asset_type != "tc.ui_document":
+                self.database.register_asset(
+                    record.source_path, record.asset_type, asset_id=record.asset_id,
+                    metadata=metadata, dependencies=self.database.dependency_edges(record.asset_id),
+                )
         except Exception as exc:
             QMessageBox.warning(self, "Property save failed", str(exc))
             return
-        self.statusMessage.emit(f"Saved properties for {record.source_path.name}; hot reload is ready.")
+        hot_reload = self.registry.require(record.asset_type).hot_reload_class.replace("_", " ")
+        self.statusMessage.emit(f"Saved properties for {record.source_path.name}; live update: {hot_reload}.")
         self.refresh()
 
     def _show_property_context_menu(self, position) -> None:

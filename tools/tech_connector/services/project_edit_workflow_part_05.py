@@ -3062,6 +3062,80 @@ def _repair_shared_ttl_recency_index(
     return updated, notes
 
 
+def _repair_monotonic_clear_counter(
+    generated_files: list[tuple[str, str, str]],
+    errors: list[str],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Remove a proven counter reset from a bounded journal's clear method."""
+
+    diagnostics = "\n".join(str(error) for error in errors)
+    updated = list(generated_files)
+    repairs: list[str] = []
+    for index, (path, original, source) in enumerate(updated):
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        line_ranges: list[tuple[int, int]] = []
+        file_repairs: list[str] = []
+        for class_node in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+            if f"{path}:{class_node.name}.clear: clear must preserve" not in diagnostics:
+                continue
+            methods = {
+                node.name: node
+                for node in class_node.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            append = methods.get("append")
+            clear = methods.get("clear")
+            if append is None or clear is None:
+                continue
+            counters = {
+                node.attr
+                for node in ast.walk(append)
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and isinstance(node.ctx, ast.Store)
+                and any(token in node.attr.casefold() for token in (
+                    "sequence", "serial", "counter", "next",
+                ))
+            }
+            if len(counters) != 1:
+                continue
+            counter = next(iter(counters))
+            for node in ast.walk(clear):
+                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+                    continue
+                if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Attribute):
+                    continue
+                target = node.targets[0]
+                if (
+                    isinstance(target.value, ast.Name)
+                    and target.value.id == "self"
+                    and target.attr == counter
+                    and node.value.value in (0, 1)
+                ):
+                    line_ranges.append((node.lineno, node.end_lineno or node.lineno))
+            if line_ranges:
+                file_repairs.append(
+                    f"{class_node.name}.clear: preserved persistent {counter} counter"
+                )
+        if not line_ranges:
+            continue
+        lines = source.splitlines(keepends=True)
+        for start, end in sorted(line_ranges, reverse=True):
+            del lines[start - 1:end]
+        repaired = "".join(lines)
+        try:
+            ast.parse(repaired, filename=path)
+        except SyntaxError:
+            continue
+        updated[index] = (path, original, repaired)
+        repairs.extend(file_repairs)
+    return updated, repairs
+
+
 def _repair_explicit_bool_rejections(
     generated_files: list[tuple[str, str, str]],
     errors: list[str],

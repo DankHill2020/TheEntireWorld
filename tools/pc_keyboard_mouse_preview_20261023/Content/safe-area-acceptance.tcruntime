@@ -1,0 +1,342 @@
+TCRUNTIME	1
+SCENEID	bd4f650fa341a96504a79822
+ASSET	tc.asset.14f25a3cd6b19714	texture	Assets/tc.asset.14f25a3cd6b19714.png	3497691baff782023e1ac7a06f42fe7c79a6e64d8d96f51c46e8f193a0321970
+ASSET	tc.asset.18a2820c6f8e3210	audio	Assets/tc.asset.18a2820c6f8e3210.wav	a08f7d837d034c4d516f9c522f7c2ac953854950ae838b398e95b1048dbe23cf
+ASSET	tc.asset.2c6d4b5e99bbe921	rig_blob	Assets/tc.asset.2c6d4b5e99bbe921.u32	f68fd665b87597480550cbd2bba15b6534033a2c5f8a9b66c03ef81d81422474
+ASSET	tc.asset.44f8a2b5dbf54e5b	mesh	Assets/tc.asset.44f8a2b5dbf54e5b.obj	877acbf35b785ff9c526be071e31d0233b8ee06055f700800aaa6850cb866a1f
+ASSET	tc.asset.4cd74032d68e9dd0	rig_blob	Assets/tc.asset.4cd74032d68e9dd0.u32	ef53096c91191c9c56acf13cc1180b59cf93ca7449ab5637a1b20d333f02efce
+ASSET	tc.asset.5926f39e31ea4c68a1b15d6e438f0855	texture	Assets/tc.asset.5926f39e31ea4c68a1b15d6e438f0855.png	3497691baff782023e1ac7a06f42fe7c79a6e64d8d96f51c46e8f193a0321970
+ASSET	tc.asset.6e8bcd96b27d64bd	rig_blob	Assets/tc.asset.6e8bcd96b27d64bd.f32	139c38bdfbdd5bfd9dda34330ad6916f878e9e6ccf870859b9119ca8d663dff7
+ASSET	tc.asset.851fa84d330c4b84	audio	Assets/tc.asset.851fa84d330c4b84.wav	5a726768d1e55b3550300ee1d2762973e1592919d24e9df7fb21b577c3515a1b
+ASSET	tc.asset.b149d1e3e6d76ae8	rig_blob	Assets/tc.asset.b149d1e3e6d76ae8.f32	056b96f4fa7a385d7904d34413cc383135e601a3cb55349ba15c1fb02b2c115f
+ASSET	tc.asset.b33fdae4154ef7ad	rig_blob	Assets/tc.asset.b33fdae4154ef7ad.f32	762474a2679df69636bc181087a628a7bb4b33b31243c707e20606aa664c51f0
+ASSET	tc.asset.c09f6d274b427cad	material	builtin:default_pbr	1f5abfb7789c5c29e09e21fa0d92b9bbe7dcc2a10741c1f3536c27fccc88b197
+ASSET	tc.asset.e30c1421ed919668	mesh	builtin:cube	ad7a745dbc9fdd166fee8dba556375e2f1ffe0dbd436f3eaf9fe5618d975eee4
+ENTITY	Player
+TRANSFORM	Player	0	1.25	0	0	0	0	1	1	1
+RENDER	Player	tc.asset.44f8a2b5dbf54e5b	tc.asset.c09f6d274b427cad	0.12	0.48	0.82	0.05	0.42	1	tc.asset.14f25a3cd6b19714					tc_starter::tc_starter_biped::tc_starter_mannequin
+RIGID	Player	0	0	0	80	0.2	1	0	0	0	0.08	0.05	1	0	1	1	1	1	1	0
+COLLIDER	Player	0.45000000000000001	0.90000000000000002	0.45000000000000001	0	capsule	0.45000000000000001	0.90000000000000002	4	4294967295	0.5	0.2		0
+ENTITY	Ground
+TRANSFORM	Ground	0	-0.5	2	0	0	0	24	1	24
+RENDER	Ground	tc.asset.e30c1421ed919668	tc.asset.c09f6d274b427cad	0.12	0.16	0.2	0	0.82	1						
+COLLIDER	Ground	12	0.5	12	0	box	0.5	0.5	1	4294967295	0.5	0.2		0
+ENTITY	Ramp
+TRANSFORM	Ramp	4	0.25	3.5	0	0	-12	4	0.5	3
+RENDER	Ramp	tc.asset.e30c1421ed919668	tc.asset.c09f6d274b427cad	0.24	0.34	0.42	0	0.7	1						
+COLLIDER	Ramp	2	0.25	1.5	0	box	0.5	0.5	1	4294967295	0.5	0.2		0
+ENTITY	PhysicsCube
+TRANSFORM	PhysicsCube	-3	1.25	3	0	0	0	1	1	1
+RENDER	PhysicsCube	tc.asset.e30c1421ed919668	tc.asset.c09f6d274b427cad	0.92	0.34	0.08	0	0.46	1						
+RIGID	PhysicsCube	0	0	0	12	0.2	1	0	0	0	0.01	0.05	1	0	1	1	1	1	1	0
+COLLIDER	PhysicsCube	0.5	0.5	0.5	0	box	0.5	0.5	2	4294967295	0.5	0.2		0
+ENTITY	KillVolume
+TRANSFORM	KillVolume	0	-8	0	0	0	0	1	1	1
+COLLIDER	KillVolume	30	1	30	1	box	0.5	0.5	8	4294967295	0.5	0.2		0
+ENTITY	RuntimeCamera
+TRANSFORM	RuntimeCamera	0	4.2000000000000002	-9.5	0	0	0	1	1	1
+CAMERA	RuntimeCamera	58	0.05	5000	1	0	1	2
+ENTITY	Sun
+TRANSFORM	Sun	0	0	0	0	0	0	1	1	1
+LIGHT	Sun	-0.45	-1	-0.3	1	0.93	0.78	4.5	1	0.266
+SKELETON	tc.skeleton.scene	107
+JOINT	tc.skeleton.scene	tc_starter::tc_root		tc_root	1	0	0	0	0	1	0	0	0	0	1	0	0	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_hips	tc_starter::tc_root	tc_hips	1	0	0	0	0	1	0	0	0	0	1	0	0	1	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thigh	tc_starter::tc_hips	tc_l_thigh	1	0	0	0	0	1	0	0	0	0	1	0	0.10000000149011612	-0.079999983310699463	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thigh	tc_starter::tc_hips	tc_r_thigh	1	0	0	0	0	1	0	0	0	0	1	0	-0.10000000149011612	-0.079999983310699463	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_spine	tc_starter::tc_hips	tc_spine	1	0	0	0	0	1	0	0	0	0	1	0	0	0.10000002384185791	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_knee	tc_starter::tc_l_thigh	tc_l_knee	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.45000001788139343	0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thigh_roll	tc_starter::tc_l_thigh	tc_l_thigh_roll	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.15000003576278687	0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_knee	tc_starter::tc_r_thigh	tc_r_knee	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.45000001788139343	0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thigh_roll	tc_starter::tc_r_thigh	tc_r_thigh_roll	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.15000003576278687	0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_spine_01	tc_starter::tc_spine	tc_spine_01	1	0	0	0	0	1	0	0	0	0	1	0	0	0.10000002384185791	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ankle	tc_starter::tc_l_knee	tc_l_ankle	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.42999999970197678	-0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_calf_roll	tc_starter::tc_l_knee	tc_l_calf_roll	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.15000000596046448	-0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ankle	tc_starter::tc_r_knee	tc_r_ankle	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.42999999970197678	-0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_calf_roll	tc_starter::tc_r_knee	tc_r_calf_roll	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.15000000596046448	-0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_spine_02	tc_starter::tc_spine_01	tc_spine_02	1	0	0	0	0	1	0	0	0	0	1	0	0	0.099999904632568359	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ball	tc_starter::tc_l_ankle	tc_l_ball	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.059999998658895493	0.14000000059604645	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ball	tc_starter::tc_r_ankle	tc_r_ball	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.059999998658895493	0.14000000059604645	1
+JOINT	tc.skeleton.scene	tc_starter::tc_spine_03	tc_starter::tc_spine_02	tc_spine_03	1	0	0	0	0	1	0	0	0	0	1	0	0	0.10000002384185791	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_clavicle	tc_starter::tc_spine_03	tc_l_clavicle	1	0	0	0	0	1	0	-7.5015068264673503e-17	0	0	1	0	0.070000000298023224	0.080000042915344169	0	0.99999999999999989
+JOINT	tc.skeleton.scene	tc_starter::tc_l_toe_end	tc_starter::tc_l_ball	tc_l_toe_end	1	0	0	0	0	1	0	0	0	0	1	0	0	0	0.099999994039535522	1
+JOINT	tc.skeleton.scene	tc_starter::tc_neck	tc_starter::tc_spine_03	tc_neck	1	0	0	0	0	1	0	0	0	0	1	0	0	0.10000002384185791	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_clavicle	tc_starter::tc_spine_03	tc_r_clavicle	1	0	0	0	0	1	0	-7.5015068264673503e-17	0	0	1	0	-0.070000000298023224	0.080000042915344169	0	0.99999999999999989
+JOINT	tc.skeleton.scene	tc_starter::tc_r_toe_end	tc_starter::tc_r_ball	tc_r_toe_end	1	0	0	0	0	1	0	0	0	0	1	0	0	0	0.099999994039535522	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_upperarm	tc_starter::tc_l_clavicle	tc_l_upperarm	1	0	0	0	5.2510548008833787e-18	1	0	-1.2325951644078309e-32	0	0	1	0	0.11999999731779099	-2.7977620008795708e-16	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_neck_01	tc_starter::tc_neck	tc_neck_01	1	0	0	0	0	1	0	0	0	0	1	0	0	0.070000052452087624	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_upperarm	tc_starter::tc_r_clavicle	tc_r_upperarm	1	0	0	0	-5.2510548008833787e-18	1	0	-1.2325951644078309e-32	0	0	1	0	-0.11999999731779099	-2.7977620008795708e-16	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_head	tc_starter::tc_neck_01	tc_head	1	0	0	0	0	1	0	0	0	0	1	0	0	0.079999923706054243	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_forearm	tc_starter::tc_l_upperarm	tc_l_forearm	1	0	0	0	1.4252862791438107e-17	1	0	-1.2325951644078309e-32	0	0	1	0	0.30000001192092896	-2.7977620008795708e-16	-0.019999999552965164	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_upperarm_roll	tc_starter::tc_l_upperarm	tc_l_upperarm_roll	1	0	0	0	-2.3254671340898645e-17	1	0	-1.2325951644078309e-32	0	0	1	0	0.099999994039535467	-2.7977620008795708e-16	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_forearm	tc_starter::tc_r_upperarm	tc_r_forearm	1	0	0	0	-1.4252862791438107e-17	1	0	-1.2325951644078309e-32	0	0	1	0	-0.30000001192092896	-2.7977620008795708e-16	-0.019999999552965164	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_upperarm_roll	tc_starter::tc_r_upperarm	tc_r_upperarm_roll	1	0	0	0	2.3254671340898645e-17	1	0	-1.2325951644078309e-32	0	0	1	0	-0.099999994039535467	-2.7977620008795708e-16	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_head_end	tc_starter::tc_head	tc_head_end	1	0	0	0	0	1	0	0	0	0	1	0	0	0.18000006675720259	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_jaw	tc_starter::tc_head	tc_jaw	1	0	0	0	0	1	4.3917048831871529e-18	0	0	0	1	0	0	-0.06999993324279763	0.050000000745058067	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_brow_01	tc_starter::tc_head	tc_l_brow_01	1	0	0	0	0	1	0	0	0	0	1	0	0.019999999552965164	0.06000006198883101	0.079999998211860657	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_brow_02	tc_starter::tc_head	tc_l_brow_02	1	0	0	0	0	1	0	0	0	0	1	0	0.039999999105930328	0.06000006198883101	0.070000000298023224	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_brow_03	tc_starter::tc_head	tc_l_brow_03	1	0	0	0	4.0817021819273541e-18	1	4.0817021819273541e-18	0	0	0	1	0	0.059999998658895499	0.050000071525573953	0.059999998658895499	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_eye	tc_starter::tc_head	tc_l_eye	1	0	0	0	0	1	0	0	0	0	1	0	0.029999999329447746	0.019999980926513894	0.090000003576278687	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_forearm_roll	tc_starter::tc_l_forearm	tc_l_forearm_roll	1	0	0	0	-3.8257684099584045e-17	1	-1.5003013317591215e-18	-1.2325951644078309e-32	0	0	1	0	0.099999964237213024	-2.7977620008795708e-16	1.2490009523341375e-18	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_hand	tc_starter::tc_l_forearm	tc_l_hand	1	0	0	0	3.6757384165089457e-17	1	-1.5003013317591215e-18	-1.2325951644078309e-32	0	0	1	0	0.26999998092651367	-2.7977620008795708e-16	0.019999999552965164	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_lip_corner	tc_starter::tc_head	tc_l_lip_corner	1	0	0	0	0	1	0	0	0	0	1	0	0.039999999105930328	-0.049999952316283958	0.079999998211860657	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_upper_lip	tc_starter::tc_head	tc_l_upper_lip	1	0	0	0	0	1	0	0	0	0	1	0	0.019999999552965164	-0.039999961853027122	0.090000003576278687	1
+JOINT	tc.skeleton.scene	tc_starter::tc_nose_root	tc_starter::tc_head	tc_nose_root	1	0	0	0	0	1	0	0	0	0	1	0	0	0.009999990463257058	0.090000003576278687	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_brow_01	tc_starter::tc_head	tc_r_brow_01	1	0	0	0	0	1	0	0	0	0	1	0	-0.019999999552965164	0.06000006198883101	0.079999998211860657	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_brow_02	tc_starter::tc_head	tc_r_brow_02	1	0	0	0	0	1	0	0	0	0	1	0	-0.039999999105930328	0.06000006198883101	0.070000000298023224	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_brow_03	tc_starter::tc_head	tc_r_brow_03	1	0	0	0	-4.0817021819273541e-18	1	4.0817021819273541e-18	0	0	0	1	0	-0.059999998658895499	0.050000071525573953	0.059999998658895499	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_eye	tc_starter::tc_head	tc_r_eye	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999999329447746	0.019999980926513894	0.090000003576278687	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_forearm_roll	tc_starter::tc_r_forearm	tc_r_forearm_roll	1	0	0	0	3.8257684099584045e-17	1	-1.5003013317591215e-18	-1.2325951644078309e-32	0	0	1	0	-0.099999964237213024	-2.7977620008795708e-16	1.2490009523341375e-18	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_hand	tc_starter::tc_r_forearm	tc_r_hand	1	0	0	0	-3.6757384165089457e-17	1	-1.5003013317591215e-18	-1.2325951644078309e-32	0	0	1	0	-0.26999998092651367	-2.7977620008795708e-16	0.019999999552965164	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_lip_corner	tc_starter::tc_head	tc_r_lip_corner	1	0	0	0	0	1	0	0	0	0	1	0	-0.039999999105930328	-0.049999952316283958	0.079999998211860657	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_upper_lip	tc_starter::tc_head	tc_r_upper_lip	1	0	0	0	0	1	0	0	0	0	1	0	-0.019999999552965164	-0.039999961853027122	0.090000003576278687	1
+JOINT	tc.skeleton.scene	tc_starter::tc_upper_lip_c	tc_starter::tc_head	tc_upper_lip_c	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.039999961853027122	0.10000000149011612	1
+JOINT	tc.skeleton.scene	tc_starter::tc_upper_teeth	tc_starter::tc_head	tc_upper_teeth	1	0	0	0	0	1	0	0	0	0	1	0	0	-0.049999952316283958	0.070000000298023224	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_inhand_index	tc_starter::tc_l_hand	tc_l_inhand_index	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	0.030000030994415172	-0.009999990463257058	0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_inhand_middle	tc_starter::tc_l_hand	tc_l_inhand_middle	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	0.030000030994415172	-0.009999990463257058	0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_inhand_pinky	tc_starter::tc_l_hand	tc_l_inhand_pinky	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	0.030000030994415172	-0.009999990463257058	-0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_inhand_ring	tc_starter::tc_l_hand	tc_l_inhand_ring	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	0.030000030994415172	-0.009999990463257058	-0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_lower_lip	tc_starter::tc_jaw	tc_l_lower_lip	1	0	0	0	0	1	-8.7834097663743057e-18	0	0	0	1	0	0.019999999552965164	0.039999961853027566	0.050000000745058053	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thumb_01	tc_starter::tc_l_hand	tc_l_thumb_01	1	0	0	0	-7.6042670932683535e-17	1	0	7.5015068264673503e-17	0	0	1	0	0.040000021457671897	-0.019999980926513894	0.045000001788139343	1
+JOINT	tc.skeleton.scene	tc_starter::tc_lower_lip_c	tc_starter::tc_jaw	tc_lower_lip_c	1	0	0	0	0	1	-2.1687410775329937e-19	0	0	0	1	0	0	0.039999961853027566	0.059999998658895499	1
+JOINT	tc.skeleton.scene	tc_starter::tc_lower_teeth	tc_starter::tc_jaw	tc_lower_teeth	1	0	0	0	0	1	-8.7834097663743057e-18	0	0	0	1	0	0	0.019999980926513672	0.02999999746680259	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_inhand_index	tc_starter::tc_r_hand	tc_r_inhand_index	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	-0.030000030994415172	-0.009999990463257058	0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_inhand_middle	tc_starter::tc_r_hand	tc_r_inhand_middle	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	-0.030000030994415172	-0.009999990463257058	0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_inhand_pinky	tc_starter::tc_r_hand	tc_r_inhand_pinky	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	-0.030000030994415172	-0.009999990463257058	-0.029999999329447746	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_inhand_ring	tc_starter::tc_r_hand	tc_r_inhand_ring	1	0	0	0	0	1	0	7.5015068264673503e-17	0	0	1	0	-0.030000030994415172	-0.009999990463257058	-0.0099999997764825821	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_lower_lip	tc_starter::tc_jaw	tc_r_lower_lip	1	0	0	0	0	1	-8.7834097663743057e-18	0	0	0	1	0	-0.019999999552965164	0.039999961853027566	0.050000000745058053	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thumb_01	tc_starter::tc_r_hand	tc_r_thumb_01	1	0	0	0	7.6042670932683535e-17	1	0	7.5015068264673503e-17	0	0	1	0	-0.040000021457671897	-0.019999980926513894	0.045000001788139343	1
+JOINT	tc.skeleton.scene	tc_starter::tc_tongue_01	tc_starter::tc_jaw	tc_tongue_01	1	0	0	0	0	1	-8.7834097663743057e-18	0	0	0	1	0	0	0.0099999904632568359	0.02999999746680259	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_index_01	tc_starter::tc_l_inhand_index	tc_l_index_01	1	0	0	0	0	1	0	0	0	0	1	0	0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_middle_01	tc_starter::tc_l_inhand_middle	tc_l_middle_01	1	0	0	0	0	1	0	0	0	0	1	0	0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_pinky_01	tc_starter::tc_l_inhand_pinky	tc_l_pinky_01	1	0	0	0	0	1	0	0	0	0	1	0	0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ring_01	tc_starter::tc_l_inhand_ring	tc_l_ring_01	1	0	0	0	0	1	0	0	0	0	1	0	0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thumb_02	tc_starter::tc_l_thumb_01	tc_l_thumb_02	1	0	0	0	1.5208534186536707e-16	1	0	0	0	0	1	0	0.029999971389770619	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_index_01	tc_starter::tc_r_inhand_index	tc_r_index_01	1	0	0	0	0	1	0	0	0	0	1	0	-0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_middle_01	tc_starter::tc_r_inhand_middle	tc_r_middle_01	1	0	0	0	0	1	0	0	0	0	1	0	-0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_pinky_01	tc_starter::tc_r_inhand_pinky	tc_r_pinky_01	1	0	0	0	0	1	0	0	0	0	1	0	-0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ring_01	tc_starter::tc_r_inhand_ring	tc_r_ring_01	1	0	0	0	0	1	0	0	0	0	1	0	-0.03200000524520874	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thumb_02	tc_starter::tc_r_thumb_01	tc_r_thumb_02	1	0	0	0	-1.5208534186536707e-16	1	0	0	0	0	1	0	-0.029999971389770619	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_tongue_02	tc_starter::tc_tongue_01	tc_tongue_02	1	0	0	0	0	1	0	0	0	0	1	0	0	0	0.030000001192092896	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_index_02	tc_starter::tc_l_index_01	tc_l_index_02	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_middle_02	tc_starter::tc_l_middle_01	tc_l_middle_02	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_pinky_02	tc_starter::tc_l_pinky_01	tc_l_pinky_02	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ring_02	tc_starter::tc_l_ring_01	tc_l_ring_02	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thumb_03	tc_starter::tc_l_thumb_02	tc_l_thumb_03	1	0	0	0	-7.6042670932683535e-17	1	0	0	0	0	1	0	0.030000030994415172	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_index_02	tc_starter::tc_r_index_01	tc_r_index_02	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_middle_02	tc_starter::tc_r_middle_01	tc_r_middle_02	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_pinky_02	tc_starter::tc_r_pinky_01	tc_r_pinky_02	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ring_02	tc_starter::tc_r_ring_01	tc_r_ring_02	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thumb_03	tc_starter::tc_r_thumb_02	tc_r_thumb_03	1	0	0	0	7.6042670932683535e-17	1	0	0	0	0	1	0	-0.030000030994415172	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_tongue_03	tc_starter::tc_tongue_02	tc_tongue_03	1	0	0	0	0	1	0	0	0	0	1	0	0	0	0.030000001192092896	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_index_03	tc_starter::tc_l_index_02	tc_l_index_03	1	0	0	0	0	1	0	0	0	0	1	0	0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_middle_03	tc_starter::tc_l_middle_02	tc_l_middle_03	1	0	0	0	0	1	0	0	0	0	1	0	0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_pinky_03	tc_starter::tc_l_pinky_02	tc_l_pinky_03	1	0	0	0	0	1	0	0	0	0	1	0	0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ring_03	tc_starter::tc_l_ring_02	tc_l_ring_03	1	0	0	0	0	1	0	0	0	0	1	0	0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_thumb_04	tc_starter::tc_l_thumb_03	tc_l_thumb_04	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770619	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_index_03	tc_starter::tc_r_index_02	tc_r_index_03	1	0	0	0	0	1	0	0	0	0	1	0	-0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_middle_03	tc_starter::tc_r_middle_02	tc_r_middle_03	1	0	0	0	0	1	0	0	0	0	1	0	-0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_pinky_03	tc_starter::tc_r_pinky_02	tc_r_pinky_03	1	0	0	0	0	1	0	0	0	0	1	0	-0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ring_03	tc_starter::tc_r_ring_02	tc_r_ring_03	1	0	0	0	0	1	0	0	0	0	1	0	-0.030000030994415283	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_thumb_04	tc_starter::tc_r_thumb_03	tc_r_thumb_04	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770619	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_index_04	tc_starter::tc_l_index_03	tc_l_index_04	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_middle_04	tc_starter::tc_l_middle_03	tc_l_middle_04	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_pinky_04	tc_starter::tc_l_pinky_03	tc_l_pinky_04	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_l_ring_04	tc_starter::tc_l_ring_03	tc_l_ring_04	1	0	0	0	0	1	0	0	0	0	1	0	0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_index_04	tc_starter::tc_r_index_03	tc_r_index_04	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_middle_04	tc_starter::tc_r_middle_03	tc_r_middle_04	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_pinky_04	tc_starter::tc_r_pinky_03	tc_r_pinky_04	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+JOINT	tc.skeleton.scene	tc_starter::tc_r_ring_04	tc_starter::tc_r_ring_03	tc_r_ring_04	1	0	0	0	0	1	0	0	0	0	1	0	-0.029999971389770508	0	0	1
+ANIMATION	tc_crawl_idle	TC Crawl Idle	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_hips	translateY	1	0	2	1	0.38	auto	25	0.38	auto
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_l_knee	rotateX	1	0	2	1	82	auto	25	82	auto
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_l_upperarm	rotateX	1	0	2	1	-58	auto	25	-58	auto
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_r_knee	rotateX	1	0	2	1	82	auto	25	82	auto
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_r_upperarm	rotateX	1	0	2	1	-58	auto	25	-58	auto
+ANIMCURVE	tc_crawl_idle	tc_starter::tc_spine_01	rotateX	1	0	2	1	62	auto	25	62	auto
+ANIMATION	tc_crawl_walk	TC Crawl Walk	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_hips	translateY	1	0	2	1	0.38	auto	25	0.38	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_l_knee	rotateX	1	0	2	1	82	auto	25	82	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_l_thigh	rotateX	1	0	3	1	18	auto	13	-18	auto	25	18	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-76	auto	13	-40	auto	25	-76	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_r_knee	rotateX	1	0	2	1	82	auto	25	82	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-18	auto	13	18	auto	25	-18	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	-40	auto	13	-76	auto	25	-40	auto
+ANIMCURVE	tc_crawl_walk	tc_starter::tc_spine_01	rotateX	1	0	2	1	62	auto	25	62	auto
+ANIMATION	tc_crouch_idle	TC Crouch Idle	tc.skeleton.scene	1	49	24	1
+ANIMCURVE	tc_crouch_idle	tc_starter::tc_hips	translateY	1	0	2	1	0.71999999999999997	auto	49	0.71999999999999997	auto
+ANIMCURVE	tc_crouch_idle	tc_starter::tc_l_knee	rotateX	1	0	2	1	58	auto	49	58	auto
+ANIMCURVE	tc_crouch_idle	tc_starter::tc_r_knee	rotateX	1	0	2	1	58	auto	49	58	auto
+ANIMCURVE	tc_crouch_idle	tc_starter::tc_spine_01	rotateX	1	0	2	1	12	auto	49	12	auto
+ANIMATION	tc_crouch_walk	TC Crouch Walk	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_crouch_walk	tc_starter::tc_hips	translateY	1	0	2	1	0.71999999999999997	auto	25	0.71999999999999997	auto
+ANIMCURVE	tc_crouch_walk	tc_starter::tc_l_knee	rotateX	1	0	2	1	58	auto	25	58	auto
+ANIMCURVE	tc_crouch_walk	tc_starter::tc_r_knee	rotateX	1	0	2	1	58	auto	25	58	auto
+ANIMCURVE	tc_crouch_walk	tc_starter::tc_spine_01	rotateX	1	0	2	1	12	auto	25	12	auto
+ANIMATION	tc_fall	TC Fall	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_fall	tc_starter::tc_l_upperarm	rotateZ	1	0	3	1	8	auto	13	20	auto	25	28	auto
+ANIMCURVE	tc_fall	tc_starter::tc_r_upperarm	rotateZ	1	0	3	1	-8	auto	13	-20	auto	25	-28	auto
+ANIMATION	tc_idle	TC Idle	tc.skeleton.scene	1	49	24	1
+ANIMCURVE	tc_idle	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	13	1.018	auto	25	1	auto	37	1.018	auto	49	1	auto
+ANIMATION	tc_jump	TC Jump	tc.skeleton.scene	1	25	24	0
+ANIMCURVE	tc_jump	tc_starter::tc_hips	translateY	1	0	4	1	1	auto	8	1.1599999999999999	auto	16	1.25	auto	25	1.0800000000000001	auto
+ANIMCURVE	tc_jump	tc_starter::tc_l_knee	rotateX	1	0	4	1	22	auto	8	42	auto	16	12	auto	25	28	auto
+ANIMCURVE	tc_jump	tc_starter::tc_r_knee	rotateX	1	0	4	1	22	auto	8	42	auto	16	12	auto	25	28	auto
+ANIMATION	tc_land	TC Land	tc.skeleton.scene	1	13	24	0
+ANIMCURVE	tc_land	tc_starter::tc_hips	translateY	1	0	3	1	1.0800000000000001	auto	6	0.93999999999999995	auto	13	1	auto
+ANIMATION	tc_pivot_left	TC Pivot Left	tc.skeleton.scene	1	19	24	0
+ANIMCURVE	tc_pivot_left	tc_starter::tc_hips	rotateY	1	0	3	1	0	auto	10	-49.500000000000007	auto	19	-90	auto
+ANIMCURVE	tc_pivot_left	tc_starter::tc_l_knee	rotateX	1	0	1	10	28	auto
+ANIMCURVE	tc_pivot_left	tc_starter::tc_r_knee	rotateX	1	0	1	10	28	auto
+ANIMATION	tc_pivot_right	TC Pivot Right	tc.skeleton.scene	1	19	24	0
+ANIMCURVE	tc_pivot_right	tc_starter::tc_hips	rotateY	1	0	3	1	0	auto	10	49.500000000000007	auto	19	90	auto
+ANIMCURVE	tc_pivot_right	tc_starter::tc_l_knee	rotateX	1	0	1	10	28	auto
+ANIMCURVE	tc_pivot_right	tc_starter::tc_r_knee	rotateX	1	0	1	10	28	auto
+ANIMATION	tc_run	TC Run	tc.skeleton.scene	1	17	24	1
+ANIMCURVE	tc_run	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	4	1.0449999999999999	auto	9	1	auto	12	1.0449999999999999	auto	17	1	auto
+ANIMCURVE	tc_run	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	9	12	auto	17	-12	auto
+ANIMCURVE	tc_run	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	9	42	auto	17	8	auto
+ANIMCURVE	tc_run	tc_starter::tc_l_thigh	rotateX	1	0	3	1	44	auto	9	-44	auto	17	44	auto
+ANIMCURVE	tc_run	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-28.600000000000001	auto	9	28.600000000000001	auto	17	-28.600000000000001	auto
+ANIMCURVE	tc_run	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	9	-12	auto	17	12	auto
+ANIMCURVE	tc_run	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	9	8	auto	17	42	auto
+ANIMCURVE	tc_run	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-44	auto	9	44	auto	17	-44	auto
+ANIMCURVE	tc_run	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	28.600000000000001	auto	9	-28.600000000000001	auto	17	28.600000000000001	auto
+ANIMCURVE	tc_run	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	9	3	auto	17	-3	auto
+ANIMATION	tc_start_forward	TC Start Forward	tc.skeleton.scene	1	15	24	0
+ANIMCURVE	tc_start_forward	tc_starter::tc_l_thigh	rotateX	1	0	3	1	0	auto	6	18	auto	15	34	auto
+ANIMCURVE	tc_start_forward	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-0	auto	6	-18	auto	15	-34	auto
+ANIMATION	tc_stop_forward	TC Stop Forward	tc.skeleton.scene	1	17	24	0
+ANIMCURVE	tc_stop_forward	tc_starter::tc_l_thigh	rotateX	1	0	3	1	34	auto	10	16	auto	17	0	auto
+ANIMCURVE	tc_stop_forward	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-34	auto	10	-16	auto	17	-0	auto
+ANIMATION	tc_walk	TC Walk Forward	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk	tc_starter::tc_hips	rotateY	1	0	2	1	0	auto	25	0	auto
+ANIMCURVE	tc_walk	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_backward	TC Walk Backward	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_backward	tc_starter::tc_hips	rotateY	1	0	2	1	180	auto	25	180	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_backward	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_backward_left	TC Walk Backward Left	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_hips	rotateY	1	0	2	1	-135	auto	25	-135	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_backward_left	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_backward_right	TC Walk Backward Right	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_hips	rotateY	1	0	2	1	135	auto	25	135	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_backward_right	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_forward_left	TC Walk Forward Left	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_hips	rotateY	1	0	2	1	-45	auto	25	-45	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_forward_left	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_forward_right	TC Walk Forward Right	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_hips	rotateY	1	0	2	1	45	auto	25	45	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_forward_right	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_left	TC Walk Left	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_left	tc_starter::tc_hips	rotateY	1	0	2	1	-90	auto	25	-90	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_left	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+ANIMATION	tc_walk_right	TC Walk Right	tc.skeleton.scene	1	25	24	1
+ANIMCURVE	tc_walk_right	tc_starter::tc_hips	rotateY	1	0	2	1	90	auto	25	90	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_hips	translateY	1	0	5	1	1	auto	6	1.0249999999999999	auto	13	1	auto	18	1.0249999999999999	auto	25	1	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_l_ankle	rotateX	1	0	3	1	-12	auto	13	12	auto	25	-12	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_l_knee	rotateX	1	0	3	1	8	auto	13	42	auto	25	8	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_l_thigh	rotateX	1	0	3	1	28	auto	13	-28	auto	25	28	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_l_upperarm	rotateX	1	0	3	1	-18.199999999999999	auto	13	18.199999999999999	auto	25	-18.199999999999999	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_r_ankle	rotateX	1	0	3	1	12	auto	13	-12	auto	25	12	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_r_knee	rotateX	1	0	3	1	42	auto	13	8	auto	25	42	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_r_thigh	rotateX	1	0	3	1	-28	auto	13	28	auto	25	-28	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_r_upperarm	rotateX	1	0	3	1	18.199999999999999	auto	13	-18.199999999999999	auto	25	18.199999999999999	auto
+ANIMCURVE	tc_walk_right	tc_starter::tc_spine_03	rotateZ	1	0	3	1	-3	auto	13	3	auto	25	-3	auto
+SKIN	tc_starter::tc_starter_biped::tc_starter_mannequin	tc_starter::tc_starter_mannequin	tc.skeleton.scene	linear_blend_skinning	9018	4	107	tc_starter::tc_root	tc_starter::tc_hips	tc_starter::tc_spine	tc_starter::tc_spine_01	tc_starter::tc_spine_02	tc_starter::tc_spine_03	tc_starter::tc_neck	tc_starter::tc_neck_01	tc_starter::tc_head	tc_starter::tc_head_end	tc_starter::tc_l_clavicle	tc_starter::tc_l_upperarm	tc_starter::tc_l_forearm	tc_starter::tc_l_hand	tc_starter::tc_r_clavicle	tc_starter::tc_r_upperarm	tc_starter::tc_r_forearm	tc_starter::tc_r_hand	tc_starter::tc_l_thigh	tc_starter::tc_l_knee	tc_starter::tc_l_ankle	tc_starter::tc_l_ball	tc_starter::tc_l_toe_end	tc_starter::tc_r_thigh	tc_starter::tc_r_knee	tc_starter::tc_r_ankle	tc_starter::tc_r_ball	tc_starter::tc_r_toe_end	tc_starter::tc_l_upperarm_roll	tc_starter::tc_l_forearm_roll	tc_starter::tc_l_thigh_roll	tc_starter::tc_l_calf_roll	tc_starter::tc_r_upperarm_roll	tc_starter::tc_r_forearm_roll	tc_starter::tc_r_thigh_roll	tc_starter::tc_r_calf_roll	tc_starter::tc_jaw	tc_starter::tc_l_eye	tc_starter::tc_r_eye	tc_starter::tc_nose_root	tc_starter::tc_upper_teeth	tc_starter::tc_lower_teeth	tc_starter::tc_tongue_01	tc_starter::tc_tongue_02	tc_starter::tc_tongue_03	tc_starter::tc_l_brow_01	tc_starter::tc_l_brow_02	tc_starter::tc_l_brow_03	tc_starter::tc_r_brow_01	tc_starter::tc_r_brow_02	tc_starter::tc_r_brow_03	tc_starter::tc_upper_lip_c	tc_starter::tc_lower_lip_c	tc_starter::tc_l_lip_corner	tc_starter::tc_r_lip_corner	tc_starter::tc_l_upper_lip	tc_starter::tc_r_upper_lip	tc_starter::tc_l_lower_lip	tc_starter::tc_r_lower_lip	tc_starter::tc_l_thumb_01	tc_starter::tc_l_thumb_02	tc_starter::tc_l_thumb_03	tc_starter::tc_l_thumb_04	tc_starter::tc_l_inhand_index	tc_starter::tc_l_index_01	tc_starter::tc_l_index_02	tc_starter::tc_l_index_03	tc_starter::tc_l_index_04	tc_starter::tc_l_inhand_middle	tc_starter::tc_l_middle_01	tc_starter::tc_l_middle_02	tc_starter::tc_l_middle_03	tc_starter::tc_l_middle_04	tc_starter::tc_l_inhand_ring	tc_starter::tc_l_ring_01	tc_starter::tc_l_ring_02	tc_starter::tc_l_ring_03	tc_starter::tc_l_ring_04	tc_starter::tc_l_inhand_pinky	tc_starter::tc_l_pinky_01	tc_starter::tc_l_pinky_02	tc_starter::tc_l_pinky_03	tc_starter::tc_l_pinky_04	tc_starter::tc_r_thumb_01	tc_starter::tc_r_thumb_02	tc_starter::tc_r_thumb_03	tc_starter::tc_r_thumb_04	tc_starter::tc_r_inhand_index	tc_starter::tc_r_index_01	tc_starter::tc_r_index_02	tc_starter::tc_r_index_03	tc_starter::tc_r_index_04	tc_starter::tc_r_inhand_middle	tc_starter::tc_r_middle_01	tc_starter::tc_r_middle_02	tc_starter::tc_r_middle_03	tc_starter::tc_r_middle_04	tc_starter::tc_r_inhand_ring	tc_starter::tc_r_ring_01	tc_starter::tc_r_ring_02	tc_starter::tc_r_ring_03	tc_starter::tc_r_ring_04	tc_starter::tc_r_inhand_pinky	tc_starter::tc_r_pinky_01	tc_starter::tc_r_pinky_02	tc_starter::tc_r_pinky_03	tc_starter::tc_r_pinky_04	tc.asset.b33fdae4154ef7ad	tc.asset.6e8bcd96b27d64bd	tc.asset.2c6d4b5e99bbe921	tc.asset.4cd74032d68e9dd0	tc.asset.b149d1e3e6d76ae8
+HUD	Third Person — Exploration — WASD move, Space jump, hold C crouch, hold V crawl
+INPUTBIND	move_right	76
+INPUTBIND	move_left	74
+INPUTBIND	move_forward	73
+INPUTBIND	move_backward	75
+INPUTBIND	jump	32
+GAMEPADBIND	jump	NORTH
+GAMEPADBIND	crouch	LEFT_SHOULDER
+GAMEPADBIND	crawl	RIGHT_SHOULDER
+GAMEPADBIND	ui_confirm	WEST
+UICANVAS	1280	720
+UISAFEAREA	40	30	40	30
+UIWIDGET	hud_panel	panel	20	20	300	112						0	0	0	0	20	20	300	112	0
+UIWIDGET	objective	text	36	32	150	40	Explore				hud_panel	0	0	0	0	16	12	150	40	0
+UIWIDGET	save_button	button	36	76	190	42	Save progress	Save progress	save_game		hud_panel	0	0	0	0	16	56	190	42	0
+UIWIDGET	load_button	button	194	32	110	40	Load	Load progress	load_game		hud_panel	0	0	0	0	174	12	110	40	0
+UIWIDGET	character_icon	image	248	76	56	42		Character texture		tc.asset.5926f39e31ea4c68a1b15d6e438f0855	hud_panel	0	0	0	0	228	56	56	42	0
+UIWIDGET	right_status	panel	1110	20	150	48		Status panel				1	0	1	0	-20	20	150	48	520
+UIWIDGET	controls_panel	panel	12	136	386	90		Gameplay controls				0	0	0	0	12	136	386	90	0
+UIWIDGET	rebind_jump	button	20	144	180	34	Rebind Jump	Rebind Jump button	rebind_jump			0	0	0	0	20	144	180	34	0
+UIWIDGET	rebind_crouch	button	210	144	180	34	Rebind Crouch	Rebind Crouch button	rebind_crouch			0	0	0	0	210	144	180	34	0
+UIWIDGET	rebind_crawl	button	20	184	180	34	Rebind Crawl	Rebind Crawl button	rebind_crawl			0	0	0	0	20	184	180	34	0
+UIWIDGET	audio_toggle	button	210	184	180	34	Audio: On	Mute audio	audio_toggle			0	0	0	0	210	184	180	34	0
+SAVE	third_person_exploration_autosave
+RENDERSETTINGS	tc_temporal	quality	0.666666667	1.05	0.18		1	0	0.5	1	16.6667	physically_based	probe	0.12	0.28	0.58	0.035	0.05	0.075	1	4	0.15	1	0.35	12	8	1	1	0.75	4
+SIMULATION	everyday	1	1	0	-9.8066499999999994	0	0.0083333333333333332	8	10000	1	1	293.14999999999998	0.001	1	1	0.59999999999999998	12	0.050000000000000003	0.050000000000000003	0.5	6	0.34999999999999998
+GRAPH	begin	template_ready	event.emit	L_ThirdPersonAcceptance_Default.tcscene	0	TemplateReady
+GRAPH	begin	locomotion_idle	animation.play	L_ThirdPersonAcceptance_Default.tcscene	0	tc_idle	restart
+GRAPH	begin	acceptance_audio	audio.play	L_ThirdPersonAcceptance_Default.tcscene	0	tc.asset.18a2820c6f8e3210
+GRAPH	begin	acceptance_stereo_audio	audio.play	L_ThirdPersonAcceptance_Default.tcscene	0	tc.asset.851fa84d330c4b84
+GRAPH	tick	player_move	character.move	L_ThirdPersonAcceptance_Default.tcscene	0	Player	5.5	30.0	38.0	0.35	free_3d
+GRAPH	tick	player_jump	character.jump	L_ThirdPersonAcceptance_Default.tcscene	0	Player	6.5	0.1	0.12
+GRAPH	tick	locomotion_animation	animation.locomotion	L_ThirdPersonAcceptance_Default.tcscene	0	Player	tc_idle	tc_walk	tc_walk_forward_right	tc_walk_right	tc_walk_backward_right	tc_walk_backward	tc_walk_backward_left	tc_walk_left	tc_walk_forward_left	tc_run	tc_jump	tc_land	0.15	3.4	0.16	tc_crouch_idle	tc_crouch_walk	tc_crawl_idle	tc_crawl_walk
+GRAPH	tick	camera_follow	camera.follow	L_ThirdPersonAcceptance_Default.tcscene	0	RuntimeCamera	Player	0.0	3.2	-7.5	1.0	0.0	14.0

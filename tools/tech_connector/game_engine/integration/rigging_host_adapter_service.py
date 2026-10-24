@@ -71,10 +71,19 @@ class PythonHostRiggingAdapter:
     def _call(self, function_name: str, payload: dict[str, Any], *, capability: str = "host.query") -> RiggingOperationResult:
         call_payload = dict(payload)
         nested_payload = call_payload.get("payload")
-        force_reload = bool(call_payload.pop("_reload_modules", False))
+        # Authoring operations must never execute stale host-side modules.
+        # DCC sessions are long-lived and commonly remain open while the
+        # joint placer, rig builders, and skinning tools are edited on disk.
+        force_reload = (
+            function_name == "execute"
+            and str(capability).startswith(("rig.", "skin.", "retarget."))
+        )
+        if "_reload_modules" in call_payload:
+            force_reload = bool(call_payload.pop("_reload_modules"))
         if isinstance(nested_payload, dict):
             nested_payload = dict(nested_payload)
-            force_reload = bool(nested_payload.pop("_reload_modules", force_reload))
+            if "_reload_modules" in nested_payload:
+                force_reload = bool(nested_payload.pop("_reload_modules"))
             call_payload["payload"] = nested_payload
         encoded = json.dumps(call_payload, default=_json_default)
         script = (

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 from contextlib import contextmanager
+from functools import lru_cache
 import hashlib
 import os
 import re
@@ -24,6 +25,34 @@ CONTENT_COLUMN_CANDIDATES = ("content", "text", "source", "body", "chunk", "snip
 SIZE_COLUMN_CANDIDATES = ("size", "file_size", "bytes")
 MODIFIED_COLUMN_CANDIDATES = ("last_modified", "mtime", "modified", "updated_at", "timestamp")
 TYPE_COLUMN_CANDIDATES = ("type", "file_type", "language", "suffix", "extension")
+
+_DECLARATION_PATTERN = re.compile(
+    r"(?m)^(?P<indent>[ \t]*)(?P<kind>async\s+def|def|class)\s+"
+    r"(?P<name>[A-Za-z_]\w*)\s*(?P<signature>\([^\n]*\))?"
+)
+
+
+@lru_cache(maxsize=8192)
+def _cached_python_declarations(
+    path: str, modified_ns: int, size: int,
+) -> tuple[tuple[str, str, str, int, int], ...]:
+    """Cache compact declarations, not entire source files, between prompts."""
+
+    source = Path(path).read_text(encoding="utf-8", errors="replace")
+    rows: list[tuple[str, str, str, int, int]] = []
+    line = 1
+    previous_offset = 0
+    for found in _DECLARATION_PATTERN.finditer(source):
+        offset = found.start()
+        line += source.count("\n", previous_offset, offset)
+        previous_offset = offset
+        raw_kind = found.group("kind").replace(" ", "")
+        indent = found.group("indent") or ""
+        kind = "class" if raw_kind == "class" else ("method" if indent else "function")
+        name = found.group("name")
+        signature = f"{name}{found.group('signature') or ''}"
+        rows.append((name, signature, kind, line, offset))
+    return tuple(rows)
 
 
 class FileIndexService:
@@ -269,6 +298,12 @@ class FileIndexService:
                     for name in directory_names
                     if name.casefold() not in ignored_directories
                     and not name.startswith(".")
+                    and not name.casefold().startswith("pytest_")
+                    and not name.casefold().startswith("test_tmp_")
+                    and not (
+                        Path(directory).name.casefold() == "benchmarks"
+                        and name.casefold() == "results"
+                    )
                 ]
                 for file_name in file_names:
                     if not file_name.casefold().endswith((".py", ".pyi")):
@@ -338,10 +373,6 @@ class FileIndexService:
         if not terms:
             return []
         accepted_kinds = {str(kind).strip().casefold() for kind in kinds}
-        declarations = re.compile(
-            r"(?m)^(?P<indent>[ \t]*)(?P<kind>async\s+def|def|class)\s+"
-            r"(?P<name>[A-Za-z_]\w*)\s*(?P<signature>\([^\n]*\))?"
-        )
         ignored_directories = {
             ".git", ".hg", ".mypy_cache", ".pytest_cache", ".ruff_cache",
             ".svn", ".tox", ".venv", "__pycache__", "build", "dist",
@@ -386,6 +417,12 @@ class FileIndexService:
                         for name in directory_names
                         if name.casefold() not in ignored_directories
                         and not name.startswith(".")
+                        and not name.casefold().startswith("pytest_")
+                        and not name.casefold().startswith("test_tmp_")
+                        and not (
+                            Path(directory).name.casefold() == "benchmarks"
+                            and name.casefold() == "results"
+                        )
                     ]
                     for file_name in file_names:
                         if not file_name.casefold().endswith((".py", ".pyi")):
@@ -399,27 +436,27 @@ class FileIndexService:
                         if inspected > max(1, int(max_files)):
                             break
                         try:
-                            if source_path.stat().st_size > max(1, int(max_file_bytes)):
+                            metadata = source_path.stat()
+                            if metadata.st_size > max(1, int(max_file_bytes)):
                                 continue
-                            source = source_path.read_text(encoding="utf-8", errors="replace")
+                            declarations = _cached_python_declarations(
+                                str(source_path), metadata.st_mtime_ns, metadata.st_size,
+                            )
                         except OSError:
                             continue
                         path_text = str(source_path).replace("\\", "/").casefold()
-                        for found in declarations.finditer(source):
-                            raw_kind = found.group("kind").replace(" ", "")
-                            indent = found.group("indent") or ""
-                            symbol_kind = "class" if raw_kind == "class" else ("method" if indent else "function")
+                        resolved_path = ""
+                        for name, signature, symbol_kind, line, offset in declarations:
                             if symbol_kind not in accepted_kinds and not (
                                 symbol_kind == "method" and "function" in accepted_kinds
                             ):
                                 continue
-                            name = found.group("name")
-                            signature = f"{name}{found.group('signature') or ''}"
                             declaration_text = f"{name} {signature}".casefold()
                             name_matches = {term for term in terms if term in declaration_text}
                             if not name_matches:
                                 continue
-                            line = source.count("\n", 0, found.start()) + 1
+                            if not resolved_path:
+                                resolved_path = str(source_path.resolve())
                             path_matches = {term for term in terms if term in path_text}
                             score = len(name_matches) * 100 + len(path_matches) * 12
                             score += sum(20 for hint in normalized_hints if hint in path_text)
@@ -430,12 +467,12 @@ class FileIndexService:
                                     "name": name,
                                     "qualname": name,
                                     "kind": symbol_kind,
-                                    "path": str(source_path.resolve()),
-                                    "rel_path": str(source_path.resolve()),
+                                    "path": resolved_path,
+                                    "rel_path": resolved_path,
                                     "start_line": line,
                                     "signature": signature,
                                     "docstring": "",
-                                    "source": source[found.start():found.start() + 2200],
+                                    "_source_offset": offset,
                                     "candidate_source": "project_source_fallback",
                                     "source_match_score": score,
                                 }
@@ -451,7 +488,20 @@ class FileIndexService:
                 int(item.get("start_line") or 0),
             )
         )
-        return matches[:max(1, int(limit))]
+        selected = matches[:max(1, int(limit))]
+        source_cache: dict[str, str] = {}
+        for row in selected:
+            path = str(row["path"])
+            if path not in source_cache:
+                try:
+                    source_cache[path] = Path(path).read_text(
+                        encoding="utf-8", errors="replace",
+                    )
+                except OSError:
+                    source_cache[path] = ""
+            offset = int(row.pop("_source_offset"))
+            row["source"] = source_cache[path][offset:offset + 2200]
+        return selected
 
     def get_file_metadata(self, file_path: str) -> Optional[Dict[str, Any]]:
         """Return available metadata for a file from the detected file table."""

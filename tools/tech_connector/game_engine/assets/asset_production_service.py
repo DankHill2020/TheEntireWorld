@@ -366,6 +366,16 @@ class AssetProductionService:
                 derived_outputs.append({"kind": "procedural_geometry_runtime",
                                         "path": self._project_relative(procedural_artifact.path),
                                         "content_hash": procedural_artifact.content_hash})
+            if record.asset_type == "tc.ui_document":
+                from .ui_document_asset_service import UIDocumentAssetService
+
+                ui_artifact = UIDocumentAssetService(self.project_root, self.database).cook(
+                    record.asset_id, platform=str(platform), quality=str(quality),
+                )
+                derived_outputs.append({
+                    "kind": "ui_layout_preview", "path": self._project_relative(ui_artifact.path),
+                    "content_hash": ui_artifact.content_hash,
+                })
             records.append({
                 "asset_id": record.asset_id,
                 "type_id": record.asset_type,

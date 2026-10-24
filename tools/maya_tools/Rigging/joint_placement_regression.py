@@ -21,6 +21,9 @@ from maya_tools.Rigging import joint_placer
 
 
 SCHEMA_VERSION = 1
+DEFAULT_PLACEMENT_TEMPLATE = getattr(
+    joint_placer, "DEFAULT_PLACEMENT_TEMPLATE", ""
+)
 DEFAULT_THRESHOLDS = {
     "mean_anchor_error": 0.0125,
     "max_anchor_error": 0.035,
@@ -411,7 +414,7 @@ def evaluate_points(
 def evaluate_mesh_against_baseline(
     mesh: str,
     baseline_path: str,
-    template_path: str = joint_placer.DEFAULT_PLACEMENT_TEMPLATE,
+    template_path: str = DEFAULT_PLACEMENT_TEMPLATE,
     build_skeleton: bool = False,
 ) -> Dict[str, object]:
     baseline = load_baseline(baseline_path)
@@ -708,7 +711,7 @@ def capture_selected_baseline(path: str, case_id: str = "", namespace: str = "")
     return capture_baseline(selection[0], path, case_id=case_id, namespace=namespace)
 
 
-def evaluate_selected_mesh(baseline_path: str, template_path: str = joint_placer.DEFAULT_PLACEMENT_TEMPLATE):
+def evaluate_selected_mesh(baseline_path: str, template_path: str = DEFAULT_PLACEMENT_TEMPLATE):
     selection = cmds.ls(selection=True, long=False) or []
     if not selection:
         cmds.error("Select the character mesh to validate first.")

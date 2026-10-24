@@ -37,7 +37,9 @@ class DeveloperPromptCase:
     expected_success: bool = True
     expected_gap_kind: str = ""
     expected_explicit_functions: int = 0
+    expected_asset_lanes: tuple[str, ...] = ()
     expected_result_type: str = ""
+    expected_target_identifier: str = ""
     expected_result_terms: tuple[str, ...] = ()
     forbidden_result_terms: tuple[str, ...] = ()
 
@@ -61,7 +63,7 @@ DEVELOPER_PROMPT_CASES: tuple[DeveloperPromptCase, ...] = (
         expected_result_type="exact_symbol_callers_direct",
         expected_result_terms=(
             "build_project_edit_agent_request(prompt, *, active_path=None, limit=8)",
-            "project_edit_workflow_runner_planning.py:68",
+            "project_edit_workflow_runner_planning.py:",
             "test_code_agent_prompt_smoke_suite.py:127",
         ),
         forbidden_result_terms=("detect_editor_intent", "\\dist\\"),
@@ -75,6 +77,22 @@ DEVELOPER_PROMPT_CASES: tuple[DeveloperPromptCase, ...] = (
         "maya_live_query", "dcc_query",
         "List the selected joints in Maya without changing the scene.",
         ("dcc_query",),
+    ),
+    DeveloperPromptCase(
+        "maya_fbx_to_control_rig", "dcc_execution",
+        'In Maya, transfer animation FBX "C:/tmp/Walk.fbx" onto control rig '
+        '"C:/tmp/Hero.ma" using target HIK "C:/tmp/Hero_mocap.fbx" '
+        'and sister FBX "C:/tmp/Actor_mocap.fbx"; save scene "C:/tmp/Walk_Hero.ma"',
+        ("dcc_execute",),
+        expected_target_identifier="animation.fbx_to_control_rig",
+    ),
+    DeveloperPromptCase(
+        "maya_embedded_hik_to_control_rig", "dcc_execution",
+        'In Maya, transfer animation FBX "C:/tmp/Characterized_Walk.fbx" onto '
+        'control rig "C:/tmp/Hero.ma" using target HIK "C:/tmp/Hero_mocap.fbx"; '
+        'save scene "C:/tmp/Characterized_Walk_Hero.ma"',
+        ("dcc_execute",),
+        expected_target_identifier="animation.fbx_to_control_rig",
     ),
     DeveloperPromptCase(
         "unreal_gameplay_feature", "gameplay_development",
@@ -104,6 +122,13 @@ DEVELOPER_PROMPT_CASES: tuple[DeveloperPromptCase, ...] = (
         ("pipeline_graph", "action_graph"), True,
         ("blender", "unreal"),
         ("pipeline.process_meshes_for_transfer", "unreal_tools.asset_transfer_adapter.registry_readback"),
+    ),
+    DeveloperPromptCase(
+        "blender_single_host_prop", "pipeline_generation",
+        "In Blender clean names of selected prop meshes, apply transforms, generate LOD0 and LOD1, then export FBX to C:/tmp/prop.fbx.",
+        ("pipeline_graph", "action_graph"), True,
+        ("blender",),
+        ("pipeline.process_meshes_for_transfer", "io.export_fbx"),
     ),
     DeveloperPromptCase(
         "maya_blender_unreal_character", "pipeline_generation",
@@ -149,6 +174,56 @@ DEVELOPER_PROMPT_CASES: tuple[DeveloperPromptCase, ...] = (
         expected_explicit_functions=7,
     ),
     DeveloperPromptCase(
+        "maya_multi_asset_blender_unreal", "safe_failure",
+        "Export a rigged character mesh and two animation takes from Maya to Blender, clean the mesh and bake both animations in Blender, export the edited character and animations as FBX, then import both into Unreal under /Game/Demo using skeleton /Game/Characters/SK_Demo and validate registry readback.",
+        ("pipeline_graph", "action_graph"), True,
+        ("maya", "blender", "unreal"), expected_success=False,
+        expected_gap_kind="unsupported_multi_asset_transfer",
+    ),
+    DeveloperPromptCase(
+        "maya_character_and_walk_clip_separate", "safe_failure",
+        "Export a rigged hero and a walk cycle from Maya, import both into Blender, "
+        "adjust root motion, re-export the edited character and animation separately, "
+        "then import both into Unreal using skeleton /Game/Hero/SK_Hero.",
+        ("pipeline_graph", "action_graph"), True,
+        ("maya", "blender", "unreal"), expected_success=False,
+        expected_gap_kind="unsupported_multi_asset_transfer",
+    ),
+    DeveloperPromptCase(
+        "motionbuilder_two_named_takes_separate", "safe_failure",
+        "Export the Walk and Run takes separately from MotionBuilder, import each "
+        "into Blender, bake the actions, re-export both as FBX, and import them into Unreal.",
+        ("pipeline_graph", "action_graph"), True,
+        ("motionbuilder", "blender", "unreal"), expected_success=False,
+        expected_gap_kind="unsupported_multi_asset_transfer",
+    ),
+    DeveloperPromptCase(
+        "maya_blender_skin_weight_edit", "safe_failure",
+        "Export a skeletal mesh from Maya to Blender, change its weights, re-export "
+        "it as FBX, then import into Unreal using skeleton /Game/Hero/SK_Hero.",
+        ("pipeline_graph", "action_graph"), True,
+        ("maya", "blender", "unreal"), expected_success=False,
+        expected_gap_kind="missing_requested_operation",
+    ),
+    DeveloperPromptCase(
+        "blender_two_named_meshes_unreal", "pipeline_generation",
+        "Export two separate static meshes named Crate_A and Barrel_B from Blender as FBX and import both into Unreal.",
+        ("pipeline_graph", "action_graph"), True,
+        ("blender", "unreal"),
+        ("blender.export_fbx", "unreal_tools.asset_transfer_adapter.import_fbx_verified", "unreal_tools.asset_transfer_adapter.registry_readback",
+         "blender.export_fbx", "unreal_tools.asset_transfer_adapter.import_fbx_verified", "unreal_tools.asset_transfer_adapter.registry_readback"),
+        expected_asset_lanes=("Crate_A", "Barrel_B"),
+    ),
+    DeveloperPromptCase(
+        "maya_two_meshes_blender_edit_unreal", "pipeline_generation",
+        "Export two separate static meshes named Crate_A and Barrel_B from Maya to Blender, clean names and apply transforms in Blender, re-export each as FBX, then import both into Unreal and validate registry readback.",
+        ("pipeline_graph", "action_graph"), True,
+        ("maya", "blender", "unreal"),
+        ("animation.export", "io.import_fbx", "pipeline.process_meshes_for_transfer", "blender.export_fbx", "unreal_tools.asset_transfer_adapter.import_fbx_verified", "unreal_tools.asset_transfer_adapter.registry_readback",
+         "animation.export", "io.import_fbx", "pipeline.process_meshes_for_transfer", "blender.export_fbx", "unreal_tools.asset_transfer_adapter.import_fbx_verified", "unreal_tools.asset_transfer_adapter.registry_readback"),
+        expected_asset_lanes=("Crate_A", "Barrel_B"),
+    ),
+    DeveloperPromptCase(
         "unknown_explicit_function", "safe_failure",
         "Export a mesh from Maya to Unreal. Functions: maya.animation.export, unreal.magic_import_everything.",
         ("pipeline_graph", "action_graph"), True,
@@ -161,6 +236,20 @@ DEVELOPER_PROMPT_CASES: tuple[DeveloperPromptCase, ...] = (
         ("pipeline_graph", "action_graph"), True,
         ("houdini", "unreal"), expected_success=False,
         expected_gap_kind="missing_transfer_edge",
+    ),
+    DeveloperPromptCase(
+        "delegated_painter_smart_material", "safe_failure",
+        "Export an FBX from Blender to Substance Painter, apply smart material Steel to the Body texture set, then export PBR textures. Functions: blender.io.export_fbx, substance_painter.material.apply.",
+        ("pipeline_graph", "action_graph"), True,
+        ("blender", "substance_painter"), expected_success=False,
+        expected_gap_kind="operation_evidence_gap",
+    ),
+    DeveloperPromptCase(
+        "single_host_painter_material_export", "safe_failure",
+        "Build a Substance Painter pipeline: create a project from C:/tmp/demo_prop.fbx, apply smart material Steel to texture set Body, then export PBR textures to C:/tmp/demo_textures using preset PBR Metallic Roughness.",
+        ("pipeline_graph", "action_graph"), True,
+        ("substance_painter",), expected_success=False,
+        expected_gap_kind="operation_evidence_gap",
     ),
 )
 
@@ -190,6 +279,165 @@ def _load_runtime_evidence(paths: tuple[str | Path, ...]) -> dict[str, dict[str,
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("schema") == "tech_connector.maya_joint_query_prompt.v1":
+            from tech_connector.benchmarks.verify_maya_joint_query_prompt_live import (
+                verify_maya_joint_query_prompt_proof,
+            )
+
+            try:
+                verification = verify_maya_joint_query_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                continue
+            if verification.get("verified") and verification.get("scene_unchanged"):
+                evidence["maya_live_query"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "selected_joints": verification["selected_joints"],
+                    "elapsed_seconds": verification["elapsed_seconds"],
+                    "maya_version": verification["maya_version"],
+                    "scene_unchanged": True,
+                }
+            continue
+        if payload.get("schema") == "tech_connector.blender_unreal_two_props_prompt.v1":
+            from tech_connector.benchmarks.verify_blender_unreal_two_props_prompt_live import (
+                verify_blender_unreal_two_props_prompt_proof,
+            )
+
+            try:
+                verification = verify_blender_unreal_two_props_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                continue
+            if verification.get("verified") and verification.get("continuous_action_graph_proven"):
+                evidence["blender_two_named_meshes_unreal"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "asset_names": verification["asset_names"],
+                    "assets": verification["assets"],
+                    "fresh_readback_path": verification["fresh_readback_path"],
+                }
+            continue
+        if payload.get("schema") == "tech_connector.blender_unreal_prop_prompt.v1":
+            from tech_connector.benchmarks.verify_blender_unreal_prop_prompt_live import (
+                verify_blender_unreal_prop_prompt_proof,
+            )
+
+            try:
+                verification = verify_blender_unreal_prop_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                continue
+            if verification.get("verified") and verification.get("continuous_action_graph_proven"):
+                evidence["blender_to_unreal_prop"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "asset_path": verification["asset_path"],
+                    "fbx_sha256": verification["fbx_sha256"],
+                    "unreal_asset_sha256": verification["unreal_asset_sha256"],
+                    "lod_count": verification["lod_count"],
+                    "convex_collision_count": verification["convex_collision_count"],
+                    "fresh_readback_path": verification["fresh_readback_path"],
+                }
+            continue
+        if payload.get("schema") == "tech_connector.maya_unreal_animation_prompt_proof.v2":
+            from tech_connector.benchmarks.verify_maya_unreal_animation_prompt_live import (
+                verify_maya_unreal_animation_prompt_proof,
+            )
+
+            try:
+                verification = verify_maya_unreal_animation_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                continue
+            if verification.get("verified"):
+                evidence["maya_to_unreal_animation"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "anim_sequence": verification["anim_sequence"],
+                    "skeleton": verification["skeleton"],
+                    "track_count": verification["track_count"],
+                    "frame_count": verification["frame_count"],
+                    "fbx_sha256": verification["fbx_sha256"],
+                    "unreal_asset_sha256": verification["unreal_asset_sha256"],
+                }
+            continue
+        if payload.get("schema") == "tech_connector.maya_fbx_control_proof.v2":
+            from tech_connector.benchmarks.verify_maya_fbx_control_prompt_live import (
+                verify_maya_fbx_control_prompt_proof,
+            )
+
+            try:
+                verification = verify_maya_fbx_control_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                continue
+            if verification.get("verified"):
+                source_file = ((payload.get("prompt_binding") or {}).get("selected_files") or {}).get("source_hik_fbx")
+                if verification.get("source_characterization") == "embedded" and source_file is None:
+                    case_id = "maya_embedded_hik_to_control_rig"
+                elif verification.get("source_characterization") == "companion_hik" and source_file:
+                    case_id = "maya_fbx_to_control_rig"
+                else:
+                    continue
+                evidence[case_id] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "output_scene": verification["output_scene"],
+                    "output_sha256": verification["output_sha256"],
+                    "keyed_control_count": verification["keyed_control_count"],
+                    "source_characterization": verification["source_characterization"],
+                }
+            continue
+        if payload.get("schema") == "tech_connector.live_blender_tc_prompt.v1":
+            from tech_connector.benchmarks.verify_blender_single_host_prompt_live import (
+                verify_blender_single_host_prompt_proof,
+            )
+            from tech_connector.benchmarks.verify_blender_tc_prompt_live import (
+                verify_blender_tc_prompt_proof,
+            )
+
+            try:
+                single_host = verify_blender_single_host_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                single_host = {}
+            if single_host.get("verified"):
+                evidence["blender_single_host_prop"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "export_path": single_host["export_path"],
+                    "export_sha256": single_host["export_sha256"],
+                    "reimport_meshes": single_host["reimport_meshes"],
+                }
+            try:
+                verification = verify_blender_tc_prompt_proof(path)
+            except (OSError, TypeError, ValueError, KeyError, RuntimeError):
+                # A malformed or stale external receipt cannot promote a case.
+                continue
+            if verification.get("verified") and verification.get("continuous_action_graph_proven"):
+                evidence["blender_to_tc_engine"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "asset_id": verification["asset_id"],
+                    "asset_path": verification["asset_path"],
+                    "continuous_action_graph_proven": True,
+                }
+            continue
+        if payload.get("schema") == "tech_connector.two_mesh_action_engine_live.v1":
+            from tech_connector.benchmarks.verify_two_mesh_action_engine_live import (
+                verify_action_engine_proof,
+            )
+
+            inspection = path.parent / "unreal_fresh_inspection.json"
+            verification = verify_action_engine_proof(path, inspection)
+            if verification.get("verified") and verification.get("continuous_action_graph_proven"):
+                evidence["maya_two_meshes_blender_edit_unreal"] = {
+                    "schema": payload["schema"],
+                    "report_path": str(path),
+                    "inspection_path": str(inspection),
+                    "unreal_mode": str(payload.get("unreal_mode") or ""),
+                    "elapsed_seconds": payload.get("elapsed_seconds"),
+                    "prompt_variant": str(payload.get("prompt") or ""),
+                    "asset_names": ["Crate_A", "Barrel_B"],
+                }
             continue
         if payload.get("schema") != "tech_connector.live_maya_blender_e2e.v1" or not payload.get("passed"):
             continue
@@ -283,6 +531,17 @@ def qualify_developer_demo_prompts(
                         "expected": case.expected_explicit_functions,
                         "actual": len(plan.get("explicit_function_requests") or []),
                     })
+                if case.expected_asset_lanes:
+                    actual_lanes = tuple(
+                        str(row.get("name") or "")
+                        for row in plan.get("asset_lanes") or []
+                    )
+                    checks.append({
+                        "name": "independent_asset_lanes",
+                        "passed": actual_lanes == case.expected_asset_lanes,
+                        "expected": list(case.expected_asset_lanes),
+                        "actual": list(actual_lanes),
+                    })
                 if case.expected_success:
                     preflight = preflight_pipeline_execution(plan, require_live_sessions=False)
                     checks.append({
@@ -321,6 +580,13 @@ def qualify_developer_demo_prompts(
                         "provider": str(getattr(decision, "provider", "") or ""),
                     },
                 })
+                if case.expected_target_identifier:
+                    checks.append({
+                        "name": "operation_target",
+                        "passed": decision.target_identifier == case.expected_target_identifier,
+                        "expected": case.expected_target_identifier,
+                        "actual": decision.target_identifier,
+                    })
                 if case.expected_result_terms or case.expected_result_type:
                     from tech_connector.engine.request_context import RequestContext
                     from tech_connector.engine.request_engine import RequestEngine
@@ -374,6 +640,9 @@ def qualify_developer_demo_prompts(
         elif case.pipeline and qualified and case.case_id in runtime_evidence:
             evidence_level = "live_runtime_artifact_readback"
             end_to_end_qualified = True
+        elif qualified and case.case_id in runtime_evidence:
+            evidence_level = "live_runtime_artifact_readback"
+            end_to_end_qualified = True
         elif case.pipeline:
             evidence_level = "planning_materialization_codegen"
             end_to_end_qualified = False
@@ -404,7 +673,10 @@ def qualify_developer_demo_prompts(
         "schema": DEVELOPER_PROMPT_DEMO_SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "project_root": root,
-        "ready_for_demo": not failed,
+        # Planning/codegen is useful evidence, but it is not a live DCC demo.
+        # Keep the public readiness gate closed until every requested case has
+        # end-to-end evidence or a verified safe-failure contract.
+        "ready_for_demo": not failed and not end_to_end_unproven,
         "planning_ready": not failed,
         "ready_for_end_to_end_demo": not end_to_end_unproven,
         "summary": {
@@ -415,6 +687,18 @@ def qualify_developer_demo_prompts(
             "safe_failure_cases": sum(not bool(row["expected_success"]) for row in rows),
             "end_to_end_proven": len(rows) - len(end_to_end_unproven),
             "end_to_end_unproven": len(end_to_end_unproven),
+            "live_pipeline_proven": sum(
+                row["pipeline"] and row["evidence_level"] == "live_runtime_artifact_readback"
+                for row in rows
+            ),
+            "live_dcc_proven": sum(
+                not row["pipeline"] and row["evidence_level"] == "live_runtime_artifact_readback"
+                for row in rows
+            ),
+            "planning_only_pipeline_cases": sum(
+                row["evidence_level"] == "planning_materialization_codegen"
+                for row in rows
+            ),
             "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
         },
         "category_counts": {

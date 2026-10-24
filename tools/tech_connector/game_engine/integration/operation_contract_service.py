@@ -115,10 +115,20 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
     ("maya", "animation.export"): {
         "role": "export",
         "formats": ("fbx",),
-        "subjects": ("animation", "skeletal_mesh"),
+        "subjects": ("asset", "animation", "static_mesh", "skeletal_mesh"),
         "consumes": ("maya_scene",),
         "produces": ("fbx_path",),
         "validation": ("export file exists",),
+    },
+    ("maya", "animation.fbx_to_engine"): {
+        "role": "export",
+        "formats": ("fbx",),
+        "subjects": ("animation",),
+        "produces": ("fbx_path", "maya_scene", "frame_range"),
+        "validation": (
+            "HumanIK source/target slots match and animator controls are baked",
+            "clean FBX reimport matches the target deform skeleton and sampled poses",
+        ),
     },
     ("blender", "io.import_fbx"): {
         "role": "import",
@@ -146,9 +156,10 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
             "materials",
             "collision",
             "lods",
+            "bevels",
         ),
         "validation": (
-            "processed mesh names, transforms, LODs, materials, and collision are reported",
+            "processed mesh names, transforms, angle-limited bevels, LODs, materials, and collision are reported",
         ),
         "rollback": ("discard unsaved Blender scene changes or remove reported objects",),
     },
@@ -175,6 +186,22 @@ _TRANSFER_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "consumes": ("fbx_path",),
         "produces": ("motionbuilder_scene", "animations", "skeleton"),
         "validation": ("scene take and model counts are reported",),
+    },
+    ("motionbuilder", "character.create_character"): {
+        "role": "operate",
+        "formats": ("fbx",),
+        "subjects": ("animation", "skeletal_mesh"),
+        "consumes": ("motionbuilder_scene",),
+        "produces": ("motionbuilder_character",),
+        "phase_order": 20,
+    },
+    ("motionbuilder", "character.plot_animation"): {
+        "role": "operate",
+        "formats": ("fbx",),
+        "subjects": ("animation", "skeletal_mesh"),
+        "consumes": ("motionbuilder_scene",),
+        "produces": ("plotted_animation",),
+        "phase_order": 30,
     },
     ("motionbuilder", "io.export_fbx"): {
         "role": "export",
@@ -335,6 +362,7 @@ _CALLABLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "skeleton_path": "",
             "replace_existing": False,
             "save": True,
+            "assemble_lods": False,
         },
         "validation": ("imported object paths resolve in EditorAssetLibrary",),
         "rollback": (
@@ -366,6 +394,7 @@ _CALLABLE_OVERRIDES: dict[str, dict[str, Any]] = {
 def _normalize_registered(host: str, key: str, operation: Any) -> OperationContract:
     override = dict(_TRANSFER_OVERRIDES.get((host, key), {}))
     description = str(getattr(operation, "description", "") or "")
+    execution_mode = str(getattr(operation, "execution_mode", "host_native") or "host_native")
     implementation_state = str(
         override.pop(
             "implementation_state",
@@ -373,6 +402,11 @@ def _normalize_registered(host: str, key: str, operation: Any) -> OperationContr
         )
         or "implemented"
     )
+    if execution_mode == "user_delegated":
+        # A registered callable may only raise a guidance exception. The typed
+        # planner must not present that step as executable merely because it
+        # has a Python import path (Painter smart-material application today).
+        implementation_state = "user_delegated"
     implementation_evidence = tuple(
         getattr(operation, "implementation_evidence", ()) or ()
     )
@@ -417,6 +451,7 @@ def _normalize_registered(host: str, key: str, operation: Any) -> OperationContr
         produces=produces,
         metadata={
             "description": description,
+            "execution_mode": execution_mode,
             "implementation_evidence": list(implementation_evidence),
             "validation_receipt": validation_receipt,
             "evidence_level": evidence_level,
@@ -426,8 +461,16 @@ def _normalize_registered(host: str, key: str, operation: Any) -> OperationContr
     )
 
 
+def registered_operation_contract(host: str, key: str) -> OperationContract | None:
+    """Resolve one canonical host operation without building the full inventory."""
+    operation = dcc_operation_registry(host).get(key)
+    return _normalize_registered(host, key, operation) if operation is not None else None
+
+
 def _normalize_unreal_inventory(section: str, key: str, row: dict[str, Any]) -> OperationContract:
     implementation_state = str(row.get("implementation_state") or "implemented")
+    if str(row.get("execution_mode") or "") == "user_delegated":
+        implementation_state = "user_delegated"
     callable_name = str(row.get("python_call") or row.get("function") or row.get("operation") or "")
     provider = {
         "plugin_functions": "unreal_plugin",

@@ -199,7 +199,8 @@ def validate_skeleton_properties(properties: Mapping[str, Any]) -> tuple[Charact
         if bone not in known:
             issues.append(CharacterAssetIssue("error", "missing_socket_bone", f"Socket '{socket.get('name', '')}' references missing bone '{bone}'."))
     pose = dict(values.get("retarget_pose") or {})
-    unknown_pose_bones = sorted(set(str(name) for name in pose) - known)
+    pose_metadata = {"name", "forward_axis", "up_axis"}
+    unknown_pose_bones = sorted(set(str(name) for name in pose) - known - pose_metadata)
     if unknown_pose_bones:
         issues.append(CharacterAssetIssue("error", "unknown_retarget_bone", "Retarget pose references missing bones: " + ", ".join(unknown_pose_bones)))
     unknown_preserved = sorted(set(str(name) for name in values.get("preserve_bones") or ()) - known)

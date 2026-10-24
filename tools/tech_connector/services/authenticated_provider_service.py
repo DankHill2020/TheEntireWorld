@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import time
 from typing import Any
 
@@ -58,6 +59,20 @@ def _candidate_paths(provider_id: str) -> list[str]:
                 str(local_app_data / "OpenAI" / "Codex" / "bin" / name),
             ]
         )
+    if provider_id == "openai":
+        # The desktop app places its CLI in a versioned child of bin, which is
+        # often absent from the environment inherited by another GUI process.
+        versioned_bin = local_app_data / "OpenAI" / "Codex" / "bin"
+        try:
+            versioned = sorted(
+                (item for item in versioned_bin.iterdir() if item.is_dir()),
+                key=lambda item: item.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            versioned = []
+        for folder in versioned[:8]:
+            candidates.extend(str(folder / name) for name in names)
     return [candidate for candidate in candidates if candidate]
 
 
@@ -84,8 +99,10 @@ def resolve_provider_executable(provider_id: str) -> str:
 
 def _build_cmd(executable: str, args: list[str]) -> list[str]:
     if os.name == "nt":
-        if executable.startswith("npx ") or executable.lower().endswith((".cmd", ".bat", ".ps1")) or " " in executable:
+        if executable.startswith("npx "):
             return ["cmd.exe", "/c", f"{executable} {' '.join(args)}".strip()]
+        if executable.lower().endswith((".cmd", ".bat", ".ps1")):
+            return ["cmd.exe", "/c", subprocess.list2cmdline([executable, *args])]
     return [executable, *args]
 
 
@@ -140,7 +157,8 @@ def provider_account_status(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=max(1, min(3, timeout)),
+            timeout=max(1, min(12 if executable.startswith("npx ") else 3, timeout)),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             check=False,
         )
         connected = completed.returncode == 0
@@ -164,31 +182,28 @@ def account_provider_is_connected(provider_id: str) -> bool:
     return provider_account_status(provider_id).connected
 
 
-def begin_provider_login(provider_id: str, *, cwd: str | None = None) -> str:
-    """Launch 100% keyless official CLI OAuth Web SSO login in dedicated terminal console."""
-    import os
-    import subprocess
-
+def begin_provider_login(provider_id: str, *, cwd: str | None = None, device_auth: bool = False) -> str:
+    """Launch official browser/device sign-in in a visible terminal."""
     pid = provider_id.lower().strip()
-    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
-    
-    keyless_args = {
-        "anthropic": ["npx", "-y", "@anthropic-ai/claude-code", "auth", "login"],
-        "google": ["gcloud", "auth", "application-default", "login"],
-        "openai": ["npx", "-y", "@openai/codex", "login"],
-        "x": ["npx", "-y", "grok-cli", "login"],
-    }
-    args = keyless_args.get(pid, keyless_args["openai"])
-    command = ["cmd.exe", "/k", *args] if os.name == "nt" else args
-
+    executable = resolve_provider_executable(pid)
+    if not executable:
+        return f"No official {pid.upper()} login helper is available on this device."
+    login_args = ["login", "--device-auth"] if pid == "openai" and device_auth else _login_args(pid)
+    if not login_args:
+        return f"No login command is configured for {pid.upper()}."
+    command = _build_cmd(executable, login_args)
     try:
         subprocess.Popen(
             command,
             cwd=cwd or os.getcwd(),
-            creationflags=creationflags,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
             shell=False,
         )
-        return f"Launched 100% Keyless OAuth Sign-In for {pid.upper()} in console terminal."
+        if pid == "openai":
+            if device_auth:
+                return "Opened OpenAI device-code sign-in. Enter the code shown in the terminal."
+            return "Opened OpenAI browser sign-in. Approve access in the browser."
+        return f"Opened official {pid.upper()} sign-in in a terminal."
     except Exception as exc:
         return str(exc)
 
@@ -231,6 +246,7 @@ def _run_provider(
     *,
     prompt_input: str | None,
     timeout: int,
+    cwd: str | Path | None = None,
 ) -> str:
     if command:
         command = _build_cmd(command[0], command[1:])
@@ -239,7 +255,11 @@ def _run_provider(
         input=prompt_input,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         timeout=max(1, timeout),
+        cwd=cwd,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         check=False,
     )
     if completed.returncode != 0:
@@ -279,6 +299,8 @@ def query_account_provider(
     system: str | None,
     response_format: dict | str | None,
     timeout: int,
+    *,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Generate through an authenticated official command-line client."""
     executable = resolve_provider_executable(provider_id)
@@ -287,9 +309,13 @@ def query_account_provider(
     combined = _combined_prompt(prompt, system, response_format)
 
     if provider_id == "openai":
+        effort = str(reasoning_effort or "").strip().lower()
+        if effort and effort not in {"none", "low", "medium", "high", "xhigh", "max"}:
+            raise ValueError(f"Unsupported OpenAI reasoning effort: {effort}")
         command = [
             executable,
             "exec",
+            *(["-c", f'model_reasoning_effort="{effort}"'] if effort else []),
             "--ephemeral",
             "--skip-git-repo-check",
             "--sandbox",
@@ -299,7 +325,13 @@ def query_account_provider(
             model,
             "-",
         ]
-        return _run_provider(command, prompt_input=combined, timeout=timeout)
+        # The prompt already contains the approved repository context. Launch
+        # the CLI outside that repository so its read-only agent cannot spend
+        # time indexing unrelated files or infer context outside the prompt.
+        with tempfile.TemporaryDirectory(prefix="tc_codex_prompt_") as temporary_root:
+            return _run_provider(
+                command, prompt_input=combined, timeout=timeout, cwd=temporary_root,
+            )
     if provider_id == "anthropic":
         command = [
             executable,

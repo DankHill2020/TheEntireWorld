@@ -96,6 +96,41 @@ class RequestEngine:
     def emit(self, stage: str, message: str, current: int = 0, total: int = 0, detail: str = "") -> None:
         self.progress(ProgressEvent(stage=stage, message=message, current=current, total=total, detail=detail))
 
+    def _fast_source_review_candidates(self, context: RequestContext) -> EngineResult | None:
+        """Ground a read-only review request without a broad index/model pass."""
+
+        if not context.project_roots or not re.search(
+            r"\b(unreal|maya|blender|motionbuilder|substance.painter)\b",
+            context.text or "", re.IGNORECASE,
+        ):
+            return None
+        from tech_connector.services.project_search_service import (
+            build_deterministic_project_search_answer,
+            detect_project_search_mode,
+            gather_project_search_context,
+        )
+
+        if detect_project_search_mode(context.text) != "source_review":
+            return None
+        frame = analyze_request_frame(context.text)
+        if frame.wants_execution or frame.wants_mutation:
+            return None
+        evidence = gather_project_search_context(
+            context.text, active_path=context.current_file_path, limit=20,
+            requested_project_roots=context.project_roots,
+        )
+        answer = build_deterministic_project_search_answer(
+            context.text, context.current_file_path, evidence,
+        )
+        return EngineResult(
+            action="answer", label="Source Review Candidates", text=answer,
+            metadata={
+                "engine_path": "project_search", "result_type": "source_review_candidates_only",
+                "review_completed": False, "mutation_scope": "read_only",
+                "original_query": context.text,
+            },
+        )
+
     def _dispatch_preclassified(
         self,
         route_decision: dict,
@@ -741,9 +776,9 @@ class RequestEngine:
             )
 
         try:
-            from tech_connector.services.prompt.prompt_intent_service import understand_prompt_request
+            from tech_connector.services.prompt.prompt_intent_service import understand_prompt_request_deterministic
 
-            understanding = understand_prompt_request(
+            understanding = understand_prompt_request_deterministic(
                 context.text,
                 host=str((context.extras or {}).get("host_hint") or ""),
             )
@@ -1746,6 +1781,9 @@ class RequestEngine:
         # constructing the full code-understanding packet first. Keeping these
         # deterministic fast paths ahead of runtime preparation avoids a large
         # symbol/context scan on the user's most common read-only questions.
+        review_candidates = self._fast_source_review_candidates(context)
+        if review_candidates is not None:
+            return review_candidates
         fast_symbol = self._fast_explicit_symbol_inspection(context)
         if fast_symbol is not None:
             return fast_symbol

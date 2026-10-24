@@ -186,6 +186,7 @@ def validate_realtime_fx_qualification(
     max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
     require_gpu_backend: bool = False,
     require_production_backend: bool = False,
+    source_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     row = dict(receipt or {}); gates: list[str] = []
     if row.get("schema") != FX_QUALIFICATION_SCHEMA: gates.append("schema")
@@ -200,7 +201,10 @@ def validate_realtime_fx_qualification(
         gates.append("production_backend")
     verified = _timestamp(row.get("verified_at")); now = datetime.now(timezone.utc).timestamp()
     if verified <= 0.0 or now - verified > max(0.0, float(max_age_seconds)): gates.append("freshness")
-    expected = playable_project_source_fingerprint(source_root)
+    expected = (
+        playable_project_source_fingerprint(source_root)
+        if source_fingerprint is None else source_fingerprint
+    )
     if str(row.get("source_fingerprint") or "") != expected: gates.append("source_fingerprint")
     return {"valid": not gates, "gates": sorted(set(gates)), "age_seconds": max(0.0, now - verified) if verified > 0 else None,
             "source_fingerprint": expected, "gpu_backend_required": bool(require_gpu_backend),

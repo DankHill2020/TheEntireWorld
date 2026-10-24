@@ -8,6 +8,7 @@ signals from existing Tech Connector services.
 from __future__ import annotations
 
 import ast
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -263,6 +264,25 @@ def audit_python_package_layout(
 from reasoning_runtime.project_analysis import audit_python_package_layout as audit_python_package_layout
 
 
+def _iter_analysis_python_files(
+    package_root: Path, ignored_dirs: set[str],
+):
+    """Walk first-party sources without descending into generated workspaces."""
+
+    ignored = {name.casefold() for name in ignored_dirs}
+    for directory, directory_names, file_names in os.walk(package_root):
+        parent_name = Path(directory).name.casefold()
+        directory_names[:] = [
+            name for name in directory_names
+            if name.casefold() not in ignored
+            and not name.casefold().startswith(("test_tmp_", "pytest_"))
+            and not (parent_name == "benchmarks" and name.casefold() == "results")
+        ]
+        for file_name in file_names:
+            if file_name.endswith(".py"):
+                yield Path(directory) / file_name
+
+
 def analyze_service_cleanup_candidates(
     project_root: str | Path,
     *,
@@ -301,9 +321,7 @@ def analyze_service_cleanup_candidates(
         }
 
     all_sources: dict[Path, str] = {}
-    for path in package_root.rglob("*.py"):
-        if any(part in ignored_dirs for part in path.parts):
-            continue
+    for path in _iter_analysis_python_files(package_root, ignored_dirs):
         try:
             all_sources[path] = path.read_text(encoding="utf-8", errors="replace")
         except OSError:

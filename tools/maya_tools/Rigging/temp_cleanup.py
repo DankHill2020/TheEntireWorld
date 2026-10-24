@@ -16,16 +16,18 @@ def _is_temp_bone(node):
     return bool(_TEMP_BONE_TOKEN.search(short_name))
 
 
-def delete_temp_bones():
-    """Delete local construction joints with a distinct ``temp`` name token.
+def delete_temp_bones(exclude=()):
+    """Delete newly created construction joints with a distinct ``temp`` token.
 
     Non-temporary children are first reparented beside the temporary joint so
     cleanup cannot accidentally remove a persistent skeleton branch. Referenced
-    joints are left untouched because they were not created by this process.
+    and explicitly excluded joints are left untouched because they predate the
+    current operation and may be valid rig data despite their name.
     """
+    excluded = set(exclude or ())
     candidates = [
         node for node in (cmds.ls(type="joint", long=True) or [])
-        if _is_temp_bone(node)
+        if _is_temp_bone(node) and node not in excluded
     ]
     candidate_set = set(candidates)
     roots = []
@@ -69,13 +71,18 @@ def delete_temp_bones():
 
 
 def cleanup_temp_bones(function):
-    """Run a Maya operation with stale-before and guaranteed-after cleanup."""
+    """Clean up only temporary joints created by this operation.
+
+    Existing scene joints are treated as user data, even when their names
+    contain ``temp``. Sweeping the entire scene before a fit could otherwise
+    delete authored helpers such as hair, eyelid, or twist joints.
+    """
     @wraps(function)
     def wrapped(*args, **kwargs):
-        delete_temp_bones()
+        existing = set(cmds.ls(type="joint", long=True) or [])
         try:
             return function(*args, **kwargs)
         finally:
-            delete_temp_bones()
+            delete_temp_bones(exclude=existing)
 
     return wrapped

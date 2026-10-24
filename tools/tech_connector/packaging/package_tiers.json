@@ -61,12 +61,13 @@
         {"source": "tech_connector/packaging/repository_root/public.gitignore", "target": ".gitignore"}
       ],
       "exclude": [
-        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/pytest_*", "**/.agents",
         "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
         "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*~", "**/*.db",
         "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
         "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
         "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/benchmarks/results",
         "tech_connector/knowledge/index/legacy", "tech_connector/knowledge/index",
         "tech_connector/data/capability_registry.json", "tech_connector/data/capability_registry",
         "tech_connector/project_analysis/*.db"
@@ -96,12 +97,13 @@
         {"source": "tech_connector/packaging/repository_root/public.gitignore", "target": ".gitignore"}
       ],
       "exclude": [
-        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/pytest_*", "**/.agents",
         "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
         "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*~", "**/*.db",
         "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
         "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
         "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/benchmarks/results",
         "tech_connector/data/capability_registry", "**/*_port.txt",
         "external_tools/downloaded_code", "external_tools/downloaded_assets"
       ]
@@ -129,12 +131,13 @@
         {"source": "tech_connector/packaging/repository_root/public.gitignore", "target": ".gitignore"}
       ],
       "exclude": [
-        ".git", "**/__pycache__", "**/.pytest_cache", "**/.agents",
+        ".git", "**/__pycache__", "**/.pytest_cache", "**/pytest_*", "**/.agents",
         "**/.continue", "**/.idea", "**/.ai_studio", "**/.build",
         "**/.project_ai", "**/.tech_connector", "**/*.bak", "**/*~", "**/*.db",
         "**/*.db-shm", "**/*.db-wal", "**/*.log", "**/*.pyc",
         "**/*.pyo", "**/*.sqlite", "**/*.sqlite-shm", "**/*.sqlite-wal",
         "**/scratch*", "**/tests", "**/test_*.py",
+        "tech_connector/benchmarks/results",
         "tech_connector/knowledge/index/legacy", "tech_connector/knowledge/index",
         "tech_connector/data/capability_registry.json", "tech_connector/data/capability_registry",
         "tech_connector/project_analysis/*.db", "blender_tools/blender_port.txt",

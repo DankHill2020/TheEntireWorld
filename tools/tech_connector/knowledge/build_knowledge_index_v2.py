@@ -1245,7 +1245,14 @@ def index_file(conn: sqlite3.Connection, root: Path, path: Path, *, symbols_only
             )
 
     if ext == ".py":
-        symbols = extract_python_symbols(text)
+        # Keep chunks bounded for retrieval, but parse the full Python source
+        # for AST symbols. Truncating at MAX_FILE_CHARS can cut large modules
+        # inside a function body and make ast.parse silently return no symbols.
+        try:
+            symbol_text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            symbol_text = text
+        symbols = extract_python_symbols(symbol_text)
 
         file_import_records: list[PythonImport] = []
         for sym in symbols:
@@ -1420,6 +1427,19 @@ def _file_needs_rich_index(conn: sqlite3.Connection, file_id: int, ext: str) -> 
     if ext == ".py":
         cur.execute("SELECT COUNT(*) FROM symbols WHERE file_id = ?", (file_id,))
         symbol_count = int((cur.fetchone() or [0])[0] or 0)
+        if symbol_count == 0:
+            # An indexed text chunk is not enough when the Python source
+            # declares symbols: lookup depends on AST rows. Retry older or
+            # incomplete records, but do not continually reindex a genuinely
+            # symbol-free module.
+            row = cur.execute(
+                "SELECT path FROM files WHERE id = ?", (file_id,)
+            ).fetchone()
+            try:
+                text = Path(row[0]).read_text(encoding="utf-8", errors="replace") if row else ""
+            except Exception:
+                text = _load_file_text_from_chunks(conn, file_id)
+            return bool(extract_python_symbols(text))
         if symbol_count:
             cur.execute(
                 """

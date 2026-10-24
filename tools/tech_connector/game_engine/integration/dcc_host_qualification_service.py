@@ -289,7 +289,15 @@ def probe_dcc_host(
             }
         except Exception as exc:
             install_evidence = {"automatic_recovery_verified": False, "error": str(exc)}
-    preferred_honored = None if preferred is None else bool(ports and ports[0] == preferred and any(row.get("port") == preferred for row in sessions))
+    # A saved preference for a closed session must not block a healthy
+    # discovered fallback. Keep the stale preference visible in evidence.
+    stale_preferred = preferred is not None and not any(
+        int(row.get("port") or 0) == preferred for row in sessions
+    )
+    preferred_honored = (
+        None if preferred is None or stale_preferred
+        else bool(ports and ports[0] == preferred and any(row.get("port") == preferred for row in sessions))
+    )
     multi_verified = len(sessions) >= 2 and exact_session_identity
     missing_gates: list[str] = []
     if missing_operations:
@@ -300,7 +308,7 @@ def probe_dcc_host(
         missing_gates.append("exact_session_identity_readback")
     if live_readback and not latency_budget_met:
         missing_gates.append("identity_latency_budget")
-    if preferred is not None and not preferred_honored:
+    if preferred is not None and not stale_preferred and not preferred_honored:
         missing_gates.append("preferred_session_readback")
     if not multi_supported:
         missing_gates.append("multi_session_contract")
@@ -308,7 +316,7 @@ def probe_dcc_host(
         missing_gates.append("install_recovery_readback")
     if missing_operations:
         status = "incomplete"
-    elif live_readback and exact_session_identity and latency_budget_met and install_recovery_verified:
+    elif not missing_gates and live_readback and exact_session_identity and latency_budget_met and install_recovery_verified:
         status = "qualified"
     elif live_readback and exact_session_identity and latency_budget_met:
         status = "live"
@@ -324,6 +332,8 @@ def probe_dcc_host(
         except Exception as exc:
             discovery_evidence = {"error": str(exc)}
     discovery_evidence["requested_ports"] = list(explicit_ports)
+    if stale_preferred:
+        discovery_evidence["stale_preferred_port"] = preferred
     source_rows = discovery_evidence.setdefault("port_sources", {})
     for port in explicit_ports:
         sources = list(source_rows.get(str(port)) or [])

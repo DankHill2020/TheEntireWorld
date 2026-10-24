@@ -6,15 +6,45 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
 
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace tc::runtime {
 namespace {
+
+std::filesystem::path save_sidecar_path(std::filesystem::path path, const char* suffix) {
+    path += suffix;
+    return path;
+}
+
+std::string path_utf8(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    const auto text = path.u8string();
+    return std::string(text.begin(), text.end());
+#else
+    return path.string();
+#endif
+}
+
+std::filesystem::path path_from_utf8(const std::string& text) {
+#if defined(_WIN32)
+    return std::filesystem::path(std::u8string(text.begin(), text.end()));
+#else
+    return std::filesystem::path(text);
+#endif
+}
 
 Matrix4 identity_matrix() {
     return {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
@@ -56,7 +86,9 @@ std::string decode(const std::string& value) {
     std::string result;
     result.reserve(value.size());
     for (std::size_t index = 0; index < value.size(); ++index) {
-        if (value[index] == '%' && index + 2 < value.size()) {
+        if (value[index] == '%' && index + 2 < value.size() &&
+            std::isxdigit(static_cast<unsigned char>(value[index + 1])) != 0 &&
+            std::isxdigit(static_cast<unsigned char>(value[index + 2])) != 0) {
             const auto hex = value.substr(index + 1, 2);
             unsigned int code = 0;
             std::istringstream(hex) >> std::hex >> code;
@@ -139,7 +171,7 @@ double normal_random(std::uint64_t first, std::uint64_t second) {
 
 std::shared_ptr<CookedCollisionAsset> load_cooked_collision_asset(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
-    if (!stream) throw std::runtime_error("Could not open cooked collision asset: " + path.string());
+    if (!stream) throw std::runtime_error("Could not open cooked collision asset: " + path_utf8(path));
     std::array<char, 8> magic{};
     std::uint32_t version = 0, kind = 0, vertex_count = 0, triangle_count = 0, child_count = 0;
     std::array<float, 6> bounds{};
@@ -153,7 +185,7 @@ std::shared_ptr<CookedCollisionAsset> load_cooked_collision_asset(const std::fil
     const std::array<char, 8> expected{'T','C','C','O','L','0','1','\0'};
     if (!stream || magic != expected || version != 1U || kind < 1U || kind > 3U ||
         vertex_count > 10000000U || triangle_count > 20000000U || child_count > 65535U)
-        throw std::runtime_error("Unsupported or corrupt cooked collision asset: " + path.string());
+        throw std::runtime_error("Unsupported or corrupt cooked collision asset: " + path_utf8(path));
     auto result = std::make_shared<CookedCollisionAsset>();
     result->shape = kind == 1U ? ColliderShape::convex_hull : kind == 2U ? ColliderShape::triangle_mesh : ColliderShape::compound;
     result->bounds_min = {bounds[0], bounds[1], bounds[2]};
@@ -180,7 +212,7 @@ std::shared_ptr<CookedCollisionAsset> load_cooked_collision_asset(const std::fil
         child.half_extents = {values[7], values[8], values[9]};
         child.radius = values[10]; child.half_height = values[11];
     }
-    if (!stream) throw std::runtime_error("Cooked collision asset is truncated: " + path.string());
+    if (!stream) throw std::runtime_error("Cooked collision asset is truncated: " + path_utf8(path));
     return result;
 }
 
@@ -233,6 +265,84 @@ Quaternion normalized_quaternion(Quaternion value) {
     const double length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w);
     if (length <= 1.0e-12) return {};
     return {value.x / length, value.y / length, value.z / length, value.w / length};
+}
+
+Matrix4 interpolate_pose_matrix(const Matrix4& first, const Matrix4& second, double alpha) {
+    Matrix4 result{};
+    for (std::size_t part = 0; part < 16; ++part)
+        result[part] = first[part] * (1.0 - alpha) + second[part] * alpha;
+    // Imported pose caches contain affine world transforms. Interpolating their
+    // rotation entries directly shrinks the bones between sampled frames.
+    const auto rotation = [](const Matrix4& matrix, Quaternion& quaternion,
+                             std::array<double, 3>& scales) {
+        double row[3][3]{};
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            double squared = 0.0;
+            for (std::size_t component = 0; component < 3; ++component)
+                squared += matrix[axis * 4 + component] * matrix[axis * 4 + component];
+            scales[axis] = std::sqrt(squared);
+            if (!std::isfinite(scales[axis]) || scales[axis] < 1.0e-8) return false;
+            for (std::size_t component = 0; component < 3; ++component)
+                row[axis][component] = matrix[axis * 4 + component] / scales[axis];
+        }
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            for (std::size_t other = axis + 1; other < 3; ++other)
+                if (std::fabs(row[axis][0] * row[other][0] +
+                              row[axis][1] * row[other][1] +
+                              row[axis][2] * row[other][2]) > 1.0e-3) return false;
+        const double determinant =
+            row[0][0] * (row[1][1] * row[2][2] - row[1][2] * row[2][1]) -
+            row[0][1] * (row[1][0] * row[2][2] - row[1][2] * row[2][0]) +
+            row[0][2] * (row[1][0] * row[2][1] - row[1][1] * row[2][0]);
+        if (determinant < 0.999 || determinant > 1.001) return false;
+        // The cache is row-vector oriented, so transpose its rotation before
+        // converting to a conventional quaternion.
+        const double m00 = row[0][0], m01 = row[1][0], m02 = row[2][0];
+        const double m10 = row[0][1], m11 = row[1][1], m12 = row[2][1];
+        const double m20 = row[0][2], m21 = row[1][2], m22 = row[2][2];
+        const double trace = m00 + m11 + m22;
+        if (trace > 0.0) {
+            const double s = std::sqrt(trace + 1.0) * 2.0;
+            quaternion = {(m21 - m12) / s, (m02 - m20) / s,
+                          (m10 - m01) / s, s * 0.25};
+        } else if (m00 > m11 && m00 > m22) {
+            const double s = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+            quaternion = {s * 0.25, (m01 + m10) / s,
+                          (m02 + m20) / s, (m21 - m12) / s};
+        } else if (m11 > m22) {
+            const double s = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+            quaternion = {(m01 + m10) / s, s * 0.25,
+                          (m12 + m21) / s, (m02 - m20) / s};
+        } else {
+            const double s = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+            quaternion = {(m02 + m20) / s, (m12 + m21) / s,
+                          s * 0.25, (m10 - m01) / s};
+        }
+        quaternion = normalized_quaternion(quaternion);
+        return true;
+    };
+    Quaternion a{}, b{};
+    std::array<double, 3> first_scales{}, second_scales{};
+    if (!rotation(first, a, first_scales) || !rotation(second, b, second_scales))
+        return result;  // Preserve authored shear or reflection without guessing.
+    if (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0.0)
+        b = {-b.x, -b.y, -b.z, -b.w};
+    const Quaternion q = normalized_quaternion({a.x * (1.0 - alpha) + b.x * alpha,
+                                                 a.y * (1.0 - alpha) + b.y * alpha,
+                                                 a.z * (1.0 - alpha) + b.z * alpha,
+                                                 a.w * (1.0 - alpha) + b.w * alpha});
+    const double x = q.x, y = q.y, z = q.z, w = q.w;
+    const double rows[3][3] = {
+        {1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y)},
+        {2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x)},
+        {2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y)},
+    };
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        const double scale = first_scales[axis] * (1.0 - alpha) + second_scales[axis] * alpha;
+        for (std::size_t component = 0; component < 3; ++component)
+            result[axis * 4 + component] = rows[axis][component] * scale;
+    }
+    return result;
 }
 
 Quaternion multiply_quaternion(const Quaternion& first, const Quaternion& second) {
@@ -400,8 +510,11 @@ ContactManifold sphere_box_manifold(const Transform& sphere_transform, const Col
 }
 
 std::pair<WorldVector3, WorldVector3> capsule_segment(const Transform& transform, const Collider& capsule) {
-    const WorldVector3 axis = normalize(rotate_local_vector({0.0, 1.0, 0.0}, transform.rotation));
-    return {subtract(transform.position, scale(axis, capsule.half_height)), add(transform.position, scale(axis, capsule.half_height))};
+    const WorldVector3 axis = capsule.world_up?WorldVector3{0.0,1.0,0.0}:
+        normalize(rotate_local_vector({0.0, 1.0, 0.0}, transform.rotation));
+    const WorldVector3 center=add(transform.position,capsule.world_up?capsule.center_offset:
+        rotate_local_vector(capsule.center_offset,transform.rotation));
+    return {subtract(center, scale(axis, capsule.half_height)), add(center, scale(axis, capsule.half_height))};
 }
 
 WorldVector3 closest_point_on_segment(const WorldVector3& point, const WorldVector3& start, const WorldVector3& end) {
@@ -585,7 +698,8 @@ ContactManifold collider_manifold(const Transform& first_transform, const Collid
 WorldVector3 collider_world_half_extents(const Transform& transform, const Collider& collider) {
     if (collider.shape == ColliderShape::sphere) return {collider.radius, collider.radius, collider.radius};
     if (collider.shape == ColliderShape::capsule) {
-        const WorldVector3 axis = normalize(rotate_local_vector({0.0, 1.0, 0.0}, transform.rotation));
+        const WorldVector3 axis = collider.world_up?WorldVector3{0.0,1.0,0.0}:
+            normalize(rotate_local_vector({0.0, 1.0, 0.0}, transform.rotation));
         return {collider.radius + std::fabs(axis.x) * collider.half_height,
                 collider.radius + std::fabs(axis.y) * collider.half_height,
                 collider.radius + std::fabs(axis.z) * collider.half_height};
@@ -608,6 +722,18 @@ PhysicsJointType physics_joint_type(const std::string& value) {
 }
 
 }  // namespace
+
+std::filesystem::path save_io_path(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    // A user-scoped save can exceed MAX_PATH after adding .tmp/.bak.
+    const auto absolute = std::filesystem::absolute(path).lexically_normal().native();
+    if (absolute.rfind(L"\\\\?\\", 0) == 0) return absolute;
+    if (absolute.rfind(L"\\\\", 0) == 0) return L"\\\\?\\UNC\\" + absolute.substr(2);
+    return L"\\\\?\\" + absolute;
+#else
+    return path;
+#endif
+}
 
 EntityId World::create_entity(std::string stable_name) {
     if (stable_name.empty()) {
@@ -653,6 +779,53 @@ EntityId World::find_entity(const std::string& stable_name) const {
 
 const std::vector<EntityId>& World::entities() const noexcept { return entities_; }
 
+std::vector<UiRect> layout_ui_widgets(const World& world, float viewport_width, float viewport_height,
+                                      float ui_scale) {
+    const float scale = std::isfinite(ui_scale) && ui_scale > 0.0F ? ui_scale : 1.0F;
+    const float width = std::max(1.0F, viewport_width / scale);
+    const float height = std::max(1.0F, viewport_height / scale);
+    std::vector<UiRect> rects(world.ui_widgets.size());
+    std::vector<std::uint8_t> state(world.ui_widgets.size(), 0);
+    std::unordered_map<std::string, std::size_t> indices;
+    for (std::size_t index = 0; index < world.ui_widgets.size(); ++index)
+        indices.emplace(world.ui_widgets[index].id, index);
+    std::function<UiRect(std::size_t)> place = [&](std::size_t index) -> UiRect {
+        if (state[index] == 2) return rects[index];
+        const auto& widget = world.ui_widgets[index];
+        if (state[index] == 1 || !widget.responsive_layout) {
+            const float sx = width / std::max(1.0F, world.ui_canvas_width);
+            const float sy = height / std::max(1.0F, world.ui_canvas_height);
+            rects[index] = {widget.x * sx, widget.y * sy, widget.width * sx, widget.height * sy,
+                            width >= widget.min_viewport_width};
+            state[index] = 2;
+            return rects[index];
+        }
+        state[index] = 1;
+        UiRect parent{world.ui_safe_left, world.ui_safe_top,
+                      std::max(1.0F, width - world.ui_safe_left - world.ui_safe_right),
+                      std::max(1.0F, height - world.ui_safe_top - world.ui_safe_bottom)};
+        if (const auto found = indices.find(widget.parent_id);
+            !widget.parent_id.empty() && found != indices.end() && found->second != index)
+            parent = place(found->second);
+        rects[index] = {
+            parent.x + widget.anchor_x * parent.width + widget.offset_x - widget.pivot_x * widget.layout_width,
+            parent.y + widget.anchor_y * parent.height + widget.offset_y - widget.pivot_y * widget.layout_height,
+            widget.layout_width, widget.layout_height,
+            parent.visible && width >= widget.min_viewport_width,
+        };
+        state[index] = 2;
+        return rects[index];
+    };
+    for (std::size_t index = 0; index < world.ui_widgets.size(); ++index) place(index);
+    for (auto& rect : rects) {
+        rect.x *= scale;
+        rect.y *= scale;
+        rect.width *= scale;
+        rect.height *= scale;
+    }
+    return rects;
+}
+
 const std::string& World::name(EntityId entity) const {
     static const std::string empty;
     const auto found = names_.find(entity);
@@ -684,10 +857,33 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
     try {
         std::ifstream stream(path, std::ios::binary);
         if (!stream) {
-            error = "Could not open runtime manifest: " + path.string();
+            error = "Could not open runtime manifest: " + path_utf8(path);
             return false;
         }
         world_ = World{};
+        profile_ = RuntimeProfile{};
+        debug_trace_.clear();
+        debug_trace_start_index_ = 0;
+        input_axis_ = {};
+        jump_pressed_ = false;
+        crouch_pressed_ = false;
+        crawl_pressed_ = false;
+        jump_was_pressed_ = false;
+        character_ground_grace_seconds_.clear();
+        character_jump_buffer_seconds_.clear();
+        character_was_grounded_.clear();
+        character_land_seconds_.clear();
+        character_landing_grace_seconds_.clear();
+        character_jump_start_seconds_.clear();
+        motion_frames_.clear();motion_frame_indices_by_family_.clear();motion_frame_index_by_clip_.clear();motion_match_searches_=0;
+        camera_orbit_yaw_degrees_=0.0;camera_orbit_pitch_degrees_=0.0;
+        character_standing_capsules_.clear();character_effective_stance_.clear();character_base_yaw_degrees_.clear();
+        broadphase_pairs_ = 0;
+        collision_contacts_ = 0;
+        solver_islands_ = 0;
+        physics_contacts_.clear();
+        physics_joint_diagnostics_.clear();
+        simulation_step_index_ = 0;
         active_animation_id_.clear();previous_animation_id_.clear();animation_time_seconds_=0.0;previous_animation_time_seconds_=0.0;animation_blend_duration_seconds_=0.0;animation_blend_elapsed_seconds_=0.0;animation_playback_speed_=1.0;animation_playing_=true;
         std::string line;
         if (!std::getline(stream, line)) {
@@ -700,6 +896,7 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
             return false;
         }
         std::size_t line_number = 1;
+        bool scene_id_seen = false;
         while (std::getline(stream, line)) {
             ++line_number;
             if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -712,7 +909,7 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
             }
             const std::string& type = row[0];
             if (type == "ASSET" && row.size() >= 5) {
-                std::filesystem::path source=decode(row[3]);if(source.is_relative())source=path.parent_path()/source;
+                std::filesystem::path source=path_from_utf8(decode(row[3]));if(source.is_relative())source=path.parent_path()/source;
                 world_.assets[row[1]] = AssetRecord{row[1], row[2],std::move(source), row[4]};
             } else if (type == "ENTITY" && row.size() >= 2) {
                 world_.create_entity(decode(row[1]));
@@ -783,6 +980,7 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
                     collider.mask = static_cast<std::uint32_t>(std::stoull(row[10]));
                     collider.friction = std::clamp(number(row, 11, 0.5F), 0.0F, 1.0F);
                     collider.restitution = std::clamp(number(row, 12, 0.2F), 0.0F, 1.0F);
+                    collider.world_up = row.size()>=15 && flag(row,14);
                     if (collider.shape == ColliderShape::sphere) collider.half_extents = {collider.radius, collider.radius, collider.radius};
                     if (collider.shape == ColliderShape::capsule) collider.half_extents = {collider.radius, collider.radius + collider.half_height, collider.radius};
                     if (row.size() >= 14 && !row[13].empty()) {
@@ -890,6 +1088,48 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
                 };
             } else if (type == "HUD" && row.size() >= 2) {
                 world_.hud_text = decode(row[1]);
+            } else if (type == "UICANVAS" && row.size() >= 3) {
+                world_.ui_canvas_width = std::max(1.0F, number(row, 1, 1920.0F));
+                world_.ui_canvas_height = std::max(1.0F, number(row, 2, 1080.0F));
+            } else if (type == "UISAFEAREA" && row.size() >= 5) {
+                world_.ui_safe_left = std::max(0.0F, number(row, 1));
+                world_.ui_safe_top = std::max(0.0F, number(row, 2));
+                world_.ui_safe_right = std::max(0.0F, number(row, 3));
+                world_.ui_safe_bottom = std::max(0.0F, number(row, 4));
+            } else if (type == "UIWIDGET" && row.size() >= 10) {
+                if (row.size() > 11 && row.size() < 20)
+                    throw std::invalid_argument("Incomplete responsive UI widget: " + decode(row[1]));
+                world_.ui_widgets.push_back({
+                    decode(row[1]), decode(row[2]), decode(row[7]), decode(row[8]), decode(row[9]),
+                    number(row, 3), number(row, 4), number(row, 5), number(row, 6),
+                    row.size() >= 11 ? decode(row[10]) : std::string{},
+                });
+                if (row.size() >= 20) {
+                    auto& widget = world_.ui_widgets.back();
+                    widget.parent_id = decode(row[11]);
+                    widget.anchor_x = number(row, 12); widget.anchor_y = number(row, 13);
+                    widget.pivot_x = number(row, 14); widget.pivot_y = number(row, 15);
+                    widget.offset_x = number(row, 16); widget.offset_y = number(row, 17);
+                    widget.layout_width = number(row, 18); widget.layout_height = number(row, 19);
+                    if (row.size() >= 21) widget.min_viewport_width = std::max(0.0F, number(row, 20));
+                    widget.responsive_layout = true;
+                }
+            } else if (type == "INPUTBIND" && row.size() >= 3) {
+                const int key = static_cast<int>(number(row, 2));
+                if (key >= 32 && key <= 90) world_.input_bindings[row[1]] = key;
+            } else if (type == "GAMEPADBIND" && row.size() == 3) {
+                if (!set_gamepad_binding(world_.gamepad_bindings, row[1], gamepad_button_mask(row[2]))) {
+                    throw std::invalid_argument("Invalid gamepad binding: " + row[1] + "=" + row[2]);
+                }
+            } else if (type == "SCENEID" && row.size() == 2) {
+                if (scene_id_seen) throw std::invalid_argument("Duplicate scene identity.");
+                if (row[1].size() != 24 || !std::all_of(row[1].begin(), row[1].end(), [](unsigned char ch) {
+                    return std::isxdigit(ch) != 0;
+                })) throw std::invalid_argument("Invalid scene identity.");
+                world_.scene_id = row[1];
+                std::transform(world_.scene_id.begin(), world_.scene_id.end(), world_.scene_id.begin(),
+                               [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                scene_id_seen = true;
             } else if (type == "SAVE" && row.size() >= 2) {
                 world_.save_slot = decode(row[1]);
             } else if (type == "RENDERSETTINGS" && row.size() >= 6) {
@@ -940,23 +1180,128 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
                     instruction.arguments.push_back(decode(row[index]));
                 }
                 (row[1] == "begin" ? world_.begin_play : world_.tick).push_back(std::move(instruction));
-            } else if(type=="SKELETON"&&row.size()>=3){Skeleton skeleton;skeleton.id=decode(row[1]);skeleton.declared_joint_count=static_cast<std::size_t>(std::stoull(row[2]));world_.skeletons[skeleton.id]=std::move(skeleton);
-            } else if(type=="JOINT"&&row.size()>=21){const std::string skeleton_id=decode(row[1]);auto found=world_.skeletons.find(skeleton_id);if(found==world_.skeletons.end())throw std::runtime_error("joint references unknown skeleton: "+skeleton_id);SkeletonJoint joint;joint.id=decode(row[2]);const std::string parent_id=decode(row[3]);joint.name=decode(row[4]);for(std::size_t index=0;index<16;++index)joint.rest_local[index]=real_number(row,5+index);joint.local=joint.rest_local;joint.world=joint.rest_local;if(!parent_id.empty()){const auto parent=found->second.joint_indices.find(parent_id);if(parent==found->second.joint_indices.end())throw std::runtime_error("joint parent must precede child: "+parent_id);joint.parent_index=static_cast<int>(parent->second);}found->second.joint_indices[joint.id]=found->second.joints.size();found->second.joints.push_back(std::move(joint));
+            } else if(type=="SKELETON"&&row.size()>=3){Skeleton skeleton;skeleton.id=decode(row[1]);skeleton.declared_joint_count=static_cast<std::size_t>(std::stoull(row[2]));if(world_.skeletons.contains(skeleton.id))throw std::runtime_error("duplicate skeleton: "+skeleton.id);world_.skeletons.emplace(skeleton.id,std::move(skeleton));
+            } else if(type=="JOINT"&&row.size()>=21){const std::string skeleton_id=decode(row[1]);auto found=world_.skeletons.find(skeleton_id);if(found==world_.skeletons.end())throw std::runtime_error("joint references unknown skeleton: "+skeleton_id);SkeletonJoint joint;joint.id=decode(row[2]);if(found->second.joint_indices.contains(joint.id))throw std::runtime_error("duplicate skeleton joint: "+joint.id);const std::string parent_id=decode(row[3]);joint.name=decode(row[4]);for(std::size_t index=0;index<16;++index)joint.rest_local[index]=real_number(row,5+index);joint.local=joint.rest_local;joint.world=joint.rest_local;if(!parent_id.empty()){const auto parent=found->second.joint_indices.find(parent_id);if(parent==found->second.joint_indices.end())throw std::runtime_error("joint parent must precede child: "+parent_id);joint.parent_index=static_cast<int>(parent->second);}found->second.joint_indices[joint.id]=found->second.joints.size();found->second.joints.push_back(std::move(joint));
             } else if(type=="ANIMATION"&&row.size()>=8){AnimationClip clip;clip.id=decode(row[1]);clip.name=decode(row[2]);clip.skeleton_id=decode(row[3]);clip.start_frame=real_number(row,4,1.0);clip.end_frame=real_number(row,5,clip.start_frame);clip.frame_rate=real_number(row,6,24.0);clip.looping=flag(row,7,true);if(!world_.skeletons.contains(clip.skeleton_id))throw std::runtime_error("animation references unknown skeleton: "+clip.skeleton_id);if(active_animation_id_.empty())active_animation_id_=clip.id;world_.animation_clips[clip.id]=std::move(clip);
+            } else if(type=="ANIMPOSE"&&row.size()>=5){
+                const std::string clip_id=decode(row[1]);auto clip=world_.animation_clips.find(clip_id);
+                if(clip==world_.animation_clips.end())throw std::runtime_error("pose cache references unknown animation: "+clip_id);
+                const auto asset=world_.assets.find(row[2]);
+                if(asset==world_.assets.end())throw std::runtime_error("pose cache asset not found: "+row[2]);
+                const std::size_t frame_count=static_cast<std::size_t>(std::stoull(row[3]));
+                const std::size_t joint_count=static_cast<std::size_t>(std::stoull(row[4]));
+                auto& skeleton=world_.skeletons.at(clip->second.skeleton_id);
+                if(frame_count==0U||frame_count>10000U||joint_count!=skeleton.joints.size()||
+                   row.size()!=5U+joint_count||frame_count*joint_count>1000000U)
+                    throw std::runtime_error("invalid pose cache dimensions: "+clip_id);
+                const std::uint64_t expected=static_cast<std::uint64_t>(frame_count)*joint_count*16U*sizeof(float);
+                if(std::filesystem::file_size(asset->second.source)!=expected)
+                    throw std::runtime_error("pose cache byte count mismatch: "+clip_id);
+                std::ifstream poses(asset->second.source,std::ios::binary);
+                if(!poses)throw std::runtime_error("pose cache could not be opened: "+clip_id);
+                std::vector<std::size_t> indices;
+                for(std::size_t joint=0;joint<joint_count;++joint){
+                    const auto found=skeleton.joint_indices.find(decode(row[5+joint]));
+                    if(found==skeleton.joint_indices.end())throw std::runtime_error("pose cache joint not found: "+clip_id);
+                    indices.push_back(found->second);
+                }
+                clip->second.pose_frames.resize(frame_count);
+                for(auto& frame:clip->second.pose_frames){
+                    frame.resize(joint_count);
+                    for(std::size_t joint=0;joint<joint_count;++joint){
+                        float values[16]{};
+                        poses.read(reinterpret_cast<char*>(values),sizeof(values));
+                        if(!poses)throw std::runtime_error("pose cache is truncated: "+clip_id);
+                        for(std::size_t part=0;part<16;++part){
+                            if(!std::isfinite(values[part]))throw std::runtime_error("pose cache has non-finite matrix: "+clip_id);
+                            frame[indices[joint]][part]=values[part];
+                        }
+                    }
+                }
+            } else if(type=="MOTIONFRAME"&&row.size()==19){
+                MotionFrame feature;feature.clip_id=decode(row[1]);feature.frame=static_cast<std::size_t>(std::stoull(row[2]));feature.family=decode(row[3]);
+                const auto clip=world_.animation_clips.find(feature.clip_id);
+                if(clip==world_.animation_clips.end()||clip->second.pose_frames.empty()||feature.frame>=clip->second.pose_frames.size()||
+                   (feature.family!="stand"&&feature.family!="crouch"&&feature.family!="crawl"&&feature.family!="start"&&feature.family!="air"&&feature.family!="land")||
+                   motion_frames_.size()>=1000000U)throw std::runtime_error("invalid motion-search frame: "+feature.clip_id);
+                feature.velocity_x=real_number(row,4);feature.velocity_z=real_number(row,5);feature.pelvis_height=real_number(row,6);
+                for(std::size_t joint=0;joint<4;++joint){const std::size_t part=7+joint*3;feature.joints[joint]={real_number(row,part),real_number(row,part+1),real_number(row,part+2)};}
+                const auto motion_index=motion_frames_.size();
+                motion_frames_.push_back(std::move(feature));
+                const auto& stored=motion_frames_.back();
+                motion_frame_indices_by_family_[stored.family].push_back(motion_index);
+                auto& clip_frames=motion_frame_index_by_clip_[stored.clip_id];
+                if(clip_frames.size()<clip->second.pose_frames.size())
+                    clip_frames.resize(clip->second.pose_frames.size(),std::numeric_limits<std::size_t>::max());
+                if(clip_frames[stored.frame]==std::numeric_limits<std::size_t>::max())
+                    clip_frames[stored.frame]=motion_index;
             } else if(type=="ANIMCURVE"&&row.size()>=10){const std::string clip_id=decode(row[1]);auto found=world_.animation_clips.find(clip_id);if(found==world_.animation_clips.end())throw std::runtime_error("curve references unknown animation: "+clip_id);AnimationCurve curve;curve.joint_id=decode(row[2]);curve.attribute=decode(row[3]);curve.layer_weight=real_number(row,4,1.0);curve.additive=flag(row,5);const std::size_t count=static_cast<std::size_t>(std::stoull(row[6]));if(count>1000000U||row.size()<7+count*3)throw std::runtime_error("invalid animation key count");for(std::size_t index=0;index<count;++index)curve.keys.push_back({real_number(row,7+index*3),real_number(row,8+index*3),decode(row[9+index*3])});found->second.curves.push_back(std::move(curve));
-            } else if(type=="SKIN"&&row.size()>=13){SkinBinding skin;skin.id=decode(row[1]);skin.mesh_id=decode(row[2]);skin.skeleton_id=decode(row[3]);skin.deformation_mode=decode(row[4]);skin.vertex_count=static_cast<std::size_t>(std::stoull(row[5]));skin.maximum_influences=static_cast<std::size_t>(std::stoull(row[6]));const std::size_t joint_count=static_cast<std::size_t>(std::stoull(row[7]));if(joint_count==0||joint_count>65535U||row.size()<8+joint_count+5)throw std::runtime_error("invalid skin joint map: "+skin.id);for(std::size_t index=0;index<joint_count;++index)skin.joint_ids.push_back(decode(row[8+index]));const std::size_t asset_start=8+joint_count;skin.inverse_bind_asset=row[asset_start];skin.rest_positions_asset=row[asset_start+1];skin.influence_offsets_asset=row[asset_start+2];skin.joint_indices_asset=row[asset_start+3];skin.weights_asset=row[asset_start+4];if(skin.vertex_count==0||skin.maximum_influences>32U)throw std::runtime_error("invalid skin binding dimensions: "+skin.id);world_.skin_bindings[skin.id]=std::move(skin);
+            } else if(type=="SKIN"&&row.size()>=13){SkinBinding skin;skin.id=decode(row[1]);if(world_.skin_bindings.contains(skin.id))throw std::runtime_error("duplicate skin binding: "+skin.id);skin.mesh_id=decode(row[2]);skin.skeleton_id=decode(row[3]);skin.deformation_mode=decode(row[4]);skin.vertex_count=static_cast<std::size_t>(std::stoull(row[5]));skin.maximum_influences=static_cast<std::size_t>(std::stoull(row[6]));const std::size_t joint_count=static_cast<std::size_t>(std::stoull(row[7]));if(joint_count==0||joint_count>65535U||row.size()<8+joint_count+5)throw std::runtime_error("invalid skin joint map: "+skin.id);for(std::size_t index=0;index<joint_count;++index)skin.joint_ids.push_back(decode(row[8+index]));const std::size_t asset_start=8+joint_count;skin.inverse_bind_asset=row[asset_start];skin.rest_positions_asset=row[asset_start+1];skin.influence_offsets_asset=row[asset_start+2];skin.joint_indices_asset=row[asset_start+3];skin.weights_asset=row[asset_start+4];if(skin.vertex_count==0||skin.vertex_count>10000000U||skin.maximum_influences>32U)throw std::runtime_error("invalid skin binding dimensions: "+skin.id);world_.skin_bindings[skin.id]=std::move(skin);
             } else if(type=="PHYSANIM"&&row.size()>=9){PhysicalAnimationBinding binding;binding.skeleton_id=decode(row[1]);binding.joint_id=decode(row[2]);binding.body=world_.find_entity(decode(row[3]));binding.pose_drive_strength=std::clamp(real_number(row,4,0.8),0.0,1.0);binding.damping=std::max(0.0,real_number(row,5,0.5));binding.maximum_force=std::max(0.0,real_number(row,6,10000.0));binding.physics_blend=std::clamp(real_number(row,7,1.0),0.0,1.0);binding.muscle_strength=std::clamp(real_number(row,8,1.0),0.0,1.0);if(binding.body==0U||!world_.rigid_bodies.contains(binding.body))throw std::runtime_error("physical animation references invalid rigid body");const auto skeleton=world_.skeletons.find(binding.skeleton_id);if(skeleton==world_.skeletons.end()||!skeleton->second.joint_indices.contains(binding.joint_id))throw std::runtime_error("physical animation references invalid skeleton joint: "+binding.joint_id);world_.physical_animation_bindings.push_back(std::move(binding));
             } else {
-                error = "Invalid runtime record at line " + std::to_string(line_number) + ": " + type;
-                return false;
+                throw std::runtime_error("Invalid runtime record at line " +
+                    std::to_string(line_number) + ": " + type);
             }
         }
+        std::unordered_map<std::string, std::size_t> ui_indices;
+        for (std::size_t index = 0; index < world_.ui_widgets.size(); ++index) {
+            const auto& id = world_.ui_widgets[index].id;
+            if (id.empty() || !ui_indices.emplace(id, index).second)
+                throw std::runtime_error("UI widget IDs must be nonempty and unique: " + id);
+        }
+        std::vector<std::uint8_t> ui_visit(world_.ui_widgets.size(), 0);
+        std::vector<std::size_t> ui_depth(world_.ui_widgets.size(), 0);
+        for (std::size_t index = 0; index < world_.ui_widgets.size(); ++index) {
+            std::vector<std::size_t> chain;
+            std::size_t current = index;
+            while (ui_visit[current] == 0) {
+                ui_visit[current] = 1;
+                chain.push_back(current);
+                const auto& parent = world_.ui_widgets[current].parent_id;
+                if (parent.empty()) break;
+                const auto found = ui_indices.find(parent);
+                if (found == ui_indices.end())
+                    throw std::runtime_error("UI widget references missing parent: " + parent);
+                current = found->second;
+            }
+            if (ui_visit[current] == 1 && !chain.empty() &&
+                !world_.ui_widgets[chain.back()].parent_id.empty())
+                throw std::runtime_error("UI widget parent cycle: " + world_.ui_widgets[current].id);
+            std::size_t depth = ui_visit[current] == 2 ? ui_depth[current] : 0;
+            for (auto visited = chain.rbegin(); visited != chain.rend(); ++visited) {
+                if (world_.ui_widgets[*visited].parent_id.empty()) depth = 0;
+                if (++depth > 128)
+                    throw std::runtime_error("UI widget parent depth exceeds 128");
+                ui_depth[*visited] = depth;
+                ui_visit[*visited] = 2;
+            }
+        }
+        if (!valid_gamepad_bindings(world_.gamepad_bindings))
+            throw std::runtime_error("Invalid gamepad binding combination.");
         for(const auto& [id,skeleton]:world_.skeletons)if(skeleton.joints.size()!=skeleton.declared_joint_count)throw std::runtime_error("skeleton joint count mismatch: "+id);
+        // JOINT records store local rest transforms. A skeleton with no active
+        // animation still needs parent-composed world matrices for skinning.
+        for(auto& [id,skeleton]:world_.skeletons){
+            static_cast<void>(id);
+            for(auto& joint:skeleton.joints){
+                joint.world=joint.parent_index>=0?
+                    multiply_matrix(joint.local,skeleton.joints[static_cast<std::size_t>(joint.parent_index)].world):
+                    joint.local;
+            }
+        }
         for(const auto& [id,skin]:world_.skin_bindings){const auto skeleton=world_.skeletons.find(skin.skeleton_id);if(skeleton==world_.skeletons.end())throw std::runtime_error("skin references unknown skeleton: "+id);for(const auto& joint_id:skin.joint_ids)if(!skeleton->second.joint_indices.contains(joint_id))throw std::runtime_error("skin references unknown joint: "+joint_id);for(const auto* asset:{&skin.inverse_bind_asset,&skin.rest_positions_asset,&skin.influence_offsets_asset,&skin.joint_indices_asset,&skin.weights_asset})if(!world_.assets.contains(*asset))throw std::runtime_error("skin references unknown asset: "+*asset);}
         error.clear();
         return true;
     } catch (const std::exception& exception) {
         error = exception.what();
+        // Parsing may already have created entities, assets, or graph nodes.
+        // A failed load must not leave that partial scene runnable.
+        world_ = World{};
+        motion_frames_.clear();
+        motion_frame_indices_by_family_.clear();
+        motion_frame_index_by_clip_.clear();
+        active_animation_id_.clear();
+        previous_animation_id_.clear();
         return false;
     }
 }
@@ -964,11 +1309,25 @@ bool Runtime::load_manifest(const std::filesystem::path& path, std::string& erro
 void Runtime::begin_play() { animation_time_seconds_=0.0;evaluate_animation(0.0);execute(world_.begin_play, 0.0F); }
 
 void Runtime::set_input_axis(float x, float y) noexcept {
-    input_axis_.x = std::clamp(x, -1.0F, 1.0F);
-    input_axis_.y = std::clamp(y, -1.0F, 1.0F);
+    input_axis_.x = std::isfinite(x) ? std::clamp(x, -1.0F, 1.0F) : 0.0F;
+    input_axis_.y = std::isfinite(y) ? std::clamp(y, -1.0F, 1.0F) : 0.0F;
+    const float length = std::sqrt(input_axis_.x * input_axis_.x + input_axis_.y * input_axis_.y);
+    if (length > 1.0F) {
+        input_axis_.x /= length;
+        input_axis_.y /= length;
+    }
 }
 
 void Runtime::set_jump_pressed(bool pressed) noexcept { jump_pressed_ = pressed; }
+void Runtime::set_stance_pressed(bool crouch, bool crawl) noexcept {
+    crouch_pressed_ = crouch;
+    crawl_pressed_ = crawl;
+}
+
+void Runtime::set_camera_orbit(float yaw_degrees, float pitch_degrees) noexcept {
+    if(std::isfinite(yaw_degrees))camera_orbit_yaw_degrees_=std::remainder(static_cast<double>(yaw_degrees),360.0);
+    if(std::isfinite(pitch_degrees))camera_orbit_pitch_degrees_=std::clamp(static_cast<double>(pitch_degrees),-60.0,60.0);
+}
 
 void Runtime::tick(float delta_seconds) {
     const auto frame_start = Clock::now();
@@ -1007,6 +1366,47 @@ void Runtime::evaluate_animation(double delta_seconds){
     auto channel_index=[](const std::string& attribute){const auto key=normalized_attribute(attribute);if(key=="translatex"||key=="tx")return 0;if(key=="translatey"||key=="ty")return 1;if(key=="translatez"||key=="tz")return 2;if(key=="rotatex"||key=="rotationx"||key=="rx")return 3;if(key=="rotatey"||key=="rotationy"||key=="ry")return 4;if(key=="rotatez"||key=="rotationz"||key=="rz")return 5;if(key=="scalex"||key=="sx")return 6;if(key=="scaley"||key=="sy")return 7;if(key=="scalez"||key=="sz")return 8;return -1;};
     auto sample_clip=[&](const AnimationClip& sampled_clip,double time_seconds){std::unordered_map<std::string,Channels> sampled;const double duration_frames=std::max(0.0,sampled_clip.end_frame-sampled_clip.start_frame);double frame=sampled_clip.start_frame+time_seconds*std::max(1.0e-6,sampled_clip.frame_rate);if(sampled_clip.looping&&duration_frames>0.0){double wrapped=std::fmod(frame-sampled_clip.start_frame,duration_frames);if(wrapped<0.0)wrapped+=duration_frames;frame=sampled_clip.start_frame+wrapped;}else frame=std::clamp(frame,sampled_clip.start_frame,sampled_clip.end_frame);for(const auto& curve:sampled_clip.curves){const int index=channel_index(curve.attribute);if(index<0||!skeleton.joint_indices.contains(curve.joint_id))continue;const double sample=sample_animation_curve(curve,frame);auto& target=sampled[curve.joint_id];if(!target.initialized[index]){target.values[index]=sample;target.initialized[index]=true;}else if(curve.additive)target.values[index]+=sample*curve.layer_weight;else target.values[index]=target.values[index]*(1.0-curve.layer_weight)+sample*curve.layer_weight;}return sampled;};
     if(animation_playing_){animation_time_seconds_+=delta_seconds*animation_playback_speed_;if(!previous_animation_id_.empty())previous_animation_time_seconds_+=delta_seconds*animation_playback_speed_;}
+    if(!clip.pose_frames.empty()){
+        struct PoseSample{const std::vector<Matrix4>* first;const std::vector<Matrix4>* second;double alpha;};
+        const auto pose_sample=[](const AnimationClip& source,double seconds)->PoseSample{
+            const double maximum=static_cast<double>(source.pose_frames.size()-1U);
+            double offset=seconds*std::max(1.0e-6,source.frame_rate);
+            if(source.looping&&maximum>0.0){
+                const double period=static_cast<double>(source.pose_frames.size());
+                offset=std::fmod(offset,period);
+                if(offset<0.0)offset+=period;
+            }
+            else offset=std::clamp(offset,0.0,maximum);
+            const auto first=static_cast<std::size_t>(std::floor(offset));
+            const auto second=source.looping?(first+1U)%source.pose_frames.size():std::min(first+1U,source.pose_frames.size()-1U);
+            const double alpha=offset-static_cast<double>(first);
+            return {&source.pose_frames[first],&source.pose_frames[second],alpha};
+        };
+        const auto joint_pose=[](const PoseSample& sample,std::size_t joint){
+            if(sample.first==sample.second||sample.alpha==0.0)return (*sample.first)[joint];
+            return interpolate_pose_matrix((*sample.first)[joint],(*sample.second)[joint],sample.alpha);
+        };
+        const auto current=pose_sample(clip,animation_time_seconds_);
+        const AnimationClip* previous_clip=nullptr;
+        double blend_alpha=1.0;
+        if(!previous_animation_id_.empty()&&animation_blend_duration_seconds_>0.0){
+            const auto previous=world_.animation_clips.find(previous_animation_id_);
+            if(previous!=world_.animation_clips.end()&&previous->second.skeleton_id==clip.skeleton_id&&
+               !previous->second.pose_frames.empty()){
+                animation_blend_elapsed_seconds_+=std::max(0.0,delta_seconds);
+                blend_alpha=std::clamp(animation_blend_elapsed_seconds_/animation_blend_duration_seconds_,0.0,1.0);
+                if(blend_alpha<1.0)previous_clip=&previous->second;
+                else previous_animation_id_.clear();
+            }else previous_animation_id_.clear();
+        }
+        if(previous_clip){
+            const auto previous=pose_sample(*previous_clip,previous_animation_time_seconds_);
+            for(std::size_t joint=0;joint<skeleton.joints.size();++joint)
+                skeleton.joints[joint].world=interpolate_pose_matrix(joint_pose(previous,joint),joint_pose(current,joint),blend_alpha);
+        }else for(std::size_t joint=0;joint<skeleton.joints.size();++joint)
+            skeleton.joints[joint].world=joint_pose(current,joint);
+        return;
+    }
     channels=sample_clip(clip,animation_time_seconds_);
     double blend_alpha=1.0;
     std::unordered_map<std::string,Channels> previous_channels;
@@ -1144,10 +1544,37 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 store_vector(graph_value_key(item, "value"), {input_axis_.x, input_axis_.y, 0.0});
             } else if (item.operation == "character.move" && args.size() >= 6) {
                 const auto id = resolve_entity(args[0]);
-                if (id == 0U || !world_.rigid_bodies.contains(id))
+                if (id == 0U || !world_.rigid_bodies.contains(id) || !world_.transforms.contains(id))
                     throw std::runtime_error("character rigid body not found: " + args[0]);
                 auto& body = world_.rigid_bodies.at(id);
-                const double speed = std::max(0.0, argument_real(item, 1, 5.5));
+                const int requested_stance=crawl_pressed_?2:(crouch_pressed_?1:0);
+                int& effective_stance=character_effective_stance_[id];
+                if(const auto found=world_.colliders.find(id);found!=world_.colliders.end()&&found->second.shape==ColliderShape::capsule){
+                    auto& collider=found->second;
+                    const auto [baseline,_]=character_standing_capsules_.try_emplace(id,collider.radius,collider.half_height);
+                    const double standing_extent=baseline->second.first+baseline->second.second;
+                    Collider candidate=collider;
+                    candidate.radius=baseline->second.first*(requested_stance==2?0.7:(requested_stance==1?0.95:1.0));
+                    candidate.half_height=baseline->second.second*(requested_stance==2?0.12:(requested_stance==1?0.45:1.0));
+                    candidate.half_extents={candidate.radius,candidate.radius+candidate.half_height,candidate.radius};
+                    candidate.center_offset={0.0,candidate.half_extents.y-standing_extent,0.0};
+                    bool blocked=false;
+                    if(candidate.half_extents.y>collider.half_extents.y+1.0e-6){
+                        const auto& transform=world_.transforms.at(id);
+                        const double feet=transform.position.y-standing_extent;
+                        for(const auto& [other,obstacle]:world_.colliders){
+                            if(other==id||obstacle.trigger||!world_.transforms.contains(other))continue;
+                            const auto& obstacle_transform=world_.transforms.at(other);
+                            const auto obstacle_extents=collider_world_half_extents(obstacle_transform,obstacle);
+                            if(obstacle_transform.position.y+obstacle_extents.y<=feet+0.05)continue;
+                            const auto overlap=collider_manifold(transform,candidate,obstacle_transform,obstacle);
+                            if(overlap.hit&&overlap.penetration>0.025){blocked=true;break;}
+                        }
+                    }
+                    if(!blocked){collider=candidate;effective_stance=requested_stance;}
+                }else effective_stance=requested_stance;
+                const double stance_scale = effective_stance==2 ? 0.15 : (effective_stance==1 ? 0.32 : 1.0);
+                const double speed = std::max(0.0, argument_real(item, 1, 5.5)) * stance_scale;
                 double acceleration = std::max(0.0, argument_real(item, 2, 30.0));
                 const double deceleration = std::max(0.0, argument_real(item, 3, 38.0));
                 const double air_control = std::clamp(argument_real(item, 4, 0.35), 0.0, 1.0);
@@ -1163,7 +1590,7 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 }
                 if (!grounded && world_.simulation_settings.floor_enabled && world_.colliders.contains(id)) {
                     grounded = world_.transforms.at(id).position.y <=
-                        world_.colliders.at(id).half_extents.y + 0.05;
+                        world_.colliders.at(id).half_extents.y - world_.colliders.at(id).center_offset.y + 0.05;
                 }
                 if (!grounded) acceleration *= air_control;
                 double input_x = static_cast<double>(input_axis_.x);
@@ -1171,6 +1598,23 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 if (args[5] == "plane_2d") input_z = 0.0;
                 const double length = std::sqrt(input_x * input_x + input_z * input_z);
                 if (length > 1.0) { input_x /= length; input_z /= length; }
+                if (args[5] != "plane_2d") {
+                    const double yaw = camera_orbit_yaw_degrees_ * 0.017453292519943295;
+                    const double cosine = std::cos(yaw), sine = std::sin(yaw);
+                    const double local_x = input_x, local_z = input_z;
+                    input_x = local_x * cosine - local_z * sine;
+                    input_z = local_x * sine + local_z * cosine;
+                    auto& character_transform = world_.transforms.at(id);
+                    if (std::fabs(camera_orbit_yaw_degrees_) > 1.0e-5) {
+                        const auto [base_yaw, inserted] = character_base_yaw_degrees_.try_emplace(
+                            id, character_transform.rotation.y);
+                        character_transform.rotation.y = static_cast<float>(base_yaw->second + camera_orbit_yaw_degrees_);
+                    } else if (const auto base_yaw = character_base_yaw_degrees_.find(id);
+                               base_yaw != character_base_yaw_degrees_.end()) {
+                        character_transform.rotation.y = static_cast<float>(base_yaw->second);
+                        character_base_yaw_degrees_.erase(base_yaw);
+                    }
+                }
                 const bool has_input = length > 1.0e-5;
                 const double maximum_change = (has_input ? acceleration : deceleration) * std::max(0.0F, delta_seconds);
                 const auto approach = [maximum_change](double value, double target) {
@@ -1195,14 +1639,15 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                 }
                 if (!grounded && world_.simulation_settings.floor_enabled && world_.colliders.contains(id)) {
                     grounded = world_.transforms.at(id).position.y <=
-                        world_.colliders.at(id).half_extents.y + 0.05;
+                        world_.colliders.at(id).half_extents.y - world_.colliders.at(id).center_offset.y + 0.05;
                 }
                 const double coyote_time = std::max(0.0, argument_real(item, 2, 0.1));
                 const double jump_buffer = std::max(0.0, argument_real(item, 3, 0.12));
                 auto& ground_grace = character_ground_grace_seconds_[id];
                 auto& buffered_jump = character_jump_buffer_seconds_[id];
                 ground_grace = grounded ? coyote_time : std::max(0.0, ground_grace - std::max(0.0F, delta_seconds));
-                if (jump_pressed_ && !jump_was_pressed_) buffered_jump = jump_buffer;
+                if (jump_pressed_ && !jump_was_pressed_ && character_effective_stance_[id]==0)
+                    buffered_jump = jump_buffer;
                 else buffered_jump = std::max(0.0, buffered_jump - std::max(0.0F, delta_seconds));
                 if (buffered_jump > 0.0 && ground_grace > 0.0) {
                     auto& body = world_.rigid_bodies.at(id);
@@ -1210,6 +1655,8 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                     body.sleeping = false;
                     buffered_jump = 0.0;
                     ground_grace = 0.0;
+                    character_jump_start_seconds_[id] = 0.12;
+                    character_landing_grace_seconds_[id] = 0.0;
                     world_.events.push_back("CharacterJump:" + args[0]);
                 }
             } else if (item.operation == "camera.follow" && args.size() >= 8) {
@@ -1221,17 +1668,34 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                     throw std::runtime_error("camera target not found: " + args[1]);
                 auto& camera_transform = world_.transforms.at(camera_id);
                 const auto& target = world_.transforms.at(target_id).position;
-                const WorldVector3 desired{
-                    target.x + argument_real(item, 2, 0.0), target.y + argument_real(item, 3, 3.0),
-                    target.z + argument_real(item, 4, -7.5),
+                const double offset_x=argument_real(item,2,0.0),offset_y=argument_real(item,3,3.0);
+                const double offset_z=argument_real(item,4,-7.5),look_height=argument_real(item,5,1.0);
+                const double yaw=camera_orbit_yaw_degrees_*0.017453292519943295;
+                const double horizontal=std::hypot(offset_x,offset_z);
+                const double vertical=offset_y-look_height;
+                const double radius=std::hypot(horizontal,vertical);
+                const double pitch=std::clamp(std::atan2(vertical,horizontal)+
+                    camera_orbit_pitch_degrees_*0.017453292519943295,-1.3089969389957472,1.3089969389957472);
+                const double horizontal_scale=horizontal>1.0e-9?radius*std::cos(pitch)/horizontal:0.0;
+                WorldVector3 desired{
+                    target.x+(offset_x*std::cos(yaw)-offset_z*std::sin(yaw))*horizontal_scale,
+                    target.y+look_height+radius*std::sin(pitch),
+                    target.z+(offset_x*std::sin(yaw)+offset_z*std::cos(yaw))*horizontal_scale,
                 };
+                const WorldVector3 look_at{target.x,target.y+look_height,
+                    target.z+argument_real(item,6,0.0)};
+                const WorldVector3 sight_line=subtract(desired,look_at);
+                const double sight_distance=vector_length(sight_line);
+                PhysicsRayHit camera_hit{};
+                const bool blocked=sight_distance>1.0e-6 &&
+                    raycast(look_at,sight_line,sight_distance,camera_hit,0xFFFFFFFFU,target_id,true);
+                if(blocked)desired=add(look_at,scale(sight_line,
+                    std::max(0.0,camera_hit.distance-0.25)/sight_distance));
                 const double smoothing = std::max(0.0, argument_real(item, 7, 14.0));
                 const double weight = smoothing <= 0.0 ? 1.0 : 1.0 - std::exp(-smoothing * std::max(0.0F, delta_seconds));
-                camera_transform.position = add(camera_transform.position, scale(subtract(desired, camera_transform.position), weight));
-                world_.cameras.at(camera_id).look_at = {
-                    target.x, target.y + argument_real(item, 5, 1.0),
-                    target.z + argument_real(item, 6, 0.0),
-                };
+                camera_transform.position = blocked ? desired :
+                    add(camera_transform.position, scale(subtract(desired, camera_transform.position), weight));
+                world_.cameras.at(camera_id).look_at = look_at;
             } else if (item.operation == "movement.calculate_velocity" && args.size() >= 4) {
                 WorldVector3 direction = linked_vector(args[0]);
                 const double direction_length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
@@ -1284,26 +1748,95 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
                        world_.transforms.at(other).position.y<world_.transforms.at(id).position.y-0.05){grounded=true;break;}
                 }
                 if(!grounded&&world_.simulation_settings.floor_enabled&&world_.colliders.contains(id))
-                    grounded=world_.transforms.at(id).position.y<=world_.colliders.at(id).half_extents.y+0.05;
+                    grounded=world_.transforms.at(id).position.y<=world_.colliders.at(id).half_extents.y-world_.colliders.at(id).center_offset.y+0.05;
                 const auto& velocity=world_.rigid_bodies.at(id).velocity;
                 const double planar_speed=std::sqrt(velocity.x*velocity.x+velocity.z*velocity.z);
+                const double motion_yaw=camera_orbit_yaw_degrees_*0.017453292519943295;
+                const double motion_cosine=std::cos(motion_yaw),motion_sine=std::sin(motion_yaw);
+                const double local_velocity_x=velocity.x*motion_cosine+velocity.z*motion_sine;
+                const double local_velocity_z=-velocity.x*motion_sine+velocity.z*motion_cosine;
                 const bool was_grounded=character_was_grounded_.contains(id)?character_was_grounded_.at(id):grounded;
                 const bool directional=args.size()>=16;
                 const std::size_t run_index=directional?10U:3U,jump_index=directional?11U:4U,land_index=directional?12U:5U;
                 const std::size_t walk_threshold_index=directional?13U:6U,run_threshold_index=directional?14U:7U;
-                if(!was_grounded&&grounded)character_land_seconds_[id]=0.13;
+                auto& landing_grace_seconds=character_landing_grace_seconds_[id];
+                if(!was_grounded&&grounded&&landing_grace_seconds<=0.0&&character_jump_start_seconds_[id]<=0.0){
+                    character_land_seconds_[id]=0.13;
+                    landing_grace_seconds=0.3;
+                }
                 auto& landing_seconds=character_land_seconds_[id];landing_seconds=std::max(0.0,landing_seconds-static_cast<double>(delta_seconds));
+                landing_grace_seconds=std::max(0.0,landing_grace_seconds-static_cast<double>(delta_seconds));
+                auto& jump_start_seconds=character_jump_start_seconds_[id];
+                jump_start_seconds=std::max(0.0,jump_start_seconds-static_cast<double>(delta_seconds));
                 std::string desired;
-                if(!grounded||velocity.y>0.5)desired=args[jump_index];
+                if(jump_start_seconds>0.0&&directional&&args.size()>=21U)desired=args[20];
                 else if(landing_seconds>0.0)desired=args[land_index];
+                else if(landing_grace_seconds<=0.0&&(!grounded||velocity.y>0.5))desired=args[jump_index];
+                else if(directional&&args.size()>=20&&character_effective_stance_[id]==2)
+                    desired=args[planar_speed>=argument_real(item,walk_threshold_index,0.15)?19U:18U];
+                else if(directional&&args.size()>=20&&character_effective_stance_[id]==1)
+                    desired=args[planar_speed>=argument_real(item,walk_threshold_index,0.15)?17U:16U];
                 else if(planar_speed>=argument_real(item,run_threshold_index,3.4))desired=args[run_index];
                 else if(planar_speed>=argument_real(item,walk_threshold_index,0.15)){
                     if(!directional)desired=args[2];
                     else{constexpr double pi=3.14159265358979323846;const double angle=std::atan2(static_cast<double>(input_axis_.x),static_cast<double>(input_axis_.y))*180.0/pi;int sector=static_cast<int>(std::lround(angle/45.0));if(sector>4)sector-=8;if(sector<-4)sector+=8;const std::size_t directional_index=sector==0?2U:sector==1?3U:sector==2?4U:sector==3?5U:(sector==4||sector==-4)?6U:sector==-3?7U:sector==-2?8U:9U;desired=args[directional_index];}
                 }else desired=args[1];
+                const MotionFrame* selected_motion_frame=nullptr;
+                if(!motion_frames_.empty()){
+                    const std::string family=(jump_start_seconds>0.0&&directional&&args.size()>=21U)?"start":
+                        landing_seconds>0.0?"land":
+                        (landing_grace_seconds<=0.0&&(!grounded||velocity.y>0.5))?"air":
+                        (directional&&args.size()>=20U&&character_effective_stance_[id]==2)?"crawl":
+                        (directional&&args.size()>=20U&&character_effective_stance_[id]==1)?"crouch":"stand";
+                    const MotionFrame* current=nullptr;
+                    const auto active=world_.animation_clips.find(active_animation_id_);
+                    if(active!=world_.animation_clips.end()&&!active->second.pose_frames.empty()){
+                        const std::size_t count=active->second.pose_frames.size();
+                        const double elapsed_frames=std::max(0.0,std::floor(animation_time_seconds_*active->second.frame_rate));
+                        const std::size_t frame=active->second.looping?
+                            static_cast<std::size_t>(std::fmod(elapsed_frames,static_cast<double>(count))):
+                            static_cast<std::size_t>(std::min(elapsed_frames,static_cast<double>(count-1U)));
+                        const auto clip_frames=motion_frame_index_by_clip_.find(active_animation_id_);
+                        if(clip_frames!=motion_frame_index_by_clip_.end()&&frame<clip_frames->second.size()){
+                            const auto motion_index=clip_frames->second[frame];
+                            if(motion_index!=std::numeric_limits<std::size_t>::max())current=&motion_frames_[motion_index];
+                        }
+                    }
+                    double best_cost=std::numeric_limits<double>::infinity();
+                    const auto family_frames=motion_frame_indices_by_family_.find(family);
+                    if(family_frames!=motion_frame_indices_by_family_.end())for(const std::size_t candidate_index:family_frames->second){
+                        const auto& candidate=motion_frames_[candidate_index];
+                        const double dx=local_velocity_x-candidate.velocity_x,dz=local_velocity_z-candidate.velocity_z;
+                        double cost=dx*dx+dz*dz;
+                        // Pose and continuity penalties are nonnegative; the same-clip
+                        // bonus is the only possible reduction from velocity cost.
+                        const bool same_clip=current&&candidate.clip_id==active_animation_id_;
+                        if(cost-(same_clip?0.06:0.0)>=best_cost)continue;
+                        if(current){
+                            const double height=current->pelvis_height-candidate.pelvis_height;
+                            cost+=2.0*height*height;
+                            for(std::size_t joint=0;joint<4;++joint){
+                                const auto difference=subtract(current->joints[joint],candidate.joints[joint]);
+                                cost+=dot(difference,difference);
+                            }
+                            if(same_clip){
+                                cost-=0.06;
+                                const auto clip=world_.animation_clips.find(candidate.clip_id);
+                                const std::size_t count=clip->second.pose_frames.size();
+                                const std::size_t predicted=clip->second.looping?
+                                    (current->frame+1U)%count:std::min(current->frame+1U,count-1U);
+                                const std::size_t distance=candidate.frame>predicted?candidate.frame-predicted:predicted-candidate.frame;
+                                cost+=static_cast<double>(clip->second.looping?std::min(distance,count-distance):distance)*0.005;
+                            }
+                        }
+                        if(cost<best_cost){best_cost=cost;selected_motion_frame=&candidate;}
+                    }
+                    ++motion_match_searches_;
+                    if(selected_motion_frame)desired=selected_motion_frame->clip_id;
+                }
                 character_was_grounded_[id]=grounded;
                 if(!world_.animation_clips.contains(desired))throw std::runtime_error("locomotion clip not found: "+desired);
-                if(active_animation_id_!=desired){previous_animation_id_=active_animation_id_;previous_animation_time_seconds_=animation_time_seconds_;active_animation_id_=desired;animation_time_seconds_=0.0;animation_blend_duration_seconds_=directional?std::max(0.0,argument_real(item,15,0.16)):0.12;animation_blend_elapsed_seconds_=0.0;animation_playing_=true;}
+                if(active_animation_id_!=desired){previous_animation_id_=active_animation_id_;previous_animation_time_seconds_=animation_time_seconds_;active_animation_id_=desired;animation_time_seconds_=selected_motion_frame&&selected_motion_frame->family!="start"&&selected_motion_frame->family!="land"?static_cast<double>(selected_motion_frame->frame)/std::max(1.0e-6,world_.animation_clips.at(desired).frame_rate):0.0;animation_blend_duration_seconds_=directional?std::max(0.0,argument_real(item,15,0.16)):0.12;animation_blend_elapsed_seconds_=0.0;animation_playing_=true;}
             } else if(item.operation=="animation.stop"){
                 animation_playing_=false;
             } else if(item.operation=="animation.set_speed"&&!args.empty()){
@@ -1311,7 +1844,8 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
             } else {
                 throw std::runtime_error("unsupported operation: " + item.operation);
             }
-            debug_trace_.push_back("OK " + item.node_id + " " + item.operation);
+            if (success_trace_enabled_)
+                debug_trace_.push_back("OK " + item.node_id + " " + item.operation);
         } catch (const std::exception& exception) {
             std::ostringstream message;
             message << item.source_file << ':' << item.source_line << ":1: error: [TC1001] " << exception.what()
@@ -1321,14 +1855,24 @@ void Runtime::execute(const std::vector<GraphInstruction>& instructions, float d
     }
     if (debug_trace_.size() > 2048) {
         debug_trace_.erase(debug_trace_.begin(), debug_trace_.begin() + 1024);
+        debug_trace_start_index_ += 1024;
     }
+}
+
+bool build_skin_matrix_palette_from_values(const World& world,const std::string& skin_id,const std::vector<float>& values,std::vector<Matrix4>& palette,std::string& error){
+    palette.clear();const auto skin_found=world.skin_bindings.find(skin_id);if(skin_found==world.skin_bindings.end()){error="Unknown skin binding: "+skin_id;return false;}const auto& skin=skin_found->second;
+    const auto skeleton_found=world.skeletons.find(skin.skeleton_id);if(skeleton_found==world.skeletons.end()){error="Skin skeleton is unavailable: "+skin.skeleton_id;return false;}
+    if(skin.joint_ids.size()>65535U){error="Skin palette exceeds the native joint limit.";return false;}
+    if(values.size()<skin.joint_ids.size()*16U){error="Inverse-bind asset is truncated.";return false;}
+    palette.reserve(skin.joint_ids.size());for(std::size_t index=0;index<skin.joint_ids.size();++index){Matrix4 inverse{};for(std::size_t component_index=0;component_index<16;++component_index){const float value=values[index*16+component_index];if(!std::isfinite(value)){error="Inverse-bind matrix contains a non-finite value: "+skin_id;palette.clear();return false;}inverse[component_index]=value;}const auto joint_index=skeleton_found->second.joint_indices.find(skin.joint_ids[index]);if(joint_index==skeleton_found->second.joint_indices.end()){error="Skin joint is unavailable: "+skin.joint_ids[index];palette.clear();return false;}const auto result=multiply_matrix(inverse,skeleton_found->second.joints[joint_index->second].world);if(std::any_of(result.begin(),result.end(),[](double value){return !std::isfinite(value);})){error="Skin palette contains a non-finite value: "+skin_id;palette.clear();return false;}palette.push_back(result);}error.clear();return true;
 }
 
 bool build_skin_matrix_palette(const World& world,const std::string& skin_id,std::vector<Matrix4>& palette,std::string& error){
     palette.clear();const auto skin_found=world.skin_bindings.find(skin_id);if(skin_found==world.skin_bindings.end()){error="Unknown skin binding: "+skin_id;return false;}const auto& skin=skin_found->second;
-    const auto skeleton_found=world.skeletons.find(skin.skeleton_id);if(skeleton_found==world.skeletons.end()){error="Skin skeleton is unavailable: "+skin.skeleton_id;return false;}const auto asset_found=world.assets.find(skin.inverse_bind_asset);if(asset_found==world.assets.end()){error="Inverse-bind asset is unavailable: "+skin.inverse_bind_asset;return false;}
-    const std::size_t float_count=skin.joint_ids.size()*16U;if(float_count>65535U*16U){error="Skin palette exceeds the native joint limit.";return false;}std::ifstream stream(asset_found->second.source,std::ios::binary|std::ios::ate);if(!stream){error="Could not open inverse-bind asset: "+asset_found->second.source.string();return false;}const auto byte_count=stream.tellg();if(byte_count<0||static_cast<std::uint64_t>(byte_count)<float_count*sizeof(float)){error="Inverse-bind asset is truncated.";return false;}stream.seekg(0);std::vector<float> values(float_count);stream.read(reinterpret_cast<char*>(values.data()),static_cast<std::streamsize>(float_count*sizeof(float)));if(!stream){error="Could not read inverse-bind matrices.";return false;}
-    palette.reserve(skin.joint_ids.size());for(std::size_t index=0;index<skin.joint_ids.size();++index){Matrix4 inverse{};for(std::size_t component_index=0;component_index<16;++component_index)inverse[component_index]=values[index*16+component_index];const auto joint_index=skeleton_found->second.joint_indices.find(skin.joint_ids[index]);if(joint_index==skeleton_found->second.joint_indices.end()){error="Skin joint is unavailable: "+skin.joint_ids[index];palette.clear();return false;}palette.push_back(multiply_matrix(inverse,skeleton_found->second.joints[joint_index->second].world));}error.clear();return true;
+    const auto asset_found=world.assets.find(skin.inverse_bind_asset);if(asset_found==world.assets.end()){error="Inverse-bind asset is unavailable: "+skin.inverse_bind_asset;return false;}
+    if(skin.joint_ids.size()>65535U){error="Skin palette exceeds the native joint limit.";return false;}
+    const std::size_t float_count=skin.joint_ids.size()*16U;std::ifstream stream(asset_found->second.source,std::ios::binary|std::ios::ate);if(!stream){error="Could not open inverse-bind asset: "+path_utf8(asset_found->second.source);return false;}const auto byte_count=stream.tellg();if(byte_count<0||static_cast<std::uint64_t>(byte_count)<float_count*sizeof(float)){error="Inverse-bind asset is truncated.";return false;}stream.seekg(0);std::vector<float> values(float_count);stream.read(reinterpret_cast<char*>(values.data()),static_cast<std::streamsize>(float_count*sizeof(float)));if(!stream){error="Could not read inverse-bind matrices.";return false;}
+    return build_skin_matrix_palette_from_values(world,skin_id,values,palette,error);
 }
 
 void Runtime::simulate(double delta_seconds) {
@@ -1849,7 +2393,8 @@ void Runtime::simulate_step(double step) {
         transform.rotation.y += static_cast<float>(body.angular_velocity.y * step * degrees_per_radian);
         transform.rotation.z += static_cast<float>(body.angular_velocity.z * step * degrees_per_radian);
         const auto collider = world_.colliders.find(entity);
-        const double floor_offset = collider == world_.colliders.end() ? 0.5 : collider->second.half_extents.y;
+        const double floor_offset = collider == world_.colliders.end() ? 0.5 :
+            collider->second.half_extents.y - collider->second.center_offset.y;
         if (simulation.floor_enabled && !orbital && transform.position.y < floor_offset) {
             transform.position.y = floor_offset;
             if (body.velocity.y < 0.0F) {
@@ -1901,8 +2446,12 @@ void Runtime::simulate_step(double step) {
     std::vector<BroadphaseProxy> proxies;
     proxies.reserve(collider_extents.size());
     for (const auto& [entity, extents] : collider_extents) {
-        const WorldVector3 position = world_.transforms.at(entity).position;
-        const WorldVector3 previous = previous_positions.contains(entity) ? previous_positions.at(entity) : position;
+        const auto& entity_transform=world_.transforms.at(entity);
+        const auto& entity_collider=world_.colliders.at(entity);
+        const WorldVector3 offset=entity_collider.world_up?entity_collider.center_offset:
+            rotate_local_vector(entity_collider.center_offset,entity_transform.rotation);
+        const WorldVector3 position = add(entity_transform.position,offset);
+        const WorldVector3 previous = previous_positions.contains(entity) ? add(previous_positions.at(entity),offset) : position;
         proxies.push_back({
             entity,
             {std::min(position.x, previous.x) - extents.x, std::min(position.y, previous.y) - extents.y,
@@ -2061,21 +2610,27 @@ const std::vector<PhysicsJointDiagnostic>& Runtime::physics_joint_diagnostics() 
 }
 
 bool Runtime::raycast(const WorldVector3& origin, const WorldVector3& direction, double maximum_distance,
-                      PhysicsRayHit& hit, std::uint32_t layer_mask) const {
+                      PhysicsRayHit& hit, std::uint32_t layer_mask, EntityId ignored_entity,
+                      bool ignore_triggers) const {
     const WorldVector3 ray = normalize(direction, {});
     if (vector_length(ray) <= 1.0e-12 || maximum_distance < 0.0) return false;
     bool found = false;
     double closest = maximum_distance;
     for (const auto& [entity, collider] : world_.colliders) {
-        if ((collider.layer & layer_mask) == 0U || !world_.transforms.contains(entity)) continue;
-        const auto& center = world_.transforms.at(entity).position;
+        if (entity == ignored_entity || (ignore_triggers && collider.trigger) ||
+            (collider.layer & layer_mask) == 0U ||
+            !world_.transforms.contains(entity)) continue;
+        const auto& transform = world_.transforms.at(entity);
+        const auto center = add(transform.position,collider.world_up?collider.center_offset:
+            rotate_local_vector(collider.center_offset,transform.rotation));
         double near_distance = 0.0;
         double far_distance = closest;
         WorldVector3 normal{};
         const double origins[3] = {origin.x, origin.y, origin.z};
         const double directions[3] = {ray.x, ray.y, ray.z};
         const double centers[3] = {center.x, center.y, center.z};
-        const double extents[3] = {collider.half_extents.x, collider.half_extents.y, collider.half_extents.z};
+        const auto world_extents=collider_world_half_extents(transform,collider);
+        const double extents[3] = {world_extents.x, world_extents.y, world_extents.z};
         bool intersects = true;
         int near_axis = -1;
         double near_sign = 0.0;
@@ -2103,25 +2658,165 @@ bool Runtime::raycast(const WorldVector3& origin, const WorldVector3& direction,
     return found;
 }
 
-bool Runtime::save(const std::filesystem::path& path, std::string& error) const {
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    if (!stream) {
-        error = "Could not write save game: " + path.string();
+namespace {
+
+constexpr std::size_t kMaximumSaveBytes = 16U * 1024U * 1024U;
+
+bool read_validated_save_file(const std::filesystem::path& candidate, std::string& payload) {
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(candidate, size_error);
+    if (size_error || size == 0 || size > kMaximumSaveBytes) return false;
+    std::ifstream input(candidate, std::ios::binary);
+    if (!input) return false;
+    payload.resize(static_cast<std::size_t>(size));
+    input.read(payload.data(), static_cast<std::streamsize>(size));
+    if (!input) return false;
+    const auto header_end = payload.find('\n');
+    if (header_end == std::string::npos) return false;
+    const auto header = payload.substr(0, header_end);
+    if (payload.back() != '\n') return false;
+    if (header == "TCSAVE\t1" || header == "TCSAVE\t2") return true;
+    if (header != "TCSAVE\t3") return false;
+    const auto footer_start = payload.rfind("CHECKSUM\t");
+    if (footer_start == std::string::npos || footer_start == 0 || payload[footer_start - 1] != '\n') return false;
+    const auto footer = payload.substr(footer_start + 9);
+    if (footer.size() != 17 || footer.back() != '\n') return false;
+    std::uint64_t actual = 1469598103934665603ULL;
+    for (std::size_t index = 0; index < footer_start; ++index)
+        actual = (actual ^ static_cast<unsigned char>(payload[index])) * 1099511628211ULL;
+    std::ostringstream expected;
+    expected.imbue(std::locale::classic());
+    expected << std::hex << std::setw(16) << std::setfill('0') << actual;
+    if (footer.substr(0, 16) != expected.str()) return false;
+    payload.resize(footer_start);
+    return true;
+}
+
+bool valid_encoded_save_name(const std::string& value) {
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (value[index] != '%') continue;
+        if (index + 2 >= value.size() ||
+            std::isxdigit(static_cast<unsigned char>(value[index + 1])) == 0 ||
+            std::isxdigit(static_cast<unsigned char>(value[index + 2])) == 0) return false;
+        index += 2;
+    }
+    return true;
+}
+
+bool valid_save_records(const std::string& payload) {
+    try {
+        std::istringstream stream(payload);
+        std::string line;
+        std::getline(stream, line);
+        const bool legacy_v1 = line == "TCSAVE\t1";
+        const bool legacy_v2 = line == "TCSAVE\t2";
+        if (!legacy_v1 && !legacy_v2 && line != "TCSAVE\t3") return false;
+        std::unordered_set<std::string> seen_records;
+        std::size_t record_count = 0;
+        while (std::getline(stream, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            const auto row = fields(line);
+            const bool shape_valid =
+                (row[0] == "VAR" && row.size() == 3) ||
+                (!legacy_v1 && !legacy_v2 && row[0] == "SCENE" && row.size() == 2) ||
+                (legacy_v1 && row[0] == "POS" && row.size() == 5) ||
+                (legacy_v2 && row[0] == "BODY" && row.size() == 17) ||
+                (!legacy_v1 && !legacy_v2 &&
+                 ((row[0] == "BODY" && (row.size() == 17 || row.size() == 23)) ||
+                  (row[0] == "JOINTSTATE" && (row.size() == 4 || row.size() == 10))));
+            if (!shape_valid) return false;
+            if (row[0] != "SCENE" && !valid_encoded_save_name(row[1])) return false;
+            const std::string record_key = row[0] == "SCENE" ? "SCENE" : row[0] + "\t" + decode(row[1]);
+            if (!seen_records.insert(record_key).second) return false;
+            if (row[0] == "SCENE" &&
+                (row[1].size() != 24 || !std::all_of(row[1].begin(), row[1].end(), [](unsigned char ch) {
+                    return std::isxdigit(ch) != 0;
+                }))) return false;
+            ++record_count;
+            if (row[0] == "SCENE") continue;
+            const std::size_t first_numeric = row[0] == "JOINTSTATE" ? 4U : 2U;
+            for (std::size_t index = first_numeric; index < row.size(); ++index) {
+                if (row[0] == "BODY" && (index == 20U || index == 21U)) {
+                    if (row[index] != "0" && row[index] != "1") return false;
+                    continue;
+                }
+                std::size_t used = 0;
+                const double value = std::stod(row[index], &used);
+                if (used != row[index].size() || !std::isfinite(value)) return false;
+                if (row[0] == "BODY" && index >= 5U && index <= 10U) {
+                    const float narrowed = std::stof(row[index]);
+                    if (!std::isfinite(narrowed)) return false;
+                }
+            }
+            if (row[0] == "JOINTSTATE" &&
+                ((row[2] != "0" && row[2] != "1") ||
+                 (row[3] != "0" && row[3] != "1"))) return false;
+        }
+        return record_count != 0 || (!legacy_v1 && !legacy_v2);
+    } catch (const std::exception&) {
         return false;
     }
+}
+
+bool save_records_match_scene(const std::string& payload, const std::string& scene_id) {
+    std::istringstream stream(payload);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto row = fields(line);
+        if (row.size() == 2 && row[0] == "SCENE") {
+            return row[1].size() == scene_id.size() &&
+                std::equal(row[1].begin(), row[1].end(), scene_id.begin(),
+                           [](unsigned char left, unsigned char right) {
+                               return std::tolower(left) == std::tolower(right);
+                           });
+        }
+    }
+    return true; // A pre-binding save has no scene identity to compare.
+}
+
+bool save_records_reference_missing_scene_state(const std::string& payload, const World& world) {
+    // A legacy unbound save must not silently discard state while migrating
+    // into an identified scene. Unidentified legacy worlds retain their old
+    // permissive loading behavior.
+    if (world.scene_id.empty() && payload.find("\nSCENE\t") == std::string::npos) return false;
+    std::istringstream stream(payload);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto row = fields(line);
+        if (row.size() >= 2 && (row[0] == "POS" || row[0] == "BODY")) {
+            const auto entity = world.find_entity(decode(row[1]));
+            if (entity == 0U || !world.transforms.contains(entity)) return true;
+        }
+        if (row.size() >= 2 && row[0] == "JOINTSTATE" &&
+            !world.physics_joints.contains(decode(row[1]))) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool Runtime::save(const std::filesystem::path& path, std::string& error) const {
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
     stream << std::setprecision(17);
-    stream << "TCSAVE\t2\n";
+    stream << "TCSAVE\t3\n";
+    if (!world_.scene_id.empty()) stream << "SCENE\t" << world_.scene_id << '\n';
     for (const auto& [name, value] : world_.variables) stream << "VAR\t" << encode(name) << '\t' << value << '\n';
     for (const auto entity : world_.entities()) {
         const auto found = world_.transforms.find(entity);
         if (found != world_.transforms.end()) {
             const auto& transform = found->second;
+            const auto base_yaw = character_base_yaw_degrees_.find(entity);
+            const double saved_yaw = base_yaw == character_base_yaw_degrees_.end() ?
+                transform.rotation.y : base_yaw->second;
             const auto body = world_.rigid_bodies.find(entity);
             const WorldVector3 velocity = body == world_.rigid_bodies.end() ? WorldVector3{} : body->second.velocity;
             const WorldVector3 angular_velocity = body == world_.rigid_bodies.end() ? WorldVector3{} : body->second.angular_velocity;
             stream << "BODY\t" << encode(world_.name(entity))
                    << '\t' << transform.position.x << '\t' << transform.position.y << '\t' << transform.position.z
-                   << '\t' << transform.rotation.x << '\t' << transform.rotation.y << '\t' << transform.rotation.z
+                   << '\t' << transform.rotation.x << '\t' << saved_yaw << '\t' << transform.rotation.z
                    << '\t' << transform.scale.x << '\t' << transform.scale.y << '\t' << transform.scale.z
                    << '\t' << velocity.x << '\t' << velocity.y << '\t' << velocity.z
                    << '\t' << angular_velocity.x << '\t' << angular_velocity.y << '\t' << angular_velocity.z;
@@ -2146,64 +2841,177 @@ bool Runtime::save(const std::filesystem::path& path, std::string& error) const 
                << '\t' << joint.accumulated_linear_impulse.x << '\t' << joint.accumulated_linear_impulse.y << '\t' << joint.accumulated_linear_impulse.z
                << '\t' << joint.accumulated_angular_impulse.x << '\t' << joint.accumulated_angular_impulse.y << '\t' << joint.accumulated_angular_impulse.z << '\n';
     }
+    const std::string body = stream.str();
+    // Reject a payload the loader cannot read before touching the primary,
+    // temporary, or backup files. Runtime state can acquire non-finite values
+    // after scene loading, and the recovery path must keep the last valid save.
+    constexpr std::size_t checksum_record_bytes = 9U + 16U + 1U;
+    if (body.size() > kMaximumSaveBytes - checksum_record_bytes || !valid_save_records(body)) {
+        error = "TC save game state is invalid or exceeds the supported size";
+        return false;
+    }
+    std::uint64_t checksum = 1469598103934665603ULL;
+    for (const unsigned char byte : body) checksum = (checksum ^ byte) * 1099511628211ULL;
+    stream << "CHECKSUM\t" << std::hex << std::setw(16) << std::setfill('0') << checksum << '\n';
+    const auto io_path = save_io_path(path);
+    const auto temporary = save_sidecar_path(io_path, ".tmp");
+    const auto backup = save_sidecar_path(io_path, ".bak");
+    std::error_code filesystem_error;
+    std::string previous_payload;
+    const bool previous_save_valid = std::filesystem::exists(io_path, filesystem_error) &&
+        read_validated_save_file(io_path, previous_payload) && valid_save_records(previous_payload);
+    if (previous_save_valid) {
+        if (!save_records_match_scene(previous_payload, world_.scene_id)) {
+            error = "Existing save game belongs to another scene: " + path_utf8(path);
+            return false;
+        }
+        if (save_records_reference_missing_scene_state(previous_payload, world_)) {
+            error = "Existing save game references missing scene entities or joints: " + path_utf8(path);
+            return false;
+        }
+    }
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        output << stream.str();
+        output.flush();
+        if (!output) {
+            error = "Could not write temporary save game: " + path_utf8(temporary);
+            return false;
+        }
+    }
+    if (previous_save_valid) {
+        std::filesystem::copy_file(io_path, backup, std::filesystem::copy_options::overwrite_existing, filesystem_error);
+        if (filesystem_error) {
+            std::filesystem::remove(temporary);
+            error = "Could not preserve previous save game: " + filesystem_error.message();
+            return false;
+        }
+    }
+#if defined(_WIN32)
+    if (!MoveFileExW(temporary.c_str(), io_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        std::filesystem::remove(temporary);
+        error = "Could not atomically replace save game: " + path_utf8(path);
+        return false;
+    }
+#else
+    std::filesystem::rename(temporary, io_path, filesystem_error);
+    if (filesystem_error) {
+        std::filesystem::remove(temporary);
+        error = "Could not atomically replace save game: " + filesystem_error.message();
+        return false;
+    }
+#endif
     error.clear();
     return true;
 }
 
 bool Runtime::load_save(const std::filesystem::path& path, std::string& error) {
-    std::ifstream stream(path, std::ios::binary);
-    std::string line;
-    if (!stream || !std::getline(stream, line)) {
-        error = "Unsupported or missing TC save game";
-        return false;
-    }
-    if (!line.empty() && line.back() == '\r') line.pop_back();
-    if (line != "TCSAVE\t1" && line != "TCSAVE\t2") {
-        error = "Unsupported or missing TC save game";
-        return false;
-    }
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        const auto row = fields(line);
-        if (row.size() >= 3 && row[0] == "VAR") world_.variables[decode(row[1])] = real_number(row, 2);
-        if (row.size() >= 5 && row[0] == "POS") {
-            const auto id = world_.find_entity(decode(row[1]));
-            if (id != 0U) world_.transforms[id].position = {real_number(row, 2), real_number(row, 3), real_number(row, 4)};
-        }
-        if (row.size() >= 17 && row[0] == "BODY") {
-            const auto id = world_.find_entity(decode(row[1]));
-            if (id != 0U) {
-                auto& transform = world_.transforms[id];
-                transform.position = {real_number(row, 2), real_number(row, 3), real_number(row, 4)};
-                transform.rotation = {number(row, 5), number(row, 6), number(row, 7)};
-                transform.scale = {number(row, 8, 1.0F), number(row, 9, 1.0F), number(row, 10, 1.0F)};
-                const auto body = world_.rigid_bodies.find(id);
-                if (body != world_.rigid_bodies.end()) {
-                    body->second.velocity = {real_number(row, 11), real_number(row, 12), real_number(row, 13)};
-                    body->second.angular_velocity = {real_number(row, 14), real_number(row, 15), real_number(row, 16)};
-                    if (row.size() >= 23) {
-                        body->second.inertia_diagonal = {real_number(row, 17, 1.0), real_number(row, 18, 1.0), real_number(row, 19, 1.0)};
-                        body->second.allow_sleep = flag(row, 20, true);
-                        body->second.sleeping = flag(row, 21);
-                        body->second.sleep_timer = std::max(0.0, real_number(row, 22));
+    const auto io_path = save_io_path(path);
+    bool incompatible_scene_candidate = false;
+    auto parse_payload = [this, &incompatible_scene_candidate](const std::string& payload, World& restored) {
+        try {
+            if (!valid_save_records(payload) || !save_records_match_scene(payload, world_.scene_id)) return false;
+            const bool strict_structure = !world_.scene_id.empty() ||
+                payload.find("\nSCENE\t") != std::string::npos;
+            restored = world_;
+            std::istringstream stream(payload);
+            std::string line;
+            std::getline(stream, line);
+            while (std::getline(stream, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                const auto row = fields(line);
+                if (row.size() >= 3 && row[0] == "VAR")
+                    restored.variables[decode(row[1])] = real_number(row, 2);
+                if (row.size() >= 5 && row[0] == "POS") {
+                    const auto id = restored.find_entity(decode(row[1]));
+                    if (id == 0U || !restored.transforms.contains(id)) {
+                        if (strict_structure) {
+                            incompatible_scene_candidate = true;
+                            return false;
+                        }
+                    } else {
+                        restored.transforms[id].position = {
+                            real_number(row, 2), real_number(row, 3), real_number(row, 4)};
+                    }
+                }
+                if (row.size() >= 17 && row[0] == "BODY") {
+                    const auto id = restored.find_entity(decode(row[1]));
+                    if (id == 0U || !restored.transforms.contains(id)) {
+                        if (strict_structure) {
+                            incompatible_scene_candidate = true;
+                            return false;
+                        }
+                    } else {
+                        auto& transform = restored.transforms[id];
+                        transform.position = {real_number(row, 2), real_number(row, 3), real_number(row, 4)};
+                        transform.rotation = {number(row, 5), number(row, 6), number(row, 7)};
+                        transform.scale = {number(row, 8, 1.0F), number(row, 9, 1.0F), number(row, 10, 1.0F)};
+                        const auto body = restored.rigid_bodies.find(id);
+                        if (body != restored.rigid_bodies.end()) {
+                            body->second.velocity = {real_number(row, 11), real_number(row, 12), real_number(row, 13)};
+                            body->second.angular_velocity = {real_number(row, 14), real_number(row, 15), real_number(row, 16)};
+                            if (row.size() >= 23) {
+                                body->second.inertia_diagonal = {real_number(row, 17, 1.0), real_number(row, 18, 1.0), real_number(row, 19, 1.0)};
+                                body->second.allow_sleep = flag(row, 20, true);
+                                body->second.sleeping = flag(row, 21);
+                                body->second.sleep_timer = std::max(0.0, real_number(row, 22));
+                            }
+                        }
+                    }
+                }
+                if (row.size() >= 4 && row[0] == "JOINTSTATE") {
+                    const auto joint = restored.physics_joints.find(decode(row[1]));
+                    if (joint == restored.physics_joints.end()) {
+                        if (strict_structure) {
+                            incompatible_scene_candidate = true;
+                            return false;
+                        }
+                    } else {
+                        joint->second.enabled = flag(row, 2, true);
+                        joint->second.broken = flag(row, 3);
+                        if (row.size() >= 10) {
+                            joint->second.accumulated_linear_impulse = {real_number(row, 4), real_number(row, 5), real_number(row, 6)};
+                            joint->second.accumulated_angular_impulse = {real_number(row, 7), real_number(row, 8), real_number(row, 9)};
+                        }
                     }
                 }
             }
+            return true;
+        } catch (const std::exception&) {
+            return false;
         }
-        if (row.size() >= 4 && row[0] == "JOINTSTATE") {
-            const auto joint = world_.physics_joints.find(decode(row[1]));
-            if (joint != world_.physics_joints.end()) {
-                joint->second.enabled = flag(row, 2, true);
-                joint->second.broken = flag(row, 3);
-                if (row.size() >= 10) {
-                    joint->second.accumulated_linear_impulse = {real_number(row, 4), real_number(row, 5), real_number(row, 6)};
-                    joint->second.accumulated_angular_impulse = {real_number(row, 7), real_number(row, 8), real_number(row, 9)};
-                }
-            }
-        }
+    };
+    std::string payload;
+    World restored;
+    bool foreign_scene_candidate = false;
+    auto load_candidate = [&](const std::filesystem::path& candidate) {
+        if (!read_validated_save_file(candidate, payload)) return false;
+        if (valid_save_records(payload) && !save_records_match_scene(payload, world_.scene_id))
+            foreign_scene_candidate = true;
+        return parse_payload(payload, restored);
+    };
+    if (load_candidate(io_path)) {
+        world_ = std::move(restored);
+        character_base_yaw_degrees_.clear();
+        error.clear();
+        return true;
     }
-    error.clear();
-    return true;
+    if (load_candidate(save_sidecar_path(io_path, ".tmp"))) {
+        world_ = std::move(restored);
+        character_base_yaw_degrees_.clear();
+        error = "Recovered pending TC save game from temporary file";
+        return true;
+    }
+    if (load_candidate(save_sidecar_path(io_path, ".bak"))) {
+        world_ = std::move(restored);
+        character_base_yaw_degrees_.clear();
+        error = "Recovered previous TC save game from backup";
+        return true;
+    }
+    error = foreign_scene_candidate ? "TC save game belongs to another scene" :
+        incompatible_scene_candidate ? "TC save game references missing scene entities or joints" :
+        "Unsupported, missing, malformed, or incomplete TC save game";
+    return false;
 }
 
 World& Runtime::world() noexcept { return world_; }

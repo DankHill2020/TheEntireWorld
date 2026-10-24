@@ -268,27 +268,67 @@ MAYA_OPERATIONS: dict[str, DccOperation] = {
     ),
     "animation.export": DccOperation(
         key="animation.export",
-        label="Maya Export Animation",
+        label="Maya Export FBX",
         function="maya_tools.Animation.anim_export.bridge_export.export_fbx",
         required=("export_path",),
-        optional={"start_frame": 1, "end_frame": 120, "selected_only": True, "nodes": []},
+        optional={"start_frame": 1, "end_frame": 120, "selected_only": True, "nodes": [], "bake_animation": True},
         mutates_project=False,
-        description="Export animation curves or FBX clips from Maya.",
+        description="Export selected Maya meshes or baked rig animation to FBX.",
     ),
     "animation.hik_retarget": DccOperation(
         key="animation.hik_retarget",
         label="Maya HumanIK Retarget FBX",
         function="maya_tools.Rigging.mocap.hik_retarget.retarget_fbx_hik",
-        required=("target_rig", "source_fbx", "output_fbx", "source_mapping"),
+        required=("target_rig", "source_fbx", "output_fbx"),
         optional={
-            "target_character": "Character1",
+            "source_mapping": None,
+            "source_hik_fbx": None,
+            "source_tpose_frame": None,
+            "target_character": None,
             "source_character": "AIStudioSourceCharacter",
             "source_namespace": "AIStudioSource",
             "target_namespace": "MannyRig_v01_retarget",
             "reset_scene": True,
         },
         mutates_project=True,
-        description="Retarget an explicitly mapped animated FBX through locked HumanIK character definitions and export the baked target skeleton.",
+        description="Retarget a characterized or companion-matched animated FBX through HumanIK and export the baked target skeleton.",
+    ),
+    "animation.fbx_to_control_rig": DccOperation(
+        key="animation.fbx_to_control_rig",
+        label="Maya FBX to Control Rig",
+        function="maya_tools.Rigging.mocap.fbx_to_control_rig.transfer_fbx_animation_to_control_rig",
+        required=("animation_fbx", "rig_scene", "target_hik_fbx", "output_scene"),
+        optional={
+            "source_hik_fbx": None,
+            "source_tpose_frame": None,
+            "source_mapping": None,
+            "mapping_profile": None,
+            "solved_fbx": None,
+            "target_character": None,
+            "rig_namespace": "CharacterRig",
+            "solved_namespace": "RetargetSolved",
+            "overwrite": False,
+            "force_discard_scene": False,
+        },
+        mutates_project=True,
+        description="Transfer a selected animation FBX via HumanIK to a selected Maya control rig; optionally use a characterized sister FBX, then bake animator controls into a saved Maya scene.",
+    ),
+    "animation.fbx_to_engine": DccOperation(
+        key="animation.fbx_to_engine",
+        label="Maya Retarget Controls and Export Engine FBX",
+        function="maya_tools.Rigging.mocap.fbx_to_engine.transfer_fbx_to_engine",
+        required=("animation_fbx", "rig_scene", "target_hik_fbx", "output_scene", "output_fbx"),
+        optional={
+            "source_hik_fbx": None,
+            "source_mapping": None,
+            "source_tpose_frame": None,
+            "mapping_profile": None,
+            "target_character": None,
+            "overwrite": False,
+            "force_discard_scene": False,
+        },
+        mutates_project=True,
+        description="Retarget a selected FBX through HumanIK, bake Maya animator controls, then export only the clean target deform skeleton for an engine import.",
     ),
     "modeling.create_primitive": DccOperation(
         key="modeling.create_primitive",
@@ -405,6 +445,7 @@ BLENDER_OPERATIONS: dict[str, DccOperation] = {
             "axis_forward": "-Z",
             "axis_up": "Y",
             "object_names": [],
+            "bake_animation": True,
         },
         mutates_project=False,
         description="Export current scene or selection as FBX.",
@@ -445,9 +486,11 @@ BLENDER_OPERATIONS: dict[str, DccOperation] = {
             "lod_count": 0,
             "ensure_material_slots": False,
             "create_collision": False,
+            "bevel_width": 0.0,
+            "bevel_segments": 2,
         },
         mutates_project=True,
-        description="Clean mesh names, apply transforms, generate LOD copies, ensure material slots, and create UCX collision meshes before export.",
+        description="Clean mesh names, apply transforms, add an optional angle-limited bevel, generate LOD copies, ensure material slots, and create UCX collision meshes before export.",
     ),
     "io.import_fbx": DccOperation(
         key="io.import_fbx",
@@ -1221,6 +1264,28 @@ def dcc_operation_function(host: str, mode: str) -> str:
     return f"{domain}.ai_studio.{function_name}"
 
 
+def is_painter_multi_operation_prompt(prompt: str) -> bool:
+    """Recognize an ordered Painter authoring request before single-op routing."""
+    lower = str(prompt or "").lower()
+    if not re.search(r"\b(?:substance\s+painter|substance_painter)\b", lower):
+        return False
+    material = bool(re.search(r"\b(?:apply|add|assign|use)\b.{0,32}\b(?:smart\s+)?material\b", lower))
+    project = bool(re.search(r"\b(?:create|new|start)\b.{0,20}\bproject\b", lower))
+    export = bool(re.search(r"\bexport\b.{0,24}\b(?:textures?|maps?)\b", lower))
+    return material and (project or export)
+
+
+def is_blender_process_export_prompt(prompt: str) -> bool:
+    """Recognize a scene-preparation plus FBX-export request in Blender."""
+    lower = str(prompt or "").lower()
+    return bool(
+        re.search(r"\bblender\b", lower)
+        and re.search(r"\b(?:clean|rename|apply\s+transforms?|freeze\s+transforms?|lods?|collision|material\s+slots?)\b", lower)
+        and re.search(r"\bexport\b.{0,80}(?:\bfbx\b|\.fbx\b)", lower)
+        and not re.search(r"\b(?:implement|write|code|script|function)\b", lower)
+    )
+
+
 def dcc_prompt_to_operation(
     host: str,
     text: str,
@@ -1266,10 +1331,13 @@ def dcc_prompt_to_operation(
         re.match(r"^\s*(what|which|where|find|show|list|identify|explain)\b", q)
         and re.search(r"\b(file|files|function|functions|method|methods|class|classes|code|source|implementation)\b", q)
     )
+    guidance_question = bool(
+        re.match(r"^\s*(?:explain|describe|teach|tell\s+me|how\s+(?:do|can|would|should))\b", q)
+    )
     # Read-only host queries still resolve to registered DCC operations. Only
     # source-code questions and non-executable design/understanding requests
     # are excluded here.
-    if action_mode == "design" or source_question:
+    if action_mode == "design" or source_question or guidance_question:
         return None
     if deliverables.intersection({"files", "functions", "methods", "classes", "explanation", "function_design"}):
         return None
@@ -1343,6 +1411,19 @@ def dcc_prompt_to_operation(
             return "rigging.load_biped_template"
         if "auto_skinner" in q or "auto skin" in q or "skin weights" in q or "skinning" in q or "smooth skin" in q:
             return "rigging.auto_skinner"
+        if (
+            re.search(r"\b(?:transfer|retarget|retargeting|bake|bring)\b", q)
+            and re.search(r"\b(?:fbx|mocap|animation)\b", q)
+            and re.search(r"\b(?:control\s*rig|animator\s*controls?|rig\s*controls?)\b", q)
+            and re.search(r"\bexport\b.{0,40}\b(?:engine|baked|skeleton)\s+fbx\b", q)
+        ):
+            return "animation.fbx_to_engine"
+        if (
+            re.search(r"\b(?:transfer|retarget|retargeting|bake|bring)\b", q)
+            and re.search(r"\b(?:fbx|mocap|animation)\b", q)
+            and re.search(r"\b(?:control\s*rig|animator\s*controls?|rig\s*controls?)\b", q)
+        ):
+            return "animation.fbx_to_control_rig"
         if re.search(r"\b(retarget|retargeting)\b", q) and re.search(r"\b(hik|human\s*ik|fbx|animation)\b", q):
             return "animation.hik_retarget"
         if "export anim" in q or "anim_export" in q or "export animation" in q:
@@ -1524,7 +1605,7 @@ def build_dcc_operation_params(host: str, operation: str, text: str) -> dict[str
     paths = []
     # Match Windows paths or Unix paths or Unreal-like package paths
     for match in re.finditer(r"([A-Za-z]:[\\/][^'\"\s]+|/[A-Za-z0-9_/.-]+|['\"][^'\"\s]+\.[A-Za-z0-9]+['\"])", text):
-        path = match.group(1).strip("'\"").replace("\\", "/")
+        path = match.group(1).strip("'\"").rstrip(".,;:)").replace("\\", "/")
         if path not in paths:
             paths.append(path)
             
@@ -1575,9 +1656,15 @@ def build_dcc_operation_params(host: str, operation: str, text: str) -> dict[str
             params[path_key] = paths[0]
             
     elif operation == "material.apply" and host == "substance_painter":
-        mat_match = re.search(r"\b(?:material|smart material|texture set)\s+([A-Za-z0-9_]+)\b", text, re.IGNORECASE)
+        mat_match = re.search(
+            r"\b(?:smart\s+)?material\s+(?:['\"]([^'\"]+)['\"]|([A-Za-z0-9_]+))",
+            text,
+            re.IGNORECASE,
+        )
         if mat_match:
-            params["material_name"] = mat_match.group(1)
+            value = mat_match.group(1) or mat_match.group(2)
+            if value.lower() not in {"a", "an", "the", "to", "on", "in"}:
+                params["material_name"] = value
         name_match = re.search(r"\b(?:named|called|name)\s+['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", text, re.IGNORECASE)
         if name_match:
             params["material_name"] = name_match.group(1)
@@ -1661,6 +1748,18 @@ def _extract_json_tail(text: str) -> dict[str, Any]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _labeled_maya_file(text: str, label: str, suffixes: str) -> str | None:
+    """Extract only a file explicitly paired with a role; never guess by path order."""
+    match = re.search(
+        rf"\b(?:{label})\b\s*(?:file\s*)?(?:=|:|from\s+|at\s+)?"
+        rf"(?:\"([^\"\r\n]+\.(?:{suffixes}))\"|'([^'\r\n]+\.(?:{suffixes}))'|"
+        rf"([^\s,;]+\.(?:{suffixes})))",
+        text or "",
+        re.IGNORECASE,
+    )
+    return next((part for part in match.groups() if part), None) if match else None
 
 
 def _parse_scalar(value: str) -> Any:
@@ -1760,6 +1859,28 @@ def _build_maya_operation_params(operation: str, text: str) -> dict[str, Any]:
     json_payload = _extract_json_tail(text)
     if json_payload:
         params.update(json_payload)
+
+    if operation in {"animation.fbx_to_control_rig", "animation.fbx_to_engine"}:
+        labels = {
+            "animation_fbx": (r"(?:animation|motion|mocap)\s+fbx", "fbx"),
+            "rig_scene": (r"(?:(?:maya|animator)\s+)?control\s+rig|rig\s+scene", "ma|mb"),
+            "target_hik_fbx": (r"target\s+(?:hik|human\s*ik)(?:\s+fbx)?", "fbx"),
+            "source_hik_fbx": (r"(?:source|sister|companion)\s+(?:hik|human\s*ik)(?:\s+fbx)?|sister\s+fbx", "fbx"),
+            "output_scene": (r"(?:output|saved?|baked)\s+scene", "ma|mb"),
+        }
+        for key, (label, suffixes) in labels.items():
+            value = _labeled_maya_file(text, label, suffixes)
+            if value:
+                params.setdefault(key, value)
+        if operation == "animation.fbx_to_engine":
+            value = _labeled_maya_file(
+                text,
+                r"export\s+(?:baked\s+)?(?:skeleton\s+|engine\s+)?fbx|(?:output|engine)\s+fbx",
+                "fbx",
+            )
+            if value:
+                params.setdefault("output_fbx", value)
+        return params
 
     if operation == "navigation.frame_selection":
         match = re.search(r"\b(?:frame|focus|zoom)\s+(?:on\s+)?(.+)$", text or "", re.IGNORECASE)
@@ -2389,6 +2510,7 @@ try:
         raise RuntimeError("Unsupported Maya generated operation: " + operation)
 except Exception:
     traceback.print_exc()
+    raise
 """
 
 
@@ -2481,6 +2603,7 @@ def blender_operation_code(operation: str, params: dict[str, Any]) -> str:
 import importlib
 import json
 import traceback
+from pathlib import Path
 
 import bpy
 
@@ -2634,6 +2757,8 @@ try:
         output_path = str(params.get("output_path") or params.get("filepath") or "")
         if not output_path:
             raise RuntimeError("output_path is required")
+        target = Path(output_path).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
         selection = params.get("selection")
         settings = params.get("settings") or {{}}
         if selection:
@@ -2642,16 +2767,23 @@ try:
             for obj in objects:
                 obj.select_set(True)
             bpy.context.view_layer.objects.active = objects[-1]
+        if not bpy.context.selected_objects:
+            raise RuntimeError("Blender FBX export resolved no selected objects")
         kwargs = {{
-            "filepath": output_path,
+            "filepath": str(target),
             "use_selection": True,
             "axis_forward": settings.get("axis_forward", "-Y"),
             "axis_up": settings.get("axis_up", "Z"),
             "apply_unit_scale": bool(settings.get("apply_unit_scale", True)),
+            "use_mesh_modifiers": True,
             "bake_anim": bool(settings.get("bake_animation", True)),
         }}
-        bpy.ops.export_scene.fbx(**kwargs)
-        print(json.dumps({{"ok": True, "output_path": output_path, "settings": kwargs, "selected": [obj.name for obj in bpy.context.selected_objects]}}))
+        status = bpy.ops.export_scene.fbx(**kwargs)
+        if status is not None and "FINISHED" not in status:
+            raise RuntimeError("Blender FBX export did not finish: " + str(status))
+        if not target.is_file() or target.stat().st_size <= 0:
+            raise RuntimeError("Blender FBX export produced no non-empty file: " + str(target))
+        print(json.dumps({{"ok": True, "output_path": str(target), "file_bytes": target.stat().st_size, "settings": kwargs, "selected": [obj.name for obj in bpy.context.selected_objects]}}))
 
     elif operation == "modeling.create_primitive":
         primitive = str(params.get("primitive_type") or "cube").lower()
@@ -2723,4 +2855,5 @@ try:
         raise RuntimeError("Unsupported Blender generated operation: " + operation)
 except Exception:
     traceback.print_exc()
+    raise
 """

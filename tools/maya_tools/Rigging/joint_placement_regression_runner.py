@@ -67,7 +67,10 @@ def run_manifest(manifest_path: str):
             scene = _resolve(entry["scene"], manifest_source.parent)
             baseline = _resolve(entry["baseline"], manifest_source.parent)
             template = _resolve(
-                entry.get("template", regression.joint_placer.DEFAULT_PLACEMENT_TEMPLATE),
+                entry.get(
+                    "template",
+                    getattr(regression.joint_placer, "DEFAULT_PLACEMENT_TEMPLATE", ""),
+                ),
                 manifest_source.parent,
             )
             cmds.file(new=True, force=True)

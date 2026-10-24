@@ -377,6 +377,19 @@ from tech_connector.services.project_edit_agent_part_05 import (
 )
 
 
+def _request_requires_concrete_public_annotations(request_prompt: str) -> bool:
+    """Distinguish a concrete-type mandate from ordinary useful hints."""
+
+    return any(
+        phrase in request_prompt.casefold()
+        for phrase in (
+            "concrete type annotations",
+            "concrete type hints",
+            "not object or any",
+        )
+    )
+
+
 def _validate_candidate_changes(
     changes: list[dict[str, Any]],
     *,
@@ -1934,7 +1947,17 @@ def _validate_candidate_changes(
                     if not undocumented
                     else "Requested docstrings are missing: " + ", ".join(undocumented),
                 ))
-            incomplete_type_hints = _incomplete_generated_type_hints(after_tree)
+            # ``object`` can be the sound public type at an opaque JSON or
+            # native-host boundary. A request for useful hints requires a
+            # complete annotated signature, but only an explicit concrete
+            # type request forbids that deliberate opaque type.
+            concrete_type_request = _request_requires_concrete_public_annotations(
+                request_prompt
+            )
+            incomplete_type_hints = _incomplete_generated_type_hints(
+                after_tree,
+                reject_public_object=concrete_type_request,
+            )
             results.append(_quality_result(
                 not incomplete_type_hints,
                 path,
@@ -1942,7 +1965,11 @@ def _validate_candidate_changes(
                 "Every generated callable has complete, valid type hints."
                 if not incomplete_type_hints
                 else "Requested complete type hints are invalid or missing: "
-                + ", ".join(incomplete_type_hints),
+                + ", ".join(incomplete_type_hints)
+                + (
+                    ". Public annotations must use concrete types, not object or Any."
+                    if concrete_type_request else ""
+                ),
             ))
             missing_bool_rejections = _missing_explicit_bool_rejections(
                 after_tree,
@@ -3332,7 +3359,7 @@ Rules:
 - For replace_symbol, copy the exact existing symbol from the source excerpt and make the smallest necessary edit. Preserve its docstring, quote style, and unrelated lines.
 - To add a new helper, use "insert_before_symbol" with an existing function at the same scope as target_symbol.
 - To add a test method, use "insert_after_symbol" with an existing Class.method as target_symbol.
-- To add one import without rewriting an import block, use "ensure_import" with the module in target_symbol and the imported name in new_content.
+- To add one import without rewriting an import block, use "ensure_import" with the module in target_symbol and one imported name in new_content (for example typing / Union creates `from typing import Union`). For a plain module import, set target_symbol to the same module and new_content to `import module` (for example math / `import math`).
 - For non-Python files, use replace_text/insert_before_text/insert_after_text with an exact, unique source excerpt in target_symbol. These actions are language-neutral and never interpret the anchor as a Python symbol.
 - Multiple operations on one file are composed transactionally in list order.
 - Use action "create" only for clearly required new files; set target_symbol and original_content to empty strings and place the full file in new_content.

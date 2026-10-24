@@ -774,9 +774,9 @@ class CustomizationPanel(QDialog):
         from tech_connector.services.authenticated_provider_service import (
             begin_provider_login,
         )
-        url = begin_provider_login(provider_id)
+        result = begin_provider_login(provider_id)
         if hasattr(self, "console_label"):
-            self.console_label.setText(f"Status: Opened official login portal for {provider_id.upper()}")
+            self.console_label.setText(f"Status: {result}")
 
     def setup_services_tab(self):
         layout = QVBoxLayout(self.tab_services)

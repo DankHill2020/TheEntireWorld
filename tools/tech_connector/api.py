@@ -65,6 +65,8 @@ DCC_API_ALIASES: dict[str, dict[str, str]] = {
         "create_rig_mapping": "maya_tools.Rigging.mocap.setup_hik.create_rig_mapping",
         "create_rig_from_mapping": "maya_tools.Rigging.create_rig.create_rig_from_mapping",
         "create_rig": "maya_tools.Rigging.create_rig.create_rig_from_mapping",
+        "transfer_fbx_animation_to_control_rig": "maya_tools.Rigging.mocap.fbx_to_control_rig.transfer_fbx_animation_to_control_rig",
+        "transfer_fbx_animation_dialog": "maya_tools.Rigging.mocap.fbx_to_control_rig.transfer_fbx_animation_dialog",
     },
     "unreal": {
         "find_asset_path_by_name": "unreal_tools.assets.find_asset_path_by_name",
@@ -1481,6 +1483,7 @@ class TechConnectorHeadlessAPI:
             {
                 "access_contract": self.kingdom.access_contract,
                 "editor_capabilities": self.kingdom.editor_capabilities,
+                "capability_report": self.kingdom.capability_report,
                 "editor_describe": self.kingdom.editor_describe,
                 "editor_call": self.kingdom.editor_call,
                 "configure_runtime": self.kingdom.configure_runtime,
@@ -2561,6 +2564,14 @@ class GameEngineAPINamespace:
             "kingdom.editor_capabilities",
             lambda: self._editor_api().capability_contract(),
             schema=f"{API_SCHEMA}.game_engine.editor_capabilities",
+        )
+
+    def capability_report(self) -> APIResult:
+        """Inspect asset maturity and callable editor coverage for this project."""
+        return self._run(
+            "kingdom.capability_report",
+            lambda: self._editor_api().capability_report(),
+            schema=f"{API_SCHEMA}.game_engine.capability_report",
         )
 
     def editor_describe(self, operation: str = "") -> APIResult:

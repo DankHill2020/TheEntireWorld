@@ -11,6 +11,26 @@ from typing import Any
 from .models import BenchmarkReport
 
 
+def _model_call_evidence(item: dict[str, Any]) -> int | None:
+    """Count completed Tech Connector model stages, independent of token telemetry."""
+
+    if item.get("agent") != "tech_connector":
+        return None
+    timings = (item.get("metadata") or {}).get("timings")
+    if not isinstance(timings, list):
+        return None
+    return sum(
+        1
+        for stage in timings
+        if isinstance(stage, dict)
+        and ("prompt_chars" in stage or "inference" in stage)
+        and not stage.get("model_call_skipped")
+        and not stage.get("call_error")
+        and not str(stage.get("model") or "").startswith("deterministic")
+        and stage.get("model") != "approved_plan_cache"
+    )
+
+
 def _percentile(values: list[float], percentile: float) -> float:
     """Return a linearly interpolated percentile.
 
@@ -54,6 +74,7 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         latencies = [float(item["wall_seconds"]) for item in eligible_items]
         input_tokens = [int(item.get("input_tokens") or 0) for item in eligible_items]
         output_tokens = [int(item.get("output_tokens") or 0) for item in eligible_items]
+        known_model_calls = [_model_call_evidence(item) for item in eligible_items]
         total_minutes = sum(latencies) / 60.0
         rows.append(
             {
@@ -62,6 +83,10 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "attempts": len(items),
                 "eligible_attempts": len(eligible_items),
                 "ineligible_attempts": len(items) - len(eligible_items),
+                "model_backed_attempts": sum(
+                    count > 0 for count in known_model_calls if count is not None
+                ),
+                "deterministic_attempts": sum(count == 0 for count in known_model_calls),
                 "perfect_pass_rate": round(
                     sum(score >= 100.0 for score in scores) / len(scores), 4
                 ) if scores else 0.0,
@@ -116,13 +141,14 @@ def write_report(report: BenchmarkReport, output_dir: Path) -> tuple[Path, Path]
         "",
         "## Aggregate results",
         "",
-        "| Agent | Model | Attempts | Eligible | Ineligible | Perfect | Mean quality | Median time | P95 time | Input tokens | Output tokens | Quality/min | Patch lines |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Agent | Model | Attempts | Eligible | Model-backed | Ineligible | Perfect | Mean quality | Median time | P95 time | Input tokens | Output tokens | Quality/min | Patch lines |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in report.summary:
         lines.append(
             f"| {row['agent']} | {row['model']} | {row['attempts']} | "
-            f"{row['eligible_attempts']} | {row['ineligible_attempts']} | "
+            f"{row['eligible_attempts']} | {row['model_backed_attempts']} | "
+            f"{row['ineligible_attempts']} | "
             f"{row['perfect_pass_rate'] * 100:.1f}% | {row['mean_quality']:.1f} | "
             f"{row['median_wall_seconds']:.2f}s | {row['p95_wall_seconds']:.2f}s | "
             f"{row['mean_input_tokens']:.0f} | {row['mean_output_tokens']:.0f} | "
@@ -133,15 +159,17 @@ def write_report(report: BenchmarkReport, output_dir: Path) -> tuple[Path, Path]
             "",
             "## Attempts",
             "",
-            "| Case | Agent | Model | Status | Eligible | Assertions | Score | Time | Files | Scope violations | Quality issues |",
-            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Case | Agent | Model | Status | Eligible | Model calls | Assertions | Score | Time | Files | Scope violations | Quality issues |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for item in report.runs:
         score = item["score"]
+        model_calls = _model_call_evidence(item)
         lines.append(
             f"| {item['case_id']} | {item['agent']} | {item['model']} | "
             f"{item['status']} | {'yes' if item.get('eligible', True) else 'no'} | "
+            f"{model_calls if model_calls is not None else 'n/a'} | "
             f"{score['assertions_passed']}/{score['assertions_total']} | "
             f"{score['total_points']:.1f} | {item['wall_seconds']:.2f}s | "
             f"{len(score['changed_files'])} | {len(score['out_of_scope_files'])} | "
@@ -161,7 +189,10 @@ def write_report(report: BenchmarkReport, output_dir: Path) -> tuple[Path, Path]
             "metrics are reported independently from quality; zero tokens means the adapter "
             "did not expose token telemetry, not that inference was free. Infrastructure, "
             "timeout, and process failures keep their diagnostic scores in the attempt table "
-            "but are excluded from aggregate quality and performance metrics.",
+            "but are excluded from aggregate quality and performance metrics. "
+            "Tech Connector model-call counts come from completed workflow stages: "
+            "zero means deterministic workflow evidence, not model-quality or "
+            "model-latency evidence. Other adapters without stage telemetry show n/a.",
             "",
         ]
     )

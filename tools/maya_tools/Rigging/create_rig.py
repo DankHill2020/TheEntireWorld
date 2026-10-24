@@ -52,6 +52,7 @@ from maya_tools.Rigging.create_rig_core import (
     mirror_face_joints,
     mirror_joint_yz_behavior_with_label_flip,
     normalize,
+    normalize_rfl_joint_suffixes,
     offset_pv_pad,
     orient_control_pad_to_world_safely,
     os,
@@ -80,6 +81,7 @@ POST_BUILD_EXTENSION_ATTR = "postBuildExtensionManifest"
 RIG_OWNERSHIP_ATTR = "rigOwnedNodeUuids"
 DYNAMIC_MODULES_ATTR = "dynamicRigModules"
 POST_BUILD_EXTENSION_GROUP = "rig_user_extensions_preserve_grp"
+REBUILD_SHAPE_STORE_GROUP = "rig_rebuild_control_shapes_store_grp"
 RIG_MODULE_IDS = (
     "Root / Origin", "Pelvis & Hips", "Spine", "Left Clavicle",
     "Right Clavicle", "Neck", "Head", "Left Arm", "Right Arm",
@@ -2066,6 +2068,32 @@ def restore_post_build_extensions():
     if not manifest.get("preserved"):
         return {"restored": False, "roots": [], "constraints": [], "connections": []}
 
+    # A legacy manifest may contain fixed-module controls that older ownership
+    # discovery mistook for user extensions.  Full Build has already recorded
+    # the freshly generated ownership at this point; remove those stale rows
+    # before they can pull face controls back beneath their former bind-joint
+    # parents (for example ear/cheek/nose pads under ``origin``).
+    owned, _base_joints, known_bases = _current_rig_ownership()
+    builder_systems = set()
+    retained_roots = []
+    for row in manifest.get("roots", []):
+        short = _short_scene_name(row.get("node"))
+        if short and _is_builder_owned_extension_root(
+                short, owned, known_bases):
+            builder_systems.add(short)
+            continue
+        retained_roots.append(row)
+    if builder_systems:
+        manifest["roots"] = retained_roots
+        manifest["constraints"] = [
+            row for row in manifest.get("constraints", [])
+            if _short_scene_name(row.get("system")) not in builder_systems
+        ]
+        manifest["connections"] = [
+            row for row in manifest.get("connections", [])
+            if _short_scene_name(row.get("system")) not in builder_systems
+        ]
+
     restored_roots = []
     missing_parents = []
     for row in manifest.get("roots", []):
@@ -2332,10 +2360,13 @@ def query_space_switches(driven):
                 print(f"[Warning] Failed to query constraint targetList: {e}")
 
             attr_name = "space"
-            weight_conn = cmds.listConnections(con, type="animCurveUA") or []
+            # Maya creates animCurveUU nodes for the enum-driven constraint
+            # weights in current and legacy rigs. Query the animCurve base type
+            # so both UU and older UA variants are captured before rebuild.
+            weight_conn = cmds.listConnections(con, type="animCurve") or []
             attr_from_driven = False
             for curve in weight_conn:
-                plugs = cmds.listConnections(curve + ".input", plug=True) or []
+                plugs = cmds.listConnections(curve + ".input", plugs=True) or []
                 for plug in plugs:
                     if plug.startswith(driven + "."):
                         attr_name = plug.split(".")[-1]
@@ -3098,9 +3129,6 @@ def rig_other_face_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None, jaw_j
     ]
 
     for fj in face_joints:
-        if cmds.objExists(f"{fj}_ctrl_pad"):
-            continue
-
         target_p = parent_ctrl
 
         if fj in jaw_driven_joints:
@@ -3112,6 +3140,17 @@ def rig_other_face_module(face_joint_map, parent_ctrl=None, jaw_ctrl=None, jaw_j
                 target_p = jaw_ctrl
 
         if not target_p or not cmds.objExists(target_p):
+            continue
+
+        existing_pad = f"{fj}_ctrl_pad"
+        if cmds.objExists(existing_pad):
+            pad_long = (cmds.ls(existing_pad, long=True) or [existing_pad])[0]
+            target_long = (cmds.ls(target_p, long=True) or [target_p])[0]
+            current_parent = cmds.listRelatives(
+                pad_long, parent=True, fullPath=True
+            ) or []
+            if not current_parent or current_parent[0] != target_long:
+                cmds.parent(pad_long, target_long, absolute=True)
             continue
 
         ctrl_data = create_joint_controls(
@@ -3668,7 +3707,16 @@ def _is_rfl_pivot_joint(node):
     :return: result
     """
     short = _short_node_name(node)
-    return short.endswith("_RFL") and cmds.objExists(short) and cmds.nodeType(short) == "joint"
+    leaf = short.rsplit(":", 1)[-1]
+    if not leaf.lower().endswith("_rfl"):
+        return False
+    # Missing/stale metadata names still need to be treated as protected RFL
+    # candidates. For live nodes, verify the type without replacing the exact
+    # DAG path with a potentially ambiguous short name.
+    matches = cmds.ls(node, long=True) or []
+    if not matches:
+        return True
+    return any(cmds.nodeType(match) == "joint" for match in matches)
 
 
 def _rfl_pivot_joints(side=None):
@@ -3677,19 +3725,16 @@ def _rfl_pivot_joints(side=None):
     :param side: side
     :return: result
     """
-    sides = [side] if side else ["l", "r"]
+    requested_side = str(side or "").lower()
     pivots = []
-    for side_name in sides:
-        pivots.extend([
-            f"{side_name}_heel_RFL",
-            f"{side_name}_outerBank_RFL",
-            f"{side_name}_innerBank_RFL",
-            f"{side_name}_toeTip_RFL",
-            f"{side_name}_toe_RFL",
-            f"{side_name}_ball_RFL",
-            f"{side_name}_ankle_RFL",
-        ])
-    return _unique_existing_nodes(pivots)
+    for joint in cmds.ls(type="joint", long=True) or []:
+        leaf = _short_node_name(joint).rsplit(":", 1)[-1]
+        if not leaf.lower().endswith("_rfl"):
+            continue
+        if requested_side and not leaf.lower().startswith(requested_side + "_"):
+            continue
+        pivots.append(joint)
+    return pivots
 
 
 def preserve_rfl_pivot_joints(side=None):
@@ -3698,20 +3743,28 @@ def preserve_rfl_pivot_joints(side=None):
     :param side: side
     :return: result
     """
-    preserved = []
     rfl_joints = _rfl_pivot_joints(side)
-    rfl_set = set(rfl_joints)
+    rfl_uuids = {
+        uuid for rfl_jnt in rfl_joints
+        for uuid in (cmds.ls(rfl_jnt, uuid=True) or [])
+    }
+    external_roots = []
     for rfl_jnt in rfl_joints:
         if not cmds.objExists(rfl_jnt):
             continue
         for con in (cmds.listRelatives(rfl_jnt, type="constraint") or []):
             if cmds.objExists(con):
                 cmds.delete(con)
-        parent = cmds.listRelatives(rfl_jnt, parent=True, fullPath=False)
-        if parent and parent[0] not in rfl_set:
-            cmds.parent(rfl_jnt, world=True)
-        preserved.append(rfl_jnt)
-    return preserved
+        parent = cmds.listRelatives(rfl_jnt, parent=True, fullPath=True) or []
+        parent_uuid = (cmds.ls(parent[0], uuid=True) or [""])[0] if parent else ""
+        if parent and parent_uuid not in rfl_uuids:
+            external_roots.append(rfl_jnt)
+    # Only detach hierarchy roots. Detaching every child changes authored RFL
+    # parenting and invalidates the long paths collected above.
+    for root in external_roots:
+        if cmds.objExists(root):
+            cmds.parent(root, world=True)
+    return _rfl_pivot_joints(side)
 
 
 def _metadata_joint_nodes(metadata):
@@ -4041,6 +4094,361 @@ def get_module_controls(module_id, existing_only=True):
     return _unique_existing_nodes(controls, include_missing=not existing_only)
 
 
+def _rebuild_identity_key(node_name):
+    """Return a conservative role key for matching controls across rebuilds."""
+    short_name = _short_node_name(node_name).split(":")[-1].lower()
+    if short_name.endswith("_ctrl"):
+        short_name = short_name[:-5]
+    # Older limb builders named the end control from the IK handle while the
+    # current builder names it from the end joint. Treat only that known legacy
+    # spelling as equivalent; the final alphanumeric fold also covers harmless
+    # separator differences such as ``thightwist3`` / ``thigh_twist3``.
+    short_name = short_name.replace("ikhandle", "ik")
+    return re.sub(r"[^a-z0-9]+", "", short_name)
+
+
+def _capture_control_shape_snapshot(ctrl):
+    """Capture editable NURBS control CVs without depending on shape names."""
+    result = []
+    shapes = cmds.listRelatives(ctrl, shapes=True, noIntermediate=True, fullPath=True) or []
+    for shape in shapes:
+        if cmds.nodeType(shape) != "nurbsCurve":
+            continue
+        cvs = cmds.ls(f"{shape}.cv[*]", flatten=True) or []
+        result.append({
+            "name": _short_node_name(shape),
+            "positions": [cmds.xform(cv, query=True, objectSpace=True, translation=True) for cv in cvs],
+        })
+    return result
+
+
+def _capture_control_shape_holder(ctrl):
+    """Instance a control's exact curve shapes into a hidden rebuild holder."""
+    shapes = [
+        shape for shape in (
+            cmds.listRelatives(ctrl, shapes=True, noIntermediate=True, fullPath=True) or []
+        ) if cmds.nodeType(shape) == "nurbsCurve"
+    ]
+    if not shapes:
+        return ""
+    if not cmds.objExists(REBUILD_SHAPE_STORE_GROUP):
+        store_group = cmds.createNode("transform", name=REBUILD_SHAPE_STORE_GROUP)
+        cmds.setAttr(f"{store_group}.visibility", 0)
+    holder = cmds.createNode("transform", name="rigRebuildControlShape#")
+    holder = cmds.parent(holder, REBUILD_SHAPE_STORE_GROUP)[0]
+    for shape in shapes:
+        cmds.parent(shape, holder, addObject=True, shape=True, relative=True)
+        # The stored instance is still the same shape node. Give it a neutral
+        # temporary name so the module builder can create its standard shape
+        # names without Maya resolving an ambiguous short name.
+        cmds.rename(shape, "rigRebuildStoredShape#")
+    return _short_node_name(holder)
+
+
+def _restore_control_shape_holder(ctrl, holder, shape_snapshot=None):
+    """Replace rebuilt curves with the exact instanced shapes saved pre-removal."""
+    if not holder or not cmds.objExists(holder) or not cmds.objExists(ctrl):
+        return False
+    saved_shapes = [
+        shape for shape in (
+            cmds.listRelatives(holder, shapes=True, noIntermediate=True, fullPath=True) or []
+        ) if cmds.nodeType(shape) == "nurbsCurve"
+    ]
+    if not saved_shapes:
+        return False
+    rebuilt_shapes = [
+        shape for shape in (
+            cmds.listRelatives(ctrl, shapes=True, noIntermediate=True, fullPath=True) or []
+        ) if cmds.nodeType(shape) == "nurbsCurve"
+    ]
+    if rebuilt_shapes:
+        cmds.delete(rebuilt_shapes)
+    for shape in saved_shapes:
+        cmds.parent(shape, ctrl, addObject=True, shape=True, relative=True)
+    # Removing the holder removes only its shape instances; the instances just
+    # added beneath the rebuilt control remain intact with original topology,
+    # color, and draw settings.
+    cmds.delete(holder)
+    remaining = cmds.listRelatives(ctrl, shapes=True, noIntermediate=True, fullPath=True) or []
+    desired_names = [
+        record.get("name") for record in (shape_snapshot or []) if record.get("name")
+    ]
+    for shape, desired_name in zip(remaining, desired_names):
+        if _short_node_name(shape) != desired_name:
+            try:
+                cmds.rename(shape, desired_name)
+            except RuntimeError:
+                pass
+    return bool(remaining)
+
+
+def _control_pad_hierarchy(ctrl):
+    """Return only the conventional SDK/pad parents for a control."""
+    parents = cmds.listRelatives(ctrl, parent=True, fullPath=False) or []
+    if not parents:
+        return "", ""
+    immediate = parents[0]
+    immediate_short = _short_node_name(immediate)
+    if immediate_short.endswith("_sdk_pad"):
+        pad_parents = cmds.listRelatives(immediate, parent=True, fullPath=False) or []
+        pad = pad_parents[0] if (
+            pad_parents and _short_node_name(pad_parents[0]).endswith("_ctrl_pad")
+        ) else ""
+        return immediate, pad
+    if immediate_short.endswith("_ctrl_pad"):
+        return "", immediate
+    return "", ""
+
+
+def _restore_control_shape_snapshot(ctrl, shape_snapshot):
+    """Restore captured CVs when the rebuilt curve topology is unambiguous."""
+    rebuilt_shapes = [
+        shape for shape in (
+            cmds.listRelatives(ctrl, shapes=True, noIntermediate=True, fullPath=True) or []
+        ) if cmds.nodeType(shape) == "nurbsCurve"
+    ]
+    if len(rebuilt_shapes) != len(shape_snapshot):
+        cmds.warning(
+            "Skipped saved control shape for '{}': expected {} curve shape(s), found {}.".format(
+                ctrl, len(shape_snapshot), len(rebuilt_shapes)
+            )
+        )
+        return False
+
+    # Shape node suffixes are not stable after rebuild. Match by name where
+    # possible and otherwise by the unique shape order under the transform.
+    by_name = {_short_node_name(shape): shape for shape in rebuilt_shapes}
+    used = set()
+    pairs = []
+    for index, record in enumerate(shape_snapshot):
+        shape = by_name.get(record.get("name"))
+        if not shape and index < len(rebuilt_shapes):
+            shape = rebuilt_shapes[index]
+        if not shape or shape in used:
+            return False
+        used.add(shape)
+        cvs = cmds.ls(f"{shape}.cv[*]", flatten=True) or []
+        positions = record.get("positions") or []
+        if len(cvs) != len(positions):
+            cmds.warning(
+                "Skipped saved control shape for '{}': CV topology changed ({} vs {}).".format(
+                    ctrl, len(positions), len(cvs)
+                )
+            )
+            return False
+        pairs.append((cvs, positions))
+
+    for cvs, positions in pairs:
+        for cv, position in zip(cvs, positions):
+            cmds.xform(cv, objectSpace=True, translation=position)
+    return True
+
+
+def capture_module_rebuild_identity(module_id, controls=None):
+    """Persist live control/space names and control shapes before module removal."""
+    controls = controls or get_module_controls(module_id)
+    controls = [ctrl for ctrl in controls if ctrl and cmds.objExists(ctrl)]
+    connection_data = store_rig_connections(controls, module_id)
+
+    previous_snapshot = (load_module_metadata(module_id) or {}).get("rebuild_identity") or {}
+    for old_record in previous_snapshot.get("controls", []):
+        old_holder = old_record.get("shape_holder")
+        if old_holder and cmds.objExists(old_holder):
+            cmds.delete(old_holder)
+
+    control_records = []
+    owned_spaces = set()
+    for ctrl in controls:
+        sdk, pad = _control_pad_hierarchy(ctrl)
+        switches = query_space_switches(ctrl)
+        for switch in switches:
+            for target, _display in switch.get("target_enum_pairs", []):
+                short_target = _short_node_name(target)
+                if short_target.endswith("_space"):
+                    owned_spaces.add(short_target)
+        control_records.append({
+            "name": _short_node_name(ctrl),
+            "role_key": _rebuild_identity_key(ctrl),
+            "sdk_name": _short_node_name(sdk) if sdk else "",
+            "pad_name": _short_node_name(pad) if pad else "",
+            "shapes": _capture_control_shape_snapshot(ctrl),
+            "shape_holder": _capture_control_shape_holder(ctrl),
+        })
+
+    # Module composite spaces can be absent from a queried switch on legacy
+    # scenes, so include owned cleanup spaces as well.
+    metadata = load_module_metadata(module_id) or {}
+    for node in _discover_module_cleanup_nodes(module_id, metadata):
+        short_node = _short_node_name(node)
+        if short_node.endswith("_space") and cmds.objExists(node):
+            owned_spaces.add(short_node)
+
+    snapshot = {
+        "schema": 1,
+        "controls": control_records,
+        "spaces": [
+            {"name": name, "role_key": _rebuild_identity_key(name)}
+            for name in sorted(owned_spaces)
+        ],
+        "rig_connections": connection_data,
+    }
+    save_module_metadata(module_id, {"rebuild_identity": snapshot})
+    return snapshot
+
+
+def _unique_rebuild_role_map(records):
+    """Return role -> record only for roles that occur exactly once."""
+    grouped = {}
+    for record in records:
+        key = record.get("role_key") or ""
+        if key:
+            grouped.setdefault(key, []).append(record)
+    return {key: rows[0] for key, rows in grouped.items() if len(rows) == 1}
+
+
+def _rename_rebuilt_node(node, desired_name):
+    """Rename one rebuilt node without overwriting a live scene node."""
+    if not node or not desired_name or not cmds.objExists(node):
+        return node
+    if _short_node_name(node) == desired_name:
+        return node
+    if cmds.objExists(desired_name):
+        cmds.warning(
+            "Refusing rebuild rename '{} -> {}': the destination already exists.".format(
+                node, desired_name
+            )
+        )
+        return node
+    return cmds.rename(node, desired_name)
+
+
+def restore_module_rebuild_identity(module_id):
+    """Restore uniquely matched legacy names, spaces, and control CV shapes."""
+    metadata = load_module_metadata(module_id) or {}
+    snapshot = metadata.get("rebuild_identity") or {}
+    old_records = snapshot.get("controls") or []
+    if not old_records or snapshot.get("applied"):
+        return {"renamed": {}, "shapes": 0, "spaces": {}}
+
+    stored_connections = snapshot.get("rig_connections")
+    if stored_connections:
+        # The UI's global-store refresh may already have observed the freshly
+        # built standard controls. The persisted pre-removal record is the
+        # authoritative source for this one identity restore.
+        GLOBAL_RIG_STORE[module_id] = stored_connections
+
+    rebuilt_controls = get_module_controls(module_id)
+    new_records = [
+        {
+            "name": _short_node_name(ctrl),
+            "node": ctrl,
+            "role_key": _rebuild_identity_key(ctrl),
+        }
+        for ctrl in rebuilt_controls if ctrl and cmds.objExists(ctrl)
+    ]
+    old_by_role = _unique_rebuild_role_map(old_records)
+    new_by_role = _unique_rebuild_role_map(new_records)
+    renamed = {}
+    rebuilt_to_final = {}
+    restored_shapes = 0
+
+    for role_key, old_record in old_by_role.items():
+        new_record = new_by_role.get(role_key)
+        if not new_record:
+            continue
+        ctrl = new_record["node"]
+        desired_ctrl = old_record.get("name") or ""
+
+        # Restore curve edits before renaming so either the new or old shape
+        # node spelling can be used as a deterministic match.
+        holder_restored = _restore_control_shape_holder(
+            ctrl,
+            old_record.get("shape_holder") or "",
+            old_record.get("shapes") or [],
+        )
+        if holder_restored or _restore_control_shape_snapshot(
+                ctrl, old_record.get("shapes") or []):
+            restored_shapes += 1
+
+        original_rebuilt_name = _short_node_name(ctrl)
+        sdk, pad = _control_pad_hierarchy(ctrl)
+        _rename_rebuilt_node(pad, old_record.get("pad_name") or "")
+        _rename_rebuilt_node(sdk, old_record.get("sdk_name") or "")
+        final_ctrl = _rename_rebuilt_node(ctrl, desired_ctrl)
+        # Preserve the authored curve geometry, then enforce the current rig's
+        # side-color standard on that restored shape.
+        apply_side_color_override(final_ctrl)
+        renamed[old_record["name"]] = _short_node_name(final_ctrl)
+        rebuilt_to_final[original_rebuilt_name] = _short_node_name(final_ctrl)
+
+    # Restore module-owned composite space names using the same conservative,
+    # unique-role rule. External target spaces are deliberately not renamed.
+    old_spaces = snapshot.get("spaces") or []
+    old_space_by_role = _unique_rebuild_role_map(old_spaces)
+    scene_spaces = [
+        {"name": _short_node_name(node), "node": node,
+         "role_key": _rebuild_identity_key(node)}
+        for node in (cmds.ls("*_space", type="transform") or [])
+    ]
+    new_space_by_role = _unique_rebuild_role_map(scene_spaces)
+    renamed_spaces = {}
+    for role_key, old_record in old_space_by_role.items():
+        new_record = new_space_by_role.get(role_key)
+        if not new_record:
+            continue
+        final_space = _rename_rebuilt_node(new_record["node"], old_record["name"])
+        renamed_spaces[old_record["name"]] = _short_node_name(final_space)
+
+    # Recreate captured switches after aliases are restored. This also fixes
+    # the generated *_spaceTarget node prefixes, which Maya does not rename
+    # automatically when their driven control is renamed.
+    data = stored_connections or GLOBAL_RIG_STORE.get(module_id) or {}
+    for switch in data.get("switches", []):
+        driven = renamed.get(switch.get("driven"), switch.get("driven"))
+        if not driven or not cmds.objExists(driven):
+            continue
+        pairs = switch.get("target_enum_pairs") or []
+        targets = []
+        enum_names = []
+        for target, display in pairs:
+            resolved = renamed.get(target, renamed_spaces.get(target, target))
+            if resolved and cmds.objExists(resolved):
+                targets.append(resolved)
+                enum_names.append(display)
+        if not targets:
+            continue
+        _delete_space_switch_for_ctrl(
+            driven, switch.get("attr_name", "space")
+        )
+        create_space_switch(
+            driven=driven,
+            targets=targets,
+            attr_name=switch.get("attr_name", "space"),
+            constraint_type=switch.get("constraint_type", "parent"),
+            enum_names=enum_names,
+        )
+        switch["driven"] = driven
+        switch["target_enum_pairs"] = [list(pair) for pair in zip(targets, enum_names)]
+
+    updated_controls = []
+    for record in new_records:
+        final_name = rebuilt_to_final.get(record["name"], record["name"])
+        if cmds.objExists(final_name):
+            updated_controls.append(final_name)
+    if updated_controls:
+        save_module_metadata(module_id, {"controls": updated_controls})
+
+    if cmds.objExists(REBUILD_SHAPE_STORE_GROUP):
+        remaining = cmds.listRelatives(REBUILD_SHAPE_STORE_GROUP, children=True) or []
+        if not remaining:
+            cmds.delete(REBUILD_SHAPE_STORE_GROUP)
+
+    _restore_orphaned_space_switch_roles(module_id, renamed)
+    snapshot["applied"] = True
+    save_module_metadata(module_id, {"rebuild_identity": snapshot})
+    return {"renamed": renamed, "shapes": restored_shapes, "spaces": renamed_spaces}
+
+
 def _delete_module_from_metadata(
         module_id, fallback_nodes=None, fallback_controls=None,
         protected_nodes=None, prefer_fallback=False):
@@ -4056,6 +4464,13 @@ def _delete_module_from_metadata(
         if prefer_fallback
         else _get_module_controls_for_removal(module_id, fallback_controls)
     )
+    # Old scenes frequently have an empty/stale module store. Merge the live
+    # heuristic discovery before taking the snapshot so twist, finger, switch,
+    # and alternate IK-handle controls are not silently omitted.
+    controls = _unique_existing_nodes(
+        list(controls) + get_module_controls(module_id), include_missing=True
+    )
+    rebuild_snapshot = capture_module_rebuild_identity(module_id, controls)
     _capture_orphaned_space_switch_roles(controls, module_id)
     for ctrl in controls:
         _delete_space_switch_for_ctrl(ctrl)
@@ -4072,6 +4487,11 @@ def _delete_module_from_metadata(
     protected = {
         _short_node_name(node) for node in (protected_nodes or []) if node
     }
+    protected.update(
+        _short_node_name(record.get("name"))
+        for record in rebuild_snapshot.get("spaces", [])
+        if record.get("name")
+    )
     nodes = [
         node for node in nodes
         if not _is_rfl_pivot_joint(node)
@@ -4131,6 +4551,7 @@ def resolve_rfl_joints(side):
     :param side: side
     :return: result
     """
+    normalize_rfl_joint_suffixes(side=side)
     role_candidates = {
         "heel": [f"{side}_heel_RFL"],
         "outerBank": [
@@ -4399,6 +4820,20 @@ def rig_leg_module(side, body_joint_map, parent_ctrl=None):
                 "after template creation."
             )
 
+        # A removed leg module preserves its authored RFL pivots. Refresh only
+        # this side from the final deformation foot before recreating controls
+        # and constraints; legacy templates may call the toe pivot ball_RFL.
+        from maya_tools.Rigging import joint_placer
+        rfl_snap = joint_placer.snap_reverse_foot_helpers_to_deformation_skeleton(
+            sides=(side,)
+        )
+        if side not in (rfl_snap.get("snapped_sides") or []):
+            raise RuntimeError(
+                f"Could not snap the {side_prefix_title} Leg RFL pivots to "
+                "the finalized deformation foot before rebuilding the module."
+            )
+        rfl_joints = resolve_rfl_joints(side)
+
         if all(cmds.objExists(joint) for joint in ik_leg_joints):
             build_rfl_ik_and_constraints(
                 side=side,
@@ -4606,7 +5041,10 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
             control_shape="sphere",
             root_parent=root_p,
             sub_ctrls=True,
-            sub_ctrl_shape_rotation_x=90.0,
+            # create_bi_arrow_ctrl already converts its original XZ points
+            # into the animator-facing XY plane. Do not rotate it a second
+            # time here.
+            sub_ctrl_shape_rotation_x=0.0,
         )
         tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
         control_data.extend(create_joint_controls(
@@ -4629,7 +5067,7 @@ def rig_spine_module(body_joint_map, parent_ctrl=None):
                 control_shape="sphere",
                 root_parent=root_p,
                 sub_ctrls=True,
-                sub_ctrl_shape_rotation_x=90.0,
+                sub_ctrl_shape_rotation_x=0.0,
             )
         tip_root = spine_base[-1] + "_ctrl" if spine_base else root_p
         if cmds.objExists(spine_tip):
@@ -5042,6 +5480,15 @@ def restore_rig_connections(module_name):
     :param module_name: name of the module
     :return: int
     """
+    # Keep legacy/open UI instances safe: they already call this function after
+    # a module build, even if their Python class predates the explicit identity
+    # hook in hik_ui.py. Because create_rig is reloaded by the UI, restoring
+    # here guarantees names/shapes/spaces are applied in that same session.
+    metadata = load_module_metadata(module_name) or {}
+    identity = metadata.get("rebuild_identity") or {}
+    if identity.get("controls") and not identity.get("applied"):
+        restore_module_rebuild_identity(module_name)
+
     data = GLOBAL_RIG_STORE.get(module_name)
     if not data:
         return 0

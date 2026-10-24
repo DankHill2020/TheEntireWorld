@@ -244,7 +244,8 @@ class GameTemplateService:
                 "jump_start": "tc_jump", "jump_loop": "tc_jump", "land": "tc_land",
                 "start_forward": "tc_start_forward", "stop_forward": "tc_stop_forward",
                 "pivot_left": "tc_pivot_left", "pivot_right": "tc_pivot_right",
-                "crouch_idle": "tc_crouch_idle", "crouch_walk": "tc_crouch_walk", "fall": "tc_fall",
+                "crouch_idle": "tc_crouch_idle", "crouch_walk": "tc_crouch_walk",
+                "crawl_idle": "tc_crawl_idle", "crawl": "tc_crawl_walk", "fall": "tc_fall",
             })
             locomotion = self.operations.create_asset(
                 "tc.animation_controller", f"AC_{safe_prefix}_Locomotion",
@@ -637,6 +638,8 @@ def _input_properties(recipe: GameTemplateVariant) -> dict[str, Any]:
             binding("MouseDelta"), binding("RightStick", device="gamepad"),
         ]},
         "Jump": {"value_type": "button", "bindings": [binding("Space"), binding("GamepadSouth", device="gamepad")]},
+        "Crouch": {"value_type": "button", "bindings": [binding("C"), binding("LeftStickPress", device="gamepad")]},
+        "Crawl": {"value_type": "button", "bindings": [binding("V"), binding("RightStickPress", device="gamepad")]},
         "Pause": {"value_type": "button", "bindings": [binding("Escape"), binding("GamepadStart", device="gamepad")]},
     }
     if recipe.template_id in {"first_person", "third_person", "fighting"}:
@@ -711,7 +714,7 @@ def _runtime_world(
     pixel = visual_style.casefold().startswith("pixel_")
     toon = visual_style.casefold() in {"toon", "vector_flat", "hand_painted", "low_poly", "retro_3d"}
     world = {
-        "hud_text": f"{recipe.display_name} — WASD / Left Stick to move, Space / South Button to jump",
+        "hud_text": f"{recipe.display_name} — WASD move, Space jump, hold C crouch, hold V crawl",
         "save_slot": f"{recipe.template_id}_{recipe.variant_id}_autosave",
         "locomotion_controller_asset_id": str(locomotion_controller_id),
         "rendering": {
@@ -785,6 +788,7 @@ def _runtime_world(
                 "Player", "tc_idle", "tc_walk", "tc_walk_forward_right", "tc_walk_right",
                 "tc_walk_backward_right", "tc_walk_backward", "tc_walk_backward_left", "tc_walk_left",
                 "tc_walk_forward_left", "tc_run", "tc_jump", "tc_land", 0.15, 3.4, 0.16,
+                "tc_crouch_idle", "tc_crouch_walk", "tc_crawl_idle", "tc_crawl_walk",
             ]},
             {"node_id": "camera_follow", "operation": "camera.follow", "arguments": [
                 "RuntimeCamera", "Player", *({

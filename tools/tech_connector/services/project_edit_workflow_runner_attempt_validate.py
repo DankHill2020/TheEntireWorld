@@ -22,6 +22,15 @@ def _has_class_scoped_validation_error(error_blob: str, class_name: str) -> bool
     )
 
 
+def _coherent_class_repair_model(selected_model: str, settings: dict) -> str:
+    """Use the installed deep local lane for bounded class-wide repairs."""
+
+    from tech_connector.services.ollama_service import installed_local_quality_model
+
+    chosen = _deps._strong_task_model(selected_model)
+    return installed_local_quality_model(chosen, settings)
+
+
 def _compact_local_class_repair_stage(stage: _deps.ProjectEditPromptStage) -> _deps.ProjectEditPromptStage:
     """Give a local coder the exact owner and failures without plan noise."""
 
@@ -29,6 +38,13 @@ def _compact_local_class_repair_stage(stage: _deps.ProjectEditPromptStage) -> _d
     targets = [str(value) for value in metadata.get("symbols") or []]
     objective = str(metadata.get("full_objective") or "").strip()
     owner_source = str(metadata.get("owner_source") or "").strip()
+    code_blocks = _deps.re.findall(
+        r"```(?:python|py)?\s*\n(.*?)\n?```",
+        owner_source,
+        flags=_deps.re.IGNORECASE | _deps.re.DOTALL,
+    )
+    if code_blocks:
+        owner_source = "\n\n".join(block.strip() for block in code_blocks)
     failures = [str(value) for value in metadata.get("all_validation_errors") or []]
     if not targets or not objective or not owner_source or not failures:
         return stage
@@ -37,7 +53,17 @@ def _compact_local_class_repair_stage(stage: _deps.ProjectEditPromptStage) -> _d
         owner_source,
         flags=_deps.re.MULTILINE,
     )
+    method_names = list(dict.fromkeys(
+        match.group(1)
+        for match in _deps.re.finditer(
+            r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(",
+            owner_source,
+            flags=_deps.re.MULTILINE,
+        )
+    ))
     reconstruct_state = (
+        int(metadata.get("repair_attempt") or 1) <= 1
+        and
         len(targets) == 1
         and len(signatures) <= 8
         and any(
@@ -52,14 +78,40 @@ def _compact_local_class_repair_stage(stage: _deps.ProjectEditPromptStage) -> _d
         if reconstruct_state
         else owner_source
     )
+    bounded_journal_guidance = ""
+    if (
+        "sequence" in objective.casefold()
+        and "capacity" in objective.casefold()
+        and "since(" in objective.casefold()
+    ):
+        bounded_journal_guidance = (
+            "Bounded journal invariant: initialize a persistent next-ID counter at "
+            "1 and a separate retained-event container. On append, reserve the "
+            "counter value, increment it, store (ID, topic, deepcopy(payload)), "
+            "evict only the oldest retained record, and return the reserved ID. "
+            "Reserve and increment the counter unconditionally on every append "
+            "inside the lock, outside all eviction, capacity, topic, and filter "
+            "branches; never increment only when the container is full. "
+            "Never return len(events) as an ID or enumerate retained records "
+            "to reconstruct IDs. since compares stored IDs numerically, including "
+            "zero and already-evicted IDs; return tuple((ID, topic, "
+            "deepcopy(payload)), ...) for matching retained records. topic=None "
+            "means no filter; falsey non-None topics remain valid. clear empties "
+            "only retention, never the next-ID counter. Guard all state "
+            "transitions with one lock."
+        )
     prompt = "\n".join(
         [
             "Return only valid Python source for exactly these complete class declarations: "
             + ", ".join(targets) + ".",
             "Preserve every existing public method unless the request explicitly removes it.",
+            "Return the complete class including these current methods: "
+            + (", ".join(method_names) or "(none found)"),
             "The original request and the validation failures are authoritative; fix shared state "
             "across writers and readers, not just one method.",
             "Use imports only when needed. No Markdown, diffs, ellipses, or explanation.",
+            "Keep every physical source line at or below 100 characters, including docstring lines.",
+            bounded_journal_guidance,
             "",
             "Original request:",
             objective,
@@ -400,6 +452,15 @@ class _ProjectEditAttemptValidatePhase:
                     ):
                         self.focused_candidates = list(
                             self.focused_batch.get("targets") or []
+                        )
+                        self.focused_candidates.extend(
+                            _deps._production_callables_exercised_by_tests(
+                                self.active_validation_files,
+                                [
+                                    target for target in self.focused_candidates
+                                    if _deps.Path(str(target.get("path") or "")).name.startswith("test_")
+                                ],
+                            )
                         )
                         self.focused_validation_errors = list(
                             self.focused_batch.get("errors") or self.errors
@@ -1436,7 +1497,9 @@ class _ProjectEditAttemptValidatePhase:
                 self.class_repair_attempt = max(
                     (self.class_repair_attempts[key] for key in self.class_targets)
                 )
-                self.class_repair_model = _deps._strong_task_model(self.selected_model)
+                self.class_repair_model = _coherent_class_repair_model(
+                    self.selected_model, self.settings,
+                )
                 self.status_callback(
                     "Repairing coherent class chunks: "
                     + ", ".join((name for _path, name in self.class_targets))
@@ -1446,7 +1509,9 @@ class _ProjectEditAttemptValidatePhase:
                 self.class_repair_attempt = max(
                     (self.class_repair_attempts[key] for key in self.class_targets)
                 )
-                self.class_repair_model = _deps._strong_task_model(self.selected_model)
+                self.class_repair_model = _coherent_class_repair_model(
+                    self.selected_model, self.settings,
+                )
             self.class_response, self.class_timing = _deps._query_stage(
                 self.class_stage,
                 selected_model=self.class_repair_model,
@@ -1584,6 +1649,47 @@ class _ProjectEditAttemptValidatePhase:
                         request_prompt=self.prompt,
                     )
                 )
+                # A class replacement can drop constructor state that the
+                # earlier candidate had already established. Repair only a
+                # field named by the fresh, owner-specific validator finding
+                # before comparing this transaction with its baseline.
+                (
+                    self.proposed_class_files,
+                    self._post_class_constructor_state_repairs,
+                ) = _deps._repair_missing_constructor_state(
+                    self.proposed_class_files,
+                    self.proposed_class_quality_errors,
+                )
+                if self._post_class_constructor_state_repairs and self.status_callback:
+                    self.status_callback(
+                        "Applied deterministic class constructor-state repair: "
+                        + "; ".join(self._post_class_constructor_state_repairs)
+                    )
+                if self._post_class_constructor_state_repairs:
+                    self.proposed_class_quality_errors = (
+                        _deps._repair_phase_validation_errors(
+                            self.proposed_class_files,
+                            implementation_plan=self.implementation_plan,
+                            project_root=self.root,
+                            request_prompt=self.prompt,
+                        )
+                    )
+                # A coherent class proposal may fix storage and snapshot
+                # behavior while accidentally resetting its persistent ID in
+                # clear(). Repair that exact proven regression before the
+                # monotonic transaction gate evaluates the whole class.
+                (
+                    self.proposed_class_files,
+                    self._post_class_monotonic_clear_repairs,
+                ) = _deps._repair_monotonic_clear_counter(
+                    self.proposed_class_files,
+                    self.proposed_class_quality_errors,
+                )
+                if self._post_class_monotonic_clear_repairs and self.status_callback:
+                    self.status_callback(
+                        "Applied deterministic class counter repair: "
+                        + "; ".join(self._post_class_monotonic_clear_repairs)
+                    )
                 (
                     self.proposed_class_files,
                     self._post_class_bool_repairs,

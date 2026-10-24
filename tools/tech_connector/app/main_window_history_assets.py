@@ -1824,7 +1824,9 @@ class MainWindowHistoryAssetsMixin:
         account_row.addWidget(QLabel("Account login:"))
         for provider_id in ("openai", "x", "google", "anthropic"):
             provider = PROVIDERS[provider_id]
-            button = QPushButton(provider.display_name)
+            button = QPushButton(
+                "OpenAI browser sign-in" if provider_id == "openai" else provider.display_name
+            )
             button.setToolTip(
                 f"Launch {provider.display_name}'s official account login."
             )
@@ -1835,11 +1837,12 @@ class MainWindowHistoryAssetsMixin:
                 )
 
                 try:
-                    begin_provider_login(selected_provider)
-                    self.append(
-                        f"\n[Model Provider] Opened official {selected_provider} login. "
-                        "Complete login, then select the provider model again.\n"
+                    result = begin_provider_login(selected_provider)
+                    next_step = (
+                        " Complete sign-in, then select the provider model again."
+                        if result.startswith("Opened") else ""
                     )
+                    self.append(f"\n[Model Provider] {result}{next_step}\n")
                 except (OSError, ValueError) as exc:
                     QMessageBox.warning(dialog, "Provider Login", str(exc))
 

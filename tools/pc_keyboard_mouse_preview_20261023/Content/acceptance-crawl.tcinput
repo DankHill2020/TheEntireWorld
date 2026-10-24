@@ -1,0 +1,8 @@
+TCINPUT	1
+jump	NORTH
+crouch	LEFT_SHOULDER
+crawl	SOUTH
+ui_confirm	WEST
+ui_cancel	EAST
+ui_menu	MENU
+CHECKSUM	692ef54d0f24bc0e

@@ -22,19 +22,23 @@ _BRIDGE_CLIENT_SLOTS = threading.BoundedSemaphore(32)
 MENU_NAME = "theEntireWorldMenu"
 MENU_LABEL = "The Entire World Tools"
 
-TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "3"
+TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "5"
 TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = str(globals().get("__file__", ""))
 _MAX_BRIDGE_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_BRIDGE_OUTPUT_CHARS = 8 * 1024 * 1024
 _MAX_BRIDGE_RESPONSE_BYTES = 32 * 1024 * 1024
 _BRIDGE_CONNECTION_TIMEOUT_SECONDS = 30.0
 
-COMMAND_PORT_START = 7001
-COMMAND_PORT_FILE = (
-    os.path.join(os.path.expanduser("~"), "temp", "maya_port.txt")
+try:
+    _configured_command_port = int(os.environ.get("MAYA_COMMAND_PORT", "7001"))
+except (TypeError, ValueError):
+    _configured_command_port = 7001
+COMMAND_PORT_START = _configured_command_port if 0 < _configured_command_port < 65536 else 7001
+COMMAND_PORT_FILE = os.environ.get("MAYA_COMMAND_PORT_FILE") or os.path.join(
+    os.path.expanduser("~"), "temp", "maya_port.txt"
 )
-COMMAND_PORT_SESSION_FILE = (
-    os.path.join(os.path.expanduser("~"), "temp", "maya_sessions.json")
+COMMAND_PORT_SESSION_FILE = os.environ.get("MAYA_COMMAND_SESSION_FILE") or os.path.join(
+    os.path.expanduser("~"), "temp", "maya_sessions.json"
 )
 
 
@@ -542,6 +546,14 @@ def _show_hik_ui(*args):
         log_exception("Failed to launch Human IK UI.")
 
 
+def _transfer_fbx_animation_to_controls(*args):
+    try:
+        from maya_tools.Rigging.mocap.fbx_to_control_rig import transfer_fbx_animation_dialog
+        transfer_fbx_animation_dialog()
+    except Exception:
+        log_exception("Failed to transfer FBX animation to Maya controls.")
+
+
 def create_maya_menu():
     main_window = _get_maya_main_window()
 
@@ -572,6 +584,13 @@ def create_maya_menu():
             label="Human IK UI",
             parent=main_menu,
             command=_show_hik_ui
+        )
+
+        cmds.menuItem(
+            "fbxToControlRigItem",
+            label="Transfer FBX Animation to Control Rig",
+            parent=main_menu,
+            command=_transfer_fbx_animation_to_controls,
         )
 
         log("Menu created.")

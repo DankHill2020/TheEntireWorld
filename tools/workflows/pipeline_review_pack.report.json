@@ -1,0 +1,350 @@
+{
+  "schema": "tech_connector.pipeline_review_pack.v1",
+  "project_root": "C:\\depot\\tools",
+  "pipeline_count": 10,
+  "pipelines": [
+    {
+      "name": "review_maya_blender_unreal_character",
+      "category": "rigged_character",
+      "file_types": [
+        ".ma/.mb scene",
+        ".fbx",
+        "Unreal skeletal assets"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_blender_unreal_character.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_blender_unreal_character.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_maya_blender_unreal_character.py",
+      "hosts": [
+        "maya",
+        "maya",
+        "blender",
+        "blender",
+        "blender",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 7,
+      "data_link_count": 5,
+      "flow_link_count": 6,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 7,
+        "link_count": 11,
+        "execution_order": [
+          "stage_01_maya_pipeline_create_rigged_proxy",
+          "stage_02_maya_animation_export",
+          "stage_03_blender_io_import_fbx",
+          "stage_04_blender_pipeline_process_meshes_for_transfer",
+          "stage_05_blender_blender_export_fbx",
+          "stage_06_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_07_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_blender_unreal_prop_publish",
+      "category": "static_model",
+      "file_types": [
+        ".blend scene",
+        ".fbx",
+        "Unreal static mesh"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_blender_unreal_prop_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_blender_unreal_prop_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_blender_unreal_prop_publish.py",
+      "hosts": [
+        "blender",
+        "blender",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 4,
+      "data_link_count": 3,
+      "flow_link_count": 3,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 4,
+        "link_count": 6,
+        "execution_order": [
+          "stage_01_blender_pipeline_process_meshes_for_transfer",
+          "stage_02_blender_blender_export_fbx",
+          "stage_03_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_04_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_maya_unreal_animation_publish",
+      "category": "animation",
+      "file_types": [
+        ".ma/.mb scene",
+        ".fbx animation",
+        "Unreal animation sequence"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_unreal_animation_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_unreal_animation_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_maya_unreal_animation_publish.py",
+      "hosts": [
+        "maya",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 6,
+      "data_link_count": 6,
+      "flow_link_count": 5,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 6,
+        "link_count": 11,
+        "execution_order": [
+          "stage_01_maya_animation_export",
+          "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_03_unreal_animation_inspect_imported_pipeline",
+          "stage_04_unreal_animation_retarget_imported_if_needed",
+          "stage_05_unreal_animation_report_pipeline_assets",
+          "stage_06_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_motionbuilder_blender_unreal_mocap",
+      "category": "mocap_cleanup",
+      "file_types": [
+        "MotionBuilder take",
+        ".fbx animation",
+        ".blend scene",
+        "Unreal animation sequence"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_motionbuilder_blender_unreal_mocap.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_motionbuilder_blender_unreal_mocap.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_motionbuilder_blender_unreal_mocap.py",
+      "hosts": [
+        "motionbuilder",
+        "blender",
+        "blender",
+        "blender",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 9,
+      "data_link_count": 8,
+      "flow_link_count": 8,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 9,
+        "link_count": 16,
+        "execution_order": [
+          "stage_01_motionbuilder_io_export_fbx",
+          "stage_02_blender_io_import_fbx",
+          "stage_03_blender_blender_clean_animation",
+          "stage_04_blender_blender_export_fbx",
+          "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_06_unreal_animation_inspect_imported_pipeline",
+          "stage_07_unreal_animation_retarget_imported_if_needed",
+          "stage_08_unreal_animation_report_pipeline_assets",
+          "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_houdini_unreal_fx_mesh_publish",
+      "category": "fx_geometry",
+      "file_types": [
+        "Houdini SOP geometry",
+        ".fbx",
+        "Unreal static mesh"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_houdini_unreal_fx_mesh_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_houdini_unreal_fx_mesh_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_houdini_unreal_fx_mesh_publish.py",
+      "hosts": [
+        "houdini",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 3,
+      "data_link_count": 2,
+      "flow_link_count": 2,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 3,
+        "link_count": 4,
+        "execution_order": [
+          "stage_01_houdini_geometry_export",
+          "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_3dsmax_unreal_environment_publish",
+      "category": "environment_model",
+      "file_types": [
+        ".max scene",
+        ".fbx",
+        "Unreal static mesh"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_3dsmax_unreal_environment_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_3dsmax_unreal_environment_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_3dsmax_unreal_environment_publish.py",
+      "hosts": [
+        "3dsmax",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 3,
+      "data_link_count": 2,
+      "flow_link_count": 2,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 3,
+        "link_count": 4,
+        "execution_order": [
+          "stage_01_3dsmax_io_export",
+          "stage_02_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_03_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    },
+    {
+      "name": "review_blender_unity_vehicle_publish",
+      "category": "vehicle_model",
+      "file_types": [
+        ".blend scene",
+        ".fbx",
+        "Unity model asset"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_blender_unity_vehicle_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_blender_unity_vehicle_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_blender_unity_vehicle_publish.py",
+      "hosts": [
+        "blender",
+        "blender",
+        "unity"
+      ],
+      "node_count": 3,
+      "data_link_count": 2,
+      "flow_link_count": 2,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 3,
+        "link_count": 4,
+        "execution_order": [
+          "stage_01_blender_pipeline_process_meshes_for_transfer",
+          "stage_02_blender_io_export_fbx",
+          "stage_03_unity_assets_import_fbx"
+        ]
+      }
+    },
+    {
+      "name": "review_substance_tech_connector_texture_publish",
+      "category": "material_textures",
+      "file_types": [
+        "Substance Painter project",
+        "texture set images",
+        "Tech Connector texture assets"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_substance_tech_connector_texture_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_substance_tech_connector_texture_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_substance_tech_connector_texture_publish.py",
+      "hosts": [
+        "substance_painter",
+        "tech_connector"
+      ],
+      "node_count": 2,
+      "data_link_count": 1,
+      "flow_link_count": 1,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 2,
+        "link_count": 2,
+        "execution_order": [
+          "stage_01_substance_painter_textures_export",
+          "stage_02_tech_connector_asset_import_interchange"
+        ]
+      }
+    },
+    {
+      "name": "review_maya_blender_unity_character_publish",
+      "category": "rigged_character",
+      "file_types": [
+        ".ma/.mb scene",
+        ".fbx",
+        ".blend scene",
+        "Unity character asset"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_blender_unity_character_publish.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_blender_unity_character_publish.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_maya_blender_unity_character_publish.py",
+      "hosts": [
+        "maya",
+        "blender",
+        "blender",
+        "blender",
+        "unity"
+      ],
+      "node_count": 5,
+      "data_link_count": 4,
+      "flow_link_count": 4,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 5,
+        "link_count": 8,
+        "execution_order": [
+          "stage_01_maya_animation_export",
+          "stage_02_blender_io_import_fbx",
+          "stage_03_blender_pipeline_process_meshes_for_transfer",
+          "stage_04_blender_io_export_fbx",
+          "stage_05_unity_assets_import_fbx"
+        ]
+      }
+    },
+    {
+      "name": "review_maya_motionbuilder_unreal_roundtrip",
+      "category": "animation_roundtrip",
+      "file_types": [
+        ".ma/.mb scene",
+        "MotionBuilder take",
+        ".fbx animation",
+        "Unreal animation sequence"
+      ],
+      "manifest": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_motionbuilder_unreal_roundtrip.workflow.json",
+      "module": "C:\\depot\\tools\\workflows\\cross_dcc\\review_maya_motionbuilder_unreal_roundtrip.py",
+      "test": "C:\\depot\\tools\\tests\\test_workflow_cross_dcc_review_maya_motionbuilder_unreal_roundtrip.py",
+      "hosts": [
+        "maya",
+        "motionbuilder",
+        "motionbuilder",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal",
+        "unreal"
+      ],
+      "node_count": 8,
+      "data_link_count": 7,
+      "flow_link_count": 7,
+      "ui_materialization": {
+        "ok": true,
+        "node_count": 8,
+        "link_count": 14,
+        "execution_order": [
+          "stage_01_maya_animation_export",
+          "stage_02_motionbuilder_io_import_fbx",
+          "stage_03_motionbuilder_io_export_fbx",
+          "stage_04_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "stage_05_unreal_animation_inspect_imported_pipeline",
+          "stage_06_unreal_animation_retarget_imported_if_needed",
+          "stage_07_unreal_animation_report_pipeline_assets",
+          "stage_08_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+        ]
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from tech_connector.game_engine.assets.asset_database_service import AssetDatabase
-from tech_connector.game_engine.assets.asset_operations_service import AssetOperationsService
+from tech_connector.game_engine.assets.asset_operations_service import AssetOperationsService, validate_fbx_import
 
 
 def import_interchange_asset(
@@ -35,6 +35,10 @@ def import_interchange_asset(
         raise FileNotFoundError(
             "Pipeline handoff artifact does not exist: " + ", ".join(missing)
         )
+    # Preflight the entire batch so a later character artifact cannot leave
+    # earlier static assets partially imported.
+    for source in sources:
+        validate_fbx_import(source, type_id or ("tc.static_mesh" if source.suffix.casefold() == ".fbx" else ""))
     database = AssetDatabase(root / ".tech_connector" / "assets.sqlite3")
     service = AssetOperationsService(root, database)
     receipts = [

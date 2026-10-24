@@ -635,6 +635,12 @@ def _satisfy_required_dependencies(
     diagnostics: list[str] = []
     capability_gaps: list[dict[str, Any]] = []
     insertions = 0
+    # A pair of mutually dependent candidates can otherwise be moved in front
+    # of each other forever. Bound reordering independently of insertions so a
+    # cyclic prompt fails closed with missing-input gaps instead of hanging.
+    reorders = 0
+    max_reorders = max(8, 2 * len(steps) + max_insertions)
+    reorder_limit_reported = False
     index = 0
     while index < len(steps):
         step = steps[index]
@@ -668,9 +674,10 @@ def _satisfy_required_dependencies(
                     matched, _reason = _output_matches_param(output, param)
                     if matched:
                         later_direct_index = candidate_index
-            if later_direct_index is not None:
+            if later_direct_index is not None and reorders < max_reorders:
                 producer_step = steps.pop(later_direct_index)
                 steps.insert(index, producer_step)
+                reorders += 1
                 diagnostics.append(
                     f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` before `{symbol.get('name')}` for `{param_name}`."
                 )
@@ -692,7 +699,7 @@ def _satisfy_required_dependencies(
                         later_adapter_index = candidate_index
                         later_adapter = _utility_symbol("list_item", index=0)
                         later_adapter_reason = "adapted list output with Get List Item"
-            if later_adapter_index is not None and later_adapter:
+            if later_adapter_index is not None and later_adapter and reorders < max_reorders:
                 producer_step = steps.pop(later_adapter_index)
                 adapter_step = _step_for_symbol(
                     later_adapter,
@@ -703,6 +710,7 @@ def _satisfy_required_dependencies(
                 steps.insert(index, producer_step)
                 steps.insert(index + 1, adapter_step)
                 insertions += 1
+                reorders += 1
                 diagnostics.append(
                     f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` and inserted adapter `{later_adapter.get('name')}` before `{symbol.get('name')}` for `{param_name}`."
                 )
@@ -711,6 +719,12 @@ def _satisfy_required_dependencies(
                 index = max(index - 1, 0)
                 restarted = True
                 break
+
+            if not reorder_limit_reported and reorders >= max_reorders:
+                diagnostics.append(
+                    "Stopped prerequisite reordering after a possible dependency cycle; unresolved inputs require review."
+                )
+                reorder_limit_reported = True
 
             used_names = {str(item.get("symbol", {}).get("name") or "") for item in steps}
             producer, output, reason = _find_producer_for_param(param, symbols, prompt, used_names)
@@ -878,10 +892,17 @@ def _resolve_scope_paths(prompt: str, roots: list[str]) -> list[Path]:
         raw = Path(token.lstrip("@"))
         if raw.is_absolute():
             candidates.append(raw)
-        for root_text in roots:
-            root = Path(root_text)
-            candidates.append(root / normalized)
-            candidates.extend(path for path in root.rglob(Path(normalized).name) if path.name.lower() == Path(normalized).name.lower())
+        else:
+            # An absolute asset/output path is not a project symbol scope.
+            # Recursively searching every project root for its basename made
+            # ordinary FBX/texture prompts block the UI for many seconds.
+            for root_text in roots:
+                root = Path(root_text)
+                candidates.append(root / normalized)
+                candidates.extend(
+                    path for path in root.rglob(Path(normalized).name)
+                    if path.name.lower() == Path(normalized).name.lower()
+                )
         for candidate in candidates:
             try:
                 candidate = candidate.resolve()

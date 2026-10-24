@@ -688,6 +688,7 @@ class ActionExecutionEngine:
             require_live_sessions=require_live_sessions,
             timeout_seconds=float(context.policy.get("pipeline_preflight_timeout_seconds", 5.0)),
             bridge_factory=bridge_factory,
+            verify_live_context=require_live_sessions,
         )
 
     def preflight_plan(self, plan: dict[str, Any], context: ExecutionContext | None = None) -> dict[str, Any]:
@@ -2096,7 +2097,10 @@ def _handle_execute_dcc(
                 callable_name,
                 resolve_runtime_values(params),
                 session_port=int(session_port) if session_port not in (None, "") else None,
-                timeout_seconds=float(context.policy.get("dcc_timeout_seconds", 120.0)),
+                timeout_seconds=float(context.policy.get(
+                    "dcc_timeout_seconds",
+                    300.0 if host == "maya" and operation == "animation.fbx_to_engine" else 120.0,
+                )),
                 cancel_token=context.cancellation_token,
                 retry_attempts=retry_attempts,
                 retry_safe=not mutates_project,

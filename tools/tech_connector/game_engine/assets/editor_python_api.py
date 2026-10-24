@@ -85,6 +85,7 @@ from .world_asset_service import (
     build_partition_preview, build_terrain_preview,
 )
 from .world_build_service import WorldBuildService
+from .ui_document_asset_service import UIDocumentAssetService
 from .procedural_graph_asset_service import ProceduralGraphAssetService
 from tech_connector.game_engine.authoring.procedural_generation_service import ProceduralGraph
 from tech_connector.game_engine.authoring.procedural_graph_tooling_service import (
@@ -140,6 +141,7 @@ class TCEditorAPI:
         self.image_projects = ImageProjectAssetService(self.project_root, self.database)
         self.world = WorldAssetService(self.project_root, self.database)
         self.world_builds = WorldBuildService(self.project_root, self.database)
+        self.ui_documents = UIDocumentAssetService(self.project_root, self.database)
         self.procedural = ProceduralGraphAssetService(self.project_root, self.database)
         self.level_authoring = LevelActorAuthoringService(self.project_root, self.database)
         self._procedural_simulations: dict[str, ProceduralSimulationSession] = {}
@@ -811,6 +813,10 @@ class TCEditorAPI:
 
         return self.level_authoring.actors(level_asset_id)
 
+    def set_level_actor_render_mesh(self, level_asset_id: str, actor_name: str, mesh_asset_id: str) -> dict[str, Any]:
+        """Bind an imported runtime OBJ mesh to a uniquely named Level actor."""
+        return self.level_authoring.set_render_mesh(level_asset_id, actor_name, mesh_asset_id)
+
     def transform_level_actors(
         self, level_asset_id: str, actor_ids: Iterable[str], *,
         translation: Iterable[float] = (0.0, 0.0, 0.0),
@@ -1237,8 +1243,38 @@ class TCEditorAPI:
     def import_asset(self, source_path: str | Path, *, folder: str | Path = "Assets", type_id: str = "", importer_settings: Mapping[str, Any] | None = None):
         return self.assets.import_asset(source_path, folder=folder, type_id=type_id, importer_settings=dict(importer_settings or {}))
 
+    def reimport_asset(self, asset_id: str):
+        """Refresh an imported asset from its recorded source without changing its identity."""
+        return self.assets.reimport_asset(asset_id)
+
+    def create_ui_document(
+        self, name: str, *, folder: str | Path = "Assets/UI", values: Mapping[str, Any] | None = None,
+    ):
+        """Create a validated UI document with a responsive widget hierarchy."""
+        return self.ui_documents.create(name, folder=folder, values=values)
+
+    def update_ui_document(self, asset_id: str, values: Mapping[str, Any], *, replace: bool = False) -> dict[str, Any]:
+        """Update a UI document transactionally; reject invalid hierarchy or references."""
+        return self.ui_documents.update(asset_id, values, replace=replace)
+
+    def validate_ui_document(self, asset_id: str) -> dict[str, Any]:
+        """Return authored UI errors before previewing or cooking."""
+        issues = self.ui_documents.validate(asset_id)
+        return {"valid": not any(item.severity == "error" for item in issues),
+                "issues": [vars(item) for item in issues]}
+
+    def preview_ui_document(self, asset_id: str, *, viewport: tuple[int, int] | None = None) -> dict[str, Any]:
+        """Evaluate stable widget rectangles at a target viewport size."""
+        return self.ui_documents.preview(asset_id, viewport=viewport)
+
+    def cook_ui_document(self, asset_id: str, *, platform: str = "desktop", quality: str = "high") -> DerivedArtifact:
+        """Store a layout preview artifact; this does not qualify runtime UI rendering."""
+        return self.ui_documents.cook(asset_id, platform=platform, quality=quality)
+
     def properties(self, asset_id: str) -> dict[str, Any]:
         record = self.database.asset(asset_id)
+        if record is not None and record.asset_type == "tc.ui_document":
+            return self.ui_documents.properties(asset_id)
         if record is not None and record.asset_type in AUDIO_ASSET_TYPES:
             return self.audio.properties(asset_id)
         if record is not None and record.asset_type in GAMEPLAY_FOUNDATION_TYPES:
@@ -1258,6 +1294,8 @@ class TCEditorAPI:
 
     def set_properties(self, asset_id: str, values: Mapping[str, Any], *, replace: bool = False) -> dict[str, Any]:
         existing = self.database.asset(asset_id)
+        if existing is not None and existing.asset_type == "tc.ui_document":
+            return self.ui_documents.update(asset_id, values, replace=replace)
         if existing is not None and existing.asset_type in AUDIO_ASSET_TYPES:
             return self.audio.update(asset_id, values, replace=replace)
         if existing is not None and existing.asset_type in GAMEPLAY_FOUNDATION_TYPES:
@@ -1934,6 +1972,8 @@ class TCEditorAPI:
                 self.cook_procedural_graph(asset_id, platform=platform, quality=quality)
             elif record is not None and record.asset_type == "tc.prefab":
                 self.cook_prefab(asset_id, platform=platform, quality=quality)
+            elif record is not None and record.asset_type == "tc.ui_document":
+                self.cook_ui_document(asset_id, platform=platform, quality=quality)
             elif record is not None and record.asset_type in {"tc.material", "tc.material_instance"}:
                 self.cook_material(asset_id, platform=platform, quality=quality)
         return self.production.cook_manifest(roots, platform=platform, quality=quality)
@@ -1941,16 +1981,17 @@ class TCEditorAPI:
     def capability_contract(self) -> dict[str, Any]:
         return {
             "schema": "tech_connector.editor_python_api.v1",
-            "asset_operations": ["create_asset", "import_asset", "properties", "set_properties", "cook", "export_assets", "asset_conversion_coverage", "asset_dependency_graph", "plan_asset_reference_replacement", "replace_asset_references", "plan_bulk_asset_operation", "execute_bulk_asset_operation"],
+            "asset_operations": ["create_asset", "import_asset", "reimport_asset", "properties", "set_properties", "cook", "export_assets", "asset_conversion_coverage", "asset_dependency_graph", "plan_asset_reference_replacement", "replace_asset_references", "plan_bulk_asset_operation", "execute_bulk_asset_operation"],
+            "ui_operations": ["create_ui_document", "update_ui_document", "validate_ui_document", "preview_ui_document", "cook_ui_document"],
             "content_browser_operations": ["content_browser_assets", "content_browser_search_help", "content_browser_collections", "save_content_browser_collection", "delete_content_browser_collection", "queue_asset_imports", "process_asset_import_queue", "cancel_asset_import", "asset_revision_history", "asset_source_control_status", "asset_source_control_history", "perforce_changelists", "perforce_asset_action", "content_browser_reference_health", "repair_content_browser_references", "qualify_content_browser"],
-            "launch_operations": ["audit_launch_readiness", "qualify_playable_project", "qualify_realtime_fx", "qualify_world_production", "qualify_content_production", "qualify_capability_evidence", "qualify_dcc_release"],
+            "launch_operations": ["capability_report", "audit_launch_readiness", "qualify_playable_project", "qualify_realtime_fx", "qualify_world_production", "qualify_content_production", "qualify_capability_evidence", "qualify_dcc_release"],
             "prefab_operations": ["create_prefab", "create_prefab_variant", "resolve_prefab", "instantiate_prefab", "apply_prefab_overrides", "revert_prefab_overrides", "validate_prefab", "cook_prefab"],
             "material_operations": ["material_presets", "create_material", "apply_material_preset", "create_material_instance", "resolve_material", "set_material_instance_overrides", "revert_material_instance_overrides", "assign_material_texture", "material_graph_statistics", "validate_material", "cook_material"],
             "shader_operations": ["create_shader_graph", "validate_shader_graph", "compile_shader_graph", "shader_backend_capabilities"],
             "texture_operations": ["texture_import_settings", "set_texture_import_settings", "assign_material_texture"],
             "input_operations": ["properties", "update_input_map", "input_map_audit"],
             "project_template_operations": ["available_game_templates", "available_game_quality_profiles", "create_game_project_from_template", "validate_playable_project"],
-            "level_actor_operations": ["level_actors", "transform_level_actors", "set_level_actor_visibility", "isolate_level_actors", "show_all_level_actors", "set_level_actor_lock", "duplicate_level_actors", "delete_level_actors", "move_level_actors_to_folder", "parent_level_actors", "reorder_level_actor_component", "save_level_camera_bookmark"],
+            "level_actor_operations": ["level_actors", "set_level_actor_render_mesh", "transform_level_actors", "set_level_actor_visibility", "isolate_level_actors", "show_all_level_actors", "set_level_actor_lock", "duplicate_level_actors", "delete_level_actors", "move_level_actors_to_folder", "parent_level_actors", "reorder_level_actor_component", "save_level_camera_bookmark"],
             "locomotion_operations": ["create_locomotion_controller", "validate_locomotion_controller", "cook_locomotion_controller"],
             "animation_operations": ["create_animation_clip", "create_blend_space", "create_animation_mask", "create_animation_controller", "animation_properties", "set_animation_properties", "validate_animation_asset", "evaluate_blend_space", "evaluate_animation_controller", "cook_animation_asset", "convert_unreal_animation", "convert_unity_animation", "convert_animation_export_file", "convert_live_unity_animation", "convert_live_unreal_animation", "export_animation_interchange", "import_animation_interchange"],
             "sequence_operations": ["create_level_sequence", "get_level_sequence", "update_level_sequence", "validate_level_sequence", "evaluate_level_sequence", "level_sequence_render_jobs", "cook_level_sequence", "sequence_binding", "sequence_folder", "sequence_track", "sequence_section", "sequence_level_blend", "sequence_key", "add_sequence_binding", "add_sequence_folder", "add_sequence_track", "add_sequence_section", "add_sequence_key", "transform_sequence_keys", "remove_sequence_track", "remove_sequence_section", "sequence_from_unreal", "sequence_from_unity", "sequence_to_unreal", "sequence_to_unity"],
@@ -1973,6 +2014,12 @@ class TCEditorAPI:
             "cloth_maps": list(CLOTH_MAPS),
             "ui_api_parity": True,
         }
+
+    def capability_report(self) -> dict[str, Any]:
+        """Show asset maturity and declared editor coverage without implying shipping parity."""
+        from .engine_capability_report_service import build_engine_capability_report
+
+        return build_engine_capability_report(self.registry, self.capability_contract(), self)
 
     def audit_launch_readiness(self, *, production: bool = False) -> dict[str, Any]:
         from tech_connector.game_engine.integration.launch_readiness_service import audit_launch_readiness

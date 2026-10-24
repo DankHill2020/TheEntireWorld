@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
 import re
 import sqlite3
 import ast
@@ -125,6 +126,7 @@ _EXCLUDED_REL_PREFIXES = (
     ".github/",
     ".project_ai/",
     "external_tools/",
+    "tech_connector/benchmarks/results/",
     ".venv/",
     "venv/",
     "__pycache__/",
@@ -133,6 +135,8 @@ _EXCLUDED_REL_PREFIXES = (
 
 def _is_excluded_index_path(path: str) -> bool:
     normalized = str(path or "").replace("\\", "/").lower()
+    if re.search(r"(?:^|/)pytest_[^/]+/", normalized):
+        return True
     if re.search(r"/python\d*/lib/", normalized) or re.search(r"/python\d+/lib/", normalized):
         return True
     if "/site-packages/" in normalized or "/dist-packages/" in normalized:
@@ -618,7 +622,12 @@ def _function_location_domain_hints(question: str) -> set[str]:
     return hints
 
 
-def _answer_function_location_question(question: str, active_path: str | None = None) -> str | None:
+def _answer_function_location_question(
+    question: str,
+    active_path: str | None = None,
+    *,
+    project_roots: list[str] | tuple[str, ...] | None = None,
+) -> str | None:
     lower = (question or "").lower()
     if re.search(r"\b(?:what|which|find|locate|show)\s+(?:the\s+)?class(?:es)?\b", lower):
         return None
@@ -638,7 +647,10 @@ def _answer_function_location_question(question: str, active_path: str | None = 
     terms = _function_location_terms(question, active_path=active_path)
     if not terms:
         return None
-    rows = _function_location_rows(terms, active_path=active_path, question=question, limit=8)
+    rows = _function_location_rows(
+        terms, active_path=active_path, question=question,
+        project_roots=project_roots, limit=8,
+    )
     if not rows:
         return (
             "I could not find an indexed project function matching that description.\n\n"
@@ -732,8 +744,24 @@ def _function_location_rows(
     active_path: str | None = None,
     *,
     question: str = "",
+    project_roots: list[str] | tuple[str, ...] | None = None,
     limit: int = 8,
 ) -> list[dict]:
+    allowed_roots = (
+        [os.path.normcase(os.path.abspath(os.path.expanduser(str(root)))) for root in project_roots]
+        if project_roots is not None else None
+    )
+
+    def in_scope(path: str) -> bool:
+        if allowed_roots is None:
+            return True
+        if not path:
+            return False
+        normalized = os.path.normcase(os.path.abspath(str(path)))
+        return any(normalized == root or normalized.startswith(root + os.sep) for root in allowed_roots)
+
+    if active_path and not in_scope(active_path):
+        active_path = None
     active_resolved = ""
     if active_path:
         try:
@@ -769,9 +797,10 @@ def _function_location_rows(
         db_path = project_index_db_path()
     except Exception:
         db_path = None
+    search_roots = list(project_roots) if project_roots is not None else _active_project_roots(active_path)
     source_rows = FileIndexService(db_path=Path()).find_python_declaration_candidates(
         query_terms,
-        _active_project_roots(active_path),
+        search_roots,
         kinds=("function", "method"),
         path_hints=[*domain_hints, *query_terms],
         limit=max(40, int(limit or 8) * 8),
@@ -861,7 +890,7 @@ def _function_location_rows(
         scored.append(item)
     for raw in rows:
         row = dict(raw)
-        if not _is_user_source_row(row):
+        if not _is_user_source_row(row) or not in_scope(str(row.get("path") or "")):
             continue
         score = _function_location_score(row, query_terms, active_resolved, domain_hints=domain_hints)
         if score <= 0:
@@ -1516,35 +1545,60 @@ def _find_symbol_callers(path: Path, function_name: str, project_roots: list[str
     roots = [Path(root) for root in project_roots if root] or [path.parent]
     callers: list[str] = []
     scanned = 0
+    def ranked_callers() -> list[str]:
+        return sorted(
+            set(callers),
+            key=lambda value: (
+                "/tests/" in value.replace("\\", "/").casefold(),
+                value.casefold(),
+            ),
+        )[:limit]
+
     for root in roots:
         if not root.exists():
             continue
-        for candidate in root.rglob("*.py"):
-            if scanned >= 4000 or len(callers) >= limit:
-                return callers
-            scanned += 1
-            normalized = str(candidate).replace("\\", "/").lower()
-            if any(part in normalized for part in ("/.git/", "/.venv/", "/venv/", "/__pycache__/", "/dist/", "/build/")):
-                continue
-            try:
-                source = candidate.read_text(encoding="utf-8", errors="replace")
-                if function_name not in source:
+        for directory, child_dirs, filenames in os.walk(root):
+            parent = Path(directory)
+            child_dirs[:] = sorted(
+                (
+                    name for name in child_dirs
+                    if name.casefold() not in {
+                        ".git", ".venv", "venv", "__pycache__", "dist", "build"
+                    }
+                    and not name.startswith(".")
+                    and not name.casefold().startswith("test_tmp_")
+                    and not name.casefold().startswith("pytest_")
+                    and not (
+                        parent.name.casefold() == "benchmarks"
+                        and name.casefold() == "results"
+                    )
+                ),
+                key=str.casefold,
+            )
+            for filename in sorted(filenames, key=str.casefold):
+                if not filename.endswith(".py"):
                     continue
-                tree = ast.parse(source)
-                call_lines = sorted({
-                    int(getattr(node, "lineno", 0) or 0)
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.Call)
-                    and _call_name(node.func).rsplit(".", 1)[-1] == function_name
-                    and int(getattr(node, "lineno", 0) or 0) > 0
-                })
-                for line_no in call_lines:
-                    callers.append(f"{candidate}:{line_no}")
-                    if len(callers) >= limit:
-                        return callers
-            except Exception:
-                continue
-    return callers
+                if scanned >= 4000:
+                    return ranked_callers()
+                scanned += 1
+                candidate = parent / filename
+                try:
+                    source = candidate.read_text(encoding="utf-8", errors="replace")
+                    if function_name not in source:
+                        continue
+                    tree = ast.parse(source)
+                    call_lines = sorted({
+                        int(getattr(node, "lineno", 0) or 0)
+                        for node in ast.walk(tree)
+                        if isinstance(node, ast.Call)
+                        and _call_name(node.func).rsplit(".", 1)[-1] == function_name
+                        and int(getattr(node, "lineno", 0) or 0) > 0
+                    })
+                    for line_no in call_lines:
+                        callers.append(f"{candidate}:{line_no}")
+                except Exception:
+                    continue
+    return ranked_callers()
 
 
 def _explicit_caller_target(question: str) -> str:
@@ -2637,7 +2691,9 @@ def answer_simple_project_index_question(
     if scoped_answer:
         return scoped_answer
 
-    location_answer = _answer_function_location_question(question, active_path=active_path)
+    location_answer = _answer_function_location_question(
+        question, active_path=active_path, project_roots=project_roots,
+    )
     if location_answer:
         return location_answer
 
@@ -3064,6 +3120,123 @@ def answer_project_dependency_question(question: str, active_path: str | None = 
     return "\n".join(lines)
 
 
+def _gather_source_review_candidates(question: str, project_roots: list[str]) -> str:
+    """Provide bounded source excerpts and narrowly evidenced static findings."""
+
+    lower = (question or "").casefold()
+    host = next(
+        (name for name in ("unreal", "maya", "blender", "motionbuilder", "substance_painter")
+         if name in lower),
+        "",
+    )
+    if not host:
+        return "A source review needs a named host or file; no findings were verified."
+    terms = [
+        term.casefold() for term in _clean_index_query(question).split()
+        if term.casefold() not in {
+            "performance", "risk", "risks", "line", "level", "evidence",
+            "but", "file", "files", host,
+        }
+    ]
+    roots = [Path(value).expanduser().resolve() for value in project_roots]
+    candidates: list[tuple[int, Path, list[str]]] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for folder in (
+            root / "tech_connector" / "services" / host,
+            root / "tech_connector" / "bridges" / host,
+            root / f"{host}_tools",
+        ):
+            if not folder.is_dir():
+                continue
+            for path in folder.glob("**/*.py"):
+                resolved = path.resolve()
+                if resolved in seen or any(
+                    part.startswith(".") for part in path.relative_to(folder).parts
+                ):
+                    continue
+                seen.add(resolved)
+                name = path.stem.casefold()
+                if terms and not any(term in name for term in terms):
+                    continue
+                try:
+                    if path.stat().st_size > 180_000:
+                        continue
+                    lines = path.read_text(encoding="utf-8").splitlines()
+                except (OSError, UnicodeError):
+                    continue
+                score = sum(5 for term in terms if term in name)
+                score += sum(min(2, sum(term in line.casefold() for line in lines))
+                             for term in terms)
+                if "mutation" in terms and "graph" in name:
+                    # A graph patch is the concrete mutation surface; general
+                    # graph specifications can mention planning just as often.
+                    score += 12 if "patch" in name else 6 if "edit" in name else 0
+                if score:
+                    candidates.append((score, path, lines))
+    candidates.sort(key=lambda row: (-row[0], str(row[1]).casefold()))
+    if not candidates:
+        return "No matching first-party source files were found; no review findings were verified."
+    body = [
+        "Fresh first-party source candidates (not review findings):",
+    ]
+    if "performance" in lower and host == "unreal":
+        for _, path, lines in candidates[:5]:
+            if "graph" not in path.stem.casefold() or "patch" not in path.stem.casefold():
+                continue
+            try:
+                tree = ast.parse("\n".join(lines), filename=str(path))
+            except SyntaxError:
+                continue
+            for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):
+                for outer in (node for node in ast.walk(function) if isinstance(node, ast.For)):
+                    if not (
+                        isinstance(outer.iter, ast.Attribute)
+                        and outer.iter.attr == "operations"
+                    ):
+                        continue
+                    for statement in outer.body:
+                        for inner in ast.walk(statement):
+                            if not (
+                                isinstance(inner, ast.For)
+                                and isinstance(inner.iter, ast.Name)
+                                and inner.iter.id == "graph_nodes"
+                            ):
+                                continue
+                            body.insert(0, (
+                                "Potential performance risk (static inference): "
+                                f"{path}:{outer.lineno} loops over patch operations; "
+                                f"{path}:{inner.lineno} rescans graph_nodes within that loop. "
+                                "For add-node operations, validation work can grow with "
+                                "the product of operation count and graph-node count. "
+                                "Runtime impact has not been measured."
+                            ))
+                            break
+                        if body[0].startswith("Potential performance risk"):
+                            break
+                    if body[0].startswith("Potential performance risk"):
+                        break
+                if body[0].startswith("Potential performance risk"):
+                    break
+            if body[0].startswith("Potential performance risk"):
+                break
+    if not body[0].startswith("Potential performance risk"):
+        body.append("Source inspection is required before claiming a performance risk.")
+    for index, (_, path, lines) in enumerate(candidates[:5], 1):
+        matches = [i for i, line in enumerate(lines)
+                   if line.lstrip().startswith(("def ", "class "))
+                   and any(term in line.casefold() for term in terms)]
+        if not matches:
+            matches = [i for i, line in enumerate(lines)
+                       if any(term in line.casefold() for term in terms)]
+        body.append(f"[{index}] {path} ({len(lines)} lines)")
+        for line_index in matches[:3]:
+            start = max(0, line_index - 1)
+            end = min(len(lines), line_index + 5)
+            body.extend(f"  {i + 1}: {lines[i][:180]}" for i in range(start, end))
+    return "\n".join(body)
+
+
 def detect_project_search_mode(question: str) -> str:
     """Classify a project-wide request into a retrieval mode."""
     lower = (question or "").lower()
@@ -3072,6 +3245,11 @@ def detect_project_search_mode(question: str) -> str:
         return ProjectSearchMode.RESEARCH
     if is_project_research_request(question):
         return ProjectSearchMode.RESEARCH
+
+    if re.search(r"\b(review|audit)\b", lower) and re.search(
+        r"\b(performance|risks?|bugs?|security|line.level)\b", lower
+    ):
+        return "source_review"
 
     if re.search(
         r"^\s*(?:do\s+(?:we|i)\s+have|are\s+there|is\s+there|what|which)\b",
@@ -3120,6 +3298,7 @@ def gather_project_search_context(
     limit: int = 100,
     *,
     scope: str | None = None,
+    requested_project_roots: list[str] | tuple[str, ...] | None = None,
 ) -> str:
     """Gather whole-project evidence using the SQLite knowledge index.
 
@@ -3139,7 +3318,10 @@ def gather_project_search_context(
 
     mode = detect_project_search_mode(question)
     scope = scope or detect_search_scope(question)
-    project_roots = _active_project_roots(active_path)
+    project_roots = (
+        [str(Path(value).expanduser().resolve()) for value in requested_project_roots]
+        if requested_project_roots else _active_project_roots(active_path)
+    )
     terms = extract_code_search_terms(question)
     first_term = terms[0] if terms else ""
 
@@ -3154,6 +3336,10 @@ def gather_project_search_context(
     ]
 
     try:
+        if mode == "source_review":
+            return "\n".join(header) + _gather_source_review_candidates(
+                question, project_roots
+            )
         if mode == ProjectSearchMode.RESEARCH:
             answer = (
                 answer_scoped_member_behavior_question(
@@ -3393,6 +3579,16 @@ def build_deterministic_project_search_answer(
         return "The project index did not return evidence for that request."
     if "[Project search error]" in context:
         return context[:max_chars]
+
+    if detect_project_search_mode(question) == "source_review":
+        finding = "Potential performance risk (static inference):" in context
+        return (
+            ("I found one source-backed potential performance risk, but have not "
+             "completed the full code review.\n\n" if finding else
+             "I found bounded, current source candidates, but have not completed "
+             "the requested code review or verified a performance finding.\n\n")
+            + context[:max_chars]
+        )
 
     lines = [
         "I used the local project index for this, without sending the request to the LLM.",

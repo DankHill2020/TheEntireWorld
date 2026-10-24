@@ -1553,6 +1553,39 @@ def _imported_call_api_contracts(
                 return True
             if isinstance(found, ast.ClassDef):
                 current_nodes = list(found.body)
+            elif isinstance(found, ast.Import):
+                imported = next(
+                    (
+                        alias for alias in found.names
+                        if (alias.asname or alias.name.split(".", 1)[0]) == part
+                    ),
+                    None,
+                )
+                if imported is None:
+                    return None
+                import_root = (
+                    imported.name if imported.asname
+                    else imported.name.split(".", 1)[0]
+                )
+                return installed_symbol_exists(
+                    ".".join([import_root, *remainder[index + 1:]])
+                )
+            elif isinstance(found, ast.ImportFrom) and found.module:
+                imported = next(
+                    (
+                        alias for alias in found.names
+                        if (alias.asname or alias.name) == part
+                    ),
+                    None,
+                )
+                if imported is None:
+                    return None
+                return installed_symbol_exists(
+                    ".".join([
+                        found.module, imported.name,
+                        *remainder[index + 1:],
+                    ])
+                )
             else:
                 return False
         return True
@@ -1636,6 +1669,59 @@ def _imported_call_api_contracts(
                 return False
         return False if imported_any_owner else None
 
+    parent_by_node = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    local_bindings: dict[ast.AST, set[str]] = {}
+    global_bindings: dict[ast.AST, set[str]] = {}
+
+    def function_local_bindings(scope: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+        if scope in local_bindings:
+            return local_bindings[scope]
+        names = {
+            arg.arg
+            for arg in (
+                scope.args.posonlyargs + scope.args.args + scope.args.kwonlyargs
+            )
+        }
+        if scope.args.vararg:
+            names.add(scope.args.vararg.arg)
+        if scope.args.kwarg:
+            names.add(scope.args.kwarg.arg)
+        global_names: set[str] = set()
+
+        class _LocalBindingVisitor(ast.NodeVisitor):
+            def visit_Name(self, node: ast.Name) -> None:
+                if isinstance(node.ctx, ast.Store):
+                    names.add(node.id)
+
+            def visit_Import(self, node: ast.Import) -> None:
+                names.update(alias.asname or alias.name.split(".", 1)[0] for alias in node.names)
+
+            def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+                names.update(alias.asname or alias.name for alias in node.names)
+
+            def visit_Global(self, node: ast.Global) -> None:
+                global_names.update(node.names)
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                names.add(node.name)
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                names.add(node.name)
+
+        binder = _LocalBindingVisitor()
+        for statement in scope.body:
+            binder.visit(statement)
+        names.difference_update(global_names)
+        local_bindings[scope] = names
+        global_bindings[scope] = global_names
+        return names
+
     invalid: set[str] = set()
     unresolved: set[str] = set()
     for node in ast.walk(tree):
@@ -1643,6 +1729,22 @@ def _imported_call_api_contracts(
             continue
         chain = expression_chain(node.func)
         if not chain or chain[0] not in imports:
+            continue
+        enclosing = parent_by_node.get(node)
+        shadowed_import = False
+        while enclosing is not None:
+            if isinstance(enclosing, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bindings = function_local_bindings(enclosing)
+                if chain[0] in global_bindings[enclosing]:
+                    # A global declaration bypasses every enclosing closure.
+                    break
+                if chain[0] in bindings:
+                    shadowed_import = True
+                    break
+            enclosing = parent_by_node.get(enclosing)
+        if shadowed_import:
+            # A local or captured instance shadows a module alias. Nested
+            # callbacks in tests commonly close over the instance.
             continue
         imported_parts = [
             part for part in imports[chain[0]].split(".") if part
@@ -1996,7 +2098,9 @@ def _generated_source_presentation_issues(
     return sorted(set(issues))
 
 
-def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
+def _incomplete_generated_type_hints(
+    tree: ast.AST, *, reject_public_object: bool = False
+) -> list[str]:
     """Return generated callables with missing or invalid annotation surfaces."""
 
     parent_by_node = {
@@ -2015,11 +2119,23 @@ def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
         annotation: ast.AST | None,
         *,
         reject_any: bool = False,
+        reject_object: bool = False,
     ) -> bool:
         if annotation is None:
             return True
         if reject_any and any(
-            isinstance(child, ast.Name) and child.id == "Any"
+            (isinstance(child, ast.Name) and child.id == "Any")
+            or (
+                isinstance(child, ast.Attribute)
+                and child.attr == "Any"
+                and isinstance(child.value, ast.Name)
+                and child.value.id in {"typing", "typing_extensions"}
+            )
+            for child in ast.walk(annotation)
+        ):
+            return True
+        if reject_object and any(
+            isinstance(child, ast.Name) and child.id == "object"
             for child in ast.walk(annotation)
         ):
             return True
@@ -2073,6 +2189,7 @@ def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
                 reject_any=public_surface
                 and argument is not function.args.vararg
                 and argument is not function.args.kwarg,
+                reject_object=reject_public_object and public_surface,
             )
         ]
         reasons: list[str] = []
@@ -2081,6 +2198,7 @@ def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
         if invalid_annotation(
             function.returns,
             reject_any=public_surface,
+            reject_object=reject_public_object and public_surface,
         ):
             reasons.append("return")
         invalid_local_annotations = [
@@ -2091,6 +2209,20 @@ def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
         ]
         if invalid_local_annotations:
             reasons.append("local annotations")
+        typed_self_attributes: set[str] = set()
+        if isinstance(parent, ast.ClassDef):
+            for member in parent.body:
+                if isinstance(member, ast.AnnAssign) and isinstance(member.target, ast.Name):
+                    typed_self_attributes.add(member.target.id)
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and member.name == "__init__":
+                    typed_self_attributes.update(
+                        annotated.target.attr
+                        for annotated in ast.walk(member)
+                        if isinstance(annotated, ast.AnnAssign)
+                        and isinstance(annotated.target, ast.Attribute)
+                        and isinstance(annotated.target.value, ast.Name)
+                        and annotated.target.value.id == "self"
+                    )
         untyped_empty_collection_attributes = [
             node
             for node in ast.walk(function)
@@ -2102,6 +2234,7 @@ def _incomplete_generated_type_hints(tree: ast.AST) -> list[str]:
                 isinstance(target, ast.Attribute)
                 and isinstance(target.value, ast.Name)
                 and target.value.id == "self"
+                and target.attr not in typed_self_attributes
                 for target in node.targets
             )
         ]
@@ -2462,6 +2595,29 @@ def build_project_edit_function_repair_contract(
                     f"{Path(path_text).name}:{callable_node.name}\n{complete_caller}"
                 )
     failure_text = "\n".join(str(item) for item in validation_errors)
+    if re.search(
+        r"\bboth\s+(?:paths|directions)\s+must\s+validate\b",
+        objective + "\n" + failure_text,
+        flags=re.IGNORECASE,
+    ) and node.name.startswith(("encode_", "decode_")):
+        counterpart = (
+            "decode_" + node.name.removeprefix("encode_")
+            if node.name.startswith("encode_")
+            else "encode_" + node.name.removeprefix("decode_")
+        )
+        sibling = next(
+            (item for item in sibling_nodes if item.name == counterpart), None
+        )
+        if sibling is not None:
+            sibling_source = (
+                ast.get_source_segment(module_source, sibling)
+                or ast.unparse(sibling)
+            )
+            if len(sibling_source) <= 2_400:
+                state_context.append(
+                    f"Current counterpart {counterpart} (read-only context; "
+                    f"repair only {node.name}):\n{sibling_source}"
+                )
     needles = [Path(path).name.lower(), parts[-1].lower(), symbol.lower()]
     lower_failure = failure_text.lower()
     positions = [
@@ -2776,7 +2932,10 @@ def build_project_edit_function_repair_contract(
 def _unresolved_generated_names_by_callable(tree: ast.AST) -> dict[int, list[str]]:
     """Return unresolved names for each callable independently."""
 
-    module_names = set(dir(builtins))
+    module_names = set(dir(builtins)) | {
+        "__builtins__", "__cached__", "__doc__", "__file__",
+        "__loader__", "__name__", "__package__", "__spec__",
+    }
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             module_names.add(node.name)
@@ -2848,14 +3007,31 @@ def _unresolved_generated_names_by_callable(tree: ast.AST) -> dict[int, list[str
                 )
             elif isinstance(node, ast.ClassDef):
                 local_names.add(node.name)
-        unresolved_by_callable[id(function)] = sorted({
+        unresolved_body = {
             node.id
             for node in ast.walk(function)
             if isinstance(node, ast.Name)
             and isinstance(node.ctx, ast.Load)
             and node.id not in local_names
             and node.id not in module_names
-        })
+        }
+        # Function signatures are evaluated in the enclosing/module scope,
+        # before any import inside the body runs. Do not let a local typing
+        # import hide an unresolved public annotation such as `-> Tuple[...]`.
+        annotation_roots = [
+            *(argument.annotation for argument in arguments
+              if argument.annotation is not None),
+            *([function.returns] if function.returns is not None else []),
+        ]
+        unresolved_signatures = {
+            child.id
+            for annotation in annotation_roots
+            for child in ast.walk(annotation)
+            if isinstance(child, ast.Name) and child.id not in module_names
+        }
+        unresolved_by_callable[id(function)] = sorted(
+            unresolved_body | unresolved_signatures
+        )
     return unresolved_by_callable
 
 
@@ -3564,6 +3740,58 @@ def _repair_local_module_fallback_imports(
     ]
 
 
+def _qualify_sibling_package_imports(
+    source: str,
+    *,
+    target_path: Path,
+    project_root: str | None,
+) -> tuple[str, list[str]]:
+    """Qualify bare sibling imports that would fail inside a Python package."""
+
+    if not project_root:
+        return source, []
+    root = Path(project_root).resolve()
+    parent = target_path.resolve().parent
+    try:
+        package_parts = parent.relative_to(root).parts
+    except ValueError:
+        return source, []
+    if not package_parts or not (parent / "__init__.py").is_file():
+        return source, []
+    try:
+        tree = ast.parse(source, filename=str(target_path))
+    except SyntaxError:
+        return source, []
+    lines = source.splitlines(keepends=True)
+    replacements: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+            continue
+        if "." in node.module or node.lineno != node.end_lineno:
+            continue
+        sibling = parent / f"{node.module}.py"
+        if not sibling.is_file() or sibling.resolve() == target_path.resolve():
+            continue
+        line = lines[node.lineno - 1]
+        indent = line[: len(line) - len(line.lstrip())]
+        qualified = ".".join((*package_parts, node.module))
+        aliases = ", ".join(
+            f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+            for alias in node.names
+        )
+        newline = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+        replacements.append(
+            (node.lineno - 1, f"{indent}from {qualified} import {aliases}{newline}")
+        )
+    if not replacements:
+        return source, []
+    for line_index, replacement in replacements:
+        lines[line_index] = replacement
+    return "".join(lines), [
+        f"{target_path.name}: qualified {len(replacements)} package sibling import(s)."
+    ]
+
+
 def resolve_project_edit_standard_library_symbols(
     generated_files: list[tuple[str, str, str]],
     *,
@@ -3579,6 +3807,8 @@ def resolve_project_edit_standard_library_symbols(
         "MagicMock": "from unittest.mock import MagicMock",
         "Mock": "from unittest.mock import Mock",
         "NamedTemporaryFile": "from tempfile import NamedTemporaryFile",
+        "Path": "from pathlib import Path",
+        "copy": "import copy",
         "defaultdict": "from collections import defaultdict",
         "deepcopy": "from copy import deepcopy",
         "deque": "from collections import deque",
@@ -3598,6 +3828,12 @@ def resolve_project_edit_standard_library_symbols(
     updated = list(generated_files)
     fixes: list[str] = []
     for index, (path_text, original, source) in enumerate(updated):
+        source, package_fixes = _qualify_sibling_package_imports(
+            source,
+            target_path=Path(path_text),
+            project_root=project_root,
+        )
+        fixes.extend(package_fixes)
         source, repair_fixes = _repair_local_module_fallback_imports(
             source,
             target_path=Path(path_text),

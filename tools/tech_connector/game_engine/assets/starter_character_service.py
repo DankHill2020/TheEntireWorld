@@ -721,6 +721,8 @@ def _author_starter_locomotion_clips(document: FederatedSceneDocument) -> None:
         ("tc_pivot_right", "TC Pivot Right", 1, 19, 24.0),
         ("tc_crouch_idle", "TC Crouch Idle", 1, 49, 24.0),
         ("tc_crouch_walk", "TC Crouch Walk", 1, 25, 24.0),
+        ("tc_crawl_idle", "TC Crawl Idle", 1, 25, 24.0),
+        ("tc_crawl_walk", "TC Crawl Walk", 1, 25, 24.0),
         ("tc_fall", "TC Fall", 1, 25, 24.0),
     )
     non_looping = {"tc_jump", "tc_land", "tc_start_forward", "tc_stop_forward", "tc_pivot_left", "tc_pivot_right"}
@@ -799,6 +801,21 @@ def _author_starter_locomotion_clips(document: FederatedSceneDocument) -> None:
             set_keyframe(graph, clip, joint("tc_l_knee"), "rotateX", frame, 58.0)
             set_keyframe(graph, clip, joint("tc_r_knee"), "rotateX", frame, 58.0)
             set_keyframe(graph, clip, joint("tc_spine_01"), "rotateX", frame, 12.0)
+    for clip in ("tc_crawl_idle", "tc_crawl_walk"):
+        end = int(graph.animation[clip]["end_frame"])
+        for frame in (1, end):
+            set_keyframe(graph, clip, joint("tc_hips"), "translateY", frame, 0.38)
+            set_keyframe(graph, clip, joint("tc_spine_01"), "rotateX", frame, 62.0)
+            for name in ("tc_l_knee", "tc_r_knee"):
+                set_keyframe(graph, clip, joint(name), "rotateX", frame, 82.0)
+            for name in ("tc_l_upperarm", "tc_r_upperarm"):
+                set_keyframe(graph, clip, joint(name), "rotateX", frame, -58.0)
+        if clip == "tc_crawl_walk":
+            for name, sign in (("tc_l_upperarm", 1.0), ("tc_r_upperarm", -1.0),
+                               ("tc_l_thigh", -1.0), ("tc_r_thigh", 1.0)):
+                base = -58.0 if "upperarm" in name else 0.0
+                for frame, value in ((1, -18.0), (13, 18.0), (25, -18.0)):
+                    set_keyframe(graph, clip, joint(name), "rotateX", frame, base + value * sign)
     for frame, value in ((1, 8.0), (13, 20.0), (25, 28.0)):
         set_keyframe(graph, "tc_fall", joint("tc_l_upperarm"), "rotateZ", frame, value)
         set_keyframe(graph, "tc_fall", joint("tc_r_upperarm"), "rotateZ", frame, -value)

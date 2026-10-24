@@ -53,6 +53,111 @@ from tech_connector.services.implementation_plan_quality_part_02 import (
 )
 
 
+def _remove_redundant_falsey_payload_guard(source: str) -> str:
+    """Drop a payload truthiness rejection only after exact-key proof."""
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines(keepends=True)
+    for function in (
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        payload_key_sets = {
+            target.id
+            for statement in function.body
+            if isinstance(statement, ast.Assign)
+            and isinstance(statement.value, ast.Set)
+            and any(
+                isinstance(element, ast.Constant) and element.value == "payload"
+                for element in statement.value.elts
+            )
+            for target in statement.targets
+            if isinstance(target, ast.Name)
+        }
+        for index, guard in enumerate(function.body):
+            if not (
+                isinstance(guard, ast.If)
+                and not guard.orelse
+                and len(guard.body) == 1
+                and isinstance(guard.body[0], ast.Raise)
+            ):
+                continue
+            rejects_falsey = (
+                isinstance(guard.test, ast.UnaryOp)
+                and isinstance(guard.test.op, ast.Not)
+                and isinstance(guard.test.operand, ast.Name)
+                and guard.test.operand.id == "payload"
+            ) or (
+                isinstance(guard.test, ast.Compare)
+                and isinstance(guard.test.left, ast.Name)
+                and guard.test.left.id == "payload"
+                and len(guard.test.ops) == 1
+                and isinstance(guard.test.ops[0], (ast.Is, ast.Eq))
+                and len(guard.test.comparators) == 1
+                and isinstance(guard.test.comparators[0], ast.Constant)
+                and guard.test.comparators[0].value is None
+            )
+            if not rejects_falsey:
+                continue
+            prior = function.body[:index]
+            payload_from_mapping = any(
+                isinstance(statement, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "payload"
+                    for target in statement.targets
+                )
+                and (
+                    isinstance(statement.value, ast.Subscript)
+                    and isinstance(statement.value.slice, ast.Constant)
+                    and statement.value.slice.value == "payload"
+                    or isinstance(statement.value, ast.Call)
+                    and isinstance(statement.value.func, ast.Attribute)
+                    and statement.value.func.attr == "get"
+                    and statement.value.args
+                    and isinstance(statement.value.args[0], ast.Constant)
+                    and statement.value.args[0].value == "payload"
+                )
+                for statement in prior
+            )
+            exact_keys_proven = any(
+                isinstance(statement, ast.If)
+                and any(isinstance(node, ast.Raise) for node in ast.walk(statement))
+                and any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "set"
+                    for node in ast.walk(statement.test)
+                )
+                and (
+                    any(
+                        isinstance(node, ast.Name)
+                        and node.id in payload_key_sets
+                        for node in ast.walk(statement.test)
+                    )
+                    or any(
+                        isinstance(node, ast.Constant)
+                        and node.value == "payload"
+                        for node in ast.walk(statement.test)
+                    )
+                )
+                for statement in prior
+            )
+            if not (payload_from_mapping and exact_keys_proven):
+                continue
+            candidate = "".join(
+                lines[:guard.lineno - 1] + lines[int(guard.end_lineno or guard.lineno):]
+            )
+            try:
+                ast.parse(candidate)
+            except SyntaxError:
+                continue
+            return candidate
+    return source
+
+
 def apply_deterministic_implementation_plan_repairs(
     implementation_plan: Mapping[str, Any],
     generated_files: list[tuple[str, str, str]],
@@ -168,6 +273,18 @@ def apply_deterministic_implementation_plan_repairs(
             tree = ast.parse(source, filename=path)
         except SyntaxError:
             continue
+        if (
+            re.search(r"\b(?:falsey|falsy)\s+payload", requirement_text, re.I)
+            and re.search(r"\bexactly\b[^.;]{0,90}\bkeys\b", requirement_text, re.I)
+        ):
+            cleaned = _remove_redundant_falsey_payload_guard(source)
+            if cleaned != source:
+                source = cleaned
+                tree = ast.parse(source, filename=path)
+                updated[index] = (path_text, original, source)
+                fixes.append(
+                    f"{path}: removed payload truthiness rejection after exact-key validation."
+                )
         property_accesses_by_owner: dict[str, set[str]] = {}
         verified_dependency_imports: set[tuple[str, str]] = set()
         for chunk in chunks:
@@ -731,20 +848,30 @@ def apply_deterministic_implementation_plan_repairs(
                 )
                 dead_assignment_ranges.append((start, end, target_name))
         if dead_assignment_ranges:
+            pruned_source = source
             for start, end, _name in sorted(
                 dead_assignment_ranges,
                 reverse=True,
             ):
-                source = source[:start] + source[end:]
-            tree = ast.parse(source, filename=path)
-            updated[index] = (path_text, original, source)
-            fixes.append(
-                f"{path}: removed side-effect-free unused local assignments: "
-                + ", ".join(
-                    name for _start, _end, name in dead_assignment_ranges
+                pruned_source = pruned_source[:start] + pruned_source[end:]
+            try:
+                pruned_tree = ast.parse(pruned_source, filename=path)
+            except SyntaxError:
+                # Removing the sole statement in an if/else/loop suite can
+                # invalidate otherwise parseable model output. Keep the safe
+                # candidate and let normal validation report real defects.
+                pass
+            else:
+                source = pruned_source
+                tree = pruned_tree
+                updated[index] = (path_text, original, source)
+                fixes.append(
+                    f"{path}: removed side-effect-free unused local assignments: "
+                    + ", ".join(
+                        name for _start, _end, name in dead_assignment_ranges
+                    )
+                    + "."
                 )
-                + "."
-            )
         typing_exports = set(getattr(importlib.import_module("typing"), "__all__", ()))
         loaded_names = {
             node.id

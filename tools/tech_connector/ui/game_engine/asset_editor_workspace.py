@@ -60,9 +60,12 @@ from tech_connector.ui.game_engine.sequence_editor import (
     SequenceRenderExportWidget,
 )
 from tech_connector.ui.game_engine.world_asset_editors import NavigationToolsEditorWidget, WorldAssetAuthoringWidget
+from tech_connector.ui.game_engine.ui_document_editor import UIDocumentEditorWidget
+from tech_connector.game_engine.assets.ui_document_asset_service import UIDocumentAssetService, validate_ui_document
 
 
 EDITOR_PAGES: dict[str, tuple[str, ...]] = {
+    "tc.ui_document": ("Layout & Hierarchy", "Validation"),
     "tc.procedural_graph": ("Graph", "Parameters", "Geometry Preview", "Cook & Cache", "Runtime Generation", "Interchange", "Diagnostics"),
     "tc.terrain": ("Sculpt", "Paint", "Layers", "Erosion", "LODs & Collision", "Build & Validate"),
     "tc.foliage_type": ("Placement", "Terrain Rules", "Instance LODs", "Collision & Navigation", "Wind", "Validation"),
@@ -336,6 +339,12 @@ class DedicatedAssetEditor(QWidget):
             return {}
 
     def _specialized_page(self, record, page_name: str, values: dict[str, Any]) -> QWidget | None:
+        if page_name == "Layout & Hierarchy" and record.asset_type == "tc.ui_document":
+            widget = UIDocumentEditorWidget(self)
+            widget.load_settings(values)
+            self._specialized_widgets.append(("__ui_document__", widget))
+            widget.changed.connect(self._mark_specialized_dirty)
+            return widget
         if page_name == "Graph" and record.asset_type == "tc.procedural_graph":
             widget = AssetNodeGraphWidget("procedural_geometry", self)
             widget.load_graph(dict(values.get("graph") or {}))
@@ -850,13 +859,25 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, InputMapEditorWidget):
                 binding_values = widget.settings()
                 actions = deepcopy(dict(values.get("actions") or {}))
+                action_editor = next(
+                    (editor for _editor_key, editor in self._specialized_widgets
+                     if isinstance(editor, InputActionsEditorWidget)), None,
+                )
+                original_names = set(action_editor._actions) if action_editor is not None else set()
+                renamed_actions: dict[str, str] = {}
+                if action_editor is not None:
+                    for row in range(action_editor.table.rowCount()):
+                        name_item = action_editor.table.item(row, 0)
+                        if name_item is not None:
+                            renamed_actions[str(name_item.data(Qt.UserRole) or name_item.text())] = name_item.text()
                 for name, descriptor in dict(binding_values.get("actions") or {}).items():
-                    if name not in actions:
-                        continue
-                    merged = dict(actions.get(name) or {})
+                    target_name = renamed_actions.get(name, name)
+                    if name in original_names and target_name not in actions:
+                        continue  # An action removed in the Actions editor must stay removed.
+                    merged = dict(actions.get(target_name) or {})
                     merged.setdefault("value_type", descriptor.get("value_type", "button"))
                     merged["bindings"] = list(descriptor.get("bindings") or ())
-                    actions[name] = merged
+                    actions[target_name] = merged
                 values["actions"] = actions
             elif isinstance(widget, FxBudgetProfilerWidget):
                 values["scalability"] = widget.scalability()
@@ -891,6 +912,8 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, ShaderGeneratedCodeWidget):
                 values.update(widget.settings())
             elif isinstance(widget, WorldAssetAuthoringWidget):
+                values.update(widget.settings())
+            elif isinstance(widget, UIDocumentEditorWidget):
                 values.update(widget.settings())
             elif isinstance(widget, NavigationToolsEditorWidget):
                 values.update(widget.settings())
@@ -967,6 +990,8 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, (SequenceCurveEditorWidget, SequenceBindingsEditorWidget, SequenceRenderExportWidget)):
                 widget.load_settings(values)
             elif isinstance(widget, WorldAssetAuthoringWidget):
+                widget.load_settings(values)
+            elif isinstance(widget, UIDocumentEditorWidget):
                 widget.load_settings(values)
             elif isinstance(widget, NavigationToolsEditorWidget):
                 widget.load_settings(values)
@@ -1113,6 +1138,11 @@ class DedicatedAssetEditor(QWidget):
             validator = getattr(widget, "validation_issues", None)
             if callable(validator):
                 specialized_issues.extend(str(value) for value in validator())
+        if record is not None and record.asset_type == "tc.ui_document":
+            specialized_issues.extend(
+                item.message for item in validate_ui_document(self._collect_editor_values())
+                if item.severity == "error" and item.message not in specialized_issues
+            )
         if record is not None and record.asset_type in {"tc.animation_clip", "tc.animation_controller", "tc.skeleton", "tc.skin_binding"}:
             candidate = self._collect_editor_values()
             cross_validator = {
@@ -1144,7 +1174,14 @@ class DedicatedAssetEditor(QWidget):
             self.statusMessage.emit("Save blocked • Fix the cross-page asset validation errors first.")
             return False
         updated = None
-        if self._mode == "authored" and record.asset_type == "tc.gameplay_class":
+        if self._mode == "authored" and record.asset_type == "tc.ui_document":
+            try:
+                UIDocumentAssetService(self.project_root, self.database).update(record.asset_id, values, replace=True)
+            except Exception as exc:
+                self._show_error(str(exc))
+                return False
+            updated = self.database.asset(record.asset_id)
+        elif self._mode == "authored" and record.asset_type == "tc.gameplay_class":
             try:
                 GameplayClassService(self.project_root, self.database).update(record.asset_id, values, replace=True)
             except Exception as exc:
@@ -1349,6 +1386,9 @@ class DedicatedAssetEditor(QWidget):
 
     def preview(self) -> None:
         record = self.database.asset(self.asset_id)
+        if record is not None and record.asset_type == "tc.ui_document":
+            self.pages.setCurrentIndex(0)
+            return
         if record is not None:
             self.previewRequested.emit(str(record.source_path), record.asset_type, record.asset_id)
 

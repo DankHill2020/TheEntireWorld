@@ -154,6 +154,10 @@ def resolve_llm_provider_route(
         or settings.get("local_only") is True
     ):
         return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
+    if requested_model and not requested_provider:
+        # An explicit unprefixed model is local. A saved cloud default must not
+        # silently replace qwen/other Ollama selections or benchmark labels.
+        return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
 
     credentials = {
         "openai": _credential(settings, "openai_api_key", "OPENAI_API_KEY"),
@@ -200,15 +204,6 @@ def resolve_llm_provider_route(
             str(settings.get("code_prompt_depth") or "balanced")
         )
 
-    if target_provider and credentials.get(target_provider):
-        return LLMProviderRoute(
-            target_provider,
-            target_name or _CLOUD_DEFAULT_MODELS[target_provider],
-            credentials[target_provider],
-            True,
-            "api_key",
-        )
-
     target_account_provider = "google" if target_provider == "gemini" else target_provider
     if target_account_provider:
         import tech_connector.services.authenticated_provider_service as auth_svc
@@ -221,6 +216,14 @@ def resolve_llm_provider_route(
                 True,
                 "account",
             )
+    if target_provider and credentials.get(target_provider):
+        return LLMProviderRoute(
+            target_provider,
+            target_name or _CLOUD_DEFAULT_MODELS[target_provider],
+            credentials[target_provider],
+            True,
+            "api_key",
+        )
     configured_providers = [
         name for name, credential in credentials.items() if credential
     ]
@@ -461,6 +464,10 @@ def generate_llm_response(
                 system,
                 response_format,
                 timeout,
+                reasoning_effort=(
+                    effective_options.get("reasoning_effort")
+                    if account_provider == "openai" else None
+                ),
             )
         elif route.provider == "openai":
             value = _query_openai(

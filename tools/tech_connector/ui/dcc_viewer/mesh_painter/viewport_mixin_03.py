@@ -352,7 +352,12 @@ class ThreeDMeshPainterViewportMixin03:
         if bool(getattr(self, "_paint_canvas_update_pending", False)):
             return
         self._paint_canvas_update_pending = True
-        QTimer.singleShot(interval_ms, self._flush_paint_canvas_update)
+        # The interval is measured from the last paint, not from the next
+        # request. Delaying a full interval here can almost double redraw
+        # latency when the user resumes dragging just before the deadline.
+        elapsed_ms = max(0.0, (now - float(getattr(self, "_last_paint_canvas_update_s", 0.0))) * 1000.0)
+        remaining_ms = max(1, math.ceil(interval_ms - elapsed_ms))
+        QTimer.singleShot(remaining_ms, self._flush_paint_canvas_update)
 
     def _flush_paint_canvas_update(self) -> None:
         self._paint_canvas_update_pending = False

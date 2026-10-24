@@ -36,10 +36,16 @@ def main() -> int:
         action="store_true",
         help="Run only pipeline generation, materialization, preflight, and safe-failure cases.",
     )
-    parser.add_argument(
+    gate = parser.add_mutually_exclusive_group()
+    gate.add_argument(
         "--require-end-to-end",
         action="store_true",
-        help="Return a failing exit code while any case lacks end-to-end evidence.",
+        help="Compatibility alias for the default live-evidence demo gate.",
+    )
+    gate.add_argument(
+        "--planning-only",
+        action="store_true",
+        help="Exit successfully when routing, planning, and codegen pass; the report still marks unproven live cases.",
     )
     parser.add_argument(
         "--runtime-evidence",
@@ -69,11 +75,7 @@ def main() -> int:
         "end_to_end_unproven_case_ids": report["end_to_end_unproven_case_ids"],
         "report_path": report.get("report_path", args.output),
     }, indent=2))
-    ready = (
-        report["ready_for_end_to_end_demo"]
-        if args.require_end_to_end
-        else report["ready_for_demo"]
-    )
+    ready = report["planning_ready"] if args.planning_only else report["ready_for_demo"]
     return 0 if ready else 1
 
 

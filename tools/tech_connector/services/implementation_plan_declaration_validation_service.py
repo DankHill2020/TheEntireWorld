@@ -421,6 +421,14 @@ def validate_approved_declaration_contracts(
             requested_record_states = set(
                 _structured_record_state_terms(chunk_requirement_text)
             )
+            requested_record_states.update(
+                match.group(1).casefold()
+                for match in re.finditer(
+                    r"\bfor\s+(enabled|active|eligible|loaded|missing|ready|unloaded|valid)\b",
+                    chunk_requirement_text,
+                    flags=re.IGNORECASE,
+                )
+            )
             for method in (
                 node
                 for node in ast.walk(owner_node)
@@ -431,11 +439,49 @@ def validate_approved_declaration_contracts(
                     for parent in ast.walk(method)
                     for child in ast.iter_child_nodes(parent)
                 }
-                for loop in (
+                empty_local_lists = {
+                    statement.targets[0].id
+                    for statement in method.body
+                    if isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.List)
+                    and not statement.value.elts
+                    and sum(
+                        isinstance(node, ast.Name)
+                        and isinstance(node.ctx, ast.Store)
+                        and node.id == statement.targets[0].id
+                        for node in ast.walk(method)
+                    ) == 1
+                }
+                filtered_local_lists: set[str] = set()
+                returned_names = {
+                    node.id
+                    for statement in ast.walk(method)
+                    if isinstance(statement, ast.Return) and statement.value is not None
+                    for node in ast.walk(statement.value)
+                    if isinstance(node, ast.Name)
+                }
+                empty_returned_dicts = {
+                    statement.targets[0].id
+                    for statement in method.body
+                    if isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Dict)
+                    and not statement.value.keys
+                    and sum(
+                        isinstance(node, ast.Name)
+                        and isinstance(node.ctx, ast.Store)
+                        and node.id == statement.targets[0].id
+                        for node in ast.walk(method)
+                    ) == 1
+                }
+                for loop in sorted((
                     node
                     for node in ast.walk(method)
                     if isinstance(node, (ast.For, ast.AsyncFor))
-                ):
+                ), key=lambda node: node.lineno):
                     loop_item_names = {
                         node.id
                         for node in ast.walk(loop.target)
@@ -461,6 +507,94 @@ def validate_approved_declaration_contracts(
                         )
                         if isinstance(target, ast.Name)
                     }
+                    derived_state_sources = {
+                        target.id: {
+                            node.id.casefold()
+                            for node in ast.walk(assignment.value)
+                            if isinstance(node, ast.Name)
+                        } | {
+                            node.slice.value.casefold()
+                            for node in ast.walk(assignment.value)
+                            if isinstance(node, ast.Subscript)
+                            and isinstance(node.value, ast.Name)
+                            and node.value.id in (
+                                loop_item_names | derived_predicate_names
+                            )
+                            and isinstance(node.slice, ast.Constant)
+                            and isinstance(node.slice.value, str)
+                        } | {
+                            node.args[0].value.casefold()
+                            for node in ast.walk(assignment.value)
+                            if isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "get"
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id in (
+                                loop_item_names | derived_predicate_names
+                            )
+                            and node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str)
+                        }
+                        for assignment in ast.walk(loop)
+                        if isinstance(assignment, (ast.Assign, ast.AnnAssign))
+                        for target in (
+                            assignment.targets if isinstance(assignment, ast.Assign)
+                            else [assignment.target]
+                        )
+                        if isinstance(target, ast.Name)
+                    }
+
+                    def predicate_terms(predicate: ast.AST) -> set[str]:
+                        raw_names = {
+                            node.id.casefold()
+                            for node in ast.walk(predicate)
+                            if isinstance(node, ast.Name)
+                        }
+                        record_key_states = {
+                            "enabled", "active", "eligible", "loaded", "ready", "valid"
+                        }
+                        terms = {
+                            name for name in raw_names
+                            if name not in record_key_states
+                            or name in loop_item_names
+                        }
+                        for name in raw_names:
+                            terms.update(derived_state_sources.get(name, set()))
+                        terms.update(
+                            node.attr.casefold()
+                            for node in ast.walk(predicate)
+                            if isinstance(node, ast.Attribute)
+                        )
+                        terms.update(
+                            node.slice.value.casefold()
+                            for node in ast.walk(predicate)
+                            if isinstance(node, ast.Subscript)
+                            and isinstance(node.slice, ast.Constant)
+                            and isinstance(node.slice.value, str)
+                        )
+                        terms.update(
+                            node.args[0].value.casefold()
+                            for node in ast.walk(predicate)
+                            if isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "get"
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id in (
+                                loop_item_names | derived_predicate_names
+                            )
+                            and node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str)
+                        )
+                        for _ in range(len(derived_state_sources) + 1):
+                            expanded = set(terms)
+                            for name in terms:
+                                expanded.update(derived_state_sources.get(name, set()))
+                            if expanded == terms:
+                                break
+                            terms = expanded
+                        return terms
                     if "missing" in requested_record_states:
                         missing_assignments = [
                             assignment
@@ -520,33 +654,130 @@ def validate_approved_declaration_contracts(
                     ):
                         guarded_by_item_predicate = False
                         omitted_states: set[str] = set()
+                        observed_terms: set[str] = set()
+                        if (
+                            isinstance(loop.iter, ast.Name)
+                            and loop.iter.id in filtered_local_lists
+                            and any(
+                                isinstance(node, ast.Name)
+                                and node.id in loop_item_names
+                                for argument in call.args
+                                for node in ast.walk(argument)
+                            )
+                        ):
+                            guarded_by_item_predicate = True
                         parent = parent_by_id.get(id(call))
                         while parent is not None and parent is not loop:
                             if isinstance(parent, ast.If):
-                                predicate_names = {
-                                    node.id
-                                    for node in ast.walk(parent.test)
-                                    if isinstance(node, ast.Name)
-                                }
+                                predicate_names = predicate_terms(parent.test)
+                                observed_terms.update(predicate_names)
                                 omitted_states = (
-                                    requested_record_states - predicate_names
+                                    requested_record_states - observed_terms
                                 )
                                 if (
-                                    predicate_names & loop_item_names
-                                    or (
-                                        predicate_names
-                                        & derived_predicate_names
-                                        and not omitted_states
+                                    predicate_names
+                                    & (
+                                        loop_item_names
+                                        | derived_predicate_names
+                                        | requested_record_states
                                     )
-                                    or (
-                                        predicate_names
-                                        & requested_record_states
-                                        and not omitted_states
-                                    )
+                                    and not omitted_states
                                 ):
                                     guarded_by_item_predicate = True
                                     break
                             parent = parent_by_id.get(id(parent))
+                        if not guarded_by_item_predicate:
+                            direct_statement = parent_by_id.get(id(call))
+                            if direct_statement in loop.body:
+                                preceding = loop.body[:loop.body.index(direct_statement)]
+                                for guard in preceding:
+                                    if not (
+                                        isinstance(guard, ast.If)
+                                        and any(isinstance(item, ast.Continue) for item in guard.body)
+                                    ):
+                                        continue
+                                    predicate_names = predicate_terms(guard.test)
+                                    observed_terms.update(predicate_names)
+                                    omitted_states = requested_record_states - observed_terms
+                                    if (
+                                        predicate_names & loop_item_names
+                                        or predicate_names & derived_predicate_names
+                                        or predicate_names & requested_record_states
+                                    ) and not omitted_states:
+                                        guarded_by_item_predicate = True
+                                        break
+                        if not guarded_by_item_predicate:
+                            receiver = call.func.value
+                            if (
+                                isinstance(receiver, ast.Name)
+                                and receiver.id in empty_local_lists
+                                and receiver.id not in returned_names
+                                and call.func.attr == "append"
+                            ):
+                                # An unfiltered staging list is not itself the
+                                # returned collection. Accept it only when a
+                                # later loop checks the requested state before
+                                # writing an accumulator used by the return.
+                                for consumer in ast.walk(method):
+                                    if not (
+                                        isinstance(consumer, (ast.For, ast.AsyncFor))
+                                        and consumer.lineno > loop.lineno
+                                        and isinstance(consumer.iter, ast.Name)
+                                        and consumer.iter.id == receiver.id
+                                    ):
+                                        continue
+                                    item_names = {
+                                        node.id for node in ast.walk(consumer.target)
+                                        if isinstance(node, ast.Name)
+                                    }
+                                    for guard in ast.walk(consumer):
+                                        if not isinstance(guard, ast.If):
+                                            continue
+                                        guarded_states = {
+                                            node.slice.value.casefold()
+                                            for node in ast.walk(guard.test)
+                                            if isinstance(node, ast.Subscript)
+                                            and isinstance(node.value, ast.Name)
+                                            and node.value.id in item_names
+                                            and isinstance(node.slice, ast.Constant)
+                                            and isinstance(node.slice.value, str)
+                                        }
+                                        if not requested_record_states <= guarded_states:
+                                            continue
+                                        if any(
+                                            isinstance(node, (ast.Assign, ast.AnnAssign))
+                                            and any(
+                                                isinstance(target, ast.Subscript)
+                                                and isinstance(target.value, ast.Name)
+                                                and target.value.id in returned_names
+                                                and target.value.id in empty_returned_dicts
+                                                for target in (
+                                                    node.targets if isinstance(node, ast.Assign)
+                                                    else [node.target]
+                                                )
+                                            )
+                                            for statement in guard.body
+                                            for node in ast.walk(statement)
+                                        ):
+                                            guarded_by_item_predicate = True
+                                            break
+                                    if guarded_by_item_predicate:
+                                        break
+                        if guarded_by_item_predicate:
+                            receiver = call.func.value
+                            if (
+                                isinstance(receiver, ast.Name)
+                                and receiver.id in empty_local_lists
+                                and call.func.attr == "append"
+                                and not omitted_states
+                                and any(
+                                    isinstance(node, ast.Name)
+                                    and node.id in loop_item_names
+                                    for argument in call.args
+                                    for node in ast.walk(argument)
+                                )
+                            ):
+                                filtered_local_lists.add(receiver.id)
                         if not guarded_by_item_predicate:
                             if omitted_states:
                                 errors.append(

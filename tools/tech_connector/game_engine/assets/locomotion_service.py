@@ -56,6 +56,8 @@ def locomotion_preset(preset: str = "third_person", *, movement_mode: str = "") 
         {"id": "land", "clip_slot": "land", "loop": False},
         {"id": "crouch_idle", "clip_slot": "crouch_idle", "loop": True},
         {"id": "crouch_move", "clip_slot": "crouch_walk", "loop": True},
+        {"id": "crawl_idle", "clip_slot": "crawl_idle", "loop": True},
+        {"id": "crawl_move", "clip_slot": "crawl", "loop": True},
     ]
     transitions = [
         {"from": "idle", "to": "walk_run", "condition": "speed > 0.1", "blend_seconds": 0.16},
@@ -66,12 +68,22 @@ def locomotion_preset(preset: str = "third_person", *, movement_mode: str = "") 
         {"from": "airborne", "to": "land", "condition": "is_grounded", "blend_seconds": 0.08},
         {"from": "land", "to": "idle", "condition": "speed <= 0.1 and state_time >= 0.12", "blend_seconds": 0.1},
         {"from": "land", "to": "walk_run", "condition": "speed > 0.1 and state_time >= 0.08", "blend_seconds": 0.1},
-        {"from": "idle", "to": "crouch_idle", "condition": "is_crouched", "blend_seconds": 0.14},
-        {"from": "walk_run", "to": "crouch_move", "condition": "is_crouched", "blend_seconds": 0.14},
+        {"from": "idle", "to": "crouch_idle", "condition": "is_crouched and not is_crawling", "blend_seconds": 0.14},
+        {"from": "walk_run", "to": "crouch_move", "condition": "is_crouched and not is_crawling", "blend_seconds": 0.14},
         {"from": "crouch_idle", "to": "crouch_move", "condition": "speed > 0.1", "blend_seconds": 0.12},
         {"from": "crouch_move", "to": "crouch_idle", "condition": "speed <= 0.1", "blend_seconds": 0.12},
-        {"from": "crouch_idle", "to": "idle", "condition": "not is_crouched", "blend_seconds": 0.16},
-        {"from": "crouch_move", "to": "walk_run", "condition": "not is_crouched", "blend_seconds": 0.16},
+        {"from": "crouch_idle", "to": "idle", "condition": "not is_crouched and not is_crawling", "blend_seconds": 0.16},
+        {"from": "crouch_move", "to": "walk_run", "condition": "not is_crouched and not is_crawling", "blend_seconds": 0.16},
+        {"from": "idle", "to": "crawl_idle", "condition": "is_crawling", "blend_seconds": 0.2},
+        {"from": "walk_run", "to": "crawl_move", "condition": "is_crawling", "blend_seconds": 0.2},
+        {"from": "crouch_idle", "to": "crawl_idle", "condition": "is_crawling", "blend_seconds": 0.16},
+        {"from": "crouch_move", "to": "crawl_move", "condition": "is_crawling", "blend_seconds": 0.16},
+        {"from": "crawl_idle", "to": "crawl_move", "condition": "speed > 0.1", "blend_seconds": 0.12},
+        {"from": "crawl_move", "to": "crawl_idle", "condition": "speed <= 0.1", "blend_seconds": 0.12},
+        {"from": "crawl_idle", "to": "crouch_idle", "condition": "not is_crawling and is_crouched", "blend_seconds": 0.2},
+        {"from": "crawl_move", "to": "crouch_move", "condition": "not is_crawling and is_crouched", "blend_seconds": 0.2},
+        {"from": "crawl_idle", "to": "idle", "condition": "not is_crawling and not is_crouched", "blend_seconds": 0.24},
+        {"from": "crawl_move", "to": "walk_run", "condition": "not is_crawling and not is_crouched", "blend_seconds": 0.24},
     ]
     return {
         "schema": LOCOMOTION_CONTROLLER_SCHEMA,
@@ -94,6 +106,7 @@ def locomotion_preset(preset: str = "third_person", *, movement_mode: str = "") 
             "jump_triggered": {"type": "trigger"},
             "is_sprinting": {"type": "bool", "default": False},
             "is_crouched": {"type": "bool", "default": False},
+            "is_crawling": {"type": "bool", "default": False},
             "turn_delta": {"type": "float", "default": 0.0},
         },
         "animation_slots": {
@@ -116,6 +129,8 @@ def locomotion_preset(preset: str = "third_person", *, movement_mode: str = "") 
             "pivot_right": "builtin://locomotion/humanoid/pivot_right",
             "crouch_idle": "builtin://locomotion/humanoid/crouch_idle",
             "crouch_walk": "builtin://locomotion/humanoid/crouch_walk",
+            "crawl_idle": "builtin://locomotion/humanoid/crawl_idle",
+            "crawl": "builtin://locomotion/humanoid/crawl",
             "fall": "builtin://locomotion/humanoid/fall",
         },
         "blend_spaces": [{

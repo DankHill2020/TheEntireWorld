@@ -399,6 +399,28 @@ class DccExecutionRouteHandler:
 
 
 @dataclass
+class DccSceneQueryRouteHandler(DccExecutionRouteHandler):
+    """Keep the scene-query dispatch path strictly read-only."""
+
+    def execute(
+        self,
+        decision: dict,
+        context: RequestContext,
+        emit: ProgressCallback,
+        activity: ActivityCallback | None = None,
+    ) -> EngineResult:
+        if decision.get("operation_mode") != "query" or decision.get("mutation_scope") != "read_only":
+            return EngineResult(
+                action="error",
+                label="DCC Query",
+                text="The scene-query route accepts read-only queries only.",
+                metadata={"engine_path": "prompt_dispatch", "result_type": "unsafe_scene_query"},
+            )
+        safe_decision = {**decision, "approved": False, "confirmation_accepted": False, "supervise_execution": False}
+        return super().execute(safe_decision, context, emit, activity)
+
+
+@dataclass
 class ImportCoverageRouteHandler:
     """Deterministically report scoped Python files with no inbound imports."""
 
@@ -590,6 +612,7 @@ def default_route_handlers() -> dict[str, PromptRouteHandler]:
             {CAP_LLM},
         ),
         "dcc.execution_pipeline": DccExecutionRouteHandler(),
+        "dcc.scene_query": DccSceneQueryRouteHandler(),
         "dcc.prototype_pipeline": DccExecutionRouteHandler("DCCPrototypeHandler"),
         "unreal.capability_pipeline": DccExecutionRouteHandler("UnrealExecutionHandler"),
     }
@@ -756,6 +779,31 @@ class PromptDispatchService:
                 )
             except Exception:
                 availability = {}
+        # A cached UI status card may still say unknown/disconnected after the
+        # authenticated host bridge has come online. For a live DCC request,
+        # the verified direct connection is stronger evidence than that card.
+        if decision.get("requires_dcc_connection") and self._has_direct_dcc_connection(decision):
+            host = str(decision.get("execution_environment") or "").strip().lower()
+            if host in {"", "dcc_host"}:
+                host = str(decision.get("host") or "").strip().lower()
+            availability = dict(availability)
+            hosts = dict(availability.get("hosts") or {})
+            hosts[host] = {
+                **dict(hosts.get(host) or {}),
+                "connected": True,
+                "status": "connected",
+                "light": "green",
+                "detail": "Authenticated direct bridge is responding.",
+                "source": "direct_bridge",
+                "capabilities": ["live context", "execute commands"],
+            }
+            availability["hosts"] = hosts
+            stale_warning_prefix = f"{host.replace('_', ' ').title()} is currently disconnected (status light:"
+            for key in ("planner_warnings", "reasons"):
+                decision[key] = [
+                    warning for warning in decision.get(key) or []
+                    if not str(warning).startswith(stale_warning_prefix)
+                ]
         if availability:
             decision["capability_availability"] = availability
             try:
@@ -1153,7 +1201,9 @@ class PromptDispatchService:
             or {}
         )
         hosts = dict(availability.get("hosts") or {})
-        host = str(decision.get("execution_environment") or decision.get("host") or "").strip().lower()
+        host = str(decision.get("execution_environment") or "").strip().lower()
+        if host in {"", "dcc_host"}:
+            host = str(decision.get("host") or "").strip().lower()
         if not host or host not in hosts:
             return False
         row = dict(hosts.get(host) or {})
@@ -1173,13 +1223,15 @@ class PromptDispatchService:
         return prefix + ("\n\n" + text if text else "")
 
     def _has_direct_dcc_connection(self, decision: dict) -> bool:
-        host = str(decision.get("execution_environment") or decision.get("host") or "").strip().lower()
+        host = str(decision.get("execution_environment") or "").strip().lower()
+        if host in {"", "dcc_host"}:
+            host = str(decision.get("host") or "").strip().lower()
         try:
-            from tech_connector.game_engine.integration.dcc_execution_service import _maya_direct_bridge_available, _unreal_direct_bridge_available
+            from tech_connector.game_engine.integration.dcc_execution_service import _maya_direct_bridge_sessions, _unreal_direct_bridge_available
         except Exception:
             return False
         if host == "maya":
-            return bool(_maya_direct_bridge_available())
+            return bool(_maya_direct_bridge_sessions())
         if host == "unreal":
             return bool(_unreal_direct_bridge_available())
         return False

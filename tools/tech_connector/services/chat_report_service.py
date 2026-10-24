@@ -268,7 +268,7 @@ def format_action_plan_chat_report(
     elif status == "rejected":
         lead = "I couldn't run the plan because it didn't pass validation."
     elif status == "preflight_failed":
-        lead = "I stopped before changing anything because one or more pipeline hosts or functions are not ready."
+        lead = "I stopped before changing anything because a pipeline host, function, or live input is not ready."
     else:
         lead = f"The plan execution finished with status `{status}`."
 

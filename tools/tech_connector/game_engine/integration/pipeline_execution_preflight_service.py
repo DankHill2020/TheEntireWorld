@@ -48,6 +48,17 @@ def _output_references(value: Any) -> list[dict[str, str]]:
     return rows
 
 
+def _pipeline_context_specs(value: Any) -> list[dict[str, Any]]:
+    """Find live host inputs without treating typed output links as inputs."""
+    if isinstance(value, dict):
+        if value.get("$pipeline_context") in {"dcc_export_scope_v1", "dcc_input_context_v1"}:
+            return [value]
+        return [spec for item in value.values() for spec in _pipeline_context_specs(item)]
+    if isinstance(value, (list, tuple)):
+        return [spec for item in value for spec in _pipeline_context_specs(item)]
+    return []
+
+
 def _dependency_ancestors(action_id: str, action_by_id: dict[str, dict[str, Any]]) -> set[str]:
     ancestors: set[str] = set()
     pending = list(action_by_id.get(action_id, {}).get("depends_on") or [])
@@ -58,6 +69,48 @@ def _dependency_ancestors(action_id: str, action_by_id: dict[str, dict[str, Any]
         ancestors.add(dependency)
         pending.extend(action_by_id.get(dependency, {}).get("depends_on") or [])
     return ancestors
+
+
+_CONTEXT_PRODUCED_FIELDS: dict[str, set[str]] = {
+    "rig_contents": {"root_joint", "joints", "armatures", "skeleton"},
+    "selected_or_scene_meshes": {"mesh", "meshes"},
+    "scene_contents": {"maya_scene", "blender_scene", "objects", "mesh", "meshes"},
+    "current_selection": {"selection"},
+    "active_object": {"active_object", "selection"},
+}
+
+
+def _upstream_context_producer(
+    action_id: str,
+    host: str,
+    spec: dict[str, Any],
+    action_by_id: dict[str, dict[str, Any]],
+) -> str | None:
+    """Find a dependent same-host stage that creates the requested live context."""
+
+    scope = str(spec.get("scope") or "").strip().lower()
+    if spec.get("$pipeline_context") == "dcc_input_context_v1":
+        scope = (
+            "active_object" if spec.get("context_kind") == "active_object"
+            else "current_selection"
+        )
+    expected = _CONTEXT_PRODUCED_FIELDS.get(scope)
+    if not expected:
+        return None
+    for ancestor_id in _dependency_ancestors(action_id, action_by_id):
+        ancestor = action_by_id.get(ancestor_id) or {}
+        args = dict(ancestor.get("args") or {})
+        contract = dict(args.get("operation_contract") or {})
+        ancestor_host = str(args.get("host") or contract.get("host") or "").lower()
+        role = str(contract.get("role") or "").lower()
+        produced = {str(item).lower() for item in contract.get("produces") or []}
+        if (
+            ancestor_host == host
+            and role in {"prepare", "import", "process"}
+            and produced & expected
+        ):
+            return ancestor_id
+    return None
 
 
 def _local_callable_status(callable_name: str) -> tuple[bool, str]:
@@ -74,8 +127,26 @@ def _local_callable_status(callable_name: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _session_identity(row: dict[str, Any]) -> str:
-    return str(row.get("session_id") or row.get("pid") or row.get("scene") or "").strip()
+def _session_identity(row: dict[str, Any], host: str = "") -> str:
+    direct = str(row.get("session_id") or row.get("pid") or row.get("scene") or "").strip()
+    if direct:
+        return direct
+    # Unreal's authenticated health response identifies a project, not a
+    # process or scene. An explicit live port plus a valid .uproject identity
+    # is enough to bind this session without accepting an anonymous socket.
+    if host == "unreal":
+        project_dir = str(row.get("project_dir") or "").strip().replace("\\", "/")
+        project_name = str(row.get("project_name") or "").strip()
+        if (project_name.lower().endswith(".uproject")
+                and project_name not in {".uproject", "..uproject"}
+                and "/" not in project_name and "\\" not in project_name
+                and project_dir and "/" in project_dir):
+            if project_dir.lower().endswith(".uproject"):
+                if project_dir.rsplit("/", 1)[-1].casefold() != project_name.casefold():
+                    return ""
+                return project_dir
+            return project_dir.rstrip("/") + "/" + project_name
+    return ""
 
 
 def _callable_requires_remote_probe(host: str, callable_name: str) -> bool:
@@ -285,7 +356,7 @@ def _probe_host_session(
     except Exception as exc:
         session = {"ok": False, "port": port, "error": str(exc)}
     actual_port = int(session.get("port") or 0)
-    identity = _session_identity(session)
+    identity = _session_identity(session, host)
     ready = bool(session.get("ok")) and actual_port == port and bool(identity)
     error = ""
     if not session.get("ok"):
@@ -293,7 +364,7 @@ def _probe_host_session(
     elif actual_port != port:
         error = f"Requested port {port} responded as port {actual_port or 'unknown'}."
     elif not identity:
-        error = "Session responded without a stable identity (session_id, pid, or scene)."
+        error = "Session responded without a stable host identity."
     return {
         "host": host,
         "ready": ready,
@@ -313,6 +384,8 @@ def preflight_pipeline_execution(
     timeout_seconds: float = 1.0,
     bridge_factory: Callable[[str], Any] | None = None,
     verify_host_callables: bool = True,
+    verify_live_context: bool = True,
+    live_context_reader: Callable[[str, dict[str, Any], int], Any] | None = None,
 ) -> dict[str, Any]:
     """Validate function coverage, typed handoffs, local callables, and live sessions."""
     graph = normalize_action_graph(plan)
@@ -325,6 +398,27 @@ def preflight_pipeline_execution(
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     action_rows: list[dict[str, Any]] = []
+
+    if plan.get("framework") == "dynamic_typed_pipeline_v1":
+        for required in plan.get("required_inputs") or []:
+            errors.append({
+                "kind": "required_input",
+                "stage": str(required.get("stage") or ""),
+                "argument": str(required.get("argument") or ""),
+                "message": str(required.get("question") or "A pipeline input is unresolved."),
+            })
+        for gap in plan.get("gaps") or []:
+            errors.append({
+                "kind": "capability_gap",
+                "stage": str(gap.get("stage") or ""),
+                "message": str(gap.get("message") or gap.get("reason") or "A pipeline capability is unresolved."),
+                "gap_kind": str(gap.get("kind") or ""),
+            })
+        if plan.get("execution_ready") is False and not errors:
+            errors.append({
+                "kind": "not_execution_ready",
+                "message": "The typed pipeline is not marked ready for execution.",
+            })
 
     for action in actions:
         action_id = str(action.get("id") or "")
@@ -399,6 +493,7 @@ def preflight_pipeline_execution(
     ))
     host_rows: list[dict[str, Any]] = []
     callable_rows: list[dict[str, Any]] = []
+    context_rows: list[dict[str, Any]] = []
     resolved_ports: dict[str, int] = {}
     if require_live_sessions:
         if bridge_factory is None:
@@ -451,6 +546,79 @@ def preflight_pipeline_execution(
                         "status": callable_row.get("status"),
                         "callables": list(callable_row.get("callables") or []),
                     })
+        if verify_live_context:
+            from tech_connector.game_engine.integration.pipeline_operation_runtime_service import (
+                _read_dcc_export_scope,
+                resolve_pipeline_context_params,
+            )
+
+            context_cache: dict[tuple[str, int, str], Any] = {}
+            for action in actions:
+                action_id = str(action.get("id") or "")
+                args = dict(action.get("args") or {})
+                host = str(args.get("host") or "").strip().lower()
+                params = dict(args.get("params") or {})
+                specs = _pipeline_context_specs(params)
+                port = resolved_ports.get(host)
+                if not specs or not port:
+                    continue
+                upstream_producers = [
+                    _upstream_context_producer(action_id, host, spec, all_action_by_id)
+                    for spec in specs
+                ]
+                if all(upstream_producers):
+                    context_rows.append({
+                        "action_id": action_id,
+                        "host": host,
+                        "ready": True,
+                        "status": "deferred_to_upstream",
+                        "upstream_actions": list(dict.fromkeys(upstream_producers)),
+                        "input_labels": [
+                            str(spec.get("label") or spec.get("scope") or spec.get("context_kind") or "host context")
+                            for spec in specs
+                        ],
+                    })
+                    continue
+
+                def read_context(spec: dict[str, Any]) -> Any:
+                    key = (host, port, json.dumps(spec, sort_keys=True, default=str))
+                    if key not in context_cache:
+                        context_cache[key] = (
+                            live_context_reader(host, spec, port)
+                            if live_context_reader is not None
+                            else _read_dcc_export_scope(
+                                host, spec, session_port=port,
+                                timeout_seconds=max(0.1, min(30.0, float(timeout_seconds))),
+                                bridge=bridge_factory(host),
+                            )
+                        )
+                    return context_cache[key]
+
+                try:
+                    resolved = resolve_pipeline_context_params(
+                        params, host=host, session_port=port,
+                        timeout_seconds=max(0.1, min(30.0, float(timeout_seconds))),
+                        context_reader=read_context,
+                    )
+                    context_rows.append({
+                        "action_id": action_id, "host": host, "ready": True,
+                        "input_labels": [str(spec.get("label") or spec.get("scope") or spec.get("context_kind") or "host context") for spec in specs],
+                        "resolved_counts": {
+                            key: len(value) if isinstance(value, list) else 1
+                            for key, value in resolved.items()
+                            if _pipeline_context_specs(params.get(key))
+                        },
+                    })
+                except Exception as exc:
+                    message = f"Live {host} context is not ready: {exc}"
+                    context_rows.append({
+                        "action_id": action_id, "host": host, "ready": False,
+                        "error": message,
+                    })
+                    errors.append({
+                        "kind": "live_context", "action_id": action_id,
+                        "host": host, "message": message,
+                    })
     elif external_hosts:
         warnings.append({
             "kind": "live_sessions_not_checked",
@@ -459,7 +627,7 @@ def preflight_pipeline_execution(
         })
 
     structural_ready = not any(
-        row["kind"] not in {"host_session", "host_callable"} for row in errors
+        row["kind"] not in {"host_session", "host_callable", "live_context"} for row in errors
     )
     live_ready = (
         not require_live_sessions
@@ -469,6 +637,7 @@ def preflight_pipeline_execution(
             not verify_host_callables
             or all(row.get("ready") for row in callable_rows)
         )
+        and all(row.get("ready") for row in context_rows)
     )
     return {
         "schema": PIPELINE_PREFLIGHT_SCHEMA,
@@ -481,6 +650,7 @@ def preflight_pipeline_execution(
         "actions": action_rows,
         "hosts": host_rows,
         "callable_probes": callable_rows,
+        "context_probes": context_rows,
         "resolved_session_ports": resolved_ports,
         "errors": errors,
         "warnings": warnings,

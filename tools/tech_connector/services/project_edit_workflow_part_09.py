@@ -9,6 +9,7 @@ import itertools
 import json
 import re
 import tempfile
+import textwrap
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -554,6 +555,37 @@ def _preserve_callable_docstring(
     )
     if current_doc is None:
         return replacement
+    # Behavior-only repairs preserve the previous docstring. A generated
+    # docstring can already contain an overlong prose line; copying it verbatim
+    # would reject an otherwise valid repair on presentation grounds. Reflow
+    # only prose, leaving examples and fenced blocks untouched.
+    doc_value = current_doc.value.value
+    if isinstance(doc_value, str):
+        wrapped_lines: list[str] = []
+        in_fence = False
+        for line in doc_value.splitlines():
+            content = line.lstrip()
+            if content.startswith("```"):
+                in_fence = not in_fence
+            indentation = line[:len(line) - len(content)]
+            if (
+                not in_fence
+                and len(line) > 88
+                and not content.startswith((">>>", "...", "|", "```"))
+                and " " in content
+            ):
+                wrapped_lines.extend(
+                    indentation + fragment
+                    for fragment in textwrap.wrap(
+                        content,
+                        width=max(40, 84 - len(indentation)),
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                    )
+                )
+            else:
+                wrapped_lines.append(line)
+        current_doc.value = ast.Constant(value="\n".join(wrapped_lines))
     if replacement_callable.body and ast.get_docstring(
         replacement_callable,
         clean=False,
@@ -839,6 +871,28 @@ def _small_owner_reasoning_model(
     settings: dict[str, Any],
     selected_model: str,
 ) -> str:
+    selected = str(selected_model or "").strip()
+    explicit_cloud = selected.casefold().startswith((
+        "anthropic:", "claude:", "openai:", "google:",
+        "gemini:", "x:", "grok:",
+    ))
+    if (
+        str(settings.get("model_source_mode") or "") == "local_only"
+        and selected
+        and not explicit_cloud
+    ):
+        # Likewise, keep local planning on the selected local model instead of
+        # a stale smaller default chosen for unrelated interactive work.
+        return selected.removeprefix("ollama:")
+    if explicit_cloud and str(settings.get("model_source_mode") or "") != "local_only":
+        # An explicit cloud run must not silently use a configured local model
+        # for planning and then report the whole attempt as cloud inference.
+        return selected
+    if selected and not explicit_cloud:
+        # A chosen local coder is also the source of truth in auto mode. A
+        # smaller configured planning default can misdiagnose the exact failed
+        # contract and send its own patch worker after the wrong symptom.
+        return selected.removeprefix("ollama:")
     configured = str(
         settings.get("owner_resolution_model")
         or settings.get("local_small_code_model")
@@ -857,8 +911,21 @@ def _small_owner_reasoning_model(
                 "grok:",
             )
         ):
-            return configured
+            if str(settings.get("model_source_mode") or "") != "local_only":
+                return configured
+            configured = str(
+                settings.get("local_small_code_model")
+                or settings.get("fast_code_model")
+                or "qwen3.5:4b"
+            ).strip()
+            if configured.casefold().startswith((
+                "anthropic:", "claude:", "openai:", "google:",
+                "gemini:", "x:", "grok:",
+            )):
+                configured = "qwen3.5:4b"
         return _compact_callable_repair_model(configured)
+    if explicit_cloud and str(settings.get("model_source_mode") or "") == "local_only":
+        return "qwen3.5:4b"
     return _compact_callable_repair_model(selected_model)
 
 
@@ -869,7 +936,12 @@ def _causal_repair_reasoning_model(
     """Use a configurable non-thinking coder for focused causal repair."""
 
     if str(settings.get("model_source_mode") or "") == "local_only" and selected_model:
-        return _strong_task_model(selected_model.removeprefix("ollama:"))
+        return _strong_task_model(_small_owner_reasoning_model(settings, selected_model))
+    if str(selected_model or "").casefold().startswith((
+        "anthropic:", "claude:", "openai:", "google:",
+        "gemini:", "x:", "grok:",
+    )):
+        return selected_model
     configured = str(settings.get("causal_repair_model") or "").strip()
     if configured:
         return configured.removeprefix("ollama:")
@@ -883,7 +955,12 @@ def _causal_repair_escalation_model(
     """Escalate a failed causal analysis to the configured coding model."""
 
     if str(settings.get("model_source_mode") or "") == "local_only" and selected_model:
-        return _strong_task_model(selected_model.removeprefix("ollama:"))
+        return _strong_task_model(_small_owner_reasoning_model(settings, selected_model))
+    if str(selected_model or "").casefold().startswith((
+        "anthropic:", "claude:", "openai:", "google:",
+        "gemini:", "x:", "grok:",
+    )):
+        return selected_model
     configured = str(
         settings.get("router_local_code")
         or settings.get("fast_code_model")
@@ -1091,10 +1168,36 @@ def _explicit_path_requested_file_manifest(
                 flags=re.IGNORECASE,
             )
         ]
-        mentioned = explicitly_described or [
+        # A callable mentioned as a dependency must not make its source file
+        # another owner when this clause explicitly names the destination file.
+        # In particular, "implement export() in export.py using select()" owns
+        # export.py, even when select() is an indexed declaration in select.py.
+        explicit_file_mentions = [
             path
             for path in requested_paths
-            if mentions_path(text, path)
+            if re.search(
+                rf"(?<![A-Za-z0-9_]){re.escape(path.name)}(?![A-Za-z0-9_])",
+                text,
+                flags=re.IGNORECASE,
+            )
+        ]
+        # An explicit function destination outranks a dependency's source file:
+        # "implement export() in export.py using select() from select.py".
+        destination_match = re.search(
+            r"\b(?:implement|define|add|write|create|build)\s+"
+            r"[a-z_][A-Za-z0-9_]*\s*\([^)]*\)\s+in\s+"
+            r"([A-Za-z0-9_./\\-]+\.py)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        destination_paths = [
+            path for path in requested_paths
+            if destination_match
+            and path.name.casefold()
+            == Path(destination_match.group(1).replace("\\", "/")).name.casefold()
+        ]
+        mentioned = destination_paths or explicitly_described or explicit_file_mentions or [
+            path for path in requested_paths if mentions_path(text, path)
         ]
         section_paths: list[Path] = []
         if ui_paths and re.search(
@@ -1127,7 +1230,7 @@ def _explicit_path_requested_file_manifest(
                 r"|(?:detailed|complete|descriptive)\s+"
                 r"(?:public\s+)?docstrings?"
                 r"|placeholders?|whole-file repair|disposable validation"
-                r"|report completion|production readiness)\b",
+            r"|report completion|production readiness|do not mutate inputs?)\b",
                 text,
                 flags=re.IGNORECASE,
             )
@@ -2150,6 +2253,22 @@ def _save_workflow_checkpoint(
                 persisted_payload = json.loads(
                     checkpoint.read_text(encoding="utf-8")
                 )
+                persisted_provenance = persisted_payload.get("provenance") or {}
+                previous_plan_hash = str(
+                    persisted_provenance.get("implementation_plan_hash") or ""
+                )
+                if (
+                    previous_plan_hash
+                    and previous_plan_hash != str(implementation_plan_hash or "")
+                ):
+                    # Planning can vary between local-model retries. Preserve
+                    # the prior candidate before a new plan replaces its
+                    # identity-keyed checkpoint; it may contain useful work.
+                    archived = checkpoint.with_name(
+                        f"{checkpoint.stem}.{_checkpoint_hash(previous_plan_hash)[:16]}.json"
+                    )
+                    if not archived.exists():
+                        archived.write_bytes(checkpoint.read_bytes())
                 persisted_state = persisted_payload.get("workflow_state") or {}
                 if (
                     isinstance(persisted_state, dict)

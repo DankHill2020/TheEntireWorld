@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from contextlib import contextmanager
 import json
+import mmap
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,34 @@ from .asset_database_service import AssetDatabase, AssetRecord
 from .asset_metadata_service import asset_metadata_path, read_asset_metadata, write_asset_metadata
 from .asset_schema_service import merge_asset_properties, merge_import_settings
 from .asset_type_registry import AssetTypeRegistry, builtin_asset_type_registry
+
+
+def validate_fbx_import(source: Path, type_id: str) -> None:
+    """Preflight FBX imports before a raw file is registered as a native asset."""
+    if source.suffix.casefold() != ".fbx":
+        return
+    if type_id in {"tc.skeletal_mesh", "tc.animation_clip"}:
+        raise ValueError(
+            "Raw FBX cannot be tagged as a native skeletal mesh or animation clip. "
+            "Use a verified character/animation converter before engine import."
+        )
+    if not source.stat().st_size:
+        return
+    with source.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as content:
+        if not any(content.find(marker) >= 0 for marker in (b"LimbNode", b"AnimationCurve", b"Deformer")):
+            return
+    from tech_connector.game_engine.scene.native_fbx_service import import_native_fbx
+
+    manifest = import_native_fbx(source).manifest
+    actions = list(manifest.get("actions") or [])
+    skinned = [mesh for mesh in manifest.get("meshes") or []
+               if mesh.get("armature_id") and int(mesh.get("influence_count") or 0) > 0]
+    if actions or skinned:
+        kind = "animation" if actions and not skinned else "skinned character"
+        raise ValueError(
+            f"FBX contains {kind} data and cannot be imported as {type_id}: {source}. "
+            "Use a verified character/animation importer; raw type_id tagging does not convert the asset."
+        )
 
 
 @dataclass(frozen=True)
@@ -164,6 +193,15 @@ class AssetOperationsService:
         descriptor = self.registry.require(type_id)
         if not descriptor.creatable:
             raise ValueError(f"{descriptor.display_name} assets must be imported.")
+        authored_properties = merge_asset_properties(descriptor.type_id, properties)
+        dependency_edges: list[tuple[str, str]] = []
+        if descriptor.type_id == "tc.ui_document":
+            from .ui_document_asset_service import UIDocumentAssetService, validate_ui_document
+
+            errors = [item.message for item in validate_ui_document(authored_properties) if item.severity == "error"]
+            if errors:
+                raise ValueError("Invalid UI document: " + "; ".join(errors))
+            dependency_edges = UIDocumentAssetService(self.project_root, self.database)._dependency_edges("", authored_properties)
         extension = descriptor.extensions[0] if descriptor.extensions else ".tcasset"
         safe_name = _safe_asset_name(name)
         destination = self._project_destination(folder, safe_name + extension)
@@ -182,10 +220,10 @@ class AssetOperationsService:
                 "schema": f"tech_connector.asset.{descriptor.type_id.removeprefix('tc.')}.v1",
                 "type_id": descriptor.type_id,
                 "name": safe_name,
-                "properties": merge_asset_properties(descriptor.type_id, properties),
+                "properties": authored_properties,
             }
             destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        record = self.database.register_asset(destination, descriptor.type_id)
+        record = self.database.register_asset(destination, descriptor.type_id, dependencies=dependency_edges)
         self._remember_undo(
             f"Create {safe_name}",
             lambda value=record.asset_id: self.delete_asset(value, _record_undo=False),
@@ -214,6 +252,7 @@ class AssetOperationsService:
             raise ValueError(f"No registered importer recognizes '{source.suffix}'.")
         if not descriptor.importable:
             raise ValueError(f"{descriptor.display_name} does not support source import.")
+        validate_fbx_import(source, descriptor.type_id)
         resolved_importer_settings = merge_import_settings(descriptor.type_id, importer_settings)
         destination = self._project_destination(folder, source.name)
         policy = str(conflict_policy or "error").strip().casefold()
@@ -591,6 +630,10 @@ class AssetOperationsService:
                 issues.append(AssetValidationIssue("error", "invalid_cloth", "Cloth source is not valid authored JSON."))
             for issue in validate_cloth_properties(cloth_properties):
                 issues.append(AssetValidationIssue(issue.severity, issue.code, issue.message))
+        if record.asset_type == "tc.ui_document" and record.source_path.is_file():
+            from .ui_document_asset_service import UIDocumentAssetService
+
+            issues.extend(UIDocumentAssetService(self.project_root, self.database).validate(asset_id))
         if record.asset_type in {"tc.physics_asset", "tc.physics_constraint"} and record.source_path.is_file():
             from .physics_asset_service import validate_constraint_properties, validate_physics_asset_properties
 

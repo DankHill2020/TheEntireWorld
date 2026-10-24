@@ -63,6 +63,1239 @@ from tech_connector.services.implementation_plan_quality_part_03 import (
 )
 
 
+def _explicit_serialization_contract_gaps(
+    implementation_plan: Mapping[str, Any],
+    trees: Mapping[str, ast.Module],
+) -> list[str]:
+    """Catch direct contradictions of approved JSON and falsey-value contracts."""
+
+    requirements_by_path: dict[str, list[str]] = {}
+    for chunk in implementation_plan.get("chunks") or []:
+        if not isinstance(chunk, Mapping) or not chunk.get("path"):
+            continue
+        path = str(Path(str(chunk["path"])).resolve())
+        requirements_by_path.setdefault(path, []).extend(
+            str(row.get("text") or row.get("requirement") or "")
+            if isinstance(row, Mapping)
+            else str(row)
+            for row in chunk.get("requirements") or []
+        )
+
+    errors: list[str] = []
+    for path, tree in trees.items():
+        requirements = " ".join(requirements_by_path.get(path) or [])
+        if not requirements:
+            continue
+        preserves_falsey = bool(re.search(
+            r"\b(?:preserv\w*|accept\w*|allow\w*|support\w*)"
+            r"[^.;]{0,70}\b(?:falsey|falsy)\b",
+            requirements,
+            flags=re.IGNORECASE,
+        ))
+        falsey_names = {
+            match.group(1).removesuffix("s").casefold()
+            for match in re.finditer(
+                r"\b(?:falsey|falsy)\s+(?:hashable\s+)?([A-Za-z_]\w*)",
+                requirements,
+                flags=re.IGNORECASE,
+            )
+        } if preserves_falsey else set()
+        canonical_json = bool(
+            re.search(r"\bcanonical\b[^.;]{0,100}\bJSON\b", requirements, re.I)
+            and re.search(r"\bcompact\s+separators\b", requirements, re.I)
+        )
+        both_paths_validate = bool(re.search(
+            r"\bboth\s+(?:paths|directions)\s+must\s+validate\b",
+            requirements,
+            re.I,
+        ))
+        strict_integer_version = bool(re.search(
+            r"\bversion\b[^.;]{0,90}\binteger\s+(?:other\s+than|excluding)\s+bool\b",
+            requirements,
+            re.I,
+        ))
+        positive_version = bool(re.search(
+            r"\bversion\b[^.;]{0,90}\bat\s+least\s+1\b",
+            requirements,
+            re.I,
+        ))
+        local_validators = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith(("validate_", "_validate_"))
+            and any(isinstance(child, ast.Raise) for child in ast.walk(node))
+        }
+        functions: list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.append((node.name, node))
+            elif isinstance(node, ast.ClassDef):
+                functions.extend(
+                    (f"{node.name}.{member.name}", member)
+                    for member in node.body
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+                )
+        for owner, function in functions:
+            calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+            dumps_json = any(
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "json"
+                and call.func.attr == "dumps"
+                for call in calls
+            )
+            loads_json = any(
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "json"
+                and call.func.attr == "loads"
+                for call in calls
+            )
+            calls_local_validator = any(
+                isinstance(call.func, ast.Name)
+                and call.func.id in local_validators
+                for call in calls
+            )
+            def raises_for_field(field: str) -> bool:
+                return any(
+                    any(isinstance(child, ast.Raise) for statement in guard.body for child in ast.walk(statement))
+                    and any(
+                        isinstance(child, ast.Name) and child.id == field
+                        or isinstance(child, ast.Attribute) and child.attr == field
+                        or isinstance(child, ast.Constant) and child.value == field
+                        for child in ast.walk(guard.test)
+                    )
+                    for guard in ast.walk(function)
+                    if isinstance(guard, ast.If)
+                )
+            if both_paths_validate and dumps_json and not calls_local_validator and not (
+                raises_for_field("version") and raises_for_field("kind")
+            ):
+                errors.append(
+                    f"{path}:{owner}: approved validation on both JSON paths "
+                    "requires explicit rejection guards for version and kind "
+                    "values before json.dumps; an unrelated input/key guard "
+                    "does not validate those fields."
+                )
+            if both_paths_validate and loads_json and not calls_local_validator and not (
+                raises_for_field("version") and raises_for_field("kind")
+            ):
+                errors.append(
+                    f"{path}:{owner}: approved validation on both JSON paths "
+                    "requires explicit rejection guards for version and kind "
+                    "values after json.loads and before returning the decoded "
+                    "object; constructing the object alone does not validate "
+                    "those fields."
+                )
+            if (loads_json or dumps_json) and not calls_local_validator and (strict_integer_version or positive_version):
+                executable = ast.unparse(ast.Module(body=[
+                    statement for statement in function.body
+                    if not (
+                        isinstance(statement, ast.Expr)
+                        and isinstance(statement.value, ast.Constant)
+                        and isinstance(statement.value.value, str)
+                    )
+                ], type_ignores=[]))
+                if re.search(r"\bversion\b", executable):
+                    version_ref = (
+                        r"(?:[A-Za-z_]\w*\.)?version"
+                        r"|[A-Za-z_]\w*\[\s*['\"]version['\"]\s*\]"
+                    )
+                    version_ref = f"(?:{version_ref})"
+                    if strict_integer_version and not (
+                        re.search(rf"\btype\(\s*{version_ref}\s*\)\s+is(?:\s+not)?\s+int\b", executable)
+                        or re.search(rf"\bisinstance\(\s*{version_ref}\s*,\s*bool\)", executable)
+                    ):
+                        errors.append(
+                            f"{path}:{owner}: approved integer version excludes bool; "
+                            "isinstance(value, int) alone accepts True and False."
+                        )
+                    if positive_version and not re.search(
+                        rf"\b{version_ref}\s*(?:<\s*1|<=\s*0|>=\s*1|>\s*0)\b",
+                        executable,
+                    ):
+                        errors.append(
+                            f"{path}:{owner}: approved version must be at least 1; "
+                            "the JSON path has no numeric lower-bound check."
+                        )
+            if falsey_names:
+                for guard in (node for node in ast.walk(function) if isinstance(node, ast.If)):
+                    rejects = any(
+                        isinstance(child, ast.Raise)
+                        for statement in guard.body
+                        for child in ast.walk(statement)
+                    )
+                    if not rejects:
+                        continue
+                    tested_name = ""
+                    if isinstance(guard.test, ast.UnaryOp) and isinstance(guard.test.op, ast.Not):
+                        if isinstance(guard.test.operand, ast.Name):
+                            tested_name = guard.test.operand.id
+                    elif isinstance(guard.test, ast.Compare) and len(guard.test.ops) == 1:
+                        if isinstance(guard.test.ops[0], (ast.Is, ast.Eq)):
+                            pair = [guard.test.left, *guard.test.comparators]
+                            if any(isinstance(value, ast.Constant) and value.value is None for value in pair):
+                                tested_name = next(
+                                    (value.id for value in pair if isinstance(value, ast.Name)), ""
+                                )
+                    if tested_name.casefold() in falsey_names:
+                        errors.append(
+                            f"{path}:{owner}: approved falsey {tested_name} values "
+                            "must remain valid; a truthiness/None raising guard "
+                            "conflates a present falsey value with a missing one. "
+                            "Check key presence separately."
+                        )
+                        break
+            if canonical_json:
+                for call in (
+                    node for node in ast.walk(function)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "json"
+                    and node.func.attr == "dumps"
+                ):
+                    keywords = {item.arg: item.value for item in call.keywords if item.arg}
+                    sorted_keys = isinstance(keywords.get("sort_keys"), ast.Constant) and keywords["sort_keys"].value is True
+                    separators = keywords.get("separators")
+                    compact = (
+                        isinstance(separators, ast.Tuple)
+                        and len(separators.elts) == 2
+                        and all(isinstance(item, ast.Constant) for item in separators.elts)
+                        and [item.value for item in separators.elts] == [",", ":"]
+                    )
+                    if not sorted_keys or not compact:
+                        errors.append(
+                            f"{path}:{owner}: approved canonical JSON bytes require "
+                            "json.dumps with sort_keys=True and compact "
+                            "separators=(',', ':')."
+                        )
+                        break
+    return errors
+
+
+def _explicit_tuple_dict_result_gaps(
+    implementation_plan: Mapping[str, Any],
+    trees: Mapping[str, ast.Module],
+) -> list[str]:
+    """Catch a proven name-only flow into an approved dict-row result."""
+
+    chunks = [
+        chunk for chunk in implementation_plan.get("chunks") or []
+        if isinstance(chunk, Mapping)
+    ]
+    function_chunks: dict[str, list[Mapping[str, Any]]] = {}
+    for chunk in chunks:
+        if str(chunk.get("kind") or "") == "function":
+            function_chunks.setdefault(str(chunk.get("owner") or ""), []).append(chunk)
+    name_result_owners = {
+        owner
+        for owner, matches in function_chunks.items()
+        if owner and len(matches) == 1
+        and any(
+            re.search(
+                r"\breturn\s+(?:a\s+)?tuple\s+of\b[^.;]*\bnames\b",
+                str(row.get("text") or ""),
+                re.I,
+            )
+            for row in matches[0].get("requirements") or []
+            if isinstance(row, Mapping)
+        )
+    }
+    def dict_result_keys(owner: str) -> set[str]:
+        """Read an exact dict-row key contract from one approved owner."""
+
+        matches = function_chunks.get(owner) or []
+        if len(matches) != 1:
+            return set()
+        for row in matches[0].get("requirements") or []:
+            if not isinstance(row, Mapping):
+                continue
+            contract = re.search(
+                r"\breturn\s+a\s+tuple\s+of\s+dicts?\s+with\s+exactly\s+"
+                r"(.+?)\s+keys\b",
+                str(row.get("text") or ""),
+                re.I,
+            )
+            if contract:
+                return {
+                    key for key in re.findall(r"[A-Za-z_]\w*", contract.group(1))
+                    if key != "and"
+                }
+        return set()
+
+    dict_result_owners = {
+        owner: dict_result_keys(owner)
+        for owner in function_chunks
+        if dict_result_keys(owner)
+    }
+    gaps: list[str] = []
+    for chunk in chunks:
+        if str(chunk.get("kind") or "") != "function":
+            continue
+        if not any(
+            re.search(
+                r"\breturn\s+a\s+tuple\s+of\s+dicts?\s+with\s+exactly\b",
+                str(row.get("text") or ""),
+                re.I,
+            )
+            for row in chunk.get("requirements") or []
+            if isinstance(row, Mapping)
+        ):
+            continue
+        path = str(Path(str(chunk.get("path") or "")).resolve())
+        tree = trees.get(path)
+        owner = str(chunk.get("owner") or "")
+        expected_dict_keys = dict_result_owners.get(owner, set())
+        if tree is None or not owner:
+            continue
+        function = next(
+            (node for node in tree.body
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and node.name == owner),
+            None,
+        )
+        if function is None:
+            continue
+        class OwnerReturns(ast.NodeVisitor):
+            """Visit returns in this owner, excluding nested callable bodies."""
+
+            def __init__(self) -> None:
+                self.values: list[ast.expr | None] = []
+                self.assignments: list[ast.Assign | ast.AnnAssign] = []
+                self.loops: list[ast.For | ast.AsyncFor] = []
+                self.calls: list[ast.Call] = []
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                if node is function:
+                    self.generic_visit(node)
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                if node is function:
+                    self.generic_visit(node)
+
+            def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                return
+
+            def visit_Return(self, node: ast.Return) -> None:
+                self.values.append(node.value)
+
+            def visit_Assign(self, node: ast.Assign) -> None:
+                self.assignments.append(node)
+                self.generic_visit(node)
+
+            def visit_Call(self, node: ast.Call) -> None:
+                self.calls.append(node)
+                self.generic_visit(node)
+
+            def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+                self.assignments.append(node)
+                self.generic_visit(node)
+
+            def visit_For(self, node: ast.For) -> None:
+                self.loops.append(node)
+                self.generic_visit(node)
+
+            def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+                self.loops.append(node)
+                self.generic_visit(node)
+
+        owner_returns = OwnerReturns()
+        owner_returns.visit(function)
+        returned_collectors: set[str] = set()
+        for value in owner_returns.values:
+            if isinstance(value, ast.Name):
+                returned_collectors.add(value.id)
+            elif (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "tuple"
+                and len(value.args) == 1
+                and isinstance(value.args[0], ast.Name)
+            ):
+                returned_collectors.add(value.args[0].id)
+        if expected_dict_keys:
+            for call in owner_returns.calls:
+                if not (
+                    isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id in returned_collectors
+                    and call.func.attr == "append"
+                    and len(call.args) == 1
+                    and isinstance(call.args[0], ast.Dict)
+                ):
+                    continue
+                keys = call.args[0].keys
+                if not all(
+                    isinstance(key, ast.Constant) and isinstance(key.value, str)
+                    for key in keys
+                ):
+                    continue
+                actual_keys = {key.value for key in keys}
+                if actual_keys != expected_dict_keys or len(keys) != len(expected_dict_keys):
+                    gaps.append(
+                        f"{path}:{owner}: appended dict-row keys "
+                        f"{sorted(actual_keys)} differ from approved exact keys "
+                        f"{sorted(expected_dict_keys)}."
+                    )
+                    break
+        assignment_counts: dict[str, int] = {}
+        for assignment in owner_returns.assignments:
+            for target in (
+                assignment.targets
+                if isinstance(assignment, ast.Assign)
+                else [assignment.target]
+            ):
+                if isinstance(target, ast.Name):
+                    assignment_counts[target.id] = (
+                        assignment_counts.get(target.id, 0) + 1
+                    )
+        scalar_helper_results = {
+            target.id: assignment.value.func.id
+            for assignment in owner_returns.assignments
+            if isinstance(assignment.value, ast.Call)
+            and isinstance(assignment.value.func, ast.Name)
+            and assignment.value.func.id in name_result_owners
+            for target in (
+                assignment.targets
+                if isinstance(assignment, ast.Assign)
+                else [assignment.target]
+            )
+            if isinstance(target, ast.Name)
+            and assignment_counts.get(target.id) == 1
+        }
+        requirement_text = " ".join(
+            str(row.get("text") or "")
+            for row in chunk.get("requirements") or []
+            if isinstance(row, Mapping)
+        )
+        path_name_fields = set(re.findall(r"<([A-Za-z_]\w*)>", requirement_text))
+        parameters = {
+            argument.arg
+            for argument in (*function.args.posonlyargs, *function.args.args,
+                             *function.args.kwonlyargs)
+        }
+        raw_entry_vars: set[str] = set()
+        for assignment in owner_returns.assignments:
+            value = assignment.value
+            if not (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "next"
+                and value.args
+                and isinstance(value.args[0], ast.GeneratorExp)
+            ):
+                continue
+            generator = value.args[0]
+            if not (
+                isinstance(generator.elt, ast.Name)
+                and len(generator.generators) == 1
+                and isinstance(generator.generators[0].target, ast.Name)
+                and generator.elt.id == generator.generators[0].target.id
+                and isinstance(generator.generators[0].iter, ast.Name)
+                and generator.generators[0].iter.id in parameters
+            ):
+                continue
+            for target in (
+                assignment.targets if isinstance(assignment, ast.Assign)
+                else [assignment.target]
+            ):
+                if isinstance(target, ast.Name) and assignment_counts.get(target.id) == 1:
+                    raw_entry_vars.add(target.id)
+        for loop in owner_returns.loops:
+            if not isinstance(loop.target, ast.Name):
+                continue
+            raw_input_loop = (
+                isinstance(loop.iter, ast.Name)
+                and loop.iter.id in parameters
+                and bool(scalar_helper_results)
+            )
+            helper_name = (
+                loop.iter.func.id
+                if isinstance(loop.iter, ast.Call)
+                and isinstance(loop.iter.func, ast.Name)
+                and loop.iter.func.id in name_result_owners
+                else ""
+            )
+            if (
+                not helper_name
+                and isinstance(loop.iter, ast.Name)
+                and loop.iter.id in scalar_helper_results
+            ):
+                helper_name = scalar_helper_results[loop.iter.id]
+            if not helper_name and not raw_input_loop:
+                continue
+            if path_name_fields and (raw_entry_vars or raw_input_loop):
+                for statement in loop.body:
+                    for child in ast.walk(statement):
+                        if not isinstance(child, ast.Dict):
+                            continue
+                        for key, value in zip(child.keys, child.values):
+                            if (
+                                isinstance(key, ast.Constant)
+                                and isinstance(key.value, str)
+                                and key.value in path_name_fields
+                                and isinstance(value, ast.Name)
+                                and (
+                                    value.id in raw_entry_vars
+                                    or (raw_input_loop and value.id == loop.target.id)
+                                )
+                            ):
+                                selected_name = (
+                                    loop.target.id if helper_name else
+                                    next(iter(scalar_helper_results))
+                                )
+                                gaps.append(
+                                    f"{path}:{owner}: a selection helper returns name strings, "
+                                    f"but dict field {key.value!r} stores raw input entry "
+                                    f"{value.id}; use a name from {selected_name} "
+                                    "for the row and derived output path."
+                                )
+                                break
+            if not helper_name:
+                continue
+            if any(
+                isinstance(child, ast.Subscript)
+                and isinstance(child.value, ast.Name)
+                and child.value.id == loop.target.id
+                and isinstance(child.slice, ast.Constant)
+                and isinstance(child.slice.value, str)
+                for statement in loop.body
+                for child in ast.walk(statement)
+            ):
+                gaps.append(
+                    f"{path}:{owner}: {helper_name} returns name strings, but "
+                    f"{loop.target.id} is indexed as a mapping inside the result "
+                    "loop; use the scalar name directly when constructing dict rows."
+                )
+                break
+        for value in owner_returns.values:
+            if value is None:
+                continue
+            operand: ast.expr = value
+            if (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "tuple"
+            ):
+                if len(value.args) != 1 or value.keywords:
+                    continue
+                operand = value.args[0]
+            helper_name = ""
+            source_description = ""
+            if isinstance(operand, ast.Call) and isinstance(operand.func, ast.Name):
+                helper_name = operand.func.id
+                source_description = f"returning {helper_name}(...) directly"
+            elif isinstance(operand, ast.Name):
+                helper_calls = [
+                    assignment.value
+                    for assignment in owner_returns.assignments
+                    if isinstance(assignment.value, ast.Call)
+                    and any(
+                        isinstance(target, ast.Name) and target.id == operand.id
+                        for target in (
+                            assignment.targets if isinstance(assignment, ast.Assign)
+                            else [assignment.target]
+                        )
+                    )
+                ]
+                if len(helper_calls) == 1 and isinstance(helper_calls[0].func, ast.Name):
+                    helper_name = helper_calls[0].func.id
+                    source_description = (
+                        f"return tuple({operand.id})" if operand is not value
+                        else f"return {operand.id}"
+                    )
+            if helper_name in name_result_owners:
+                gaps.append(
+                    f"{path}:{owner}: approved tuple-of-dicts result is not built; "
+                    f"{source_description} forwards name-only output from "
+                    f"{helper_name} without constructing dict rows."
+                )
+                break
+            helper_dict_keys = dict_result_owners.get(helper_name, set())
+            if (
+                helper_name != owner
+                and helper_dict_keys
+                and expected_dict_keys
+                and helper_dict_keys != expected_dict_keys
+            ):
+                gaps.append(
+                    f"{path}:{owner}: approved dict-row keys "
+                    f"{sorted(expected_dict_keys)} differ from forwarded "
+                    f"{helper_name} rows {sorted(helper_dict_keys)}; build "
+                    "the requested result rows instead of returning the "
+                    "helper output directly."
+                )
+                break
+    return gaps
+
+
+def _explicit_boundary_contract_gaps(
+    implementation_plan: Mapping[str, Any],
+    trees: Mapping[str, ast.Module],
+) -> list[str]:
+    """Catch direct empty-selection and blank-path contradictions in owner code."""
+
+    gaps: list[str] = []
+    none_all_helpers = {
+        str(chunk.get("owner") or "")
+        for chunk in implementation_plan.get("chunks") or []
+        if isinstance(chunk, Mapping)
+        and chunk.get("kind") == "function"
+        and re.search(
+            r"(?:selected_names\s*=\s*none|none selection)\s+"
+            r"(?:exports?|includes?|returns?)\s+all",
+            " ".join(
+                str(row.get("text") or row.get("requirement") or "")
+                if isinstance(row, Mapping) else str(row)
+                for row in chunk.get("requirements") or []
+            ).casefold(),
+        )
+    }
+    for chunk in implementation_plan.get("chunks") or []:
+        if not isinstance(chunk, Mapping) or chunk.get("kind") != "function":
+            continue
+        owner = str(chunk.get("owner") or "")
+        path = str(Path(str(chunk.get("path") or "")).resolve())
+        tree = trees.get(path)
+        if tree is None or not owner:
+            continue
+        function = next(
+            (node for node in tree.body
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and node.name == owner),
+            None,
+        )
+        if function is None:
+            continue
+        requirements = " ".join(
+            str(row.get("text") or row.get("requirement") or "")
+            if isinstance(row, Mapping) else str(row)
+            for row in chunk.get("requirements") or []
+        ).casefold()
+        parameters = {
+            arg.arg for arg in [
+                *function.args.posonlyargs, *function.args.args,
+                *function.args.kwonlyargs,
+            ]
+        }
+        forwards_to_default_all_helper = any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id in none_all_helpers - {owner}
+            and any(
+                isinstance(read, ast.Name)
+                and isinstance(read.ctx, ast.Load)
+                and read.id == "selected_names"
+                for argument in [*call.args, *(keyword.value for keyword in call.keywords)]
+                for read in ast.walk(argument)
+            )
+            for call in ast.walk(function)
+        )
+        if (
+            "selected_names" in parameters
+            and (
+                forwards_to_default_all_helper
+                or (
+                    re.search(
+                        r"(?:selected_names\s*=\s*none|none selection)\s+"
+                        r"(?:exports?|includes?|returns?)\s+all", requirements,
+                    )
+                    and re.search(
+                        r"(?:explicit\s+)?empty selection\s+"
+                        r"(?:exports?\s+nothing|returns?\s+(?:an\s+)?empty)",
+                        requirements,
+                    )
+                )
+            )
+        ):
+            for statement in function.body:
+                if not (
+                    isinstance(statement, ast.If)
+                    and isinstance(statement.test, ast.Compare)
+                    and isinstance(statement.test.left, ast.Name)
+                    and statement.test.left.id == "selected_names"
+                    and any(isinstance(op, ast.Is) for op in statement.test.ops)
+                    and any(isinstance(value, ast.Constant) and value.value is None
+                            for value in statement.test.comparators)
+                    and len(statement.body) == 1
+                    and isinstance(statement.body[0], ast.Assign)
+                    and len(statement.body[0].targets) == 1
+                    and isinstance(statement.body[0].targets[0], ast.Name)
+                    and statement.body[0].targets[0].id == "selected_names"
+                    and (
+                        isinstance(statement.body[0].value, (ast.List, ast.Set, ast.Tuple))
+                        and not statement.body[0].value.elts
+                        or isinstance(statement.body[0].value, ast.Call)
+                        and isinstance(statement.body[0].value.func, ast.Name)
+                        and statement.body[0].value.func.id in {"list", "set", "tuple"}
+                        and not statement.body[0].value.args
+                        and not statement.body[0].value.keywords
+                    )
+                ):
+                    continue
+                gaps.append(
+                    f"{path}:{owner}: selected_names=None is collapsed to "
+                    "an explicit empty selection, but the approved contract "
+                    "requires None to include all and [] to include none. "
+                    "Preserve a distinct all-mode sentinel through filtering."
+                )
+                break
+        if (
+            "selected_names" in parameters
+            and re.search(r"\b(?:empty selection|selected names?|selected_names)\b", requirements)
+        ):
+            parents = {
+                id(child): node
+                for node in ast.walk(function)
+                for child in ast.iter_child_nodes(node)
+            }
+            selection_reads = [
+                node for node in ast.walk(function)
+                if isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id == "selected_names"
+            ]
+            default_checks_only = not selection_reads or all(
+                isinstance(parents.get(id(node)), ast.Compare)
+                and any(
+                    isinstance(value, ast.Constant) and value.value is None
+                    for value in parents[id(node)].comparators
+                )
+                for node in selection_reads
+            )
+            if default_checks_only:
+                gaps.append(
+                    f"{path}:{owner}: selected_names is only checked for its "
+                    "default or never read; the approved explicit selection "
+                    "cannot affect the result. Use requested names to filter "
+                    "enabled names in project order and reject unknown or "
+                    "disabled names where required."
+                )
+            # Validation of requested names is not enough: the final ordered
+            # collector must also be filtered. A frequent local-model failure
+            # validates a requested set, then appends every enabled item in a
+            # later loop and returns that unfiltered collector.
+            selection_derived = {"selected_names"}
+            assignments = [
+                node for node in ast.walk(function)
+                if isinstance(node, (ast.Assign, ast.AnnAssign))
+            ]
+            for _ in range(len(assignments)):
+                changed = False
+                for assignment in assignments:
+                    value = assignment.value
+                    if value is None or not any(
+                        isinstance(node, ast.Name)
+                        and isinstance(node.ctx, ast.Load)
+                        and node.id in selection_derived
+                        for node in ast.walk(value)
+                    ):
+                        continue
+                    targets = (
+                        assignment.targets if isinstance(assignment, ast.Assign)
+                        else [assignment.target]
+                    )
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in selection_derived:
+                            selection_derived.add(target.id)
+                            changed = True
+                if not changed:
+                    break
+            returned_collectors = {
+                value.args[0].id
+                for node in function.body
+                if isinstance(node, ast.Return)
+                for value in [node.value]
+                if isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in {"tuple", "list"}
+                and len(value.args) == 1
+                and isinstance(value.args[0], ast.Name)
+            }
+            for selection_if in (
+                node for node in ast.walk(function)
+                if isinstance(node, ast.If)
+            ):
+                appends_result = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "append"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in returned_collectors
+                    for statement in selection_if.body
+                    for node in ast.walk(statement)
+                )
+                inverted_membership = any(
+                    isinstance(node, ast.Compare)
+                    and any(isinstance(op, ast.NotIn) for op in node.ops)
+                    and any(
+                        isinstance(comparator, ast.Name)
+                        and comparator.id in selection_derived
+                        for comparator in node.comparators
+                    )
+                    for node in ast.walk(selection_if.test)
+                )
+                if appends_result and inverted_membership:
+                    gaps.append(
+                        f"{path}:{owner}: inverted explicit selection filter "
+                        "appends a name when it is not in requested names. "
+                        "For a nonempty requested set, append matching enabled "
+                        "names in project order; None includes all and an "
+                        "explicit empty selection includes none."
+                    )
+                    break
+            for loop in (
+                node for node in function.body
+                if isinstance(node, (ast.For, ast.AsyncFor))
+            ):
+                appended = {
+                    node.func.value.id
+                    for node in ast.walk(loop)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "append"
+                    and isinstance(node.func.value, ast.Name)
+                }
+                if not appended.intersection(returned_collectors):
+                    continue
+                if any(
+                    isinstance(node, ast.Name)
+                    and isinstance(node.ctx, ast.Load)
+                    and node.id in selection_derived
+                    for node in ast.walk(loop)
+                ):
+                    continue
+                later = function.body[function.body.index(loop) + 1:]
+                if any(
+                    isinstance(node, (ast.Assign, ast.AnnAssign))
+                    and any(
+                        isinstance(target, ast.Name)
+                        and target.id in returned_collectors
+                        for target in (
+                            node.targets if isinstance(node, ast.Assign)
+                            else [node.target]
+                        )
+                    )
+                    and node.value is not None
+                    and any(
+                        isinstance(child, ast.Name)
+                        and isinstance(child.ctx, ast.Load)
+                        and child.id in selection_derived
+                        for child in ast.walk(node.value)
+                    )
+                    for statement in later
+                    for node in ast.walk(statement)
+                ):
+                    continue
+                gaps.append(
+                    f"{path}:{owner}: explicit selected_names is validated "
+                    "but does not filter the returned collection. Filter each "
+                    "appended enabled item against the requested names, while "
+                    "preserving project order; an empty selection returns ()."
+                )
+                break
+        if (
+            "selected_names" in parameters
+            and re.search(
+                r"\bempty selection\b[^.;]*\b(?:nothing|empty)\b",
+                requirements,
+            )
+        ):
+            derived = {"selected_names"}
+            assignments = [
+                node for node in ast.walk(function)
+                if isinstance(node, (ast.Assign, ast.AnnAssign))
+            ]
+            for _ in range(len(assignments)):
+                changed = False
+                for assignment in assignments:
+                    value = assignment.value
+                    if value is None or not any(
+                        isinstance(node, ast.Name) and node.id in derived
+                        for node in ast.walk(value)
+                    ):
+                        continue
+                    targets = (
+                        assignment.targets if isinstance(assignment, ast.Assign)
+                        else [assignment.target]
+                    )
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in derived:
+                            derived.add(target.id)
+                            changed = True
+                if not changed:
+                    break
+            returns_empty_before_raise = any(
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.UnaryOp)
+                and isinstance(node.test.op, ast.Not)
+                and isinstance(node.test.operand, ast.Name)
+                and node.test.operand.id in derived
+                and any(
+                    isinstance(child, ast.Return)
+                    and isinstance(child.value, (ast.Tuple, ast.List, ast.Set))
+                    and not child.value.elts
+                    for statement in node.body
+                    for child in ast.walk(statement)
+                )
+                for node in ast.walk(function)
+            )
+            raises_on_empty_filtered_result = any(
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.UnaryOp)
+                and isinstance(node.test.op, ast.Not)
+                and isinstance(node.test.operand, ast.Name)
+                and node.test.operand.id in derived
+                and any(isinstance(child, ast.Raise)
+                        for statement in node.body
+                        for child in ast.walk(statement))
+                for node in ast.walk(function)
+            )
+            if raises_on_empty_filtered_result and not returns_empty_before_raise:
+                gaps.append(
+                    f"{path}:{owner}: explicit empty selected_names must return "
+                    "an empty result, but a selection-derived empty value raises. "
+                    "After normalizing selected_names to a set, return () only "
+                    "when that set is empty. For a nonempty set, reject keys "
+                    "absent from enabled names with ValueError, then filter in "
+                    "project order. Never turn unknown/disabled selection into ()."
+                )
+        if (
+            "selected_names" in parameters
+            and re.search(
+                r"\bunknown or disabled (?:selected names?|selections?)\b"
+                r"[^.;]*\b(?:raises?|with)\s+valueerror\b",
+                requirements,
+            )
+        ):
+            selection_derived = {"selected_names"}
+            for _ in range(len(function.body)):
+                changed = False
+                for assignment in (
+                    node for node in ast.walk(function)
+                    if isinstance(node, (ast.Assign, ast.AnnAssign))
+                    and node.value is not None
+                    and any(
+                        isinstance(child, ast.Name)
+                        and isinstance(child.ctx, ast.Load)
+                        and child.id in selection_derived
+                        for child in ast.walk(node.value)
+                    )
+                ):
+                    targets = (
+                        assignment.targets if isinstance(assignment, ast.Assign)
+                        else [assignment.target]
+                    )
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in selection_derived:
+                            selection_derived.add(target.id)
+                            changed = True
+                if not changed:
+                    break
+            parent_nodes = {
+                id(child): node
+                for node in ast.walk(function)
+                for child in ast.iter_child_nodes(node)
+            }
+            has_selection_rejection = False
+            for rejection in (
+                node for node in ast.walk(function)
+                if isinstance(node, ast.Raise)
+            ):
+                ancestor = parent_nodes.get(id(rejection))
+                while ancestor is not None and ancestor is not function:
+                    if (
+                        isinstance(ancestor, ast.If)
+                        and any(
+                            isinstance(read, ast.Name)
+                            and read.id in selection_derived
+                            for read in ast.walk(ancestor.test)
+                        )
+                    ):
+                        has_selection_rejection = True
+                        break
+                    ancestor = parent_nodes.get(id(ancestor))
+                if has_selection_rejection:
+                    break
+            if not has_selection_rejection:
+                gaps.append(
+                    f"{path}:{owner}: approved unknown or disabled "
+                    "selected_names must raise ValueError; no rejection is "
+                    "guarded by the requested selection. "
+                    "Compare nonempty requested keys with enabled keys before "
+                    "filtering and reject any missing key."
+                )
+        if (
+            re.search(r"reject blank names?", requirements)
+            and "backslash" in requirements
+            and "valueerror" in requirements
+        ):
+            for guard in (
+                node for node in ast.walk(function)
+                if isinstance(node, ast.If)
+                and len(node.body) == 1
+                and isinstance(node.body[0], ast.Continue)
+            ):
+                literals = {
+                    node.value for node in ast.walk(guard.test)
+                    if isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                }
+                if {"/", "\\"} <= literals:
+                    gaps.append(
+                        f"{path}:{owner}: unsafe or blank names are silently "
+                        "skipped; the approved contract requires ValueError."
+                    )
+                    break
+        for field in sorted(set(re.findall(
+            r"\bblank\s+([a-z_]\w*)\b", requirements,
+        )) & parameters):
+            path_conversions = [
+                node for node in ast.walk(function)
+                if isinstance(node, ast.Call)
+                and (
+                    isinstance(node.func, ast.Name) and node.func.id == "Path"
+                    or isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "pathlib"
+                    and node.func.attr == "Path"
+                )
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id == field
+            ]
+            def stringified_field_strip(node: ast.AST) -> bool:
+                """Recognize str(field).strip(), which also accepts Path inputs."""
+
+                return (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "strip"
+                    and isinstance(node.func.value, ast.Call)
+                    and isinstance(node.func.value.func, ast.Name)
+                    and node.func.value.func.id == "str"
+                    and len(node.func.value.args) == 1
+                    and isinstance(node.func.value.args[0], ast.Name)
+                    and node.func.value.args[0].id == field
+                )
+
+            def stringified_blank_test(node: ast.AST) -> bool:
+                """Accept a blank check alone or as one disjunctive rejection."""
+
+                return (
+                    isinstance(node, ast.UnaryOp)
+                    and isinstance(node.op, ast.Not)
+                    and stringified_field_strip(node.operand)
+                ) or (
+                    isinstance(node, ast.BoolOp)
+                    and isinstance(node.op, ast.Or)
+                    and any(stringified_blank_test(value) for value in node.values)
+                )
+
+            stringified_guard = any(
+                isinstance(node, ast.If)
+                and stringified_blank_test(node.test)
+                and any(
+                    isinstance(child, ast.Raise)
+                    for statement in node.body for child in ast.walk(statement)
+                )
+                and any(node.lineno < conversion.lineno for conversion in path_conversions)
+                for node in ast.walk(function)
+            )
+            strips_field = any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "strip"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == field
+                for node in ast.walk(function)
+            )
+            if path_conversions and not strips_field and not stringified_guard:
+                gaps.append(
+                    f"{path}:{owner}: approved blank `{field}` rejection is "
+                    f"missing before Path({field}); use `isinstance({field}, str) "
+                    f"and not {field}.strip()` so whitespace-only strings raise "
+                    "ValueError."
+                )
+            elif path_conversions and (strips_field or stringified_guard) and re.search(
+                rf"\b{re.escape(field)}\b[^.;]{{0,90}}\b(?:str|pathlib\.Path|Path)\b",
+                requirements,
+                re.I,
+            ):
+                guarded_strip = any(
+                    isinstance(node, ast.If)
+                    and any(
+                        isinstance(part, ast.Call)
+                        and isinstance(part.func, ast.Name)
+                        and part.func.id == "isinstance"
+                        and len(part.args) >= 2
+                        and isinstance(part.args[0], ast.Name)
+                        and part.args[0].id == field
+                        and isinstance(part.args[1], ast.Name)
+                        and part.args[1].id == "str"
+                        for part in ast.walk(node.test)
+                    )
+                    and any(
+                        isinstance(part, ast.Call)
+                        and isinstance(part.func, ast.Attribute)
+                        and part.func.attr == "strip"
+                        and isinstance(part.func.value, ast.Name)
+                        and part.func.value.id == field
+                        for part in ast.walk(node.test)
+                    )
+                    for node in ast.walk(function)
+                )
+                if not guarded_strip and not stringified_guard:
+                    gaps.append(
+                        f"{path}:{owner}: `{field}.strip()` is unguarded even "
+                        "though pathlib.Path is an approved input. Restrict the "
+                        f"blank-string check to `isinstance({field}, str) and "
+                        f"not {field}.strip()`; Path inputs must remain valid."
+                    )
+    return gaps
+
+
+def _explicit_function_completion_gaps(
+    implementation_plan: Mapping[str, Any],
+    trees: Mapping[str, ast.Module],
+) -> list[str]:
+    """Reject missing outer returns and explicitly required sibling calls."""
+
+    callable_names = {
+        node.name
+        for tree in trees.values()
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    gaps: list[str] = []
+    for chunk in implementation_plan.get("chunks") or []:
+        if not isinstance(chunk, Mapping) or chunk.get("kind") != "function":
+            continue
+        owner = str(chunk.get("owner") or "")
+        path = str(Path(str(chunk.get("path") or "")).resolve())
+        tree = trees.get(path)
+        if tree is None or not owner:
+            continue
+        function = next(
+            (node for node in tree.body
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and node.name == owner),
+            None,
+        )
+        if function is None:
+            continue
+        requirements = " ".join(
+            str(row.get("text") or row.get("requirement") or "")
+            if isinstance(row, Mapping) else str(row)
+            for row in chunk.get("requirements") or []
+        )
+        if re.search(r"\breturns? a tuple\b", requirements, re.IGNORECASE):
+            class OuterReturns(ast.NodeVisitor):
+                def __init__(self) -> None:
+                    self.values: list[ast.expr | None] = []
+
+                def visit_Return(self, node: ast.Return) -> None:
+                    self.values.append(node.value)
+
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                    return
+
+                def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                    return
+
+                def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                    return
+
+            returns = OuterReturns()
+            for statement in function.body:
+                returns.visit(statement)
+            if not any(
+                value is not None
+                and not (isinstance(value, ast.Constant) and value.value is None)
+                for value in returns.values
+            ):
+                gaps.append(
+                    f"{path}:{owner}: approved tuple result has no value-return "
+                    "in the public owner; a nested helper return or yield is not "
+                    "the callable's result."
+                )
+        required_calls = {
+            name for name in re.findall(
+                r"\busing\s+([A-Za-z_]\w*)\b", requirements, re.IGNORECASE,
+            )
+            if name in callable_names and name != owner
+        }
+        for dependency in sorted(required_calls):
+            aliases = {dependency}
+            for statement in [*tree.body, *ast.walk(function)]:
+                if isinstance(statement, ast.ImportFrom):
+                    aliases.update(
+                        alias.asname or alias.name
+                        for alias in statement.names if alias.name == dependency
+                    )
+            nested = {
+                child.name: child
+                for child in ast.walk(function)
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child is not function
+            }
+
+            class CallsOutsideNestedDefinitions(ast.NodeVisitor):
+                def __init__(self) -> None:
+                    self.calls: list[ast.Call] = []
+                    self.loaded_names: set[str] = set()
+
+                def visit_Call(self, call: ast.Call) -> None:
+                    self.calls.append(call)
+                    self.generic_visit(call)
+
+                def visit_Name(self, name: ast.Name) -> None:
+                    if isinstance(name.ctx, ast.Load):
+                        self.loaded_names.add(name.id)
+
+                def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+                    return
+
+                def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+                    return
+
+                def visit_ClassDef(self, child: ast.ClassDef) -> None:
+                    return
+
+            reachable_calls: list[ast.Call] = []
+            pending = [function]
+            visited: set[int] = set()
+            while pending:
+                current = pending.pop()
+                if id(current) in visited:
+                    continue
+                visited.add(id(current))
+                visitor = CallsOutsideNestedDefinitions()
+                for statement in current.body:
+                    visitor.visit(statement)
+                reachable_calls.extend(visitor.calls)
+                # A callback may be passed to another callable rather than
+                # invoked syntactically here. Follow loaded helper names to
+                # avoid rejecting that valid delegation shape.
+                pending.extend(
+                    nested[name]
+                    for name in visitor.loaded_names & nested.keys()
+                )
+            if not any(
+                isinstance(call.func, ast.Name) and call.func.id in aliases
+                or isinstance(call.func, ast.Attribute)
+                and call.func.attr == dependency
+                for call in reachable_calls
+            ):
+                gaps.append(
+                    f"{path}:{owner}: approved `using {dependency}` dependency "
+                    "is never called by the public owner or its nested helpers."
+                )
+    return gaps
+
+
 def validate_generated_files_against_implementation_plan(
     implementation_plan: Mapping[str, Any],
     generated_files: list[tuple[str, str, str]],
@@ -84,6 +1317,10 @@ def validate_generated_files_against_implementation_plan(
             trees[path] = ast.parse(source, filename=path)
         except SyntaxError as exc:
             errors.append(f"{path}: approved-plan AST validation failed: {exc}")
+    errors.extend(_explicit_serialization_contract_gaps(implementation_plan, trees))
+    errors.extend(_explicit_tuple_dict_result_gaps(implementation_plan, trees))
+    errors.extend(_explicit_boundary_contract_gaps(implementation_plan, trees))
+    errors.extend(_explicit_function_completion_gaps(implementation_plan, trees))
 
     def executable_owner_fingerprint(
         tree: ast.Module,
@@ -333,6 +1570,32 @@ def validate_generated_files_against_implementation_plan(
                     (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
                 )
             )
+            def nested_arguments_for(call: ast.Call) -> set[str]:
+                """Include only parameters of scopes enclosing this call."""
+
+                names: set[str] = set()
+                ancestor = parent_by_node.get(call)
+                while ancestor is not None and ancestor is not callable_node:
+                    if isinstance(
+                        ancestor,
+                        (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda),
+                    ):
+                        arguments = ancestor.args
+                        names.update(
+                            argument.arg
+                            for argument in (
+                                *arguments.posonlyargs,
+                                *arguments.args,
+                                *arguments.kwonlyargs,
+                            )
+                        )
+                        if arguments.vararg is not None:
+                            names.add(arguments.vararg.arg)
+                        if arguments.kwarg is not None:
+                            names.add(arguments.kwarg.arg)
+                    ancestor = parent_by_node.get(ancestor)
+                return names
+
             unresolved_roots = sorted({
                 root
                 for call in ast.walk(callable_node)
@@ -340,6 +1603,7 @@ def validate_generated_files_against_implementation_plan(
                 for root in [call_root(call)]
                 if root
                 and root not in local_names
+                and root not in nested_arguments_for(call)
                 and root not in module_bindings
                 and root not in builtin_names
             })
@@ -2180,6 +3444,21 @@ def validate_generated_files_against_implementation_plan(
                     method_requirement_text,
                     flags=re.IGNORECASE,
                 ):
+                    next_count_names = {
+                        target.id
+                        for assignment in ast.walk(method)
+                        if isinstance(assignment, (ast.Assign, ast.AnnAssign))
+                        for target in (
+                            assignment.targets
+                            if isinstance(assignment, ast.Assign)
+                            else [assignment.target]
+                        )
+                        if isinstance(target, ast.Name)
+                        and isinstance(assignment.value, ast.BinOp)
+                        and isinstance(assignment.value.op, ast.Add)
+                        and isinstance(assignment.value.right, ast.Constant)
+                        and assignment.value.right.value == 1
+                    }
                     premature_guards = [
                         node
                         for node in ast.walk(method)
@@ -2187,6 +3466,7 @@ def validate_generated_files_against_implementation_plan(
                         and len(node.ops) == 1
                         and isinstance(node.ops[0], ast.GtE)
                         and isinstance(node.left, ast.Name)
+                        and node.left.id in next_count_names
                         and len(node.comparators) == 1
                         and isinstance(node.comparators[0], ast.Attribute)
                         and isinstance(node.comparators[0].value, ast.Name)
@@ -2785,6 +4065,37 @@ def validate_generated_files_against_implementation_plan(
             ):
                 append_method = methods["append"]
                 since_method = methods["since"]
+                if "useful type hints" in journal_requirement_text.casefold():
+                    append_return = (
+                        ast.unparse(append_method.returns)
+                        if append_method.returns is not None else ""
+                    )
+                    if append_return in {"", "object", "Any"}:
+                        errors.append(
+                            f"{path}:{owner}.append: requested useful type hints "
+                            "must declare the integer sequence result as int."
+                        )
+                    sequence_argument = next(
+                        (argument for argument in since_method.args.args
+                         if argument.arg == "sequence"),
+                        None,
+                    )
+                    sequence_hint = (
+                        ast.unparse(sequence_argument.annotation)
+                        if sequence_argument is not None
+                        and sequence_argument.annotation is not None else ""
+                    )
+                    since_return = (
+                        ast.unparse(since_method.returns)
+                        if since_method.returns is not None else ""
+                    )
+                    if sequence_hint in {"", "object", "Any"} or since_return in {
+                        "", "object", "Any"
+                    }:
+                        errors.append(
+                            f"{path}:{owner}.since: requested useful type hints "
+                            "must declare sequence: int and a tuple return type."
+                        )
                 persistent_sequence_attributes = {
                     node.attr
                     for node in ast.walk(append_method)
@@ -2797,13 +4108,35 @@ def validate_generated_files_against_implementation_plan(
                         for token in ("sequence", "serial", "counter", "next")
                     )
                 }
+                def event_tuple_expression(node: ast.AST) -> bool:
+                    if isinstance(node, (ast.Tuple, ast.List)):
+                        return len(node.elts) >= 3
+                    return (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id in {"deepcopy", "copy"}
+                        and len(node.args) == 1
+                        and event_tuple_expression(node.args[0])
+                    )
+
+                event_tuple_aliases = {
+                    target.id
+                    for node in ast.walk(append_method)
+                    if isinstance(node, ast.Assign)
+                    and event_tuple_expression(node.value)
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
                 stores_sequence_in_events = any(
                     isinstance(call, ast.Call)
                     and isinstance(call.func, ast.Attribute)
                     and call.func.attr in {"append", "appendleft", "insert"}
                     and any(
-                        isinstance(argument, (ast.Tuple, ast.List))
-                        and len(argument.elts) >= 3
+                        event_tuple_expression(argument)
+                        or (
+                            isinstance(argument, ast.Name)
+                            and argument.id in event_tuple_aliases
+                        )
                         for argument in call.args
                     )
                     for call in ast.walk(append_method)
@@ -2827,6 +4160,99 @@ def validate_generated_files_against_implementation_plan(
                     for call in ast.walk(since_method)
                     )
                 )
+                append_parents = {
+                    child: parent
+                    for parent in ast.walk(append_method)
+                    for child in ast.iter_child_nodes(parent)
+                }
+
+                def unconditional_statement(node: ast.AST) -> bool:
+                    """Exclude updates nested in retention or filter branches."""
+
+                    parent = append_parents.get(node)
+                    while parent is not None and parent is not append_method:
+                        if isinstance(parent, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try)):
+                            return False
+                        parent = append_parents.get(parent)
+                    return parent is append_method
+
+                def counter_attribute(node: ast.AST) -> bool:
+                    return (
+                        isinstance(node, ast.Attribute)
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id == "self"
+                        and node.attr in persistent_sequence_attributes
+                    )
+
+                def increment_expression(node: ast.AST) -> bool:
+                    return (
+                        isinstance(node, ast.BinOp)
+                        and isinstance(node.op, ast.Add)
+                        and counter_attribute(node.left)
+                        and isinstance(node.right, ast.Constant)
+                        and type(node.right.value) is int
+                        and node.right.value == 1
+                    )
+
+                unconditional_aliases = {
+                    target.id: node.lineno
+                    for node in ast.walk(append_method)
+                    if isinstance(node, ast.Assign)
+                    and unconditional_statement(node)
+                    and increment_expression(node.value)
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
+
+                def unconditional_counter_increment(node: ast.AST) -> bool:
+                    """Recognize direct and one-step local-alias counter updates."""
+
+                    if not unconditional_statement(node):
+                        return False
+                    if isinstance(node, ast.AugAssign):
+                        return (
+                            counter_attribute(node.target)
+                            and isinstance(node.op, ast.Add)
+                            and isinstance(node.value, ast.Constant)
+                            and type(node.value.value) is int
+                            and node.value.value == 1
+                        )
+                    if not isinstance(node, ast.Assign) or not any(
+                        counter_attribute(target) for target in node.targets
+                    ):
+                        return False
+                    if increment_expression(node.value):
+                        return True
+                    return (
+                        isinstance(node.value, ast.Name)
+                        and unconditional_aliases.get(node.value.id, node.lineno) < node.lineno
+                    )
+
+                advances_every_append = any(
+                    unconditional_counter_increment(node)
+                    for node in ast.walk(append_method)
+                )
+                cursor_parameter_names = {
+                    argument.arg
+                    for argument in (
+                        *since_method.args.posonlyargs,
+                        *since_method.args.args,
+                    )
+                    if argument.arg not in {"self", "cls"}
+                }
+                slices_retention_by_cursor = any(
+                    isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Attribute)
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "self"
+                    and isinstance(node.slice, ast.Slice)
+                    and any(
+                        isinstance(value, ast.Name)
+                        and value.id in cursor_parameter_names
+                        for value in ast.walk(node.slice)
+                    )
+                    for node in ast.walk(since_method)
+                )
                 if (
                     not persistent_sequence_attributes
                     or not stores_sequence_in_events
@@ -2838,6 +4264,18 @@ def validate_generated_files_against_implementation_plan(
                         "bounded retention container. Keep a persistent sequence "
                         "counter, store each sequence with its event, and have append, "
                         "since, eviction, and clear share that representation."
+                    )
+                elif not advances_every_append:
+                    errors.append(
+                        f"{path}:{owner}.append: the persistent sequence counter "
+                        "must advance by one on every append, outside retention "
+                        "and topic-filter branches."
+                    )
+                elif slices_retention_by_cursor:
+                    errors.append(
+                        f"{path}:{owner}.since: cursor sequence is an event ID, "
+                        "not a retained-list offset. Iterate retained events and "
+                        "filter by stored ID > sequence instead of slicing the list."
                     )
                 clear_method = methods["clear"]
                 clears_sequence_counter = any(
@@ -2853,8 +4291,6 @@ def validate_generated_files_against_implementation_plan(
                             else [node.target]
                         )
                     )
-                    and isinstance(node.value, ast.Constant)
-                    and node.value.value == 0
                     for node in ast.walk(clear_method)
                 )
                 if clears_sequence_counter:
@@ -2886,6 +4322,29 @@ def validate_generated_files_against_implementation_plan(
                         f"{path}:{owner}.since: approved immutable snapshot must "
                         "return a tuple, not a list-backed result."
                     )
+                if "deep cop" in journal_requirement_text.casefold():
+                    def calls_deepcopy(method: ast.AST) -> bool:
+                        return any(
+                            isinstance(node, ast.Call)
+                            and (
+                                isinstance(node.func, ast.Name)
+                                and node.func.id == "deepcopy"
+                                or isinstance(node.func, ast.Attribute)
+                                and node.func.attr == "deepcopy"
+                            )
+                            for node in ast.walk(method)
+                        )
+
+                    if not calls_deepcopy(append_method):
+                        errors.append(
+                            f"{path}:{owner}.append: approved deep-copy boundary "
+                            "must copy the mutable payload before retention."
+                        )
+                    if not calls_deepcopy(since_method):
+                        errors.append(
+                            f"{path}:{owner}.since: approved deep-copy snapshot "
+                            "must detach retained payloads before returning them."
+                        )
             for interface in chunk.get(
                 "required_dependency_interfaces",
             ) or []:

@@ -84,6 +84,16 @@ def _pipeline_literal_expr(value: Any, action_steps: dict[str, int]) -> str:
     return repr(value)
 
 
+def _has_pipeline_context(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("$pipeline_context") in {"dcc_export_scope_v1", "dcc_input_context_v1"}:
+            return True
+        return any(_has_pipeline_context(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_pipeline_context(item) for item in value)
+    return False
+
+
 def _param_names(symbol: dict[str, Any]) -> list[str]:
     return [p.get("name", "") for p in symbol.get("params", []) or [] if p.get("name") and not p.get("name", "").startswith("*")]
 
@@ -346,6 +356,11 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         (step.get("symbol") or {}).get("pipeline_operation") == "dcc_operation"
         for step in ordered_steps
     )
+    has_maya_fbx_to_engine = any(
+        str((step.get("symbol") or {}).get("provider_id") or (step.get("symbol") or {}).get("host") or "").lower() == "maya"
+        and (step.get("symbol") or {}).get("operation") == "animation.fbx_to_engine"
+        for step in ordered_steps
+    )
     pipeline_hosts = list(dict.fromkeys(
         str((step.get("symbol") or {}).get("provider_id") or (step.get("symbol") or {}).get("host") or "").lower()
         for step in ordered_steps
@@ -354,7 +369,8 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         != "tech_connector"
     ))
     pipeline_callables: dict[str, list[str]] = {}
-    for step in ordered_steps:
+    pipeline_context_checks: list[dict[str, Any]] = []
+    for step_index, step in enumerate(ordered_steps, start=1):
         symbol = step.get("symbol") or {}
         if symbol.get("pipeline_operation") != "dcc_operation":
             continue
@@ -364,6 +380,13 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             pipeline_callables.setdefault(host, [])
             if callable_name not in pipeline_callables[host]:
                 pipeline_callables[host].append(callable_name)
+        context_params = {
+            key: value
+            for key, value in dict(step.get("literal_values") or {}).items()
+            if _has_pipeline_context(value)
+        }
+        if host in pipeline_hosts and context_params:
+            pipeline_context_checks.append({"step": step_index, "host": host, "params": context_params})
 
     function_params = []
     step_param_names = {}
@@ -385,6 +408,11 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
         "require_live_preflight=True",
         "operation_timeout_seconds=120.0",
     ] if has_pipeline_operations else []
+    if has_maya_fbx_to_engine:
+        # HIK characterization, control bake, scene reopen, and clean FBX
+        # export are one host operation. Keep its bound independently tunable
+        # without slowing unrelated import/readback stages.
+        runtime_params.append("maya_fbx_to_engine_timeout_seconds=300.0")
     lines = [
         '"""Generated pipeline.',
         f"Goal: {goal}",
@@ -445,6 +473,19 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             "            timeout_seconds=operation_timeout_seconds,",
             "        )",
         ]
+        if pipeline_context_checks:
+            lines += [
+                f"    _tc_context_checks = {pipeline_context_checks!r}",
+                "    _tc_resolved_context = {}",
+                "    if require_live_preflight:",
+                "        from tech_connector.game_engine.integration.pipeline_operation_runtime_service import resolve_pipeline_context_params",
+                "        for _tc_check in _tc_context_checks:",
+                "            _tc_resolved_context[_tc_check['step']] = resolve_pipeline_context_params(",
+                "                _tc_check['params'], host=_tc_check['host'],",
+                "                session_port=_tc_session_ports.get(_tc_check['host']),",
+                "                timeout_seconds=operation_timeout_seconds,",
+                "            )",
+            ]
     if flow_links:
         lines.append(f"    flow_links = {flow_links!r}")
     if not ordered_steps:
@@ -553,13 +594,22 @@ def generate_pipeline_code_from_graph(name: str, goal: str, steps: list[dict[str
             host_name = str(symbol.get("provider_id") or symbol.get("host") or "").lower()
             operation_name = str(symbol.get("operation") or "")
             callable_path = str(symbol.get("function_path") or "")
+            stage_timeout = (
+                "maya_fbx_to_engine_timeout_seconds"
+                if host_name == "maya" and operation_name == "animation.fbx_to_engine"
+                else "operation_timeout_seconds"
+            )
             lines += [
                 "        from tech_connector.game_engine.integration.pipeline_operation_runtime_service import execute_pipeline_operation",
                 f"        _operation_params = {{{', '.join(f'{name!r}: {expr}' for name, expr in call_args_by_name.items())}}}",
+                *(
+                    [f"        _operation_params.update(_tc_resolved_context.get({idx}, {{}}))"]
+                    if pipeline_context_checks else []
+                ),
                 f"        step{idx}_result = execute_pipeline_operation(",
                 f"            {host_name!r}, {operation_name!r}, {callable_path!r}, _operation_params,",
                 f"            session_port=_tc_session_ports.get({host_name!r}),",
-                "            timeout_seconds=operation_timeout_seconds,",
+                f"            timeout_seconds={stage_timeout},",
                 "        )",
                 f"        step{idx}_outputs = {{}}",
             ]

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import tempfile
 from typing import Iterable
 
-BOOTSTRAP_VERSION = "4"
+BOOTSTRAP_VERSION = "6"
 BLOCK_BEGIN = "# BEGIN Tech Connector Maya Bridge (managed)"
 BLOCK_END = "# END Tech Connector Maya Bridge (managed)"
 
@@ -41,21 +42,41 @@ def _init_tech_connector_livelink():
 cmds.evalDeferred(_init_tech_connector_livelink)
 """
 
-MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Authenticated JSON Bridge Startup Script v4
+LEGACY_SECURE_MAYA_STARTUP_CODE = """# Entitlement-aware Live Link & Plugin Initialization
+# TECH_CONNECTOR_SECURE_MAYA_PORT
+try:
+    from maya_tools import maya_menu
+    maya_menu.initialize_command_port()
+except Exception:
+    pass
+try:
+    if not cmds.pluginInfo('MayaLiveLinkPlugin', q=True, loaded=True):
+        cmds.loadPlugin('MayaLiveLinkPlugin', quiet=True)
+except Exception:
+    pass
+"""
+
+MAYA_USER_SETUP_CODE = r'''# Tech Connector Maya Authenticated JSON Bridge Startup Script v6
+import sys
 import maya.cmds as cmds
 
-TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "3"
+TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "6"
 TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = str(globals().get("__file__", ""))
+TECH_CONNECTOR_TOOLS_ROOT = "__TECH_CONNECTOR_TOOLS_ROOT__"
 
 
 def _init_tech_connector_maya_bridge():
     try:
+        if TECH_CONNECTOR_TOOLS_ROOT not in sys.path:
+            sys.path.insert(0, TECH_CONNECTOR_TOOLS_ROOT)
         from maya_tools import maya_menu
+        maya_menu.TECH_CONNECTOR_MAYA_BRIDGE_VERSION = TECH_CONNECTOR_MAYA_BRIDGE_VERSION
+        maya_menu.TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE
         opened_port = maya_menu.initialize_command_port()
         if not opened_port:
             cmds.warning("[Tech Connector] Authenticated Maya bridge listener could not be started.")
-    except Exception:
-        cmds.warning("[Tech Connector] Authenticated Maya bridge could not be started.")
+    except Exception as exc:
+        cmds.warning("[Tech Connector] Authenticated Maya bridge could not be started: {}".format(exc))
 
     try:
         if not cmds.pluginInfo("MayaLiveLinkPlugin", q=True, loaded=True):
@@ -68,19 +89,33 @@ cmds.evalDeferred(_init_tech_connector_maya_bridge)
 '''
 
 
-def managed_bootstrap_block() -> str:
-    return f"{BLOCK_BEGIN}\n{MAYA_USER_SETUP_CODE.strip()}\n{BLOCK_END}\n"
+def managed_bootstrap_block(source_path: str | Path | None = None) -> str:
+    tools_root = Path(__file__).resolve().parents[3]
+    code = MAYA_USER_SETUP_CODE.strip().replace(
+        'TECH_CONNECTOR_TOOLS_ROOT = "__TECH_CONNECTOR_TOOLS_ROOT__"',
+        'TECH_CONNECTOR_TOOLS_ROOT = ' + json.dumps(str(tools_root)),
+    )
+    if source_path is not None:
+        code = code.replace(
+            'TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = str(globals().get("__file__", ""))',
+            'TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = '
+            + json.dumps(str(Path(source_path).expanduser().resolve())),
+        )
+    return f"{BLOCK_BEGIN}\n{code}\n{BLOCK_END}\n"
 
 
-def render_user_setup(existing: str) -> str:
+def render_user_setup(existing: str, *, source_path: str | Path | None = None) -> str:
     """Return a stable userSetup.py with exactly one current managed block."""
 
     source = str(existing or "")
+    # This exact older block was appended by maya_setup.py.  Remove only that
+    # known generated text; leave all unrelated studio startup code untouched.
+    source = source.replace(LEGACY_SECURE_MAYA_STARTUP_CODE, "", 1)
     begin_count = source.count(BLOCK_BEGIN)
     end_count = source.count(BLOCK_END)
     if begin_count != end_count or begin_count > 1:
         raise ValueError("Malformed Tech Connector managed block in userSetup.py")
-    block = managed_bootstrap_block()
+    block = managed_bootstrap_block(source_path)
     if begin_count == 1:
         start = source.index(BLOCK_BEGIN)
         end = source.index(BLOCK_END, start) + len(BLOCK_END)
@@ -173,11 +208,11 @@ def verify_maya_livelink_installation(
     """Read back exact managed bootstrap content without changing user files."""
 
     paths = [directory / "userSetup.py" for directory in _target_script_dirs(script_dirs)]
-    expected = managed_bootstrap_block().strip()
     rows = []
     for path in paths:
         try:
             content = path.read_text(encoding="utf-8") if path.is_file() else ""
+            expected = managed_bootstrap_block(path).strip()
             current = (
                 content.count(BLOCK_BEGIN) == 1
                 and content.count(BLOCK_END) == 1
@@ -214,7 +249,7 @@ def install_maya_livelink_plugin(
         user_setup = script_dir / "userSetup.py"
         try:
             existing = user_setup.read_text(encoding="utf-8") if user_setup.is_file() else ""
-            desired = render_user_setup(existing)
+            desired = render_user_setup(existing, source_path=user_setup)
             if desired == existing:
                 unchanged_paths.append(str(user_setup))
                 continue

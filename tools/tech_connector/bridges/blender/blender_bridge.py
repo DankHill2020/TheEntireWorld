@@ -558,8 +558,14 @@ if addon_dir not in sys.path:
     sys.path.append(addon_dir)
 
 module = importlib.import_module("{ADDON_MODULE}")
-if hasattr(module, "register"):
-    module.register()
+
+def register():
+    if hasattr(module, "register"):
+        module.register()
+
+def unregister():
+    if hasattr(module, "unregister"):
+        module.unregister()
 """
 
 

@@ -535,6 +535,1001 @@ def _repair_mapping_record_attribute_access(
     return updated, notes
 
 
+def _repair_scalar_name_result_access(
+    generated_files: list[tuple[str, str, str]],
+    errors: list[str],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Use a proven scalar helper name instead of indexing it as a record."""
+
+    pattern = re.compile(
+        r"^(?P<path>.+?\.py):(?P<owner>[A-Za-z_][A-Za-z0-9_]*): "
+        r"(?P<helper>[A-Za-z_][A-Za-z0-9_]*) returns name strings, but "
+        r"(?P<item>[A-Za-z_][A-Za-z0-9_]*) is indexed as a mapping "
+        r"inside the result loop;"
+    )
+    targets: dict[str, set[tuple[str, str, str]]] = {}
+    for error in errors:
+        match = pattern.match(str(error))
+        if match:
+            targets.setdefault(str(Path(match.group("path")).resolve()), set()).add(
+                (match.group("owner"), match.group("helper"), match.group("item"))
+            )
+    if not targets:
+        return generated_files, []
+
+    updated = list(generated_files)
+    notes: list[str] = []
+    for index, (path, original, source) in enumerate(updated):
+        applicable = targets.get(str(Path(path).resolve()), set())
+        if not applicable:
+            continue
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        changed = False
+        for function in tree.body:
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for owner, helper, item in applicable:
+                if function.name != owner:
+                    continue
+                class OwnerNodes(ast.NodeVisitor):
+                    """Collect this callable's statements without nested callables."""
+
+                    def __init__(self) -> None:
+                        self.assignments: list[ast.Assign | ast.AnnAssign] = []
+                        self.loops: list[ast.For | ast.AsyncFor] = []
+
+                    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                        if node is function:
+                            self.generic_visit(node)
+
+                    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                        if node is function:
+                            self.generic_visit(node)
+
+                    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                        return
+
+                    def visit_Lambda(self, node: ast.Lambda) -> None:
+                        return
+
+                    def visit_Assign(self, node: ast.Assign) -> None:
+                        self.assignments.append(node)
+                        self.generic_visit(node)
+
+                    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+                        self.assignments.append(node)
+                        self.generic_visit(node)
+
+                    def visit_For(self, node: ast.For) -> None:
+                        self.loops.append(node)
+                        self.generic_visit(node)
+
+                    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+                        self.loops.append(node)
+                        self.generic_visit(node)
+
+                owner_nodes = OwnerNodes()
+                owner_nodes.visit(function)
+                assignments = [
+                    node for node in owner_nodes.assignments
+                ]
+                assignment_counts: dict[str, int] = {}
+                for assignment in assignments:
+                    for target in (
+                        assignment.targets if isinstance(assignment, ast.Assign)
+                        else [assignment.target]
+                    ):
+                        if isinstance(target, ast.Name):
+                            assignment_counts[target.id] = assignment_counts.get(target.id, 0) + 1
+                scalar_results = {
+                    target.id
+                    for assignment in assignments
+                    if isinstance(assignment.value, ast.Call)
+                    and isinstance(assignment.value.func, ast.Name)
+                    and assignment.value.func.id == helper
+                    for target in (
+                        assignment.targets if isinstance(assignment, ast.Assign)
+                        else [assignment.target]
+                    )
+                    if isinstance(target, ast.Name)
+                    and assignment_counts.get(target.id) == 1
+                }
+                for loop in owner_nodes.loops:
+                    if not isinstance(loop.target, ast.Name) or loop.target.id != item:
+                        continue
+                    from_helper = (
+                        isinstance(loop.iter, ast.Call)
+                        and isinstance(loop.iter.func, ast.Name)
+                        and loop.iter.func.id == helper
+                    ) or (
+                        isinstance(loop.iter, ast.Name)
+                        and loop.iter.id in scalar_results
+                    )
+                    if not from_helper:
+                        continue
+                    if any(
+                        isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+                        and any(
+                            isinstance(target, ast.Name) and target.id == item
+                            for target in (
+                                node.targets if isinstance(node, ast.Assign)
+                                else [node.target]
+                            )
+                        )
+                        for statement in loop.body
+                        for node in ast.walk(statement)
+                    ):
+                        continue
+
+                    class ScalarNameRewrite(ast.NodeTransformer):
+                        """Rewrite only the proven `name` key in this loop body."""
+
+                        def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+                            return node
+
+                        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+                            return node
+
+                        def visit_Lambda(self, node: ast.Lambda) -> ast.AST:
+                            return node
+
+                        def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+                            nonlocal changed
+                            if (
+                                isinstance(node.value, ast.Name)
+                                and node.value.id == item
+                                and isinstance(node.slice, ast.Constant)
+                                and node.slice.value == "name"
+                                and isinstance(node.ctx, ast.Load)
+                            ):
+                                changed = True
+                                return ast.copy_location(ast.Name(id=item, ctx=ast.Load()), node)
+                            return self.generic_visit(node)
+
+                    rewriter = ScalarNameRewrite()
+                    loop.body = [rewriter.visit(statement) for statement in loop.body]
+                if changed:
+                    notes.append(
+                        f"{Path(path).name}:{owner}: used scalar names returned by "
+                        f"{helper} instead of indexing them as records."
+                    )
+        if changed:
+            ast.fix_missing_locations(tree)
+            updated[index] = (path, original, ast.unparse(tree).rstrip() + "\n")
+    return updated, notes
+
+
+def _repair_raw_entry_manifest_name(
+    generated_files: list[tuple[str, str, str]],
+    errors: list[str],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Use a proven selected scalar name in a manifest row and its path."""
+
+    pattern = re.compile(
+        r"^(?P<path>.+?\.py):(?P<owner>[A-Za-z_]\w*): "
+        r"a selection helper returns name strings, but dict field "
+        r"'(?P<field>[A-Za-z_]\w*)' stores raw input entry "
+        r"(?P<raw>[A-Za-z_]\w*); use a name from "
+        r"(?P<selected>[A-Za-z_]\w*) for the row"
+    )
+    targets: dict[str, set[tuple[str, str, str, str]]] = {}
+    for error in errors:
+        match = pattern.match(str(error))
+        if match:
+            targets.setdefault(str(Path(match.group("path")).resolve()), set()).add(
+                (match.group("owner"), match.group("field"),
+                 match.group("raw"), match.group("selected"))
+            )
+    updated = list(generated_files)
+    notes: list[str] = []
+    for index, (path, original, source) in enumerate(updated):
+        applicable = targets.get(str(Path(path).resolve()), set())
+        if not applicable:
+            continue
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        changed = False
+        for function in tree.body:
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for owner, field, raw, selected in applicable:
+                if function.name != owner:
+                    continue
+                scalar_iterables = {
+                    target.id
+                    for assignment in ast.walk(function)
+                    if isinstance(assignment, ast.Assign)
+                    and isinstance(assignment.value, ast.Call)
+                    and isinstance(assignment.value.func, ast.Name)
+                    and assignment.value.func.id.startswith("collect_")
+                    for target in assignment.targets
+                    if isinstance(target, ast.Name)
+                }
+                for loop in ast.walk(function):
+                    if not (
+                        isinstance(loop, (ast.For, ast.AsyncFor))
+                        and isinstance(loop.target, ast.Name)
+                        and loop.target.id == selected
+                        and isinstance(loop.iter, ast.Name)
+                        and loop.iter.id in scalar_iterables
+                    ):
+                        continue
+                    raw_lookups = [
+                        assignment for statement in loop.body
+                        for assignment in ast.walk(statement)
+                        if isinstance(assignment, ast.Assign)
+                        and any(isinstance(target, ast.Name) and target.id == raw
+                                for target in assignment.targets)
+                        and isinstance(assignment.value, ast.Call)
+                        and isinstance(assignment.value.func, ast.Name)
+                        and assignment.value.func.id == "next"
+                        and assignment.value.args
+                        and isinstance(assignment.value.args[0], ast.GeneratorExp)
+                    ]
+                    if len(raw_lookups) != 1:
+                        continue
+
+                    class RowRewrite(ast.NodeTransformer):
+                        def __init__(self) -> None:
+                            self.row_changed = False
+                            self.in_output_path = False
+
+                        def visit_Assign(self, node: ast.Assign) -> ast.AST:
+                            if any(
+                                isinstance(target, ast.Name)
+                                and target.id == "output_path"
+                                for target in node.targets
+                            ):
+                                self.in_output_path = True
+                                node.value = self.visit(node.value)
+                                self.in_output_path = False
+                                return node
+                            return self.generic_visit(node)
+
+                        def visit_FormattedValue(self, node: ast.FormattedValue) -> ast.AST:
+                            value = node.value
+                            if (
+                                self.in_output_path
+                                and
+                                isinstance(value, ast.Subscript)
+                                and isinstance(value.value, ast.Name)
+                                and value.value.id == raw
+                                and isinstance(value.slice, ast.Constant)
+                                and value.slice.value == "name"
+                            ):
+                                node.value = ast.copy_location(
+                                    ast.Name(id=selected, ctx=ast.Load()), value
+                                )
+                            return self.generic_visit(node)
+
+                        def visit_Dict(self, node: ast.Dict) -> ast.AST:
+                            for key_index, (key, value) in enumerate(
+                                zip(node.keys, node.values)
+                            ):
+                                if (
+                                    isinstance(key, ast.Constant)
+                                    and key.value == field
+                                    and isinstance(value, ast.Name)
+                                    and value.id == raw
+                                ):
+                                    node.values[key_index] = ast.copy_location(
+                                        ast.Name(id=selected, ctx=ast.Load()), value
+                                    )
+                                    self.row_changed = True
+                                if (
+                                    isinstance(key, ast.Constant)
+                                    and key.value == "output_path"
+                                ):
+                                    self.in_output_path = True
+                                    node.values[key_index] = self.visit(node.values[key_index])
+                                    self.in_output_path = False
+                            return self.generic_visit(node)
+
+                    rewriter = RowRewrite()
+                    rewritten = [rewriter.visit(statement) for statement in loop.body]
+                    if rewriter.row_changed:
+                        # The lookup was needed only to recover the raw entry.
+                        # Once the row and path use the selected scalar name,
+                        # retaining an otherwise unused `next(...)` creates
+                        # dead code (and can consume one-shot input iterables).
+                        if raw_lookups[0] in rewritten and not any(
+                            isinstance(read, ast.Name)
+                            and isinstance(read.ctx, ast.Load)
+                            and read.id == raw
+                            for statement in rewritten
+                            if statement is not raw_lookups[0]
+                            for read in ast.walk(statement)
+                        ):
+                            rewritten.remove(raw_lookups[0])
+                        loop.body = rewritten
+                        changed = True
+                        notes.append(
+                            f"{Path(path).name}:{owner}: stored selected scalar "
+                            f"{selected} in {field} row instead of raw entry {raw}"
+                        )
+                # A second common shape loops the raw input and tests each
+                # entry against the helper's scalar-name result. That can
+                # re-add disabled duplicates and cannot preserve the helper's
+                # canonical spelling. Iterate the proven helper result itself.
+                parameter_names = {argument.arg for argument in function.args.args}
+                if selected in scalar_iterables:
+                    for loop in ast.walk(function):
+                        if not (
+                            isinstance(loop, (ast.For, ast.AsyncFor))
+                            and isinstance(loop.target, ast.Name)
+                            and loop.target.id == raw
+                            and isinstance(loop.iter, ast.Name)
+                            and loop.iter.id in parameter_names
+                            and len(loop.body) == 1
+                            and isinstance(loop.body[0], ast.If)
+                            and not loop.body[0].orelse
+                        ):
+                            continue
+                        guard = loop.body[0]
+                        if not any(
+                            isinstance(compare, ast.Compare)
+                            and len(compare.ops) == 1
+                            and isinstance(compare.ops[0], ast.In)
+                            and len(compare.comparators) == 1
+                            and isinstance(compare.comparators[0], ast.Name)
+                            and compare.comparators[0].id == selected
+                            and any(
+                                isinstance(node, ast.Subscript)
+                                and isinstance(node.value, ast.Name)
+                                and node.value.id == raw
+                                and isinstance(node.slice, ast.Constant)
+                                and node.slice.value == "name"
+                                for node in ast.walk(compare.left)
+                            )
+                            for compare in ast.walk(guard.test)
+                        ):
+                            continue
+                        if any(
+                            isinstance(node, ast.Subscript)
+                            and isinstance(node.value, ast.Name)
+                            and node.value.id == raw
+                            and not (
+                                isinstance(node.slice, ast.Constant)
+                                and node.slice.value == "name"
+                            )
+                            for statement in guard.body for node in ast.walk(statement)
+                        ):
+                            continue
+                        row_fields = [
+                            value
+                            for statement in guard.body for node in ast.walk(statement)
+                            if isinstance(node, ast.Dict)
+                            for key, value in zip(node.keys, node.values)
+                            if isinstance(key, ast.Constant)
+                            and key.value == field
+                            and isinstance(value, ast.Name)
+                            and value.id == raw
+                        ]
+                        if len(row_fields) != 1:
+                            continue
+
+                        class RawNameToScalar(ast.NodeTransformer):
+                            def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+                                if (
+                                    isinstance(node.value, ast.Name)
+                                    and node.value.id == raw
+                                    and isinstance(node.slice, ast.Constant)
+                                    and node.slice.value == "name"
+                                    and isinstance(node.ctx, ast.Load)
+                                ):
+                                    return ast.copy_location(
+                                        ast.Name(id=raw, ctx=ast.Load()), node
+                                    )
+                                return self.generic_visit(node)
+
+                        loop.iter = ast.Name(id=selected, ctx=ast.Load())
+                        loop.body = [RawNameToScalar().visit(statement)
+                                     for statement in guard.body]
+                        changed = True
+                        notes.append(
+                            f"{Path(path).name}:{owner}: iterated selected scalar "
+                            f"names instead of raw input entries for {field} rows"
+                        )
+        if changed:
+            ast.fix_missing_locations(tree)
+            updated[index] = (path, original, ast.unparse(tree).rstrip() + "\n")
+    return updated, notes
+
+
+def _repair_explicit_boundary_contracts(
+    generated_files: list[tuple[str, str, str]],
+    errors: list[str],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Apply only AST-proven, request-approved boundary corrections."""
+
+    targets: dict[str, dict[str, set[str]]] = {}
+    for error in errors:
+        match = re.match(r"^(.+?\.py):([A-Za-z_]\w*): (.+)$", str(error))
+        if not match:
+            continue
+        path, owner, detail = match.groups()
+        actions = targets.setdefault(str(Path(path).resolve()), {}).setdefault(owner, set())
+        if "explicit empty selected_names must return" in detail:
+            actions.add("empty_selection")
+        if "selected_names=None is collapsed to an explicit empty selection" in detail:
+            actions.add("none_empty_selection")
+        if "approved unknown or disabled selected_names must raise ValueError" in detail:
+            actions.add("unknown_selection")
+        if "explicit selected_names is validated but does not filter the returned collection" in detail:
+            actions.add("selection_filter")
+        if "unsafe or blank names are silently skipped" in detail:
+            actions.add("unsafe_name")
+        if "rejection is missing before Path(" in detail:
+            actions.add("blank_path")
+        if "strip()` is unguarded" in detail:
+            actions.add("unguarded_strip")
+    if not targets:
+        return generated_files, []
+
+    updated = list(generated_files)
+    notes: list[str] = []
+    for file_index, (path, original, source) in enumerate(updated):
+        owners = targets.get(str(Path(path).resolve()), {})
+        if not owners:
+            continue
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        changed = False
+        for function in tree.body:
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            actions = owners.get(function.name, set())
+            if "none_empty_selection" in actions:
+                branch = next(
+                    (
+                        statement for statement in function.body
+                        if isinstance(statement, ast.If)
+                        and isinstance(statement.test, ast.Compare)
+                        and isinstance(statement.test.left, ast.Name)
+                        and statement.test.left.id == "selected_names"
+                        and any(isinstance(op, ast.Is) for op in statement.test.ops)
+                        and any(isinstance(value, ast.Constant) and value.value is None
+                                for value in statement.test.comparators)
+                        and len(statement.body) == 1
+                        and isinstance(statement.body[0], ast.Assign)
+                        and len(statement.body[0].targets) == 1
+                        and isinstance(statement.body[0].targets[0], ast.Name)
+                        and statement.body[0].targets[0].id == "selected_names"
+                    ),
+                    None,
+                )
+                guards = [
+                    node for node in ast.walk(function)
+                    if isinstance(node, ast.If)
+                    and isinstance(node.test, ast.BoolOp)
+                    and isinstance(node.test.op, ast.And)
+                    and len(node.test.values) == 2
+                    and isinstance(node.test.values[0], ast.Name)
+                    and node.test.values[0].id == "selected_names"
+                    and isinstance(node.test.values[1], ast.Compare)
+                    and any(isinstance(op, ast.NotIn) for op in node.test.values[1].ops)
+                    and any(
+                        isinstance(read, ast.Name)
+                        and isinstance(read.ctx, ast.Load)
+                        and read.id == "selected_names"
+                        for value in node.test.values[1].comparators
+                        for read in ast.walk(value)
+                    )
+                ]
+                forwards_selection = any(
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id not in {"list", "set", "tuple", "str"}
+                    and any(
+                        isinstance(read, ast.Name)
+                        and isinstance(read.ctx, ast.Load)
+                        and read.id == "selected_names"
+                        for argument in [
+                            *call.args, *(keyword.value for keyword in call.keywords)
+                        ]
+                        for read in ast.walk(argument)
+                    )
+                    for call in ast.walk(function)
+                )
+                if branch is not None and (guards or forwards_selection):
+                    branch.body[0].value = ast.Constant(value=None)
+                    for guard in guards:
+                        guard.test.values[0] = ast.Compare(
+                            left=ast.Name(id="selected_names", ctx=ast.Load()),
+                            ops=[ast.IsNot()],
+                            comparators=[ast.Constant(value=None)],
+                        )
+                    notes.append(
+                        f"{Path(path).name}:{function.name}: kept None distinct "
+                        "from explicit empty selection"
+                    )
+                    changed = True
+                elif branch is not None:
+                    selection_lookups = {
+                        statement.targets[0].id
+                        for statement in function.body
+                        if isinstance(statement, ast.Assign)
+                        and len(statement.targets) == 1
+                        and isinstance(statement.targets[0], ast.Name)
+                        and isinstance(statement.value, (ast.DictComp, ast.SetComp, ast.ListComp))
+                        and any(isinstance(node, ast.Name) and node.id == "selected_names"
+                                for node in ast.walk(statement.value))
+                    }
+                    memberships = [
+                        (loop, condition)
+                        for loop in ast.walk(function)
+                        if isinstance(loop, ast.For)
+                        for guard in loop.body
+                        if isinstance(guard, ast.If)
+                        for condition in ast.walk(guard.test)
+                        if isinstance(condition, ast.Compare)
+                        and len(condition.ops) == 1
+                        and isinstance(condition.ops[0], ast.In)
+                        and len(condition.comparators) == 1
+                        and isinstance(condition.comparators[0], ast.Name)
+                        and condition.comparators[0].id in selection_lookups
+                        and any(isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Attribute)
+                                and node.func.attr == "append"
+                                for body in guard.body for node in ast.walk(body))
+                    ]
+                    if memberships:
+                        sentinel = "_tc_include_all_selected"
+                        occupied = {node.id for node in ast.walk(function)
+                                    if isinstance(node, ast.Name)}
+                        while sentinel in occupied:
+                            sentinel += "_"
+                        branch_index = function.body.index(branch)
+                        function.body.insert(
+                            branch_index,
+                            ast.Assign(
+                                targets=[ast.Name(id=sentinel, ctx=ast.Store())],
+                                value=ast.Compare(
+                                    left=ast.Name(id="selected_names", ctx=ast.Load()),
+                                    ops=[ast.Is()],
+                                    comparators=[ast.Constant(value=None)],
+                                ),
+                            ),
+                        )
+                        class SelectionMembershipRepair(ast.NodeTransformer):
+                            def visit_Compare(self, node: ast.Compare) -> ast.AST:
+                                if any(node is condition for _loop, condition in memberships):
+                                    return ast.BoolOp(
+                                        op=ast.Or(),
+                                        values=[ast.Name(id=sentinel, ctx=ast.Load()), node],
+                                    )
+                                return self.generic_visit(node)
+
+                        SelectionMembershipRepair().visit(function)
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: preserved None as "
+                            "all-selected through selection lookup filtering"
+                        )
+                        changed = True
+                    else:
+                        # The same contract can be expressed as a filtered list
+                        # comprehension instead of an append loop. Only touch a
+                        # filter proven to read a selection-derived lookup.
+                        filtered = [
+                            (statement, generator)
+                            for statement in function.body
+                            if isinstance(statement, ast.Assign)
+                            and len(statement.targets) == 1
+                            and isinstance(statement.targets[0], ast.Name)
+                            and isinstance(statement.value, ast.ListComp)
+                            for generator in statement.value.generators
+                            if len(generator.ifs) == 1
+                            and any(
+                                isinstance(read, ast.Name)
+                                and isinstance(read.ctx, ast.Load)
+                                and read.id in selection_lookups
+                                for read in ast.walk(generator.ifs[0])
+                            )
+                        ]
+                        if len(filtered) == 1:
+                            sentinel = "_tc_include_all_selected"
+                            occupied = {node.id for node in ast.walk(function)
+                                        if isinstance(node, ast.Name)}
+                            while sentinel in occupied:
+                                sentinel += "_"
+                            function.body.insert(
+                                function.body.index(branch),
+                                ast.Assign(
+                                    targets=[ast.Name(id=sentinel, ctx=ast.Store())],
+                                    value=ast.Compare(
+                                        left=ast.Name(id="selected_names", ctx=ast.Load()),
+                                        ops=[ast.Is()],
+                                        comparators=[ast.Constant(value=None)],
+                                    ),
+                                ),
+                            )
+                            generator = filtered[0][1]
+                            generator.ifs[0] = ast.BoolOp(
+                                op=ast.Or(),
+                                values=[ast.Name(id=sentinel, ctx=ast.Load()),
+                                        generator.ifs[0]],
+                            )
+                            notes.append(
+                                f"{Path(path).name}:{function.name}: preserved None "
+                                "as all-selected through comprehension filtering"
+                            )
+                            changed = True
+            if "empty_selection" in actions:
+                selected_set = next(
+                    (
+                        statement.targets[0].id
+                        for statement in function.body
+                        if isinstance(statement, ast.Assign)
+                        and len(statement.targets) == 1
+                        and isinstance(statement.targets[0], ast.Name)
+                        and isinstance(statement.value, (ast.SetComp, ast.Call))
+                        and any(
+                            isinstance(node, ast.Name) and node.id == "selected_names"
+                            for node in ast.walk(statement.value)
+                        )
+                    ),
+                    "",
+                )
+                raise_index = next(
+                    (
+                        index for index, statement in enumerate(function.body)
+                        if isinstance(statement, ast.If)
+                        and isinstance(statement.test, ast.UnaryOp)
+                        and isinstance(statement.test.op, ast.Not)
+                        and isinstance(statement.test.operand, ast.Name)
+                        and any(isinstance(node, ast.Raise)
+                                for body in statement.body
+                                for node in ast.walk(body))
+                    ),
+                    -1,
+                )
+                if selected_set and raise_index >= 0:
+                    guard = ast.If(
+                        test=ast.UnaryOp(
+                            op=ast.Not(),
+                            operand=ast.Name(id=selected_set, ctx=ast.Load()),
+                        ),
+                        body=[ast.Return(value=ast.Tuple(elts=[], ctx=ast.Load()))],
+                        orelse=[],
+                    )
+                    function.body.insert(raise_index, guard)
+                    notes.append(
+                        f"{Path(path).name}:{function.name}: preserve explicit "
+                        "empty selection before invalid-name rejection"
+                    )
+                    changed = True
+            if "unknown_selection" in actions and any(
+                    isinstance(node, ast.If)
+                    and any(
+                        isinstance(child, ast.Name)
+                        and child.id == "selected_names"
+                        for child in ast.walk(node.test)
+                    )
+                    and any(isinstance(child, ast.Raise)
+                            for body in node.body for child in ast.walk(body))
+                    for node in ast.walk(function)
+                ):
+                actions.discard("unknown_selection")
+            if "unknown_selection" in actions:
+                for return_index, statement in enumerate(function.body):
+                    if not (
+                        isinstance(statement, ast.Return)
+                        and isinstance(statement.value, ast.Call)
+                        and isinstance(statement.value.func, ast.Name)
+                        and statement.value.func.id == "tuple"
+                        and len(statement.value.args) == 1
+                        and isinstance(statement.value.args[0], ast.Name)
+                    ):
+                        continue
+                    collector = statement.value.args[0].id
+                    has_named_rows = any(
+                        isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name)
+                        and call.func.value.id == collector
+                        and call.func.attr == "append"
+                        and call.args
+                        and isinstance(call.args[0], ast.Dict)
+                        and any(
+                            isinstance(key, ast.Constant) and key.value == "name"
+                            for key in call.args[0].keys
+                        )
+                        for call in ast.walk(function)
+                    )
+                    has_scalar_names = bool(
+                        function.returns is not None
+                        and re.search(r"\bstr\b", ast.unparse(function.returns))
+                    ) and any(
+                        isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name)
+                        and call.func.value.id == collector
+                        and call.func.attr == "append"
+                        and len(call.args) == 1
+                        and (
+                            isinstance(call.args[0], ast.Name)
+                            or (
+                                isinstance(call.args[0], ast.Subscript)
+                                and isinstance(call.args[0].slice, ast.Constant)
+                                and call.args[0].slice.value == "name"
+                            )
+                        )
+                        for call in ast.walk(function)
+                    )
+                    if not has_scalar_names and function.returns is not None and re.search(
+                        r"\bstr\b", ast.unparse(function.returns)
+                    ):
+                        has_scalar_names = any(
+                            isinstance(assign, ast.Assign)
+                            and len(assign.targets) == 1
+                            and isinstance(assign.targets[0], ast.Name)
+                            and assign.targets[0].id == collector
+                            and isinstance(assign.value, ast.ListComp)
+                            and isinstance(assign.value.elt, ast.Name)
+                            and any(generator.ifs for generator in assign.value.generators)
+                            for assign in function.body
+                        )
+                    if not (has_named_rows or has_scalar_names):
+                        continue
+                    sentinel = next(
+                        (
+                            statement.targets[0].id
+                            for statement in function.body
+                            if isinstance(statement, ast.Assign)
+                            and len(statement.targets) == 1
+                            and isinstance(statement.targets[0], ast.Name)
+                            and statement.targets[0].id.startswith("_tc_include_all_selected")
+                        ),
+                        "",
+                    )
+                    selection_guard = (
+                        f"if not {sentinel}:"
+                        if sentinel else "if selected_names is not None:"
+                    )
+                    returned_keys = (
+                        f"{{row['name'].casefold() for row in {collector}}}"
+                        if has_named_rows else f"{{name.casefold() for name in {collector}}}"
+                    )
+                    rejection = ast.parse(
+                        selection_guard + "\n"
+                        "    requested_keys = {name.casefold() for name in selected_names}\n"
+                        f"    returned_keys = {returned_keys}\n"
+                        "    if requested_keys - returned_keys:\n"
+                        "        raise ValueError('unknown or disabled selection')\n"
+                    ).body[0]
+                    function.body.insert(return_index, rejection)
+                    notes.append(
+                        f"{Path(path).name}:{function.name}: rejected requested "
+                        "names absent from returned enabled records"
+                    )
+                    changed = True
+                    break
+            if "selection_filter" in actions:
+                return_index = next(
+                    (
+                        index for index, statement in enumerate(function.body)
+                        if isinstance(statement, ast.Return)
+                        and isinstance(statement.value, ast.Call)
+                        and isinstance(statement.value.func, ast.Name)
+                        and statement.value.func.id == "tuple"
+                        and len(statement.value.args) == 1
+                        and isinstance(statement.value.args[0], ast.Name)
+                    ),
+                    -1,
+                )
+                if return_index >= 0:
+                    collector = function.body[return_index].value.args[0].id
+                    has_named_rows = any(
+                        isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name)
+                        and call.func.value.id == collector
+                        and call.func.attr == "append"
+                        and call.args
+                        and isinstance(call.args[0], ast.Dict)
+                        and any(
+                            isinstance(key, ast.Constant) and key.value == "name"
+                            for key in call.args[0].keys
+                        )
+                        for call in ast.walk(function)
+                    )
+                    if has_named_rows:
+                        for branch in function.body[:return_index]:
+                            if not (
+                                isinstance(branch, ast.If)
+                                and isinstance(branch.test, ast.Compare)
+                                and isinstance(branch.test.left, ast.Name)
+                                and branch.test.left.id == "selected_names"
+                                and any(isinstance(op, ast.Is) for op in branch.test.ops)
+                                and any(
+                                    isinstance(value, ast.Constant) and value.value is None
+                                    for value in branch.test.comparators
+                                )
+                                and len(branch.body) == 1
+                                and isinstance(branch.body[0], ast.Assign)
+                                and len(branch.body[0].targets) == 1
+                                and isinstance(branch.body[0].targets[0], ast.Name)
+                                and branch.body[0].targets[0].id == "selected_names"
+                                and isinstance(branch.body[0].value, (ast.List, ast.Set, ast.Tuple))
+                                and not branch.body[0].value.elts
+                            ):
+                                continue
+                            branch.body[0].value = ast.Constant(value=None)
+                            break
+                        selection_tail = ast.parse(
+                            "if selected_names is None:\n"
+                            f"    return tuple({collector})\n"
+                            "requested_keys = {name.casefold() for name in selected_names}\n"
+                            f"return tuple(row for row in {collector} "
+                            "if row['name'].casefold() in requested_keys)\n"
+                        ).body
+                        function.body[return_index:return_index + 1] = selection_tail
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: filtered named "
+                            "records by explicit selected_names in project order"
+                        )
+                        changed = True
+                    elif (
+                        function.returns is not None
+                        and re.search(r"\bstr\b", ast.unparse(function.returns))
+                        and any(
+                            isinstance(assignment, ast.Assign)
+                            and len(assignment.targets) == 1
+                            and isinstance(assignment.targets[0], ast.Name)
+                            and assignment.targets[0].id == collector
+                            and isinstance(assignment.value, (ast.List, ast.ListComp))
+                            for assignment in function.body
+                        )
+                    ):
+                        # The helper returns scalar names, not dict rows. Keep
+                        # None distinct from [] before the explicit filter.
+                        for branch in function.body[:return_index]:
+                            if (
+                                isinstance(branch, ast.If)
+                                and isinstance(branch.test, ast.Compare)
+                                and isinstance(branch.test.left, ast.Name)
+                                and branch.test.left.id == "selected_names"
+                                and any(isinstance(op, ast.Is) for op in branch.test.ops)
+                                and any(isinstance(value, ast.Constant) and value.value is None
+                                        for value in branch.test.comparators)
+                                and len(branch.body) == 1
+                                and isinstance(branch.body[0], ast.Assign)
+                                and len(branch.body[0].targets) == 1
+                                and isinstance(branch.body[0].targets[0], ast.Name)
+                                and branch.body[0].targets[0].id == "selected_names"
+                                and isinstance(branch.body[0].value, (ast.List, ast.Set, ast.Tuple))
+                                and not branch.body[0].value.elts
+                            ):
+                                branch.body[0].value = ast.Constant(value=None)
+                                break
+                        selection_tail = ast.parse(
+                            "if selected_names is None:\n"
+                            f"    return tuple({collector})\n"
+                            "requested_keys = {name.casefold() for name in selected_names}\n"
+                            f"return tuple(name for name in {collector} "
+                            "if name.casefold() in requested_keys)\n"
+                        ).body
+                        function.body[return_index:return_index + 1] = selection_tail
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: filtered scalar "
+                            "names by explicit selected_names in project order"
+                        )
+                        changed = True
+            if "unsafe_name" in actions:
+                for guard in (
+                    node for node in ast.walk(function)
+                    if isinstance(node, ast.If)
+                    and len(node.body) == 1
+                    and isinstance(node.body[0], ast.Continue)
+                ):
+                    literals = {
+                        node.value for node in ast.walk(guard.test)
+                        if isinstance(node, ast.Constant)
+                        and isinstance(node.value, str)
+                    }
+                    if {"/", "\\"} <= literals:
+                        guard.body[0] = ast.Raise(
+                            exc=ast.Call(
+                                func=ast.Name(id="ValueError", ctx=ast.Load()),
+                                args=[ast.Constant(value="unsafe or blank name")],
+                                keywords=[],
+                            ),
+                            cause=None,
+                        )
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: rejected "
+                            "unsafe or blank names"
+                        )
+                        changed = True
+                        break
+            for action in ("blank_path", "unguarded_strip"):
+                if action not in actions:
+                    continue
+                field = "output_dir"
+                if action == "unguarded_strip":
+                    for statement in function.body:
+                        if not isinstance(statement, ast.If):
+                            continue
+                        strip_calls = [
+                            node for node in ast.walk(statement.test)
+                            if isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "strip"
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id == field
+                        ]
+                        if not strip_calls:
+                            continue
+                        statement.test = ast.BoolOp(
+                            op=ast.And(),
+                            values=[
+                                ast.Call(
+                                    func=ast.Name(id="isinstance", ctx=ast.Load()),
+                                    args=[
+                                        ast.Name(id=field, ctx=ast.Load()),
+                                        ast.Name(id="str", ctx=ast.Load()),
+                                    ],
+                                    keywords=[],
+                                ),
+                                statement.test,
+                            ],
+                        )
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: guard blank "
+                            "string check so Path inputs remain valid"
+                        )
+                        changed = True
+                        break
+                else:
+                    path_index = next(
+                        (
+                            index for index, statement in enumerate(function.body)
+                            if any(
+                                isinstance(node, ast.Call)
+                                and (
+                                    isinstance(node.func, ast.Name)
+                                    and node.func.id == "Path"
+                                    or isinstance(node.func, ast.Attribute)
+                                    and isinstance(node.func.value, ast.Name)
+                                    and node.func.value.id == "pathlib"
+                                    and node.func.attr == "Path"
+                                )
+                                and node.args
+                                and isinstance(node.args[0], ast.Name)
+                                and node.args[0].id == field
+                                for node in ast.walk(statement)
+                            )
+                        ),
+                        -1,
+                    )
+                    if path_index >= 0:
+                        guard = ast.parse(
+                            "if isinstance(output_dir, str) and not "
+                            "output_dir.strip():\n"
+                            "    raise ValueError('output_dir cannot be blank')\n"
+                        ).body[0]
+                        function.body.insert(path_index, guard)
+                        notes.append(
+                            f"{Path(path).name}:{function.name}: reject blank "
+                            "output_dir before Path conversion"
+                        )
+                        changed = True
+        if changed:
+            ast.fix_missing_locations(tree)
+            formatted, _ = format_project_edit_generated_python(
+                [(path, original, ast.unparse(tree).rstrip() + "\n")]
+            )
+            updated[file_index] = formatted[0]
+    return updated, notes
+
+
 def _repair_omitted_selective_states(
     generated_files: list[tuple[str, str, str]],
     errors: list[str],
@@ -627,13 +1622,73 @@ def _repair_omitted_selective_states(
                         + "."
                     )
                     break
+        # Some quality findings spell a module-level owner twice (for example
+        # `collect_takes.collect_takes`). In that case the approved `enabled`
+        # state is a mapping field on each loop item, not a class-local bool.
+        for (class_name, method_name), states in matching.items():
+            if class_name != method_name or states != {"enabled"}:
+                continue
+            function = next(
+                (
+                    node for node in tree.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name == method_name
+                ),
+                None,
+            )
+            if function is None:
+                continue
+            parameter_names = {
+                arg.arg for arg in [
+                    *function.args.posonlyargs, *function.args.args,
+                    *function.args.kwonlyargs,
+                ]
+            }
+            for loop in (
+                node for node in function.body
+                if isinstance(node, (ast.For, ast.AsyncFor))
+                and isinstance(node.target, ast.Name)
+                and isinstance(node.iter, ast.Name)
+                and node.iter.id in parameter_names
+            ):
+                if not any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "append"
+                    for statement in loop.body
+                    for node in ast.walk(statement)
+                ):
+                    continue
+                item = loop.target.id
+                if not any(
+                    isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == item
+                    and isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, str)
+                    for statement in loop.body
+                    for node in ast.walk(statement)
+                ):
+                    continue
+                guard_source = f"if not {item}['enabled']:\n    continue\n"
+                guard = ast.parse(guard_source).body[0]
+                if loop.body and ast.dump(loop.body[0], include_attributes=False) == ast.dump(
+                    guard, include_attributes=False
+                ):
+                    continue
+                loop.body.insert(0, guard)
+                changed = True
+                notes.append(
+                    f"{Path(path).name}:{method_name}: skipped disabled "
+                    "mapping records before collecting"
+                )
+                break
         if changed:
             ast.fix_missing_locations(tree)
-            updated[file_index] = (
-                path,
-                original,
-                ast.unparse(tree).rstrip() + "\n",
+            formatted, _ = format_project_edit_generated_python(
+                [(path, original, ast.unparse(tree).rstrip() + "\n")]
             )
+            updated[file_index] = formatted[0]
     return updated, notes
 
 
@@ -2803,6 +3858,28 @@ def _repair_ephemeral_unused_fixture_assignments(
         def __init__(self, removable_names: set[str]) -> None:
             self.removable_names = removable_names
             self.removed: set[str] = set()
+
+        def visit_For(self, node: ast.For) -> ast.For:
+            node = self.generic_visit(node)
+            if (
+                isinstance(node.target, ast.Tuple)
+                and len(node.target.elts) == 2
+                and all(isinstance(part, ast.Name) for part in node.target.elts)
+                and node.target.elts[1].id in self.removable_names
+                and node.target.elts[0].id not in self.removable_names
+                and isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Attribute)
+                and node.iter.func.attr == "items"
+                and not node.iter.args
+                and not node.iter.keywords
+            ):
+                # A generated declaration test often loops over (name,
+                # parameter) but asserts only on name. Iterate mapping keys
+                # directly so the test keeps its checks without a fake fixture.
+                self.removed.add(node.target.elts[1].id)
+                node.target = node.target.elts[0]
+                node.iter = node.iter.func.value
+            return node
 
         def visit_With(self, node: ast.With) -> ast.stmt:
             node = self.generic_visit(node)

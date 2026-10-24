@@ -34,8 +34,49 @@ def _function_mentions(text: str) -> list[str]:
     return found
 
 
+def _looks_like_motionbuilder_sequence(text: str) -> bool:
+    lower = (text or "").lower()
+    if not re.search(r"\bmotion\s*builder\b", lower):
+        return False
+    if re.search(r"\b(?:write|implement|code|script)\b.{0,48}\b(?:function|tool|api)\b", lower):
+        return False
+    steps = sum(bool(re.search(pattern, lower)) for pattern in (
+        r"\bimport\b.{0,140}\.fbx\b",
+        r"\bcharacteri[sz]e\b|\bcreate\s+(?:a\s+)?character\b",
+        r"\bplot\b.{0,48}\b(?:animation|skeleton|rig)\b",
+        r"\bexport\b.{0,140}(?:\bfbx\b|\.fbx\b)",
+    ))
+    return steps >= 2
+
+
 def _looks_like_pipeline_request(text: str) -> bool:
     lower = (text or "").lower()
+    # Most single-host questions cannot be pipelines. Avoid importing the
+    # game-engine package (and initializing its runtime) on this UI-thread
+    # route check; keep all existing pipeline checks for plausible requests.
+    host_mentions = set(re.findall(
+        r"\b(?:maya|unreal|ue[45]|blender|substance|painter|motionbuilder|motion\s+builder|"
+        r"houdini|unity|3ds\s*max|tc\s*engine|tech\s+connector(?:\s+engine)?)\b",
+        lower,
+    ))
+    pipeline_language = re.search(
+        r"\b(?:pipeline|workflow|node|graph|connected|connection|bind|mapping|maping|bridge|"
+        r"transfer|multi[- ]?step|step\s+\d+|chain|chained|sequence|sequential|compose|composer|"
+        r"wire|builder|data\s+link|flow\s+link|import|export|retarget|plot|characteri[sz]e)\b",
+        lower,
+    )
+    if len(host_mentions) < 2 and not pipeline_language and not any(
+        host in lower for host in ("blender", "painter", "motionbuilder", "motion builder")
+    ):
+        return False
+    from tech_connector.game_engine.integration.dcc_operation_service import (
+        is_blender_process_export_prompt,
+        is_painter_multi_operation_prompt,
+    )
+    if (is_painter_multi_operation_prompt(text)
+            or is_blender_process_export_prompt(text)
+            or _looks_like_motionbuilder_sequence(text)):
+        return True
     # Use the same host vocabulary as the typed compiler so planner routing
     # cannot silently exclude newer hosts such as 3ds Max, Houdini, or TC Engine.
     from tech_connector.game_engine.integration.dynamic_pipeline_compiler_service import (
@@ -779,10 +820,38 @@ def plan_prompt_to_action_graph(
                 ),
             )
         from tech_connector.game_engine.integration.dynamic_pipeline_compiler_service import (
+            compile_delegated_painter_pipeline,
             compile_dynamic_pipeline,
+            extract_ordered_hosts,
             is_dynamic_transfer_request,
         )
 
+        delegated_painter = compile_delegated_painter_pipeline(text)
+        if delegated_painter is not None:
+            return delegated_painter
+        from tech_connector.game_engine.integration.dcc_operation_service import (
+            is_blender_process_export_prompt,
+        )
+        if extract_ordered_hosts(text) == ["blender"] and is_blender_process_export_prompt(text):
+            return compile_dynamic_pipeline(
+                text,
+                project_root=roots[0] if roots else None,
+                allow_single_host=True,
+                use_default_settings=bool(
+                    (planning_preferences or {}).get("use_default_settings", True)
+                ),
+                custom_settings=dict((planning_preferences or {}).get("custom_settings") or {}),
+                requirement_manifest=dict((planning_preferences or {}).get("requirement_manifest") or {}),
+            )
+        if extract_ordered_hosts(text) == ["motionbuilder"] and _looks_like_motionbuilder_sequence(text):
+            return compile_dynamic_pipeline(
+                text,
+                project_root=roots[0] if roots else None,
+                allow_single_host=True,
+                use_default_settings=bool((planning_preferences or {}).get("use_default_settings", True)),
+                custom_settings=dict((planning_preferences or {}).get("custom_settings") or {}),
+                requirement_manifest=dict((planning_preferences or {}).get("requirement_manifest") or {}),
+            )
         if is_dynamic_transfer_request(text):
             dynamic = compile_dynamic_pipeline(
                 text,

@@ -19,6 +19,16 @@ SCHEMA_VERSION = 1
 _HASH_CHUNK_SIZE = 1024 * 1024
 
 
+class _AutoClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context, then release its SQLite file handle."""
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool | None:
+        try:
+            return super().__exit__(exc_type, exc, traceback)
+        finally:
+            self.close()
+
+
 @dataclass(frozen=True)
 class AssetRecord:
     asset_id: str
@@ -533,7 +543,9 @@ class AssetDatabase:
                 raise RuntimeError(f"Unsupported TC asset database schema: {row[0]}")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path, timeout=30.0)
+        connection = sqlite3.connect(
+            self.database_path, timeout=30.0, factory=_AutoClosingConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")

@@ -5,6 +5,8 @@ import re
 import importlib
 import sys
 import time
+import copy
+import inspect
 
 try:
     import maya.cmds as cmds
@@ -478,9 +480,9 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self.buttons = {}
         self.module_create_buttons = {}
         self.module_remove_buttons = {}
-        self.default_map = dict(setup_hik.DEFAULT_JOINT_MAP)
+        self.default_map = copy.deepcopy(setup_hik.DEFAULT_JOINT_MAP)
         self.default_map["HipSwing"] = {"index": -1, "joint": ""}
-        self.default_face_map = setup_hik.DEFAULT_FACE_JOINT_MAP
+        self.default_face_map = copy.deepcopy(setup_hik.DEFAULT_FACE_JOINT_MAP)
         self.populate_default_face_map_from_scene()
         self.current_slot = None
         self._module_detail_widgets = {}  # {module_id: {"container", "status_lbl", "parent_btn", "spaces_widget"}}
@@ -503,7 +505,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self._build_rigging_tab()
         self._build_skinning_tab()
         self._build_mesh_tab()
-        self._build_vehicle_tab()
+        if self.host_mode == "maya":
+            self._build_vehicle_tab()
 
         # Maya can defer scriptJob updates until a manipulator releases. This
         # heartbeat keeps registered vehicle rigs evaluating while the mouse is
@@ -512,7 +515,9 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         self._vehicle_live_timer.setInterval(16)
         self._vehicle_live_timer.setTimerType(QtCore.Qt.PreciseTimer)
         self._vehicle_live_timer.timeout.connect(self._vehicle_live_tick)
-        if MAYA_HOST:
+        if MAYA_HOST and vehicle_rig is not None and getattr(
+            vehicle_rig, "_GROUND_CALLBACK_IDS", None
+        ):
             self._vehicle_live_timer.start()
 
         # One persistent result surface replaces one-button Maya/Qt dialogs.
@@ -531,7 +536,11 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         # Auto-populate module states from scene metadata without showing
         # stale saved-joint warnings when the UI first opens.
-        self._load_module_metadata_from_scene(report_missing=False)
+        self._load_module_metadata_from_scene(
+            report_missing=False, refresh_details=False
+        )
+        # Let Maya paint the window before querying module DAG/connection state.
+        QtCore.QTimer.singleShot(100, self._refresh_all_module_details)
 
     def _notify_operation(self, title, message, severity="info"):
         """Report an operation result without creating a top-level window."""
@@ -1658,8 +1667,6 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         scroll_area.setWidget(container)
         self.tabs.addTab(scroll_area, "Mesh")
-        if self.host_mode == "maya" and unreal_skeletal_export is not None:
-            self.refresh_mesh_export_scene_meshes()
         self._update_mesh_export_preview()
 
     def _sync_mesh_export_rig_name(self, value):
@@ -1937,11 +1944,6 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         if self.host_mode != "maya" or vehicle_rig is None:
             vehicle_tab.setEnabled(False)
             intro.setText("Vehicle rig construction and Maya mesh raycasts require a live Maya session.")
-        else:
-            try:
-                vehicle_rig.install_ground_callbacks()
-            except Exception:
-                pass
         self.tabs.addTab(vehicle_tab, "Vehicle")
 
     def pick_vehicle_template_path(self):
@@ -2363,26 +2365,82 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         fit_started = time.perf_counter()
         try:
             self.create_rig_mapping(refresh_details=False)
-            studio_namespace = joint_placer.mapped_studio_template_namespace(
-                self.default_map
+            mapped_namespace_fn = getattr(
+                joint_placer, "mapped_studio_template_namespace", None
+            )
+            studio_namespace = (
+                mapped_namespace_fn(self.default_map)
+                if callable(mapped_namespace_fn) else None
             )
             placement_map = None if studio_namespace is not None else self.default_map
             if studio_namespace is not None:
                 namespace = studio_namespace
-            use_mapping = joint_placer.mapped_hierarchy_requested(placement_map)
-            cmds.undoInfo(openChunk=True, chunkName="Fit Mapped Skeleton Or Studio Template")
-            result = joint_placer.build_basic_biped_skeleton(
-                mesh=selection[0],
-                solver="production",
-                template_path=template_path,
-                template_namespace=namespace,
-                create_guides=True,
-                # Match direct production placement: uncertain containment is
-                # reported for review, not promoted to a UI-only hard failure.
-                require_interior=False,
-                joint_map=placement_map,
-                import_skin_weights=False,
+            mapped_request_fn = getattr(
+                joint_placer, "mapped_hierarchy_requested", None
             )
+            use_mapping = (
+                bool(mapped_request_fn(placement_map))
+                if callable(mapped_request_fn) else False
+            )
+            builder = joint_placer.build_basic_biped_skeleton
+            builder_parameters = inspect.signature(builder).parameters
+            supports_template_fit = {
+                "solver", "template_path", "template_namespace", "joint_map"
+            }.issubset(builder_parameters)
+            if not supports_template_fit:
+                # The GitHub-compatible legacy placer only creates a fresh
+                # basic skeleton. It cannot fit an existing studio hierarchy,
+                # and its replace guard correctly protects non-generated rigs.
+                existing_origins = cmds.ls(
+                    "origin", "*:origin", type="joint", long=True
+                ) or []
+                protected_origins = []
+                for root in existing_origins:
+                    has_generated_tag = cmds.attributeQuery(
+                        joint_placer.GENERATED_ATTR, node=root, exists=True
+                    )
+                    is_generated = (
+                        bool(cmds.getAttr(root + "." + joint_placer.GENERATED_ATTR))
+                        if has_generated_tag else False
+                    )
+                    if not is_generated:
+                        protected_origins.append(root)
+                if protected_origins:
+                    self._notify_operation(
+                        "Template Fit Unavailable",
+                        "This GitHub-compatible placer can only build a new basic "
+                        "skeleton; it cannot fit the existing rig hierarchy. "
+                        "The existing origin was preserved and no scene changes "
+                        "were made. Use the production template-fit placer to fit "
+                        "this rig.",
+                        "warning",
+                    )
+                    return None
+            cmds.undoInfo(openChunk=True, chunkName="Fit Mapped Skeleton Or Studio Template")
+            if supports_template_fit:
+                result = builder(
+                    mesh=selection[0],
+                    solver="production",
+                    template_path=template_path,
+                    template_namespace=namespace,
+                    create_guides=True,
+                    # Match direct production placement: uncertain containment is
+                    # reported for review, not promoted to a UI-only hard failure.
+                    require_interior=False,
+                    joint_map=placement_map,
+                    import_skin_weights=False,
+                )
+            else:
+                # The GitHub placer has a smaller API: it generates its
+                # mesh-based biped directly and does not accept template or
+                # mapped-hierarchy options.
+                use_mapping = False
+                result = builder(
+                    mesh=selection[0],
+                    orient=True,
+                    replace_existing=True,
+                    create_guides=True,
+                )
             solve_elapsed = time.perf_counter() - fit_started
             refresh_started = time.perf_counter()
             updates_enabled = self.updatesEnabled()
@@ -2409,7 +2467,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     time.perf_counter() - action_started,
                 )
             )
-            detail_report = result.detail_placement_report or {}
+            detail_report = getattr(result, "detail_placement_report", None) or {}
             detail_message = ""
             if detail_report.get("metahuman_style"):
                 skipped_count = len(detail_report.get("skipped_driven_or_locked") or [])
@@ -2437,19 +2495,30 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         "\nDisable or remove RigLogic/RBF drivers in neutral-pose editing mode, "
                         "then run the fit again for any unverified corrective or twist joints."
                     )
-            self._notify_operation(
-                "Mapped Skeleton Fitted" if use_mapping else "Studio Template Fitted",
-                "Fitted {0} {1} skeleton joints using {2} verified anchors.\n"
-                "Reverse-foot helpers: {3}\nReview required: {4}{5}".format(
-                    result.template_joint_count,
-                    "mapped" if use_mapping else "high-resolution template",
-                    len(result.points) - len(result.outside_joints),
-                    result.reverse_foot_joint_count,
-                    result.requires_review,
-                    detail_message,
-                ),
-                "warning" if result.requires_review else "success",
-            )
+            if supports_template_fit:
+                outside_joints = getattr(result, "outside_joints", []) or []
+                requires_review = bool(getattr(result, "requires_review", False))
+                self._notify_operation(
+                    "Mapped Skeleton Fitted" if use_mapping else "Studio Template Fitted",
+                    "Fitted {0} {1} skeleton joints using {2} verified anchors.\n"
+                    "Reverse-foot helpers: {3}\nReview required: {4}{5}".format(
+                        result.template_joint_count,
+                        "mapped" if use_mapping else "high-resolution template",
+                        len(result.points) - len(outside_joints),
+                        getattr(result, "reverse_foot_joint_count", 0),
+                        requires_review,
+                        detail_message,
+                    ),
+                    "warning" if requires_review else "success",
+                )
+            else:
+                self._notify_operation(
+                    "Automatic Skeleton Placed",
+                    "The GitHub-compatible placer generated {0} mesh-based joints. "
+                    "Template-specific fitting and review checks are not available "
+                    "in this placer version.".format(len(getattr(result, "points", {}))),
+                    "info",
+                )
             return result
         except Exception as exc:
             traceback.print_exc()
@@ -2657,6 +2726,16 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             )
             return None
 
+        try:
+            setup_hik.validate_t_pose_channels(self.default_map)
+        except Exception as exc:
+            self._notify_operation(
+                "Set T-Pose Blocked",
+                str(exc),
+                "error",
+            )
+            return None
+
         cmds.undoInfo(openChunk=True, chunkName="Set T-Pose")
         try:
             result = setup_hik.set_t_pose(joint_map=self.default_map)
@@ -2703,7 +2782,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
     def build_full_rig(self):
         build_started = time.perf_counter()
-        reload_rig_function_stack()
+        build_revision = reload_rig_function_stack(force=True)
+        print("[HIK UI] Full Build reloaded rig stack: {}".format(build_revision))
         self.create_rig_mapping(refresh_details=False)
         repaired_slots = create_rig.repair_preserved_extension_body_mapping(
             self.default_map
@@ -2817,7 +2897,39 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     continue
 
                 if module in face_modules:
-                    self.create_face_module_setup(module, silent=True)
+                    def built_ctrl_for_joint(joint_name, fallback):
+                        joint_name = str(joint_name or "")
+                        if joint_name:
+                            base = joint_name.split("|")[-1].split(":")[-1]
+                            candidate = base + "_ctrl"
+                            if cmds.objExists(candidate):
+                                return candidate
+                        return fallback if cmds.objExists(fallback) else None
+
+                    head_parent = built_ctrl_for_joint(
+                        self.fields.get("Head"), "head1_ctrl"
+                    )
+                    jaw_joint = (
+                        (self.default_face_map.get("Jaw") or {}).get("joint")
+                        or self.fields.get("Jaw")
+                        or "jaw"
+                    )
+                    jaw_parent = built_ctrl_for_joint(jaw_joint, "jaw_ctrl")
+                    parent_override = head_parent
+                    if module == "Tongue":
+                        parent_override = jaw_parent or head_parent
+                    elif module in {"Eyelids (Left)", "Eyelids (Right)"}:
+                        eye_key = "LeftEye" if module.endswith("(Left)") else "RightEye"
+                        eye_joint = (self.default_face_map.get(eye_key) or {}).get("joint")
+                        parent_override = built_ctrl_for_joint(eye_joint, "") or head_parent
+
+                    self.create_face_module_setup(
+                        module,
+                        silent=True,
+                        parent_override=parent_override,
+                        jaw_ctrl_override=jaw_parent,
+                        jaw_joint_override=jaw_joint,
+                    )
                 else:
                     self.create_body_module_setup(module, silent=True)
 
@@ -3232,16 +3344,27 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 len(report.get("added_influences") or [])
                 for report in influence_reports
             )
+            mapped_count = sum(
+                len(report.get("mapped_influences") or [])
+                for report in influence_reports
+            )
             renamed_count = sum(
                 len(report.get("renamed_influences") or [])
                 for report in influence_reports
+            ) + sum(
+                len(report.get("renamed_influences") or [])
+                for report in failure_reports
             )
             summary = (
                 "Imported skin weights for {0} mesh(es).\n"
                 "Existing bind influences preserved: {1}.\n"
                 "Missing imported influences added: {2}.\n"
-                "Scene joints renamed to match the weight map: {3}."
-            ).format(len(imported), preserved_count, added_count, renamed_count)
+                "Saved influence names remapped: {3}.\n"
+                "Confirmed scene joint renames: {4}."
+            ).format(
+                len(imported), preserved_count, added_count,
+                mapped_count, renamed_count,
+            )
             if failure_reports:
                 details = []
                 for report in failure_reports:
@@ -3257,6 +3380,12 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         "{} was skipped; these required influences were not "
                         "found:".format(report.get("mesh", "Unknown mesh"))
                     )
+                    renamed = report.get("renamed_influences") or []
+                    if renamed:
+                        details.append(
+                            "  Confirmed suggested renames were applied. Resolve "
+                            "the remaining influences below, then import again."
+                        )
                     suggestions = report.get("similar_influences") or {}
                     for influence in report.get("missing_influences") or []:
                         matches = suggestions.get(influence) or []
@@ -3287,98 +3416,79 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         return result
 
     def _confirm_skin_influence_renames(
-            self, mesh, missing_influences, suggestions, suggestion_nodes):
-        """Ask before renaming likely joint matches for a skin-weight import."""
-        rename_requests = {}
-        mapping_lines = []
-        unmatched = []
-        used_nodes = set()
-        for missing in missing_influences:
-            nodes = suggestion_nodes.get(missing) or []
-            names = suggestions.get(missing) or []
-            if not nodes or not names:
-                unmatched.append(skinning_utils._influence_leaf_name(missing))
-                continue
-            scene_joint = nodes[0]
-            if scene_joint in used_nodes:
-                unmatched.append(skinning_utils._influence_leaf_name(missing))
-                continue
-            used_nodes.add(scene_joint)
-            rename_requests[missing] = scene_joint
-            mapping_lines.append(
-                "{}  →  {}".format(names[0], skinning_utils._influence_leaf_name(missing))
-            )
-
-        if unmatched:
-            self._show_skin_import_rename_dialog(
-                "Skin Import Needs Joint Matches",
-                "Not all missing influences have a unique suggested joint. "
-                "Automatic rename is unavailable because the import would "
-                "still fail. Fix or create these joints, then import again.",
-                ["{}  →  no similar scene joint".format(name) for name in unmatched],
-                allow_rename=False,
-            )
-            return {}
-
-        if not rename_requests:
-            return {}
-
-        confirmed = self._show_skin_import_rename_dialog(
-            "Rename Joints for Skin Import?",
-            "{} joint name(s) do not match the skin-weight map for '{}'. "
-            "Review the proposed short-name changes. Renaming modifies the "
-            "scene; Cancel leaves the joints unchanged and the affected skin "
-            "weights will not import.".format(len(rename_requests), mesh),
-            mapping_lines,
-            allow_rename=True,
-        )
-        if not confirmed:
-            return {}
-        return rename_requests
-
-    def _show_skin_import_rename_dialog(
-            self, title, summary, mapping_lines, allow_rename):
-        """Show a compact, selectable in-app popup for influence recovery."""
+            self, mesh, proposals, unresolved, ambiguous):
+        """Ask before applying safe, formatting-only influence renames."""
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle(title)
+        dialog.setWindowTitle("Rename Suggested Skin Influences?")
         dialog.setModal(True)
-        dialog.resize(560, 420)
+        dialog.resize(650, 480)
 
         layout = QtWidgets.QVBoxLayout(dialog)
-        heading = QtWidgets.QLabel(summary)
+        heading = QtWidgets.QLabel(
+            "The skin-weight map for '{}' has high-confidence joint-name "
+            "matches. Review them before Maya renames any scene joints."
+            .format(mesh)
+        )
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
-        mapping_label = QtWidgets.QLabel("Scene joint  →  Weight-map influence")
-        mapping_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(mapping_label)
+        lines = ["Current scene joint  →  Required weight-map name"]
+        for saved_name, scene_joint in proposals.items():
+            lines.append(
+                "{}  →  {}".format(
+                    skinning_utils._influence_node_name(scene_joint),
+                    skinning_utils._influence_leaf_name(saved_name),
+                )
+            )
+        if unresolved:
+            lines.append("")
+            lines.append("No safe automatic match:")
+            lines.extend(
+                "  - {}".format(skinning_utils._influence_leaf_name(name))
+                for name in unresolved
+            )
+        if ambiguous:
+            lines.append("")
+            lines.append("Ambiguous matches (will not be renamed):")
+            for saved_name, matches in ambiguous.items():
+                lines.append(
+                    "  - {}: {}".format(
+                        skinning_utils._influence_leaf_name(saved_name),
+                        ", ".join(
+                            skinning_utils._influence_node_name(match)
+                            for match in matches
+                        ),
+                    )
+                )
 
         mapping_view = QtWidgets.QPlainTextEdit(dialog)
         mapping_view.setReadOnly(True)
-        mapping_view.setPlainText("\n".join(mapping_lines))
+        mapping_view.setPlainText("\n".join(lines))
         mapping_view.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
         layout.addWidget(mapping_view, 1)
 
+        warning = QtWidgets.QLabel(
+            "Only the listed high-confidence matches will be renamed. "
+            "Left/right sides are never crossed. If unresolved items remain, "
+            "the mesh import will stay skipped until they are fixed and the "
+            "import is run again."
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+
         buttons = QtWidgets.QDialogButtonBox(dialog)
-        if allow_rename:
-            rename_button = buttons.addButton(
-                "Rename Matches and Import",
-                QtWidgets.QDialogButtonBox.AcceptRole,
-            )
-            rename_button.setDefault(True)
-            buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
-            buttons.accepted.connect(dialog.accept)
-            buttons.rejected.connect(dialog.reject)
-        else:
-            buttons.addButton(QtWidgets.QDialogButtonBox.Close)
-            buttons.rejected.connect(dialog.reject)
+        rename_button = buttons.addButton(
+            "Rename Suggested Joints",
+            QtWidgets.QDialogButtonBox.AcceptRole,
+        )
+        rename_button.setDefault(True)
+        buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
 
-        if hasattr(dialog, "exec"):
-            result = dialog.exec()
-        else:
-            result = dialog.exec_()
-        return bool(allow_rename and result == QtWidgets.QDialog.Accepted)
+        result = dialog.exec() if hasattr(dialog, "exec") else dialog.exec_()
+        return result == QtWidgets.QDialog.Accepted
 
     def auto_hammer_weight_spikes(self):
         """Repair isolated whole-mesh weight outliers without softening valid gradients."""
@@ -3779,14 +3889,34 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 json.dump(data, f, indent=4)
 
     def auto_detect(self):
-        root_joint = joints.find_skinned_or_top_joints(namespace='')[0]
+        roots = joints.find_skinned_or_top_joints(namespace='') or []
+        if not roots:
+            self._notify_operation(
+                "Auto Detect Bones",
+                "No skinned or top-level joint hierarchy was found in the scene.",
+                "warning",
+            )
+            return
+        root_joint = roots[0]
         joint_map = self.guess_joint_map_from_root(root_joint)
         for slot in self.default_map:
             if slot in joint_map:
-                self.fields[slot] = joint_map[slot].get("joint")
-            self.update_button_color(slot)
-        # self._build_face_rig_section(self.rig_layout)
-        self._refresh_all_module_details()
+                joint_name = joint_map[slot].get("joint") or ""
+                self.fields[slot] = joint_name
+                button = self.buttons.get(slot)
+                if button:
+                    button.setStyleSheet(
+                        "background-color: green;" if joint_name
+                        else "background-color: lightcoral;"
+                    )
+            self.default_map[slot]["joint"] = self.fields.get(slot, "")
+        self._notify_operation(
+            "Auto Detect Bones",
+            "Mapped joints from {}. Module and connection details were left untouched.".format(
+                root_joint
+            ),
+            "success",
+        )
 
     def get_uproject(self, directory):
         file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Unreal Project", directory,
@@ -3984,6 +4114,12 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
 
         if not silent:
             self.create_rig_mapping()
+        else:
+            # Batch and TC-host builds skip the full mapping refresh, but the
+            # fields are the user's current assignments. Do not pass stale
+            # template rows to the module builder.
+            for slot, row in self.default_map.items():
+                row["joint"] = self.fields.get(slot, "")
         owns_undo_chunk = not silent
         if owns_undo_chunk:
             cmds.undoInfo(openChunk=True, chunkName=f"Build Body Module: {module}")
@@ -4046,6 +4182,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                         create_rig.create_arm_space_switches(s)
                         create_rig.create_leg_space_switches(s)
 
+            identity_result = create_rig.restore_module_rebuild_identity(module)
             restored = create_rig.restore_rig_connections(module)
 
             # The full build stores connections once after all modules exist.
@@ -4056,6 +4193,10 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 msg = f"Body Module '{module}' created successfully!"
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
+                renamed_count = len(identity_result.get("renamed", {}))
+                shape_count = identity_result.get("shapes", 0)
+                if renamed_count or shape_count:
+                    msg += f"\nRestored {renamed_count} control name(s) and {shape_count} control shape(s)."
                 self._notify_operation("Body Module Created", msg, "success")
             if not silent:
                 create_rig.restore_all_control_cv_positions()
@@ -4132,12 +4273,14 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             self._refresh_all_module_details()
             dag.enable_evaluation()
 
-    def create_face_module_setup(self, module, silent=False):
+    def create_face_module_setup(
+            self, module, silent=False, parent_override=None,
+            jaw_ctrl_override=None, jaw_joint_override=None):
         if not silent:
             reload_rig_function_stack()
         edit_info = self._module_detail_widgets.get(module)
-        parent = None
-        if edit_info and edit_info.get("parent_edit"):
+        parent = parent_override
+        if not parent and edit_info and edit_info.get("parent_edit"):
             parent = edit_info["parent_edit"].text().strip() or None
         if not parent:
             parent = self.module_parent_field.text().strip() or None
@@ -4181,14 +4324,14 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     else:
                         return
 
-        jaw_ctrl = None
-        if edit_info and edit_info.get("jaw_ctrl_edit"):
+        jaw_ctrl = jaw_ctrl_override
+        if not jaw_ctrl and edit_info and edit_info.get("jaw_ctrl_edit"):
             jaw_ctrl = edit_info["jaw_ctrl_edit"].text().strip() or None
         if not jaw_ctrl:
             jaw_ctrl = self.module_jaw_ctrl_field.text().strip() or None
 
-        jaw_jnt = None
-        if edit_info and edit_info.get("jaw_jnt_edit"):
+        jaw_jnt = jaw_joint_override
+        if not jaw_jnt and edit_info and edit_info.get("jaw_jnt_edit"):
             jaw_jnt = edit_info["jaw_jnt_edit"].text().strip() or None
         if not jaw_jnt:
             jaw_jnt = self.module_jaw_jnt_field.text().strip() or None
@@ -4240,6 +4383,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             elif module == "Other Face Joints":
                 create_rig.rig_other_face_module(self.default_face_map, parent, jaw_ctrl, jaw_jnt)
 
+            identity_result = create_rig.restore_module_rebuild_identity(module)
             restored = create_rig.restore_rig_connections(module)
 
             # Save only joints that actually exist in the current scene.
@@ -4259,6 +4403,10 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                 msg = f"Face Module '{module}' created successfully!"
                 if restored > 0:
                     msg += f"\nRestored {restored} connections/space switches."
+                renamed_count = len(identity_result.get("renamed", {}))
+                shape_count = identity_result.get("shapes", 0)
+                if renamed_count or shape_count:
+                    msg += f"\nRestored {renamed_count} control name(s) and {shape_count} control shape(s)."
                 self._notify_operation("Face Module Created", msg, "success")
             if not silent:
                 create_rig.restore_all_control_cv_positions()
@@ -5787,7 +5935,9 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
         """
         return None
 
-    def _load_module_metadata_from_scene(self, report_missing=True):
+    def _load_module_metadata_from_scene(
+        self, report_missing=True, refresh_details=True
+    ):
         """
         Read rig_module_store and refresh all detail widgets.
 
@@ -5864,8 +6014,10 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     "Module Discrepancy Warning", msg, "warning"
                 )
 
-        # Refresh all live detail widgets from the scene
-        self._refresh_all_module_details()
+        # Refreshing each module's live DAG/connection state is optional so UI
+        # construction can defer that work until after the window first paints.
+        if refresh_details:
+            self._refresh_all_module_details()
 
 
 def launch_hik_ui(

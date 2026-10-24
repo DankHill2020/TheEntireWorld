@@ -74,14 +74,21 @@ def qualify_capability_evidence(
     return receipt | {"report": str(report)}
 
 
-def validate_capability_qualification(source_root: str | Path, receipt: Mapping[str, Any] | None, *, max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS) -> dict[str, Any]:
+def validate_capability_qualification(
+    source_root: str | Path, receipt: Mapping[str, Any] | None, *,
+    max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+    source_fingerprint: str | None = None,
+) -> dict[str, Any]:
     row = dict(receipt or {}); gates: list[str] = []
     if row.get("schema") != CAPABILITY_QUALIFICATION_SCHEMA: gates.append("schema")
     if row.get("status") != "passed" or int(row.get("exit_code", -1)) != 0 or int(row.get("passed_tests", 0)) <= 0: gates.append("tests")
     if row.get("missing_test_files"): gates.append("missing_test_files")
     verified = _timestamp(row.get("verified_at")); now = datetime.now(timezone.utc).timestamp()
     if verified <= 0.0 or now - verified > max(0.0, float(max_age_seconds)): gates.append("freshness")
-    expected = playable_project_source_fingerprint(source_root)
+    expected = (
+        playable_project_source_fingerprint(source_root)
+        if source_fingerprint is None else source_fingerprint
+    )
     if str(row.get("source_fingerprint") or "") != expected: gates.append("source_fingerprint")
     return {"valid": not gates, "gates": sorted(set(gates)), "age_seconds": max(0.0, now - verified) if verified > 0 else None,
             "source_fingerprint": expected}

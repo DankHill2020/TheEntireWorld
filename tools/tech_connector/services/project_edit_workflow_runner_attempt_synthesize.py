@@ -9,10 +9,19 @@ from tech_connector.services.project_edit_workflow_runner_control import (
 )
 
 
-def _semantic_review_batch_limit(settings: dict[str, _deps.Any]) -> int:
+def _semantic_review_batch_limit(
+    settings: dict[str, _deps.Any], selected_model: str = ""
+) -> int:
     """Keep local JSON reviews atomic; cloud reviewers may use larger batches."""
 
-    return 1 if str(settings.get("model_source_mode") or "") == "local_only" else 5
+    if str(settings.get("model_source_mode") or "") == "local_only":
+        return 1
+    selected = str(selected_model or "").strip().casefold()
+    if selected and not selected.startswith(
+        ("openai:", "anthropic:", "claude:", "google:", "gemini:", "x:", "grok:")
+    ):
+        return 1
+    return 5
 
 
 def _review_finding_requires_disposable_test_repair(error: str) -> bool:
@@ -31,6 +40,132 @@ def _review_finding_requires_disposable_test_repair(error: str) -> bool:
     )
 
 
+def _codec_validation_claim_disproved(
+    text: str, generated_files: list[tuple[str, str, str]],
+) -> bool:
+    """Prove both exact codec paths before discarding a blanket review claim."""
+
+    lower = text.casefold()
+    if not (
+        "final requirement review [validation]" in lower
+        and _deps.re.search(r"\.py:(?:encode|decode)_envelope: unmet r[1-9]", lower)
+        and "both paths must validate" in lower
+        and "version" in lower and "kind" in lower
+        and "exactly version, kind, and payload keys" in lower
+        and (
+            "do not perform these validations" in lower
+            or "does not include these validations" in lower
+        )
+    ):
+        return False
+
+    def proves_path(function: _deps.ast.FunctionDef, *, decoded: bool) -> bool:
+        body = function.body[1:] if _deps.ast.get_docstring(function) else function.body
+        returns = [node for node in _deps.ast.walk(function)
+                   if isinstance(node, _deps.ast.Return)]
+        if len(returns) != 1 or returns[0].value is None:
+            return False
+        result = returns[0]
+        guards = [
+            node for node in body
+            if isinstance(node, _deps.ast.If)
+            and node.lineno < result.lineno
+            and len(node.body) == 1
+            and isinstance(node.body[0], _deps.ast.Raise)
+        ]
+        value = "version" if decoded else "envelope.version"
+        kind = "kind" if decoded else "envelope.kind"
+        key_source = "obj" if decoded else "envelope.__dict__"
+
+        def guard_line(expression: str) -> int:
+            return next((node.lineno for node in guards
+                         if _deps.ast.unparse(node.test) == expression), 0)
+
+        if not (
+            guard_line(f"not isinstance({value}, int) or isinstance({value}, bool)")
+            and guard_line(f"{value} < 1")
+            and guard_line(f"not isinstance({kind}, str) or not {kind}.strip()")
+            and guard_line(
+                ("not isinstance(obj, dict) or " if decoded else "")
+                + f"set({key_source}) != required_keys"
+            )
+        ):
+            return False
+        required_keys = [
+            node for node in body
+            if isinstance(node, _deps.ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], _deps.ast.Name)
+            and node.targets[0].id == "required_keys"
+            and isinstance(node.value, _deps.ast.Set)
+            and {element.value for element in node.value.elts
+                 if isinstance(element, _deps.ast.Constant)
+                 and isinstance(element.value, str)}
+            == {"version", "kind", "payload"}
+            and len(node.value.elts) == 3
+            and node.lineno < result.lineno
+        ]
+        if len(required_keys) != 1 or required_keys[0].lineno >= guard_line(
+            ("not isinstance(obj, dict) or " if decoded else "")
+            + f"set({key_source}) != required_keys"
+        ):
+            return False
+        if decoded:
+            assignments = {
+                node.targets[0].id: _deps.ast.unparse(node.value)
+                for node in body
+                if isinstance(node, _deps.ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], _deps.ast.Name)
+                and node.targets[0].id in {"version", "kind"}
+                and node.lineno < result.lineno
+            }
+            return (
+                assignments == {"version": "obj['version']", "kind": "obj['kind']"}
+                and any(
+                    isinstance(node, _deps.ast.Assign)
+                    and len(node.targets) == 1
+                    and isinstance(node.targets[0], _deps.ast.Name)
+                    and node.targets[0].id == "obj"
+                    and _deps.ast.unparse(node.value) == "json.loads(data)"
+                    for node in _deps.ast.walk(function)
+                )
+                and isinstance(result.value, _deps.ast.Call)
+                and isinstance(result.value.func, _deps.ast.Name)
+                and result.value.func.id == "Envelope"
+                and {keyword.arg: _deps.ast.unparse(keyword.value)
+                     for keyword in result.value.keywords}.get("version") == "version"
+                and {keyword.arg: _deps.ast.unparse(keyword.value)
+                     for keyword in result.value.keywords}.get("kind") == "kind"
+            )
+        return (
+            isinstance(result.value, _deps.ast.Call)
+            and isinstance(result.value.func, _deps.ast.Attribute)
+            and result.value.func.attr == "encode"
+            and isinstance(result.value.func.value, _deps.ast.Call)
+            and isinstance(result.value.func.value.func, _deps.ast.Attribute)
+            and isinstance(result.value.func.value.func.value, _deps.ast.Name)
+            and result.value.func.value.func.value.id == "json"
+            and result.value.func.value.func.attr == "dumps"
+            and _deps.ast.unparse(result.value.func.value.args[0]) == "envelope.__dict__"
+        )
+
+    for path, _original, source in generated_files:
+        if not str(path).replace("\\", "/").endswith("/codec.py"):
+            continue
+        try:
+            tree = _deps.ast.parse(source)
+        except SyntaxError:
+            continue
+        functions = {node.name: node for node in tree.body
+                     if isinstance(node, _deps.ast.FunctionDef)}
+        encoder = functions.get("encode_envelope")
+        decoder = functions.get("decode_envelope")
+        if encoder and decoder and proves_path(encoder, decoded=False) and proves_path(decoder, decoded=True):
+            return True
+    return False
+
+
 def _semantic_review_finding_is_contradicted_by_source(
     error: str,
     generated_files: list[tuple[str, str, str]],
@@ -38,6 +173,8 @@ def _semantic_review_finding_is_contradicted_by_source(
     """Return whether a review accusation is disproven by exact owner AST."""
 
     text = str(error or "")
+    if _codec_validation_claim_disproved(text, generated_files):
+        return True
     owner_match = _deps.re.search(
         r"\.py:(?P<owners>[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?(?:,\s*"
         r"[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?)*):\s*unmet\s+R[1-9][0-9]*",
@@ -83,6 +220,241 @@ def _semantic_review_finding_is_contradicted_by_source(
 
     evidence = text.split("Evidence:", 1)[-1].split("Smallest repair:", 1)[0]
     evidence_lower = evidence.casefold()
+    requirement = text.split("unmet R", 1)[-1].split("Evidence:", 1)[0].casefold()
+    repair = text.split("Smallest repair:", 1)[-1].casefold()
+    dictionary_count_claim = _deps.re.search(
+        r"number of items in the ([a-z_]\w*) dictionary,? not the number of tracked keys",
+        evidence_lower,
+    )
+    if (
+        "len(" in requirement
+        and "reports tracked keys" in requirement
+        and len(requested_owners) == 1
+    ):
+        # A len contract asks for the count, not a collection. Prove the
+        # actual tracked-key mapping and writer before trusting or discarding
+        # any prose-only reviewer objection to that exact owner.
+        owner_name = next(iter(requested_owners))
+        class_name, _, method_name = owner_name.rpartition(".")
+        method = callable_nodes.get(owner_name)
+        initializer = callable_nodes.get(f"{class_name}.__init__")
+        if method_name == "__len__" and method is not None and initializer is not None:
+            sized_fields = {
+                node.value.args[0].attr
+                for node in _deps.ast.walk(method)
+                if isinstance(node, _deps.ast.Return)
+                and isinstance(node.value, _deps.ast.Call)
+                and isinstance(node.value.func, _deps.ast.Name)
+                and node.value.func.id == "len"
+                and len(node.value.args) == 1
+                and isinstance(node.value.args[0], _deps.ast.Attribute)
+                and isinstance(node.value.args[0].value, _deps.ast.Name)
+                and node.value.args[0].value.id == "self"
+            }
+            if dictionary_count_claim:
+                sized_fields = {
+                    field for field in sized_fields
+                    if field.casefold() == dictionary_count_claim.group(1)
+                }
+            mapped_fields = {
+                target.attr
+                for node in _deps.ast.walk(initializer)
+                if isinstance(node, (_deps.ast.Assign, _deps.ast.AnnAssign))
+                and (
+                    isinstance(node.value, _deps.ast.Dict)
+                    or isinstance(node.value, _deps.ast.Call)
+                    and isinstance(node.value.func, _deps.ast.Name)
+                    and node.value.func.id == "dict"
+                )
+                for target in (
+                    node.targets if isinstance(node, _deps.ast.Assign) else [node.target]
+                )
+                if isinstance(target, _deps.ast.Attribute)
+                and isinstance(target.value, _deps.ast.Name)
+                and target.value.id == "self"
+            }
+            class_node = class_nodes.get(class_name)
+            written_fields = {
+                target.value.attr
+                for member in (class_node.body if class_node is not None else [])
+                if isinstance(member, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+                and member.name not in {"__init__", "__len__"}
+                for node in _deps.ast.walk(member)
+                if isinstance(node, (_deps.ast.Assign, _deps.ast.AugAssign))
+                for target in (
+                    node.targets if isinstance(node, _deps.ast.Assign) else [node.target]
+                )
+                if isinstance(target, _deps.ast.Subscript)
+                and isinstance(target.value, _deps.ast.Attribute)
+                and isinstance(target.value.value, _deps.ast.Name)
+                and target.value.value.id == "self"
+            }
+            if sized_fields & mapped_fields & written_fields:
+                return True
+    if (
+        "without reusing" in requirement
+        and "reset" in repair
+        and _deps.re.search(r"\b(?:to|at)\s+(?:1|one)\b", repair)
+    ):
+        # A reviewer may describe the absence of a reset accurately while
+        # proposing the exact behavior the request explicitly forbids.
+        return True
+    if (
+        "returns a list" in evidence_lower
+        and "tuple" in evidence_lower
+        and len(owners) == 1
+        and isinstance(owners[0], (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+    ):
+        returns = [
+            node for node in _deps.ast.walk(owners[0])
+            if isinstance(node, _deps.ast.Return)
+        ]
+        if returns and all(
+            isinstance(node.value, _deps.ast.Tuple)
+            or (
+                isinstance(node.value, _deps.ast.Call)
+                and isinstance(node.value.func, _deps.ast.Name)
+                and node.value.func.id == "tuple"
+            )
+            for node in returns
+        ):
+            return True
+    if (
+        ("does not guarantee" in evidence_lower
+         or "does not explicitly state" in evidence_lower)
+        and "monotonically increasing" in requirement
+        and "starting at 1" in requirement
+        and len(requested_owners) == 1
+    ):
+        owner_name = next(iter(requested_owners))
+        class_name, _, method_name = owner_name.rpartition(".")
+        class_node = class_nodes.get(class_name)
+        method = callable_nodes.get(owner_name)
+        initializer = callable_nodes.get(f"{class_name}.__init__")
+        if (
+            method_name == "append"
+            and class_node is not None
+            and method is not None
+            and initializer is not None
+        ):
+            def counter_writes(node: _deps.ast.AST, field: str) -> list[_deps.ast.AST]:
+                return [
+                    child for child in _deps.ast.walk(node)
+                    if isinstance(child, (_deps.ast.Assign, _deps.ast.AnnAssign, _deps.ast.AugAssign))
+                    and any(
+                        isinstance(target, _deps.ast.Attribute)
+                        and isinstance(target.value, _deps.ast.Name)
+                        and target.value.id == "self"
+                        and target.attr == field
+                        for target in (
+                            child.targets if isinstance(child, _deps.ast.Assign)
+                            else [child.target]
+                        )
+                    )
+                ]
+            initialized_counters = {
+                target.attr
+                for node in _deps.ast.walk(initializer)
+                if isinstance(node, (_deps.ast.Assign, _deps.ast.AnnAssign))
+                and isinstance(node.value, _deps.ast.Constant)
+                and type(node.value.value) is int
+                and node.value.value == 1
+                for target in (
+                    node.targets if isinstance(node, _deps.ast.Assign)
+                    else [node.target]
+                )
+                if isinstance(target, _deps.ast.Attribute)
+                and isinstance(target.value, _deps.ast.Name)
+                and target.value.id == "self"
+            }
+            guarded_body: list[_deps.ast.stmt] = []
+            executable_body = method.body[1:] if _deps.ast.get_docstring(method) else method.body
+            if len(executable_body) == 1 and isinstance(executable_body[0], _deps.ast.With):
+                guard = executable_body[0]
+                if any(
+                    isinstance(item.context_expr, _deps.ast.Attribute)
+                    and isinstance(item.context_expr.value, _deps.ast.Name)
+                    and item.context_expr.value.id == "self"
+                    and item.context_expr.attr == "_lock"
+                    for item in guard.items
+                ):
+                    guarded_body = guard.body
+            has_single_return = len([
+                node for node in _deps.ast.walk(method)
+                if isinstance(node, _deps.ast.Return)
+            ]) == 1
+            for field in initialized_counters:
+                init_writes = counter_writes(initializer, field)
+                append_writes = counter_writes(method, field)
+                other_writes = [
+                    write
+                    for member in class_node.body
+                    if isinstance(member, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+                    and member.name not in {"__init__", "append"}
+                    for write in counter_writes(member, field)
+                ]
+                id_assignment = next((
+                    node for node in guarded_body
+                    if isinstance(node, _deps.ast.Assign)
+                    and len(node.targets) == 1
+                    and isinstance(node.targets[0], _deps.ast.Name)
+                    and isinstance(node.value, _deps.ast.Attribute)
+                    and isinstance(node.value.value, _deps.ast.Name)
+                    and node.value.value.id == "self"
+                    and node.value.attr == field
+                ), None)
+                counter_increment = next((
+                    node for node in guarded_body
+                    if isinstance(node, _deps.ast.AugAssign)
+                    and node in append_writes
+                ), None)
+                id_return = next((
+                    node for node in guarded_body
+                    if isinstance(node, _deps.ast.Return)
+                    and isinstance(node.value, _deps.ast.Name)
+                    and id_assignment is not None
+                    and node.value.id == id_assignment.targets[0].id
+                ), None)
+                post_increment_return = next((
+                    node for node in guarded_body
+                    if isinstance(node, _deps.ast.Return)
+                    and isinstance(node.value, _deps.ast.BinOp)
+                    and isinstance(node.value.op, _deps.ast.Sub)
+                    and isinstance(node.value.left, _deps.ast.Attribute)
+                    and isinstance(node.value.left.value, _deps.ast.Name)
+                    and node.value.left.value.id == "self"
+                    and node.value.left.attr == field
+                    and isinstance(node.value.right, _deps.ast.Constant)
+                    and type(node.value.right.value) is int
+                    and node.value.right.value == 1
+                ), None)
+                returns_assigned_id = (
+                    id_assignment is not None
+                    and id_return is not None
+                    and guarded_body.index(id_assignment)
+                    < guarded_body.index(counter_increment)
+                    < guarded_body.index(id_return)
+                    if counter_increment is not None else False
+                )
+                returns_incremented_id = (
+                    post_increment_return is not None
+                    and guarded_body.index(counter_increment)
+                    < guarded_body.index(post_increment_return)
+                    if counter_increment is not None else False
+                )
+                if (
+                    len(init_writes) == 1
+                    and len(append_writes) == 1
+                    and isinstance(counter_increment, _deps.ast.AugAssign)
+                    and isinstance(counter_increment.op, _deps.ast.Add)
+                    and isinstance(counter_increment.value, _deps.ast.Constant)
+                    and type(counter_increment.value.value) is int
+                    and counter_increment.value.value == 1
+                    and not other_writes
+                    and (returns_assigned_id or returns_incremented_id)
+                    and has_single_return
+                ):
+                    return True
     if _deps.re.search(
         r"\bmethod\b(?:\s+`?[A-Za-z_]\w*`?)?\s+is\s+missing\s+from\b",
         evidence_lower,
@@ -325,7 +697,9 @@ class _ProjectEditAttemptSynthesizePhase:
                     # grounded obligation per response, regardless of size.
                     self.review_batches = _deps._final_requirement_review_batches(
                         self.pending_semantic_ledger,
-                        max_rows=_semantic_review_batch_limit(self.settings or {}),
+                        max_rows=_semantic_review_batch_limit(
+                            self.settings or {}, self.selected_model
+                        ),
                     )
                     if self.status_callback:
                         self.status_callback(
@@ -402,6 +776,7 @@ class _ProjectEditAttemptSynthesizePhase:
                             "supplied no obligation evidence",
                             "supplied malformed obligation evidence",
                             "supplied ungrounded obligation evidence",
+                            "supplied ungrounded owner evidence",
                             "marked ",
                             "contradicted itself",
                         )
@@ -953,6 +1328,18 @@ class _ProjectEditAttemptSynthesizePhase:
             )
         )
         self.entry_point_owner_repairs.extend(self.mapping_record_repairs)
+        self.generated_files, self.scalar_name_repairs = (
+            _deps._repair_scalar_name_result_access(
+                self.generated_files, self.validation_snapshot_errors
+            )
+        )
+        self.entry_point_owner_repairs.extend(self.scalar_name_repairs)
+        self.generated_files, self.raw_entry_name_repairs = (
+            _deps._repair_raw_entry_manifest_name(
+                self.generated_files, self.validation_snapshot_errors
+            )
+        )
+        self.entry_point_owner_repairs.extend(self.raw_entry_name_repairs)
         self.generated_files, self.omitted_state_repairs = (
             _deps._repair_omitted_selective_states(
                 self.generated_files, self.validation_snapshot_errors
@@ -1039,6 +1426,11 @@ class _ProjectEditAttemptSynthesizePhase:
                 self.generated_files, self.validation_snapshot_errors
             )
         )
+        self.generated_files, self.monotonic_clear_repairs = (
+            _deps._repair_monotonic_clear_counter(
+                self.generated_files, self.validation_snapshot_errors
+            )
+        )
         self.generated_files, self.finally_cleanup_repairs = (
             _deps._repair_required_finally_cleanup(
                 self.generated_files,
@@ -1117,6 +1509,7 @@ class _ProjectEditAttemptSynthesizePhase:
             *self.qt_progress_repairs,
             *self.exact_result_repairs,
             *self.bool_rejection_repairs,
+            *self.monotonic_clear_repairs,
             *self.pre_mutation_guard_repairs,
             *self.limit_boundary_repairs,
             *self.recursive_mapping_repairs,

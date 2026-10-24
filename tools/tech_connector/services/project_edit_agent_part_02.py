@@ -494,6 +494,32 @@ def summarize_project_edit_generated_interface(path: str, source: str) -> str:
                 continue
             entries.append(f"{node.name}{_render_ast_arguments(node.args)}")
         elif isinstance(node, ast.ClassDef):
+            dataclass_declared = any(
+                isinstance(decorator, ast.Name) and decorator.id == "dataclass"
+                or isinstance(decorator, ast.Attribute) and decorator.attr == "dataclass"
+                or isinstance(decorator, ast.Call) and (
+                    isinstance(decorator.func, ast.Name)
+                    and decorator.func.id == "dataclass"
+                    or isinstance(decorator.func, ast.Attribute)
+                    and decorator.func.attr == "dataclass"
+                )
+                for decorator in node.decorator_list
+            )
+            dataclass_fields = [
+                child
+                for child in node.body
+                if isinstance(child, ast.AnnAssign)
+                and isinstance(child.target, ast.Name)
+                and not (
+                    isinstance(child.annotation, ast.Subscript)
+                    and isinstance(child.annotation.value, (ast.Name, ast.Attribute))
+                    and (
+                        child.annotation.value.id
+                        if isinstance(child.annotation.value, ast.Name)
+                        else child.annotation.value.attr
+                    ) == "ClassVar"
+                )
+            ] if dataclass_declared else []
             constructor = next(
                 (
                     child
@@ -506,9 +532,28 @@ def summarize_project_edit_generated_interface(path: str, source: str) -> str:
             class_signature = (
                 _render_ast_arguments(constructor.args, drop_first=True)
                 if constructor is not None
+                else "(" + ", ".join(
+                    f"{field.target.id}: {ast.unparse(field.annotation)}"
+                    + (" = ..." if field.value is not None else "")
+                    for field in dataclass_fields
+                ) + ")"
+                if dataclass_declared
                 else "()"
             )
             entries.append(f"{node.name}{class_signature}")
+            entries.extend(
+                f"{node.name}.{field.target.id}: {ast.unparse(field.annotation)}"
+                for field in dataclass_fields
+                if not (
+                    isinstance(field.annotation, ast.Subscript)
+                    and isinstance(field.annotation.value, (ast.Name, ast.Attribute))
+                    and (
+                        field.annotation.value.id
+                        if isinstance(field.annotation.value, ast.Name)
+                        else field.annotation.value.attr
+                    ) == "InitVar"
+                )
+            )
             entries.extend(
                 f"{node.name}.{child.name}{_render_ast_arguments(child.args, drop_first=True)}"
                 for child in node.body
@@ -692,6 +737,41 @@ def build_project_edit_function_repair_stage(
         else:
             source_lines.append(line)
     bounded_source = "\n".join(source_lines)
+    selective_lookup_hint = (
+        "For each appended result, prove that specific record is enabled. "
+        "A matching key in another enabled record does not prove the current "
+        "source record is enabled; disabled duplicates can share keys. If "
+        "selection is explicit, skip unselected enabled records and reject "
+        "only requested names absent from the enabled set.\n"
+        if (
+            "selected_names" in bounded_source
+            and any(
+                "selective return predicate omits requested state(s): enabled"
+                in str(error)
+                for error in contract.get("all_validation_errors") or []
+            )
+        )
+        else ""
+    )
+    dependency_names = list(dict.fromkeys(
+        match.group(1)
+        for error in contract.get("all_validation_errors") or []
+        if (match := re.search(
+            r"approved `using ([A-Za-z_]\w*)` dependency is never called",
+            str(error),
+        ))
+    ))
+    delegation_hint = (
+        "Approved helper delegation is mandatory: call "
+        + ", ".join(dependency_names)
+        + " inside this public owner and consume its returned records as the "
+        "source of truth. Remove the competing local validation, selection, "
+        "deduplication, or ordering pipeline instead of calling the helper "
+        "and then ignoring it. Forward the original optional selection value "
+        "without converting None to []; preserve all unrelated validated "
+        "output and path constraints.\n"
+        if dependency_names else ""
+    )
     if contract.get("atomic_owner_capsule"):
         atomic_failures = "\n".join(
             f"- {value}"
@@ -712,6 +792,9 @@ def build_project_edit_function_repair_stage(
             ),
             user_prompt=f"""EXACT REPAIR OWNER
 {symbol}
+
+ORIGINAL REQUEST (CONTEXT; REPAIR ONLY THIS OWNER)
+{contract.get("objective") or ""}
 
 EVERY APPROVED OWNER REQUIREMENT (ALL ARE MANDATORY)
 {owner_requirements}
@@ -739,6 +822,9 @@ AVAILABLE MODULE IMPORTS
 {imports}
 ```
 
+AVAILABLE GENERATED MODULE INTERFACES (READ-ONLY)
+{generated_interfaces}
+
 RELEVANT OWNER STATE
 ```python
 {state_context}
@@ -754,13 +840,22 @@ Trace one concrete input or state transition through the replacement for every
 numbered owner requirement above. Check boundary branches before the common path,
 including non-matching input types, missing keys, empty values, and mutation or
 aliasing constraints when named. Compare executable AST behavior against CURRENT
-CALLABLE TO REPLACE. If it is equivalent or any requirement or listed failure
-remains, revise it now. Return only the complete raw Python callable named
+CALLABLE TO REPLACE. Trace each called helper's declared return shape into this
+owner's loop and field accesses: iterate scalar names or IDs as scalars, not as
+mapping records, and do not substitute original input records for helper output.
+{selective_lookup_hint}
+{delegation_hint}
+When a requirement says invalid input must raise, do not catch and suppress that
+same exception (for example, `except ValueError: continue`) inside validation.
+If it is equivalent or any requirement or listed failure
+remains, revise it now. Keep the implementation concise: no explanatory comments,
+redundant branches, or repeated copies of the requirements. Return only the
+complete raw Python callable named
 {contract.get("callable_name") or ""}.
 """,
             num_predict=max(
-                512,
-                min(1800, (len(bounded_source) // 2) + 256),
+                2000,
+                min(2400, (len(bounded_source) // 2) + 768),
             ),
             model_tier="local_code",
             num_ctx=8192,
@@ -870,13 +965,16 @@ Smallest matching disposable validation failure:
 Complete owner validation snapshot:
 {chr(10).join(contract.get("all_validation_errors") or [])}
 
+{delegation_hint}
+
 Approved repair micro-plan:
 ```json
 {plan_text}
 ```
 
 Return one complete replacement callable named {contract.get("callable_name") or ""}.
-Keep the exact parameter list, defaults, annotations, async form, and decorators.
+Keep the exact parameter list, defaults, async form, and decorators. Preserve
+annotations unless a listed validation failure explicitly requires a type-hint change.
 Use only arguments, local names, builtins, visible imports, and available module symbols.
 If a new standard-library helper is needed only here, import it locally inside the callable.
 Fix the root cause and preserve behavior outside this callable. Return raw Python only.
@@ -1101,6 +1199,25 @@ def build_project_edit_class_set_repair_stage(
             + "; consumer-called methods that must remain available: "
             + (", ".join(sorted(consumer_calls)) or "(none)")
         )
+    bounded_journal_guidance = ""
+    if (
+        "sequence" in objective.casefold()
+        and "capacity" in objective.casefold()
+        and "since(" in objective.casefold()
+    ):
+        bounded_journal_guidance = (
+            "Bounded journal invariant: keep the next sequence ID independent of the "
+            "retained container and never reset it on clear. Store each ID with its "
+            "event; capacity eviction removes only the oldest retained event. A since "
+            "query compares IDs numerically, including zero or IDs already evicted, "
+            "and returns tuple snapshots with copied payloads. Treat topic=None as "
+            "no filter, but preserve/filter falsey non-None topics. Deep-copy on both "
+            "append and read, and guard all state transitions with the same lock. "
+            "When useful type hints are requested, annotate append's sequence "
+            "result as int and since's sequence parameter as int with a "
+            "tuple[tuple[int, object, object], ...] return. Write concrete "
+            ":param: and :return: docstrings for every public method.\n"
+        )
     return ProjectEditPromptStage(
         key="class_set_repair",
         label="Repairing coherent class chunks",
@@ -1144,11 +1261,13 @@ Every loaded name must be a parameter, local binding, class/module member, built
 name from a different method's parameters. When one lock-owning method calls another, use an RLock or refactor the
 private helper so it does not reacquire the lock. Every documented parameter must have an exact ``:param name:``
 entry, and every value-returning callable must have ``:return:`` in its docstring.
+{bounded_journal_guidance}
 When TTL expiry and LRU recency are both required, keep the insertion timestamp separate from the recency ordering:
 ``get`` updates only recency, eviction observes recency, and lazy expiry removes the entry from every related index.
 ``__len__`` must count live entries after lazy expiry cleanup. Never use one timestamp field for both TTL and LRU.
 The validated shared contract is authoritative over every generated signature and field shown in the broken package.
 {"This is a repeated failed repair. Reconstruct the class APIs and tests from the objective and authoritative contract; do not preserve a broken generated signature, record layout, fixture, or hard-coded domain sentinel merely because it appears in current code." if repair_attempt > 1 else ""}
+{"BOUNDED JOURNAL CONTRACT:" + chr(10) + bounded_journal_guidance if bounded_journal_guidance else ""}
 """,
         model_tier="local_code",
         num_ctx=8192,
@@ -1164,6 +1283,7 @@ The validated shared contract is authoritative over every generated signature an
             "owner_source": "\n\n".join(target_context),
             "all_validation_errors": list(validation_errors),
             "full_objective": str(objective or ""),
+            "repair_attempt": repair_attempt,
         },
     )
 
@@ -1656,7 +1776,25 @@ def _format_generated_docstring_layout(source: str) -> str:
         available_width = max(48, 92 - int(expression.col_offset or 0))
         for content_line in content_lines:
             if not content_line.lstrip().startswith(":"):
-                wrapped_content.append(content_line)
+                stripped = content_line.lstrip()
+                prose_prefix = content_line[: len(content_line) - len(stripped)]
+                if (
+                    len(content_line) > available_width
+                    and stripped
+                    and not stripped.startswith(("-", "*", ">>>", "..", "|", "@", "```", "#"))
+                ):
+                    wrapped_content.extend(
+                        textwrap.wrap(
+                            stripped,
+                            width=available_width,
+                            initial_indent=prose_prefix,
+                            subsequent_indent=prose_prefix,
+                            break_long_words=False,
+                            break_on_hyphens=False,
+                        ) or [content_line]
+                    )
+                else:
+                    wrapped_content.append(content_line)
                 continue
             wrapped_content.extend(
                 textwrap.wrap(
@@ -1776,6 +1914,103 @@ def _format_generated_function_signatures(source: str) -> str:
     return "\n".join(formatted).rstrip() + "\n"
 
 
+def _format_generated_long_signature_annotations(source: str) -> str:
+    """Wrap individual long annotation lines in multiline signatures."""
+
+    def render_subscript(
+        node: ast.Subscript, *, prefix: str, indent: int
+    ) -> list[str] | None:
+        opening = prefix + ast.unparse(node.value) + "["
+        if len(opening) > 100:
+            return None
+        elements = (
+            node.slice.elts
+            if isinstance(node.slice, ast.Tuple)
+            else [node.slice]
+        )
+        wrapped = [opening]
+        for element in elements:
+            suffix = "," if isinstance(node.slice, ast.Tuple) else ""
+            child_prefix = " " * (indent + 4)
+            child_line = child_prefix + ast.unparse(element) + suffix
+            if len(child_line) <= 100:
+                wrapped.append(child_line)
+            elif isinstance(element, ast.Subscript):
+                child = render_subscript(
+                    element, prefix=child_prefix, indent=indent + 4
+                )
+                if child is None:
+                    return None
+                child[-1] += suffix
+                wrapped.extend(child)
+            else:
+                return None
+        wrapped.append(" " * indent + "]")
+        return wrapped
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines()
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        arguments = [
+            *function.args.posonlyargs,
+            *function.args.args,
+            *function.args.kwonlyargs,
+        ]
+        for argument in arguments:
+            annotation = argument.annotation
+            if annotation is None or argument.lineno != annotation.end_lineno:
+                continue
+            index = argument.lineno - 1
+            line = lines[index]
+            if len(line) <= 100:
+                continue
+            match = re.match(
+                rf"(?P<indent>\s+){re.escape(argument.arg)}:\s*",
+                line,
+            )
+            if match is None or annotation.lineno != annotation.end_lineno:
+                continue
+            indent = match.group("indent")
+            annotation_text = line[
+                annotation.col_offset:annotation.end_col_offset
+            ]
+            suffix = line[annotation.end_col_offset:].strip()
+            if not suffix or not (suffix.startswith("=") or suffix.startswith(",")):
+                continue
+            closing_suffix = " " + suffix if suffix.startswith("=") else suffix
+            replacement = [
+                f"{indent}{argument.arg}: (",
+                f"{indent}    {annotation_text}",
+                f"{indent}){closing_suffix}",
+            ]
+            if max(map(len, replacement)) <= 100:
+                lines[index] = "\n".join(replacement)
+            elif isinstance(annotation, ast.Subscript):
+                replacement = render_subscript(
+                    annotation,
+                    prefix=f"{indent}{argument.arg}: ",
+                    indent=len(indent),
+                )
+                if replacement is not None:
+                    replacement[-1] += closing_suffix
+                    candidate = list(lines)
+                    candidate[index] = "\n".join(replacement)
+                    try:
+                        candidate_tree = ast.parse("\n".join(candidate) + "\n")
+                    except SyntaxError:
+                        candidate_tree = None
+                    if candidate_tree is not None and ast.dump(
+                        tree, include_attributes=False
+                    ) == ast.dump(candidate_tree, include_attributes=False):
+                        lines[index] = candidate[index]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _format_generated_long_constant_mappings(source: str) -> str:
     """Wrap long top-level constant mappings without changing their AST.
 
@@ -1856,6 +2091,16 @@ def _render_generated_dict(
             )
             nested[-1] += ","
             lines.extend(nested)
+        elif isinstance(item, ast.IfExp) and len(
+            entry_prefix + ast.unparse(item) + ","
+        ) > 100:
+            lines.extend([
+                entry_prefix + "(",
+                child_indent + "    " + ast.unparse(item.body),
+                child_indent + "    if " + ast.unparse(item.test),
+                child_indent + "    else " + ast.unparse(item.orelse),
+                child_indent + "),",
+            ])
         else:
             lines.append(f"{entry_prefix}{ast.unparse(item)},")
     lines.append(" " * indent + "}")
@@ -1869,6 +2114,60 @@ def _format_generated_long_statements(source: str) -> str:
     :return: Source with common long AST statements expanded.
     """
 
+    def render_nested_generator_call(
+        expression: ast.AST, prefix: str, indent: int
+    ) -> list[str] | None:
+        """Expand a single-argument call chain around a generator expression."""
+
+        if not isinstance(expression, ast.Call) or len(expression.args) != 1 or expression.keywords:
+            return None
+        argument = expression.args[0]
+        opening = prefix + ast.unparse(expression.func) + "("
+        inner_indent = indent + 4
+        if isinstance(argument, ast.Call):
+            inner = render_nested_generator_call(
+                argument, " " * inner_indent, inner_indent
+            )
+        elif isinstance(argument, ast.GeneratorExp) and len(argument.generators) == 1:
+            generator = argument.generators[0]
+            if generator.is_async:
+                return None
+            rendered_element = (
+                _render_generated_dict(
+                    argument.elt,
+                    prefix=" " * inner_indent,
+                    indent=inner_indent,
+                )
+                if isinstance(argument.elt, ast.Dict)
+                else [" " * inner_indent + ast.unparse(argument.elt)]
+            )
+            for_clause = (
+                " " * inner_indent + "for " + ast.unparse(generator.target)
+                + " in " + ast.unparse(generator.iter)
+            )
+            inner = [*rendered_element, for_clause]
+            for condition in generator.ifs:
+                clause = " " * inner_indent + "if " + ast.unparse(condition)
+                if len(clause) <= 100 or not isinstance(condition, ast.BoolOp):
+                    inner.append(clause)
+                    continue
+                operator = "and" if isinstance(condition.op, ast.And) else "or"
+                inner.extend([
+                    " " * inner_indent + "if (",
+                    " " * (inner_indent + 4) + ast.unparse(condition.values[0]),
+                    *(
+                        " " * (inner_indent + 4) + operator + " "
+                        + ast.unparse(value)
+                        for value in condition.values[1:]
+                    ),
+                    " " * inner_indent + ")",
+                ])
+        else:
+            return None
+        if inner is None:
+            return None
+        return [opening, *inner, " " * indent + ")"]
+
     formatted: list[str] = []
     for line in source.splitlines():
         if len(line) <= 100:
@@ -1876,11 +2175,231 @@ def _format_generated_long_statements(source: str) -> str:
             continue
         indent_text = line[: len(line) - len(line.lstrip())]
         stripped = line.strip()
+        if (
+            stripped.startswith(("if ", "elif "))
+            and stripped.endswith(":")
+            and "#" not in line
+        ):
+            try:
+                keyword = "elif" if stripped.startswith("elif ") else "if"
+                parseable_if = "if " + stripped[len(keyword) + 1:]
+                original_if = ast.parse(
+                    "def _wrapper():\n    " + parseable_if + "\n        pass"
+                ).body[0].body[0]
+                condition = original_if.test
+                if isinstance(condition, ast.BoolOp):
+                    operator = "and" if isinstance(condition.op, ast.And) else "or"
+                    wrapped = [indent_text + keyword + " ("]
+                    for index, value in enumerate(condition.values):
+                        lead = indent_text + "    " + (operator + " " if index else "")
+                        value_line = lead + "(" + ast.unparse(value) + ")"
+                        nested_call = (
+                            value.operand
+                            if isinstance(value, ast.UnaryOp)
+                            and isinstance(value.op, ast.Not)
+                            else None
+                        )
+                        if len(value_line) > 100 and isinstance(value, ast.BoolOp):
+                            nested_operator = (
+                                "and" if isinstance(value.op, ast.And) else "or"
+                            )
+                            wrapped.append(lead + "(")
+                            for nested_index, nested_value in enumerate(value.values):
+                                nested_lead = (
+                                    indent_text + "        "
+                                    + (nested_operator + " " if nested_index else "")
+                                )
+                                nested_line = (
+                                    nested_lead + "(" + ast.unparse(nested_value) + ")"
+                                )
+                                nested_call_lines = (
+                                    render_nested_generator_call(
+                                        nested_value, nested_lead, len(indent_text) + 8
+                                    )
+                                    if len(nested_line) > 100 else None
+                                )
+                                if (
+                                    nested_call_lines
+                                    and max(map(len, nested_call_lines)) <= 100
+                                ):
+                                    wrapped.extend(nested_call_lines)
+                                else:
+                                    wrapped.append(nested_line)
+                            wrapped.append(indent_text + "    )")
+                        elif (
+                            len(value_line) > 100
+                            and isinstance(nested_call, ast.Call)
+                            and isinstance(nested_call.func, ast.Name)
+                            and nested_call.func.id in {"any", "all"}
+                            and len(nested_call.args) == 1
+                            and not nested_call.keywords
+                            and isinstance(nested_call.args[0], ast.GeneratorExp)
+                            and len(nested_call.args[0].generators) == 1
+                            and not nested_call.args[0].generators[0].is_async
+                        ):
+                            generator = nested_call.args[0]
+                            clause = generator.generators[0]
+                            wrapped.extend([
+                                lead + "(",
+                                indent_text + "        not " + nested_call.func.id + "(",
+                                indent_text + "            " + ast.unparse(generator.elt),
+                                indent_text + "            for "
+                                + ast.unparse(clause.target) + " in "
+                                + ast.unparse(clause.iter),
+                                *(
+                                    indent_text + "            if " + ast.unparse(test)
+                                    for test in clause.ifs
+                                ),
+                                indent_text + "        )",
+                                indent_text + "    )",
+                            ])
+                        else:
+                            wrapped.append(value_line)
+                    wrapped.append(indent_text + "):")
+                    rendered_if = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + (
+                                "if" + part[len(indent_text) + 4:]
+                                if keyword == "elif" and index == 0
+                                else part[len(indent_text):]
+                            )
+                            for index, part in enumerate(wrapped)
+                        )
+                        + "\n        pass"
+                    ).body[0].body[0]
+                    if (
+                        max(map(len, wrapped)) <= 100
+                        and ast.dump(condition, include_attributes=False)
+                        == ast.dump(rendered_if.test, include_attributes=False)
+                    ):
+                        formatted.extend(wrapped)
+                        continue
+            except (SyntaxError, ValueError):
+                pass
         try:
-            statement = ast.parse(stripped).body[0]
+            parsed = ast.parse(
+                "def _wrapper():\n    " + stripped
+                if stripped.startswith("return ") else stripped
+            )
+            if not parsed.body:
+                formatted.append(line)
+                continue
+            statement = (
+                parsed.body[0].body[0]
+                if stripped.startswith("return ") else parsed.body[0]
+            )
         except SyntaxError:
             formatted.append(line)
             continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and isinstance(statement.value.func, ast.Attribute)
+            and statement.value.func.attr == "append"
+            and len(statement.value.args) == 1
+            and isinstance(statement.value.args[0], ast.Dict)
+            and not statement.value.keywords
+            and "#" not in line
+        ):
+            wrapped = [
+                *_render_generated_dict(
+                    statement.value.args[0],
+                    prefix=indent_text + ast.unparse(statement.value.func) + "(",
+                    indent=len(indent_text) + 4,
+                ),
+                indent_text + ")",
+            ]
+            if max(map(len, wrapped)) <= 100:
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):] for part in wrapped
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Raise)
+            and isinstance(statement.exc, ast.Call)
+            and len(statement.exc.args) == 1
+            and not statement.exc.keywords
+            and isinstance(statement.exc.args[0], ast.JoinedStr)
+            and statement.cause is None
+            and "#" not in line
+        ):
+            fragments: list[str] = []
+            for part in statement.exc.args[0].values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    fragments.extend(
+                        repr(part.value[start:start + 60])
+                        for start in range(0, len(part.value), 60)
+                    )
+                else:
+                    fragments.append(ast.unparse(ast.JoinedStr(values=[part])))
+            wrapped = [
+                indent_text + "raise " + ast.unparse(statement.exc.func) + "(",
+                *(indent_text + "    " + fragment for fragment in fragments),
+                indent_text + ")",
+            ]
+            if len(fragments) > 1 and all(len(part) <= 100 for part in wrapped):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):] for part in wrapped
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Raise)
+            and isinstance(statement.exc, ast.Call)
+            and "#" not in line
+        ):
+            call = statement.exc
+            cause_suffix = (
+                " from " + ast.unparse(statement.cause)
+                if statement.cause is not None else ""
+            )
+            wrapped = [
+                indent_text + "raise " + ast.unparse(call.func) + "(",
+                *(
+                    indent_text + "    " + ast.unparse(argument) + ","
+                    for argument in call.args
+                ),
+                *(
+                    indent_text + "    " + keyword.arg + "="
+                    + ast.unparse(keyword.value) + ","
+                    for keyword in call.keywords
+                    if keyword.arg is not None
+                ),
+                indent_text + ")" + cause_suffix,
+            ]
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join("    " + part[len(indent_text):] for part in wrapped)
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
         if isinstance(statement, ast.Return) and isinstance(statement.value, ast.Dict):
             formatted.extend(_render_generated_dict(
                 statement.value,
@@ -1888,6 +2407,173 @@ def _format_generated_long_statements(source: str) -> str:
                 indent=len(indent_text),
             ))
             continue
+        if (
+            isinstance(statement, ast.Return)
+            and isinstance(statement.value, ast.BoolOp)
+            and "#" not in line
+        ):
+            operator = "and" if isinstance(statement.value.op, ast.And) else "or"
+            wrapped = [
+                indent_text + "return (",
+                indent_text + "    " + ast.unparse(statement.value.values[0]),
+                *(
+                    indent_text + "    " + operator + " " + ast.unparse(value)
+                    for value in statement.value.values[1:]
+                ),
+                indent_text + ")",
+            ]
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):] for part in wrapped
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Dict)
+            and "#" not in line
+        ):
+            wrapped = _render_generated_dict(
+                statement.value,
+                prefix=indent_text,
+                indent=len(indent_text),
+            )
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    rendered = ast.parse(
+                        textwrap.dedent("\n".join(wrapped))
+                    ).body[0]
+                except SyntaxError:
+                    rendered = None
+                if rendered is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(rendered, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and len(statement.value.args) == 1
+            and not statement.value.keywords
+            and isinstance(statement.value.args[0], ast.Dict)
+            and "#" not in line
+        ):
+            call = statement.value
+            wrapped = [
+                indent_text + ast.unparse(call.func) + "(",
+                *_render_generated_dict(
+                    call.args[0],
+                    prefix=indent_text + "    ",
+                    indent=len(indent_text) + 4,
+                ),
+                indent_text + ")",
+            ]
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    wrapped_statement = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join("    " + part[len(indent_text):] for part in wrapped)
+                    ).body[0].body[0]
+                except SyntaxError:
+                    wrapped_statement = None
+                if wrapped_statement is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(wrapped_statement, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and (len(statement.value.args) > 1 or statement.value.keywords)
+            and all(keyword.arg is not None for keyword in statement.value.keywords)
+            and "#" not in line
+        ):
+            call = statement.value
+            wrapped = [
+                indent_text + ast.unparse(call.func) + "(",
+                *(
+                    indent_text + "    " + ast.unparse(argument) + ","
+                    for argument in call.args
+                ),
+                *(
+                    indent_text + "    " + keyword.arg + "="
+                    + ast.unparse(keyword.value) + ","
+                    for keyword in call.keywords
+                ),
+                indent_text + ")",
+            ]
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):] for part in wrapped
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and len(statement.value.args) == 1
+            and not statement.value.keywords
+            and "#" not in line
+        ):
+            call = statement.value
+            wrapped = [
+                indent_text + ast.unparse(call.func) + "(",
+                indent_text + "    " + ast.unparse(call.args[0]) + ",",
+                indent_text + ")",
+            ]
+            if all(len(part) <= 100 for part in wrapped):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):]
+                            for part in wrapped
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped)
+                    continue
+        if isinstance(statement, ast.Return) and "#" not in line:
+            nested = render_nested_generator_call(
+                statement.value, indent_text + "return ", len(indent_text)
+            )
+            if nested is not None and all(len(part) <= 100 for part in nested):
+                try:
+                    original_ast = ast.dump(statement, include_attributes=False)
+                    rendered_ast = ast.dump(
+                        ast.parse(
+                            "def _wrapper():\n"
+                            + "\n".join("    " + part[len(indent_text):] for part in nested)
+                        ).body[0].body[0],
+                        include_attributes=False,
+                    )
+                except SyntaxError:
+                    rendered_ast = ""
+                if original_ast == rendered_ast:
+                    formatted.extend(nested)
+                    continue
         if isinstance(statement, ast.Return) and isinstance(
             statement.value,
             (ast.ListComp, ast.SetComp, ast.GeneratorExp),
@@ -1919,10 +2605,88 @@ def _format_generated_long_statements(source: str) -> str:
             assignment_prefix = (
                 f"{indent_text}{statement.targets[0].id} = "
             )
-            if isinstance(statement.value, ast.SetComp):
+            if isinstance(statement.value, ast.IfExp) and "#" not in line:
+                expression = statement.value
+                wrapped = [
+                    assignment_prefix + "(",
+                    indent_text + "    " + ast.unparse(expression.body),
+                    indent_text + "    if " + ast.unparse(expression.test),
+                    indent_text + "    else " + ast.unparse(expression.orelse),
+                    indent_text + ")",
+                ]
+                if all(len(part) <= 100 for part in wrapped):
+                    try:
+                        parsed_wrapped = ast.parse(
+                            "def _wrapper():\n"
+                            + "\n".join(
+                                "    " + part[len(indent_text):] for part in wrapped
+                            )
+                        ).body[0].body[0]
+                    except SyntaxError:
+                        parsed_wrapped = None
+                    if parsed_wrapped is not None and ast.dump(
+                        statement, include_attributes=False
+                    ) == ast.dump(parsed_wrapped, include_attributes=False):
+                        formatted.extend(wrapped)
+                        continue
+            if isinstance(statement.value, ast.Dict) and "#" not in line:
+                wrapped = _render_generated_dict(
+                    statement.value,
+                    prefix=assignment_prefix,
+                    indent=len(indent_text),
+                )
+                if all(len(part) <= 100 for part in wrapped):
+                    try:
+                        parsed_wrapped = ast.parse(
+                            "def _wrapper():\n"
+                            + "\n".join(
+                                "    " + part[len(indent_text):]
+                                for part in wrapped
+                            )
+                        ).body[0].body[0]
+                    except SyntaxError:
+                        parsed_wrapped = None
+                    if parsed_wrapped is not None and ast.dump(
+                        statement, include_attributes=False
+                    ) == ast.dump(parsed_wrapped, include_attributes=False):
+                        formatted.extend(wrapped)
+                        continue
+            if isinstance(statement.value, (ast.List, ast.Tuple)) and "#" not in line:
+                opening, closing = (
+                    ("[", "]") if isinstance(statement.value, ast.List) else ("(", ")")
+                )
+                wrapped = [
+                    assignment_prefix + opening,
+                    *(
+                        indent_text + "    " + ast.unparse(item) + ","
+                        for item in statement.value.elts
+                    ),
+                    indent_text + closing,
+                ]
+                if all(len(part) <= 100 for part in wrapped):
+                    try:
+                        parsed_wrapped = ast.parse(
+                            "def _wrapper():\n"
+                            + "\n".join(
+                                "    " + part[len(indent_text):] for part in wrapped
+                            )
+                        ).body[0].body[0]
+                    except SyntaxError:
+                        parsed_wrapped = None
+                    if parsed_wrapped is not None and ast.dump(
+                        statement, include_attributes=False
+                    ) == ast.dump(parsed_wrapped, include_attributes=False):
+                        formatted.extend(wrapped)
+                        continue
+            if isinstance(statement.value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
                 generator = statement.value.generators[0]
+                opening, closing = (
+                    ("[", "]") if isinstance(statement.value, ast.ListComp)
+                    else ("{", "}") if isinstance(statement.value, ast.SetComp)
+                    else ("(", ")")
+                )
                 formatted.extend([
-                    assignment_prefix + "{",
+                    assignment_prefix + opening,
                     f"{indent_text}    {ast.unparse(statement.value.elt)}",
                     f"{indent_text}    for {ast.unparse(generator.target)} "
                     f"in {ast.unparse(generator.iter)}",
@@ -1930,13 +2694,13 @@ def _format_generated_long_statements(source: str) -> str:
                         f"{indent_text}    if {ast.unparse(condition)}"
                         for condition in generator.ifs
                     ),
-                    indent_text + "}",
+                    indent_text + closing,
                 ])
                 continue
             if (
                 isinstance(statement.value, ast.Call)
                 and isinstance(statement.value.func, ast.Attribute)
-                and len(statement.value.args) > 1
+                and (len(statement.value.args) > 1 or statement.value.keywords)
             ):
                 formatted.extend([
                     assignment_prefix + ast.unparse(statement.value.func) + "(",
@@ -1972,8 +2736,146 @@ def _format_generated_long_statements(source: str) -> str:
                     indent_text + ")",
                 ])
                 continue
+            if (
+                isinstance(statement.value, ast.Call)
+                and statement.value.args
+                and isinstance(statement.value.args[0], ast.GeneratorExp)
+                and len(statement.value.args[0].generators) == 1
+                and not statement.value.keywords
+                and "#" not in line
+            ):
+                call = statement.value
+                generator = call.args[0].generators[0]
+                if not generator.is_async:
+                    wrapped = [
+                        assignment_prefix + ast.unparse(call.func) + "(",
+                        indent_text + "    (",
+                        indent_text + "        " + ast.unparse(call.args[0].elt),
+                        indent_text + "        for " + ast.unparse(generator.target)
+                        + " in " + ast.unparse(generator.iter),
+                        *(
+                            indent_text + "        if " + ast.unparse(condition)
+                            for condition in generator.ifs
+                        ),
+                        indent_text + "    ),",
+                        *(
+                            indent_text + "    " + ast.unparse(argument) + ","
+                            for argument in call.args[1:]
+                        ),
+                        indent_text + ")",
+                    ]
+                    if all(len(part) <= 100 for part in wrapped):
+                        try:
+                            parsed_wrapped = ast.parse(
+                                "def _wrapper():\n"
+                                + "\n".join(
+                                    "    " + part[len(indent_text):]
+                                    for part in wrapped
+                                )
+                            ).body[0].body[0]
+                        except SyntaxError:
+                            parsed_wrapped = None
+                        if parsed_wrapped is not None and ast.dump(
+                            statement, include_attributes=False
+                        ) == ast.dump(parsed_wrapped, include_attributes=False):
+                            formatted.extend(wrapped)
+                            continue
+            wrapped_expression = [
+                assignment_prefix + "(",
+                indent_text + "    " + ast.unparse(statement.value),
+                indent_text + ")",
+            ]
+            if "#" not in line and all(len(part) <= 100 for part in wrapped_expression):
+                try:
+                    parsed_wrapped = ast.parse(
+                        "def _wrapper():\n"
+                        + "\n".join(
+                            "    " + part[len(indent_text):]
+                            for part in wrapped_expression
+                        )
+                    ).body[0].body[0]
+                except SyntaxError:
+                    parsed_wrapped = None
+                if parsed_wrapped is not None and ast.dump(
+                    statement, include_attributes=False
+                ) == ast.dump(parsed_wrapped, include_attributes=False):
+                    formatted.extend(wrapped_expression)
+                    continue
         formatted.append(line)
     return "\n".join(formatted).rstrip() + "\n"
+
+
+def _format_generated_long_call_prefixes(source: str) -> str:
+    """Split long assignment call prefixes without changing executable syntax."""
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines()
+    assignments = sorted(
+        (
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+            and int(node.end_lineno or node.lineno) > node.lineno
+        ),
+        key=lambda node: node.lineno,
+        reverse=True,
+    )
+    for statement in assignments:
+        start = statement.lineno - 1
+        end = int(statement.end_lineno or statement.lineno) - 1
+        first_line = lines[start]
+        indent = first_line[: len(first_line) - len(first_line.lstrip())]
+        target = statement.targets[0].id
+        if (
+            len(first_line) <= 100
+            or not first_line.strip().endswith("(")
+            or not first_line.strip().startswith(target + " = ")
+            or lines[end].strip() != ")"
+            or "#" in first_line
+        ):
+            continue
+        replacement = [
+            f"{indent}{target} = (",
+            f"{indent}    {ast.unparse(statement.value.func)}(",
+        ]
+        if max(map(len, replacement)) > 100:
+            member = statement.value.func
+            imported = member.value if isinstance(member, ast.Attribute) else None
+            if not (
+                isinstance(imported, ast.Call)
+                and isinstance(imported.func, ast.Name)
+                and imported.func.id == "__import__"
+            ):
+                continue
+            replacement = [
+                f"{indent}{target} = (",
+                f"{indent}    __import__(",
+                *(f"{indent}        {ast.unparse(argument)}," for argument in imported.args),
+                *(
+                    f"{indent}        {keyword.arg}={ast.unparse(keyword.value)},"
+                    for keyword in imported.keywords if keyword.arg is not None
+                ),
+                f"{indent}    ).{member.attr}(",
+            ]
+            if max(map(len, replacement)) > 100:
+                continue
+        candidate = list(lines)
+        candidate[start] = "\n".join(replacement)
+        candidate[end] += "\n" + indent + ")"
+        try:
+            candidate_tree = ast.parse("\n".join(candidate) + "\n")
+        except SyntaxError:
+            continue
+        if ast.dump(tree, include_attributes=False) == ast.dump(
+            candidate_tree, include_attributes=False
+        ):
+            lines = candidate
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def format_project_edit_generated_python(
@@ -2018,7 +2920,7 @@ def format_project_edit_generated_python(
                             line.split()[1].split(".", 1)[0]
                             if line.startswith(("import ", "from "))
                             else ""
-                        ) in sys.stdlib_module_names else 2,
+                        ) in getattr(sys, "stdlib_module_names", sys.builtin_module_names) else 2,
                         0 if line.startswith("import ") else 1,
                         line,
                     )
@@ -2043,8 +2945,10 @@ def format_project_edit_generated_python(
             formatted = "\n".join(lines).rstrip() + "\n"
             formatted = _format_generated_docstring_layout(formatted)
             formatted = _format_generated_function_signatures(formatted)
+            formatted = _format_generated_long_signature_annotations(formatted)
             formatted = _format_generated_long_constant_mappings(formatted)
             formatted = _format_generated_long_statements(formatted)
+            formatted = _format_generated_long_call_prefixes(formatted)
             if not re.match(r"^#.*coding[:=]", source):
                 formatted = formatted.lstrip("\n")
             compile(ast.parse(formatted, filename=path_text), path_text, "exec")
@@ -3231,7 +4135,10 @@ def _method_updates_widget(node: ast.AST, widget_name: str) -> bool:
 def _unresolved_module_scope_names(tree: ast.Module) -> list[str]:
     """Return undefined names evaluated at module or class construction time."""
 
-    available = set(dir(builtins))
+    available = set(dir(builtins)) | {
+        "__builtins__", "__cached__", "__doc__", "__file__",
+        "__loader__", "__name__", "__package__", "__spec__",
+    }
     parent_by_node = {
         id(child): parent
         for parent in ast.walk(tree)

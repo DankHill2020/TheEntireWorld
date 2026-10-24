@@ -89,6 +89,7 @@ def run_worker(request_path: Path, result_path: Path) -> int:
     model = str(request["model"])
     timeout = int(request.get("llm_timeout") or 300)
     max_attempts = int(request.get("max_attempts") or 5)
+    proof_model = str(request.get("proof_model") or "").strip()
     os.chdir(workspace)
 
     from tech_connector.services.project_edit_workflow_service import (
@@ -102,8 +103,17 @@ def run_worker(request_path: Path, result_path: Path) -> int:
 
     settings = dict(load_settings())
     explicit_cloud = _is_explicit_cloud_model(model)
-    if model.startswith("ollama:"):
+    if model == "ollama:auto-local":
+        from tech_connector.services.ollama_service import hardware_aware_local_models
+
         settings["model_source_mode"] = "local_only"
+        settings["local_model_policy"] = "hardware_aware"
+        selected_model = hardware_aware_local_models(settings).get("code") or "qwen3.5:4b"
+    elif model.startswith("ollama:"):
+        settings["model_source_mode"] = "local_only"
+        # A named benchmark model is pinned. Do not let the product's automatic
+        # hardware-aware quality lane silently change the measured model.
+        settings["local_model_policy"] = "manual"
         selected_model = model.removeprefix("ollama:")
     else:
         # An explicit benchmark selection takes precedence over the saved UI
@@ -115,6 +125,35 @@ def run_worker(request_path: Path, result_path: Path) -> int:
     settings["model"] = selected_model
     settings["cloud_provider_model"] = selected_model
     settings["openai_store_responses"] = False
+    benchmark_depth = os.environ.get("TECH_CONNECTOR_BENCH_CODE_DEPTH", "").strip().lower()
+    if explicit_cloud and selected_model.startswith("openai:") and benchmark_depth in {
+        "fast", "balanced", "deep", "maximum",
+    }:
+        # Benchmark-only process override: exercise the same visible profile
+        # mapping without changing the signed-in user's saved preferences.
+        from tech_connector.services import settings_service
+
+        original_load_settings = settings_service.load_settings
+
+        def load_benchmark_settings(*, credential_store=None) -> dict:
+            loaded = dict(original_load_settings(credential_store=credential_store))
+            loaded["code_prompt_depth"] = benchmark_depth
+            return loaded
+
+        settings_service.load_settings = load_benchmark_settings
+        settings["code_prompt_depth"] = benchmark_depth
+    report_model = "auto-local" if model == "ollama:auto-local" else selected_model
+
+    if proof_model:
+        if not proof_model.startswith("ollama:") or settings.get("model_source_mode") != "local_only":
+            result_path.write_text(json.dumps({
+                "status": "invalid_model_configuration",
+                "ok": False,
+                "model": report_model,
+                "error": "--tech-proof-model requires an ollama: model on a local-only benchmark route.",
+            }, indent=2), encoding="utf-8")
+            return 3
+        settings["local_behavior_harness_model"] = proof_model.removeprefix("ollama:")
 
     started = time.perf_counter()
     workflows = []
@@ -124,7 +163,7 @@ def run_worker(request_path: Path, result_path: Path) -> int:
         payload = {
             "status": "provider_unavailable",
             "ok": False,
-            "model": selected_model,
+            "model": report_model,
             "wall_seconds": round(time.perf_counter() - started, 6),
             "error": (
                 f"The requested cloud benchmark route {selected_model!r} is not "
@@ -202,7 +241,9 @@ def run_worker(request_path: Path, result_path: Path) -> int:
         payload = {
             "status": workflow.status,
             "ok": bool(workflow.ok),
-            "model": selected_model,
+            "model": report_model,
+            "selected_initial_model": selected_model,
+            "selected_proof_model": settings.get("local_behavior_harness_model") or selected_model,
             "wall_seconds": round(time.perf_counter() - started, 6),
             "input_tokens": tokens["input_tokens"],
             "output_tokens": tokens["output_tokens"],
@@ -226,7 +267,7 @@ def run_worker(request_path: Path, result_path: Path) -> int:
         payload = {
             "status": "worker_error",
             "ok": False,
-            "model": selected_model,
+            "model": report_model,
             "wall_seconds": round(time.perf_counter() - started, 6),
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc(),

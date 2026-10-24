@@ -377,8 +377,32 @@ def _aim_frame_preserving_roll(world_matrix, target_x):
     )
 
 
-def aim_joint_x_axis_to_world_x(joint_name):
-    """Aim local +X at world +X while preserving the authored arm roll."""
+def _canonical_t_pose_arm_frame(target_x, side):
+    """Return a mirrored T-pose frame with local Z as the elbow hinge axis."""
+    x_axis = om.MVector(*target_x)
+    if x_axis.length() <= 1.0e-8:
+        raise ValueError("target_x must be non-zero")
+    x_axis.normalize()
+    # Studio arms share +X as their basis aim. Their mirrored local-Z hinge
+    # points down on the left and up on the right; local Y consequently points
+    # into opposite depth directions. This removes arbitrary source arm roll
+    # while retaining the mirrored production-frame convention.
+    z_axis = om.MVector(0.0, 1.0 if side == "r" else -1.0, 0.0)
+    z_axis -= x_axis * (z_axis * x_axis)
+    if z_axis.length() <= 1.0e-8:
+        raise RuntimeError("T-pose arm aim is parallel to its hinge axis")
+    z_axis.normalize()
+    y_axis = z_axis ^ x_axis
+    y_axis.normalize()
+    return (
+        (x_axis.x, x_axis.y, x_axis.z),
+        (y_axis.x, y_axis.y, y_axis.z),
+        (z_axis.x, z_axis.y, z_axis.z),
+    )
+
+
+def aim_joint_x_axis_to_world_x(joint_name, side=None):
+    """Aim local +X at world +X and normalize mirrored arm roll for T-pose."""
     if not joint_name or not cmds.objExists(joint_name):
         return
 
@@ -388,9 +412,14 @@ def aim_joint_x_axis_to_world_x(joint_name):
     joint_pos = cmds.xform(joint_name, q=True, ws=True, t=True)
 
     matrix_before = cmds.xform(joint_name, q=True, ws=True, matrix=True)
-    x_axis, y_axis, z_axis = _aim_frame_preserving_roll(
-        matrix_before, (1.0, 0.0, 0.0)
-    )
+    if side in ("l", "r"):
+        x_axis, y_axis, z_axis = _canonical_t_pose_arm_frame(
+            (1.0, 0.0, 0.0), side
+        )
+    else:
+        x_axis, y_axis, z_axis = _aim_frame_preserving_roll(
+            matrix_before, (1.0, 0.0, 0.0)
+        )
     target_name = (
         joint_name.split("|")[-1].replace(":", "_") + "_worldAlignTemp"
     )
@@ -448,7 +477,8 @@ def aim_joint_x_axis_to_world_x(joint_name):
         "world_y": actual_axes["y"],
         "world_z": actual_axes["z"],
         "axis_errors": axis_errors,
-        "roll_preserved": True,
+        "roll_preserved": side not in ("l", "r"),
+        "roll_normalized": side in ("l", "r"),
         "joint_orient_preserved": True,
         "translate_preserved": True,
     }
@@ -467,9 +497,9 @@ def _set_oriented_elbow_prebend(elbow, hand, degrees=3.0):
     cosine = math.cos(radians)
     sine = math.sin(radians)
     matrix_before = cmds.xform(elbow, q=True, ws=True, matrix=True)
-    x_axis, y_axis, z_axis = _aim_frame_preserving_roll(
-        matrix_before,
+    x_axis, y_axis, z_axis = _canonical_t_pose_arm_frame(
         (cosine, 0.0, -sine if is_right else sine),
+        "r" if is_right else "l",
     )
     elbow_position = cmds.xform(elbow, q=True, ws=True, t=True)
     target = cmds.createNode(
@@ -1316,7 +1346,7 @@ def _prepare_legs_for_t_pose(leg_chains, pelvis=None):
 
 
 _T_POSE_SNAPSHOT_ATTR = "tcTposeWorldMatrices"
-_T_POSE_SNAPSHOT_VERSION = 10
+_T_POSE_SNAPSHOT_VERSION = 11
 _T_POSE_MATRIX_TOLERANCE = 1.0e-5
 
 
@@ -1464,6 +1494,88 @@ def _store_t_pose_snapshot(holder, joints):
     return True
 
 
+def _t_pose_rotation_blockers(joint_channels):
+    """Return locked or driven rotate plugs that T-pose cannot author safely."""
+    blockers = []
+    seen = set()
+    for joint, axes in joint_channels:
+        if not joint or not cmds.objExists(joint):
+            continue
+        resolved = (cmds.ls(joint, long=True) or [joint])[0]
+        for axis in axes:
+            plug = "{}.rotate{}".format(resolved, str(axis).upper())
+            if plug in seen:
+                continue
+            seen.add(plug)
+            source = cmds.connectionInfo(
+                plug, sourceFromDestination=True
+            ) or ""
+            if source:
+                blockers.append({
+                    "plug": plug,
+                    "reason": "connected",
+                    "source": source,
+                })
+            elif cmds.getAttr(plug, lock=True):
+                blockers.append({
+                    "plug": plug,
+                    "reason": "locked",
+                    "source": "",
+                })
+    return blockers
+
+
+def _require_editable_t_pose_channels(joint_channels):
+    """Fail before posing when a built rig already owns required channels."""
+    blockers = _t_pose_rotation_blockers(joint_channels)
+    if not blockers:
+        return
+    details = []
+    for row in blockers:
+        if row["source"]:
+            details.append("{} <- {}".format(row["plug"], row["source"]))
+        else:
+            details.append("{} ({})".format(row["plug"], row["reason"]))
+    raise RuntimeError(
+        "Set T-Pose requires undriven, unlocked rotation channels. "
+        "This skeleton already has rig connections, so T-pose must be run "
+        "before building the rig. Remove or undo the generated rig modules "
+        "and try again. The existing connections were left untouched.\n\n"
+        "Blocked channels:\n  - {}".format("\n  - ".join(details))
+    )
+
+
+def validate_t_pose_channels(joint_map):
+    """Validate mapped channels before the UI opens its pose undo transaction."""
+    if not isinstance(joint_map, dict):
+        return True
+
+    def _mapped_joint(slot):
+        value = joint_map.get(slot)
+        if isinstance(value, dict):
+            return value.get("joint")
+        if isinstance(value, (list, tuple)) and value:
+            return value[0]
+        return value if isinstance(value, str) else None
+
+    channel_specs = [
+        ("LeftShoulder", "XYZ"),
+        ("RightShoulder", "XYZ"),
+        ("LeftArm", "XYZ"),
+        ("RightArm", "XYZ"),
+        ("LeftForeArm", "XYZ"),
+        ("RightForeArm", "XYZ"),
+        ("LeftHand", "XYZ"),
+        ("RightHand", "XYZ"),
+        ("LeftUpLeg", "Z"),
+        ("RightUpLeg", "Z"),
+    ]
+    _require_editable_t_pose_channels([
+        (_mapped_joint(slot), axes) for slot, axes in channel_specs
+    ])
+    return True
+
+
 @undoable("Set T-Pose")
 @cleanup_temp_bones
 def set_t_pose(l_upperarm=None, r_upperarm=None, l_clav=None, r_clav=None, l_elbow=None, r_elbow=None, l_hand=None, r_hand=None, joint_map=None, pelvis=None):
@@ -1551,6 +1663,23 @@ def set_t_pose(l_upperarm=None, r_upperarm=None, l_clav=None, r_clav=None, l_elb
             "rfl_snap": {"stage": "already_in_t_pose", "skeleton_count": 0, "reports": []},
         }
 
+    # Temporary orient constraints solve the arm channels against each joint's
+    # real parent/jointOrient. Maya raises the opaque "Object is already
+    # connected" error if a generated rig module already drives one of those
+    # plugs. Detect that state before changing any joint so the user gets the
+    # exact blockers and the scene does not need a mid-operation rollback.
+    arm_channels = [
+        (joint, "XYZ")
+        for joint in (
+            l_clav, r_clav, l_upperarm, r_upperarm,
+            l_elbow, r_elbow, l_hand, r_hand,
+        )
+    ]
+    leg_channels = [
+        (chain[0], "Z") for chain in leg_chains.values() if chain
+    ]
+    _require_editable_t_pose_channels(arm_channels + leg_channels)
+
     authored_channel_snapshot = _capture_t_pose_authored_channels(pose_joints)
 
     print("[setup_hik.set_t_pose] Executing T-pose alignment:")
@@ -1564,9 +1693,13 @@ def set_t_pose(l_upperarm=None, r_upperarm=None, l_clav=None, r_clav=None, l_elb
 
     arm_axis_reports = {}
     if l_upperarm and cmds.objExists(l_upperarm):
-        arm_axis_reports["l"] = aim_joint_x_axis_to_world_x(l_upperarm)
+        arm_axis_reports["l"] = aim_joint_x_axis_to_world_x(
+            l_upperarm, side="l"
+        )
     if r_upperarm and cmds.objExists(r_upperarm):
-        arm_axis_reports["r"] = aim_joint_x_axis_to_world_x(r_upperarm)
+        arm_axis_reports["r"] = aim_joint_x_axis_to_world_x(
+            r_upperarm, side="r"
+        )
 
     # An RP IK chain must not be authored perfectly straight. Resolve the
     # actual post-placement hinge closest to world up so the small prebend goes

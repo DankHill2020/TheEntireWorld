@@ -39,6 +39,12 @@ not necessarily that no registry descriptor or partial service exists.
 
 - The built-in registry contains **64 asset types**: **22 runtime-ready**,
   **32 authoring-preview**, and **10 experimental**.
+
+The 2026-10-17 UI Document authoring slice raises the registry to **65 types**:
+**22 runtime-ready**, **33 authoring-preview**, and **10 experimental**. It adds
+a validated widget hierarchy, anchor layout preview, asset reference checks,
+dedicated editor controls, Python operations, and a cooked preview artifact.
+Packaged player UI rendering and full UI/2D parity remain open.
 - The engine workspace now has a project Content Browser, World Outliner,
   actor/component Details, prefab apply/revert, Sequence Editor, world-production
   tools, console, profiler, launch-readiness, and build/deploy panels.
@@ -328,7 +334,7 @@ Status meanings:
 
 | Asset types | Current | Required editor or workflow | Priority |
 |---|---|---|---|
-| UI document / widget prefab | Missing | Canvas, hierarchy, anchors, responsive preview and events | P1 |
+| UI document / widget prefab | Authoring preview; player rendering missing | Canvas, hierarchy, anchors, responsive preview and events | P1 |
 | UI theme / style sheet | Missing | Token/theme editor with state preview | P1 |
 | Font / font family | Missing | Glyph coverage, fallback, shaping and atlas settings | P1 |
 | Tile set / tile map | Missing | Tile rules, terrain painting, collision and navigation | P2 |

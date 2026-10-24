@@ -7,6 +7,7 @@ reviewed corpus that should stay stable in normal tests and local benchmarks.
 """
 
 from dataclasses import asdict, dataclass, field
+from importlib import import_module
 import json
 from pathlib import Path
 import re
@@ -61,6 +62,7 @@ class PromptRouteEvalReport:
     accuracy: float
     average_ms: float
     max_ms: float
+    warmup_ms: float = 0.0
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
     rows: list[PromptRouteEvalRow] = field(default_factory=list)
 
@@ -72,6 +74,7 @@ class PromptRouteEvalReport:
             "accuracy": round(self.accuracy, 4),
             "average_ms": round(self.average_ms, 3),
             "max_ms": round(self.max_ms, 3),
+            "warmup_ms": round(self.warmup_ms, 3),
             "by_category": self.by_category,
             "rows": [row.to_dict() for row in self.rows],
         }
@@ -117,11 +120,26 @@ def evaluate_prompt_route_cases(
     classifier: Callable[..., Any] | None = None,
     project_roots: list[str] | None = None,
     include_details: bool = False,
+    warmup_classifier: bool = False,
 ) -> PromptRouteEvalReport:
+    using_default_classifier = classifier is None
     if classifier is None:
         from tech_connector.services.prompt.prompt_route_service import classify_prompt_route
 
         classifier = classify_prompt_route
+
+    cases = list(cases)
+    warmup_ms = 0.0
+    if warmup_classifier and cases:
+        # The default router lazily loads DCC operation catalogs on its first
+        # Maya/Blender/etc. prompt. Load them before timing any fixture case so
+        # case order cannot turn a route-accuracy check into an import benchmark.
+        # Keep that cost visible as cold-start work, not scored route latency.
+        start = perf_counter()
+        if using_default_classifier:
+            import_module("tech_connector.game_engine.integration.dcc_operation_service")
+        classifier(cases[0].prompt, project_roots=project_roots or [])
+        warmup_ms = (perf_counter() - start) * 1000.0
 
     rows: list[PromptRouteEvalRow] = []
     for case in cases:
@@ -228,6 +246,7 @@ def evaluate_prompt_route_cases(
         accuracy=(passed / total) if total else 1.0,
         average_ms=(sum(elapsed) / len(elapsed)) if elapsed else 0.0,
         max_ms=max(elapsed) if elapsed else 0.0,
+        warmup_ms=warmup_ms,
         by_category=by_category,
         rows=rows,
     )

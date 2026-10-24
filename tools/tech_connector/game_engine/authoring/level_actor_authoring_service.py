@@ -25,6 +25,33 @@ class LevelActorAuthoringService:
         _record, _document, _blobs, world = self._load(level_asset_id)
         return tuple(copy.deepcopy(item) for item in world.get("entities") or () if isinstance(item, dict))
 
+    def set_render_mesh(self, level_asset_id: str, actor_name: str, mesh_asset_id: str) -> dict[str, Any]:
+        """Bind an imported OBJ mesh to one named actor in a saved Level."""
+        mesh = self.database.asset(str(mesh_asset_id))
+        if mesh is None or mesh.asset_type != "tc.static_mesh" or mesh.source_path.suffix.casefold() != ".obj":
+            raise ValueError("Runtime render mesh must be an imported tc.static_mesh OBJ asset.")
+        record, document, blobs, world = self._load(level_asset_id)
+        matches = [row for row in world.get("entities") or () if isinstance(row, dict) and str(row.get("name") or "") == str(actor_name)]
+        if len(matches) != 1:
+            raise ValueError(f"Expected exactly one level actor named '{actor_name}', found {len(matches)}.")
+        actor = matches[0]
+        if bool(actor.get("editor_locked", False)):
+            raise ValueError(f"Level actor '{actor_name}' is locked.")
+        actor.setdefault("render", {})["mesh"] = str(mesh.source_path)
+        document.metadata["runtime_world"] = world
+        save_federated_scene(record.source_path, document, blobs=blobs)
+        dependencies = [edge for edge in self.database.dependency_edges(record.asset_id) if edge[1] != f"actor_mesh:{actor_name}"]
+        dependencies.append((mesh.asset_id, f"actor_mesh:{actor_name}"))
+        self.database.register_asset(
+            record.source_path, record.asset_type, asset_id=record.asset_id,
+            metadata=record.metadata, dependencies=dependencies,
+        )
+        return {
+            "schema": LEVEL_ACTOR_EDIT_SCHEMA, "operation": "set_render_mesh",
+            "level_asset_id": record.asset_id, "actor_name": str(actor_name),
+            "mesh_asset_id": mesh.asset_id, "mesh_source": str(mesh.source_path),
+        }
+
     def transform(
         self, level_asset_id: str, actor_ids: Iterable[str], *,
         translation: Iterable[float] = (0.0, 0.0, 0.0),

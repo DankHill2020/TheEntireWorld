@@ -365,6 +365,8 @@ def _required_args_from_signature(signature: str) -> list[str]:
 
 def build_dcc_execution_request(decision: dict, context: RequestContext) -> DccExecutionRequest:
     execution_environment = str(decision.get("execution_environment") or decision.get("host") or "").strip()
+    if execution_environment == "dcc_host":
+        execution_environment = str(decision.get("host") or "").strip()
     target_identifier = str(decision.get("target_identifier") or "").strip()
     callable_name = str(decision.get("callable_name") or target_identifier or "").strip()
     is_unreal_graph_edit = (
@@ -510,6 +512,12 @@ def build_dcc_execution_request(decision: dict, context: RequestContext) -> DccE
         risk_level=str(decision.get("risk_level") or "low"),
         requires_confirmation=bool(decision.get("requires_confirmation")),
         approved=bool(decision.get("approved") or decision.get("confirmation_accepted")),
+        timeout_seconds=(
+            (300.0 if target_identifier == "animation.fbx_to_engine" else 180.0)
+            if execution_environment == "maya"
+            and target_identifier in {"animation.fbx_to_control_rig", "animation.fbx_to_engine"}
+            else 60.0
+        ),
         original_prompt=context.text,
     )
 
@@ -766,6 +774,21 @@ class MayaExecutionAdapter(WindowDccExecutionAdapter):
 
             code = maya_operation_code(operation_key, params)
             ok, raw = self._execute_maya_code(bridge, code, request, request.timeout_seconds)
+        elif operation_key in {"animation.fbx_to_control_rig", "animation.fbx_to_engine"}:
+            from tech_connector.bridges.host_bridge import (
+                PortBoundHostBridge,
+                call_python_function_via_execute,
+            )
+
+            port = params.pop("maya_port", None)
+            endpoint = PortBoundHostBridge(bridge, int(port)) if port else bridge
+            ok, raw = call_python_function_via_execute(
+                endpoint,
+                op.function,
+                kwargs=params,
+                sys_paths=getattr(bridge, "SYS_PATHS", ()),
+                timeout=request.timeout_seconds,
+            )
         else:
             ok, raw = bridge.call_function(op.function, kwargs=params)
         user_message = f"Successfully executed Maya operation `{operation_key}`." if ok else f"Maya operation failed: {raw}"
@@ -849,6 +872,8 @@ print(json.dumps({{'missing': missing, 'checked': names}}))
         params["type"] = "joint"
         ls_request = DccExecutionRequest(**{**request.to_dict(), "target_identifier": "scene.ls", "keyword_args": params})
         result = self._query_maya_ls(ls_request, context)
+        if result.status != "completed":
+            return result
         data = dict(result.structured_data.get("ls_query") or {})
         first_only = bool(params.get("first_only"))
         raw_items = data.get("items") or data.get("joints") or []
@@ -940,7 +965,13 @@ print(json.dumps(payload))
         data = _extract_json_payload(raw)
         items = [str(item) for item in data.get("items") or []]
         flags = data.get("flags") if isinstance(data.get("flags"), dict) else {}
-        if params.get("selection"):
+        if params.get("selection") and params.get("type"):
+            message = (
+                f"Selected Maya `{params.get('type')}` nodes: " + ", ".join(f"`{item}`" for item in items)
+                if items
+                else f"Maya is connected, but no `{params.get('type')}` nodes are selected."
+            )
+        elif params.get("selection"):
             message = (
                 "Maya selection: " + ", ".join(f"`{item}`" for item in items)
                 if items

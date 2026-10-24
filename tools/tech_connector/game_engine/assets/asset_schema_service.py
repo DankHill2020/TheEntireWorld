@@ -583,6 +583,10 @@ _SCHEMAS: dict[str, tuple[AssetPropertyDescriptor, ...]] = {
         AssetPropertyDescriptor("output_directory", "Output Directory", "Build", "Project-relative package output directory."),
         AssetPropertyDescriptor("include_debug_symbols", "Debug Symbols", True, "Include symbols for crash diagnosis."),
     ),
+    "tc.ui_document": (
+        AssetPropertyDescriptor("canvas", "Reference Canvas", {"size": [1920, 1080]}, "Reference width and height; anchors adapt widgets to other viewport sizes."),
+        AssetPropertyDescriptor("widgets", "Widget Hierarchy", [], "Panels, text, buttons, and images with IDs, parent IDs, anchors, pivots, offsets, sizes, and accessibility labels."),
+    ),
     "tc.prefab": (
         AssetPropertyDescriptor("prefab_version", "Prefab Version", 2, "Serialized Prefab authoring format version."),
         AssetPropertyDescriptor("entities", "Entities", [], "Nested entity and component templates."),
