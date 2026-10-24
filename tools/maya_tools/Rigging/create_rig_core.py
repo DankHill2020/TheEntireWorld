@@ -11,7 +11,7 @@ from tech_connector.services.dcc.rigging_workspace_service import twist_driver_c
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
-RIG_BUILD_REVISION = "rig-portable-thigh-twist-contract-v44"
+RIG_BUILD_REVISION = "rig-bend-preserving-limb-stretch-v45"
 
 
 def normalize_rfl_joint_suffixes(side=None, namespace=None):
@@ -517,6 +517,7 @@ def _create_stretch_ratio_network(
         stretch_attr,
         scale_reference=None,
         rest_length_attr=None,
+        minimum_ratio=None,
 ):
     """Create a scale-aware stretch/compression ratio and return its output."""
     created_nodes = []
@@ -552,13 +553,22 @@ def _create_stretch_ratio_network(
     _connect_attr_once(current_distance_attr, f"{ratio}.input1X", force=True)
     _connect_attr_once(rest_distance_attr, f"{ratio}.input2X", force=True)
 
+    ratio_output = f"{ratio}.outputX"
+    if minimum_ratio is not None:
+        ratio_clamp = cmds.createNode("clamp", name=f"{token}_stretch_ratio_clamp")
+        created_nodes.append(ratio_clamp)
+        cmds.setAttr(f"{ratio_clamp}.minR", float(minimum_ratio))
+        cmds.setAttr(f"{ratio_clamp}.maxR", 10000.0)
+        _connect_attr_once(ratio_output, f"{ratio_clamp}.inputR", force=True)
+        ratio_output = f"{ratio_clamp}.outputR"
+
     blend = cmds.createNode("blendColors", name=f"{token}_stretch_blend")
     created_nodes.append(blend)
     # blendColors computes color1 * blender + color2 * (1 - blender).
     cmds.setAttr(f"{blend}.color2R", 1.0)
     # Feed the measured ratio directly into the enabled side of the blend.
     # Ratios above one extend the chain and ratios below one compress it.
-    _connect_attr_once(f"{ratio}.outputX", f"{blend}.color1R", force=True)
+    _connect_attr_once(ratio_output, f"{blend}.color1R", force=True)
     _connect_attr_once(stretch_attr, f"{blend}.blender", force=True)
 
     return f"{blend}.outputR", created_nodes
@@ -899,7 +909,15 @@ def _drive_stretch_segments(prefix, segment_joints, ratio_attr):
 
 
 def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None):
-    """Add a 0-1 stretch/compression blend to a two-bone IK chain."""
+    """Add bend-preserving stretch to a two-bone IK chain.
+
+    The enabled ratio is measured against the chain's original root-to-end
+    chord, not the sum of its two bone lengths. Dividing by the length sum
+    makes the scaled bones exactly equal the target distance and therefore
+    forces the IK triangle flat. Scaling from the original chord preserves
+    the authored elbow/knee angle as the limb extends. Ratios below one are
+    clamped so enabling stretch never removes an animator's deeper bend.
+    """
     if len(ik_joints) < 3 or not all(cmds.objExists(node) for node in ik_joints[:3]):
         return {"enabled": False, "nodes": []}
 
@@ -927,6 +945,13 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
         start_parent=scale_reference,
         end_parent=scale_reference,
     )
+    rest_reach_dimension = _create_distance_dimension(
+        f"{prefix}_restReach",
+        positions[0],
+        positions[2],
+        start_parent=scale_reference,
+        end_parent=scale_reference,
+    )
     reach_dimension = _create_distance_dimension(
         f"{prefix}_reach",
         positions[0],
@@ -937,18 +962,16 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
         start_parent=scale_reference,
         end_parent=ik_ctrl,
     )
-    rest_sum = cmds.createNode("plusMinusAverage", name=f"{prefix}_stretch_restLength_pma")
-    cmds.setAttr(f"{rest_sum}.operation", 1)
-    _connect_attr_once(f"{upper_dimension['shape']}.distance", f"{rest_sum}.input1D[0]", force=True)
-    _connect_attr_once(f"{lower_dimension['shape']}.distance", f"{rest_sum}.input1D[1]", force=True)
-
-    rest_length = sum(abs(_joint_segment_axis(joint)[1]) for joint in ik_joints[1:3])
+    rest_length = math.sqrt(sum(
+        (positions[2][axis] - positions[0][axis]) ** 2 for axis in range(3)
+    ))
     ratio_attr, ratio_nodes = _create_stretch_ratio_network(
         prefix,
         f"{reach_dimension['shape']}.distance",
         rest_length,
         stretch_attr,
-        rest_length_attr=f"{rest_sum}.output1D",
+        rest_length_attr=f"{rest_reach_dimension['shape']}.distance",
+        minimum_ratio=1.0,
     )
     segment_nodes = _drive_stretch_segments(prefix, ik_joints[1:3], ratio_attr)
     volume_nodes = []
@@ -964,14 +987,21 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
     dimension_nodes = (
         upper_dimension["nodes"]
         + lower_dimension["nodes"]
+        + rest_reach_dimension["nodes"]
         + reach_dimension["nodes"]
     )
     return {
         "enabled": True,
         "attr": stretch_attr,
         "volume_attr": volume_attr,
-        "dimensions": [upper_dimension, lower_dimension, reach_dimension],
-        "nodes": dimension_nodes + [rest_sum] + ratio_nodes + segment_nodes + volume_nodes,
+        "dimensions": [
+            upper_dimension,
+            lower_dimension,
+            rest_reach_dimension,
+            reach_dimension,
+        ],
+        "stretch_mode": "bend_preserving",
+        "nodes": dimension_nodes + ratio_nodes + segment_nodes + volume_nodes,
     }
 
 

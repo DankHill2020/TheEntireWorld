@@ -740,10 +740,20 @@ def _solve_two_bone_ik(constraint: dict[str, Any], nodes: dict[str, dict[str, An
     if stretch > 0.0:
         rest_upper = max(1.0e-8, float(settings.get("rest_upper_length", upper_length) or upper_length))
         rest_lower = max(1.0e-8, float(settings.get("rest_lower_length", lower_length) or lower_length))
-        # Stretch is bidirectional: moving the target beyond the rest reach
-        # extends both segments, while moving it toward the limb root
-        # compresses both segments in their original length proportion.
-        full_ratio = max(1.0e-8, target_distance / (rest_upper + rest_lower))
+        if str(settings.get("stretch_mode") or "") == "bend_preserving":
+            rest_reach = max(1.0e-8, float(
+                settings.get("rest_reach_length", float(np.linalg.norm(end - start)))
+                or float(np.linalg.norm(end - start))
+            ))
+            minimum_ratio = max(1.0, float(settings.get("minimum_stretch_ratio", 1.0) or 1.0))
+            # Use the authored bent chord as the scale reference. Using the
+            # two segment lengths added together makes their scaled sum equal
+            # the target distance, leaving no triangle height for the bend.
+            full_ratio = max(minimum_ratio, target_distance / rest_reach)
+        else:
+            # Backward compatibility for serialized graphs built before the
+            # bend-preserving stretch contract.
+            full_ratio = max(1.0e-8, target_distance / (rest_upper + rest_lower))
         stretch_ratio = 1.0 + (full_ratio - 1.0) * stretch
         upper_length = rest_upper * stretch_ratio
         lower_length = rest_lower * stretch_ratio

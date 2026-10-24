@@ -25,7 +25,7 @@ from tech_connector.game_engine.authoring.rigging_workspace_service import (
 )
 
 
-RIG_BEHAVIOR_REVISION = 7
+RIG_BEHAVIOR_REVISION = 8
 
 
 def _stable_ribbon_grid(
@@ -414,6 +414,7 @@ class TCRiggingHostAdapter:
         end_position = self._joint_world_matrix(end)[12:15]
         upper_length = math.sqrt(sum((mid_position[index] - start_position[index]) ** 2 for index in range(3)))
         lower_length = math.sqrt(sum((end_position[index] - mid_position[index]) ** 2 for index in range(3)))
+        rest_reach_length = math.sqrt(sum((end_position[index] - start_position[index]) ** 2 for index in range(3)))
         solver = self.graph.add_ik_solver(start, mid, end, ik_target, pole_node_id=pole, solver_id=f"{module}_ik_solver",
                                           settings={
                                               "rig_module": module,
@@ -422,6 +423,9 @@ class TCRiggingHostAdapter:
                                               "stretch_attribute": "stretch",
                                               "rest_upper_length": upper_length,
                                               "rest_lower_length": lower_length,
+                                               "rest_reach_length": rest_reach_length,
+                                               "stretch_mode": "bend_preserving",
+                                               "minimum_stretch_ratio": 1.0,
                                               "measurement": "per_segment_distance",
                                               "distance_segments": [
                                                   {"start": start, "end": mid, "rest_length": upper_length},

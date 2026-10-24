@@ -145,15 +145,23 @@ def solve_two_bone_ik(
     *,
     maximum_stretch: float = 1.0,
 ) -> tuple[Vector3, Vector3, float]:
+    """Solve a two-bone chain while preserving its authored bend in stretch.
+
+    Once the target passes the original bent root-to-end reach, both segments
+    scale from that chord. This retains the input bend angle instead of making
+    the scaled segment sum exactly equal to the target distance.
+    """
     root, joint, end, target = map(_vec, (root, joint, end, target))
     upper = max(1.0e-8, _length(_subtract(joint, root)))
     lower = max(1.0e-8, _length(_subtract(end, joint)))
     to_target = _subtract(target, root)
     distance = _length(to_target)
-    maximum = (upper + lower) * max(1.0, float(maximum_stretch))
+    rest_reach = max(1.0e-8, _length(_subtract(end, root)))
+    maximum_ratio = max(1.0, float(maximum_stretch))
+    stretch_ratio = _clamp(distance / rest_reach, 1.0, maximum_ratio)
+    maximum = rest_reach * maximum_ratio
     solved_distance = _clamp(distance, abs(upper - lower) + 1.0e-7, maximum)
     direction = _normalize(to_target, (0.0, -1.0, 0.0))
-    stretch_ratio = max(1.0, solved_distance / (upper + lower))
     effective_upper, effective_lower = upper * stretch_ratio, lower * stretch_ratio
     reach = min(solved_distance, effective_upper + effective_lower - 1.0e-7)
     along = (effective_upper * effective_upper - effective_lower * effective_lower + reach * reach) / (2.0 * reach)
