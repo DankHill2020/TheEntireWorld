@@ -82,11 +82,10 @@
         "README.md",
         "LICENSE",
         "official_tools_bundle.json",
-        "OFFICIAL_TOOLS_README.md",
-        "tech_connector/LICENSE.md"
+        "OFFICIAL_TOOLS_README.md"
       ],
       "include": [
-        "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md", "tech_connector/LICENSE.md",
+        "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md",
         "blender_tools", "houdini_tools", "max_tools", "maya_tools",
         "motionbuilder_tools", "substance_painter_tools", "unreal_tools",
         "utilities", "plugins", "custom_qt", "external_tools", "workflows"

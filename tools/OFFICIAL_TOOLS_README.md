@@ -18,5 +18,5 @@ source-available license, but official execution, packaged updates, and support
 for this first-party bundle are controlled by the `official_tools_bundle`
 capability in the user's signed entitlement.
 
-The accompanying `tech_connector/LICENSE.md` controls use. Downloading or
-possessing these files does not create an activated entitlement.
+The accompanying root `LICENSE` controls use. Downloading or possessing these
+files does not create an activated entitlement.
