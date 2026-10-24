@@ -89,7 +89,7 @@
         "official_tools_bundle.json", "OFFICIAL_TOOLS_README.md", "tech_connector/LICENSE.md",
         "blender_tools", "houdini_tools", "max_tools", "maya_tools",
         "motionbuilder_tools", "substance_painter_tools", "unreal_tools",
-        "utilities", "plugins", "custom_qt"
+        "utilities", "plugins", "custom_qt", "external_tools", "workflows"
       ],
       "repository_files": [
         {"source": "OFFICIAL_TOOLS_README.md", "target": "README.md"},
