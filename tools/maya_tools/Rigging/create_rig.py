@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from maya_tools.Rigging import create_rig_core as _core
 from maya_tools.Rigging.undo_utils import undoable
 from maya_tools.Rigging.temp_cleanup import cleanup_temp_bones, delete_temp_bones
@@ -4750,6 +4752,51 @@ def rig_leg_module(side, body_joint_map, parent_ctrl=None):
             sub_ctrls=False,
             keep_constraint=True
         )
+        # Knee-roll controls are authored at fixed positions along the lower
+        # leg. Keep those positions proportional to the live knee-to-ankle
+        # segment length so they follow stretch/compression, and clamp any
+        # authored roll joint that starts beyond the ankle back to the end.
+        lower_rest_distance = None
+        lower_dimensions = (limb_data.get("stretch") or {}).get("dimensions") or []
+        if len(lower_dimensions) > 1:
+            lower_rest_shape = lower_dimensions[1].get("shape")
+            if lower_rest_shape and cmds.objExists(lower_rest_shape + ".distance"):
+                lower_rest_distance = cmds.getAttr(lower_rest_shape + ".distance")
+        ankle_rest_joint = leg_chain[2] if len(leg_chain) > 2 else f"{side}_ankle"
+        ankle_offset = cmds.getAttr(ankle_rest_joint + ".translateX")
+        if lower_rest_distance is not None:
+            ankle_offset = math.copysign(lower_rest_distance, ankle_offset or 1.0)
+        if abs(ankle_offset) > 1e-8:
+            for index, control_data in enumerate(knee_ctrl_data[:len(knee_joints)]):
+                knee_pad = control_data.get("pad") if isinstance(control_data, dict) else None
+                if not knee_pad or not cmds.objExists(knee_pad):
+                    continue
+                pad_offset = cmds.getAttr(knee_pad + ".translateX")
+                fraction = max(0.0, min(1.0, pad_offset / ankle_offset))
+                follow_node = f"{side}_knee_roll{index + 1}_length_mdl"
+                if cmds.objExists(follow_node):
+                    if cmds.nodeType(follow_node) != "multDoubleLinear":
+                        raise RuntimeError(
+                            "Expected a multDoubleLinear knee roll length node at {!r}.".format(
+                                follow_node,
+                            )
+                        )
+                else:
+                    follow_node = cmds.createNode(
+                        "multDoubleLinear",
+                        name=follow_node,
+                    )
+                cmds.setAttr(follow_node + ".input2", fraction)
+                cmds.connectAttr(
+                    f"{side}_ankle_driver.translateX",
+                    follow_node + ".input1",
+                    force=True,
+                )
+                cmds.connectAttr(
+                    follow_node + ".output",
+                    knee_pad + ".translateX",
+                    force=True,
+                )
         knee_twist = create_twist_driver(
             driver_bone=f"{side}_knee_driver",
             child_bone=f"{side}_ankle_driver",
