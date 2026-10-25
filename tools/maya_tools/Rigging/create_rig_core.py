@@ -11,7 +11,7 @@ from tech_connector.services.dcc.rigging_workspace_service import twist_driver_c
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
-RIG_BUILD_REVISION = "rig-bend-preserving-limb-stretch-v45"
+RIG_BUILD_REVISION = "rig-source-pose-bend-preserving-stretch-v49"
 
 
 def normalize_rfl_joint_suffixes(side=None, namespace=None):
@@ -908,15 +908,21 @@ def _drive_stretch_segments(prefix, segment_joints, ratio_attr):
     return created_nodes
 
 
-def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None):
+def setup_ik_limb_stretch(
+        ik_joints,
+        ik_ctrl,
+        switch_ctrl,
+        scale_reference=None,
+        setup_positions=None,
+):
     """Add bend-preserving stretch to a two-bone IK chain.
 
     The enabled ratio is measured against the chain's original root-to-end
     chord, not the sum of its two bone lengths. Dividing by the length sum
     makes the scaled bones exactly equal the target distance and therefore
     forces the IK triangle flat. Scaling from the original chord preserves
-    the authored elbow/knee angle as the limb extends. Ratios below one are
-    clamped so enabling stretch never removes an animator's deeper bend.
+    the authored elbow/knee angle while the limb extends or compresses. A
+    small positive ratio floor avoids zero-length segments at full collapse.
     """
     if len(ik_joints) < 3 or not all(cmds.objExists(node) for node in ik_joints[:3]):
         return {"enabled": False, "nodes": []}
@@ -927,10 +933,17 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
     volume_attr = _ensure_stretch_attr(switch_ctrl, "volumeStretch")
 
     prefix = _stretch_node_token(ik_joints[0]).replace("_ik", "")
-    positions = [
-        cmds.xform(joint, query=True, worldSpace=True, translation=True)
-        for joint in ik_joints[:3]
-    ]
+    # Use the original bind/setup pose as the stretch reference. Sampling the
+    # duplicated IK chain here can silently capture a solver-flattened pose
+    # instead of the animator-authored bend when the RP handle is initialized.
+    positions = (
+        [list(map(float, point)) for point in setup_positions[:3]]
+        if setup_positions and len(setup_positions) >= 3
+        else [
+            cmds.xform(joint, query=True, worldSpace=True, translation=True)
+            for joint in ik_joints[:3]
+        ]
+    )
     upper_dimension = _create_distance_dimension(
         f"{prefix}_upper_rest",
         positions[0],
@@ -971,7 +984,7 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
         rest_length,
         stretch_attr,
         rest_length_attr=f"{rest_reach_dimension['shape']}.distance",
-        minimum_ratio=1.0,
+        minimum_ratio=0.05,
     )
     segment_nodes = _drive_stretch_segments(prefix, ik_joints[1:3], ratio_attr)
     volume_nodes = []
@@ -1000,7 +1013,8 @@ def setup_ik_limb_stretch(ik_joints, ik_ctrl, switch_ctrl, scale_reference=None)
             rest_reach_dimension,
             reach_dimension,
         ],
-        "stretch_mode": "bend_preserving",
+        "stretch_mode": "bend_preserving_compression_and_extension",
+        "minimum_ratio": 0.05,
         "nodes": dimension_nodes + ratio_nodes + segment_nodes + volume_nodes,
     }
 
@@ -1028,6 +1042,14 @@ def create_ik_fk_limb(sel, root_parent):
 
     joint_count = len(sel)
     ik_end_index = 2
+
+    # Snapshot before constraints/IK solving touch the generated chains. The
+    # stretch network must preserve this setup-pose chord (and therefore its
+    # authored bend), not whatever pose the solver happens to report later.
+    setup_positions = [
+        cmds.xform(joint, query=True, worldSpace=True, translation=True)
+        for joint in sel[:3]
+    ]
 
     top_joint = sel[0]
     mid_joint = sel[1]
@@ -1090,6 +1112,52 @@ def create_ik_fk_limb(sel, root_parent):
                 target_plug = "{}.preferredAngle{}".format(target, axis)
                 if cmds.objExists(target_plug):
                     cmds.setAttr(target_plug, value)
+
+    # RP handles need an explicit preferred bend before creation.  Without
+    # one Maya can solve a posed two-bone chain to full extension while it
+    # initializes the handle, losing the setup bend before stretch is wired.
+    # Derive the signed hinge angle from the source-pose segment directions
+    # and express its axis in the middle joint's local frame.
+    upper_vector = om.MVector(*setup_positions[1]) - om.MVector(*setup_positions[0])
+    lower_vector = om.MVector(*setup_positions[2]) - om.MVector(*setup_positions[1])
+    if upper_vector.length() > 1.0e-8 and lower_vector.length() > 1.0e-8:
+        upper_direction = upper_vector.normal()
+        lower_direction = lower_vector.normal()
+        bend_axis_world = upper_direction ^ lower_direction
+        bend_magnitude = bend_axis_world.length()
+        if bend_magnitude > 1.0e-4:
+            bend_axis_world.normalize()
+            bend_angle = math.degrees(math.acos(max(
+                -1.0,
+                min(1.0, upper_direction * lower_direction),
+            )))
+            mid_matrix = cmds.xform(
+                sel[1], query=True, worldSpace=True, matrix=True
+            )
+            local_world_axes = (
+                om.MVector(*mid_matrix[0:3]),
+                om.MVector(*mid_matrix[4:7]),
+                om.MVector(*mid_matrix[8:11]),
+            )
+            bend_axis_index = max(
+                range(3),
+                key=lambda axis_index: abs(
+                    local_world_axes[axis_index].normal() * bend_axis_world
+                ),
+            )
+            bend_axis_name = "XYZ"[bend_axis_index]
+            bend_sign = 1.0 if (
+                local_world_axes[bend_axis_index].normal() * bend_axis_world
+            ) >= 0.0 else -1.0
+            for axis_name in "XYZ":
+                preferred_plug = (
+                    f"{ik_joints[1]}.preferredAngle{axis_name}"
+                )
+                if cmds.objExists(preferred_plug):
+                    cmds.setAttr(
+                        preferred_plug,
+                        bend_sign * bend_angle if axis_name == bend_axis_name else 0.0,
+                    )
 
     for chain_name, chain in (
         ("FK", fk_joints),
@@ -1282,7 +1350,10 @@ def create_ik_fk_limb(sel, root_parent):
         n=f"{top_joint.replace('_jnt', '')}_ikh",
         sj=ik_joints[0],
         ee=ik_joints[ik_end_index],
-        sol="ikRPsolver"
+        sol="ikRPsolver",
+        # The default snap can move a newly-created handle to Maya's transient
+        # straightened endpoint.  Keep it at the authored setup-pose endpoint.
+        shf=False,
     )
     cmds.parent(ik_handle, ik_ctrl)
     cmds.poleVectorConstraint(pv_ctrl, ik_handle)
@@ -1466,6 +1537,7 @@ def create_ik_fk_limb(sel, root_parent):
         ik_ctrl,
         switch_ctrl_name,
         scale_reference=root_parent,
+        setup_positions=setup_positions,
     )
     stretch_data["scale_isolated_joints"] = list(
         dict.fromkeys(volume_scale_isolated_joints)
