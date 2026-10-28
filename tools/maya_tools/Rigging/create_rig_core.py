@@ -11,7 +11,7 @@ from tech_connector.services.dcc.rigging_workspace_service import twist_driver_c
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
-RIG_BUILD_REVISION = "rig-source-pose-bend-preserving-stretch-v72"
+RIG_BUILD_REVISION = "rig-source-pose-bend-preserving-stretch-v77"
 
 # Preferred curl angles captured from the studio rig_template.ma. These are
 # absolute local values, not deltas; the first knuckle intentionally differs
@@ -4278,6 +4278,13 @@ def create_finger_rigs(finger_joints, hand_driver=None):
                             fk_ctrls[index]["ctrl"], children[0]
                         )
             _record_thumb_bind_pose_stage("after_fk_controls")
+            # Match the other digits: the RP solver root and IK goal both
+            # inherit the metacarpal control transform. Keep thumb01_ik under
+            # the hand driver because it supplies the metacarpal bind channels.
+            if len(ik_chain) > 1 and fk_ctrls:
+                cmds.parent(
+                    ik_chain[1], fk_ctrls[0]["ctrl"], absolute=True
+                )
 
             # Keep the duplicated IK chain at the bind joint positions. Its
             # rotate channels are already world-pose-preserving after the
@@ -4346,8 +4353,14 @@ def create_finger_rigs(finger_joints, hand_driver=None):
             # origin and the IK goal share the thumb tip pivot.
             cmds.setAttr(ik_ctrl_info["ctrl"] + ".translate", 0.0, 0.0, 0.0)
             cmds.setAttr(ik_ctrl_info["ctrl"] + ".rotate", 0.0, 0.0, 0.0)
-            if actual_hand_driver:
-                cmds.parent(ik_ctrl_info["pad"], actual_hand_driver)
+            if fk_ctrls:
+                cmds.parent(
+                    ik_ctrl_info["pad"], fk_ctrls[0]["ctrl"], absolute=True
+                )
+            elif actual_hand_driver:
+                cmds.parent(
+                    ik_ctrl_info["pad"], actual_hand_driver, absolute=True
+                )
             cmds.parent(ik_handle, ik_ctrl_info["ctrl"])
 
             # Build a real thumb pole-vector control from the authored bend
@@ -4395,11 +4408,11 @@ def create_finger_rigs(finger_joints, hand_driver=None):
 
             # Thumb opposition commonly bends toward the palm, which makes
             # the mathematically natural RP pole direction land underneath
-            # the hand.  Controls belong on the dorsal side for visibility and
-            # manipulation.  Use the hand frame's -Z anatomical dorsal normal,
+            # the hand. Controls belong on the dorsal side for visibility and
+            # manipulation. Use the hand frame's -Z anatomical dorsal normal,
             # projected off the thumb line, to choose the visible half-space.
-            # A 180-degree handle twist below preserves the authored IK bend
-            # plane whenever the pole direction must be reversed.
+            # Keep RP twist at its default; do not mirror the bend with a
+            # side-specific twist override.
             pole_direction_flipped = False
             dorsal_direction = om.MVector()
             if actual_hand_driver and cmds.objExists(actual_hand_driver):
@@ -4410,10 +4423,8 @@ def create_finger_rigs(finger_joints, hand_driver=None):
                     matrix=True,
                 )
                 dorsal_direction = -om.MVector(*hand_matrix[8:11])
-                # Mirrored hand joints reverse their local Z basis.  The rig
-                # is normalized into a world-up T-pose before construction, so
-                # choose the hemisphere above the palm consistently on both
-                # hands before projecting away the thumb-chain direction.
+                # Keep the pole control on the visible upper side of the palm
+                # consistently for both mirrored hands.
                 world_up = om.MVector(0.0, 1.0, 0.0)
                 if dorsal_direction * world_up < 0.0:
                     dorsal_direction *= -1.0
@@ -4460,10 +4471,8 @@ def create_finger_rigs(finger_joints, hand_driver=None):
             pv_constraint = cmds.poleVectorConstraint(
                 pv_ctrl_info["ctrl"], ik_handle
             )[0]
-            # The pole control already defines the RP plane. Adding a
-            # side-specific 180-degree twist inverted the left thumb while the
-            # mirrored right thumb worked correctly at the solver default.
-            cmds.setAttr(ik_handle + ".twist", 180.0 if pole_direction_flipped else 0.0)
+            # Leave RP twist at Maya's default (zero); the PV control and
+            # preferred angles determine the bend without a side-specific roll.
             # Reapply after RP handle creation, which can reset preferred angles
             # while it authors the solver chain's joint state.
             preferred_angle_joints = ik_chain[1:-1]
@@ -4478,9 +4487,12 @@ def create_finger_rigs(finger_joints, hand_driver=None):
 
             # Give the thumb PV the same IK/local/composite space behavior as
             # every other finger PV instead of leaving it directly parented.
+            thumb_root_ctrl = (
+                fk_ctrls[0]["ctrl"] if fk_ctrls else actual_hand_driver
+            )
             finger_pv_space = create_composite_space(
                 name=pv_ctrl_info["pad"] + "_space",
-                parents=[ik_ctrl_info["ctrl"], actual_hand_driver],
+                parents=[ik_ctrl_info["ctrl"], thumb_root_ctrl],
                 match_to=pv_ctrl_info["ctrl"],
                 parent_node=actual_hand_driver,
             )
@@ -4488,7 +4500,7 @@ def create_finger_rigs(finger_joints, hand_driver=None):
                 driven=pv_ctrl_info["ctrl"],
                 targets=[
                     ik_ctrl_info["ctrl"],
-                    actual_hand_driver,
+                    thumb_root_ctrl,
                     finger_pv_space,
                 ],
                 attr_name="space",
@@ -4621,8 +4633,13 @@ def create_finger_rigs(finger_joints, hand_driver=None):
             ws=True,
             t=cmds.xform(ik_handle, q=True, ws=True, t=True)
         )
-        if actual_hand_driver:
-            cmds.parent(ik_ctrl_info['pad'], actual_hand_driver)
+        if fk_ctrls:
+            # The IK goal follows the metacarpal control, matching the
+            # authored right-index hierarchy and keeping the digit IK rig
+            # in the same local space as its root control.
+            cmds.parent(ik_ctrl_info['pad'], fk_ctrls[0]['ctrl'], absolute=True)
+        elif actual_hand_driver:
+            cmds.parent(ik_ctrl_info['pad'], actual_hand_driver, absolute=True)
         cmds.parent(ik_handle, ik_ctrl_info['ctrl'])
         cmds.poleVectorConstraint(pv_ctrl, ik_handle)
         # RP handle creation can reset preferred-angle state. Reapply using the
