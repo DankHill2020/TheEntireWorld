@@ -11,7 +11,7 @@ from tech_connector.services.dcc.rigging_workspace_service import twist_driver_c
 
 MODULE_STORE_NODE = "rig_module_store"
 GLOBAL_RIG_STORE = {}
-RIG_BUILD_REVISION = "rig-source-pose-bend-preserving-stretch-v71"
+RIG_BUILD_REVISION = "rig-source-pose-bend-preserving-stretch-v72"
 
 # Preferred curl angles captured from the studio rig_template.ma. These are
 # absolute local values, not deltas; the first knuckle intentionally differs
@@ -3977,17 +3977,17 @@ def _seed_finger_ik_preferred_angles(
             signed_curl *= -1.0
         curl_axis = "XYZ"[axis_index]
 
-        # Preferred angles only bias the RP solver; they do not unlock an
-        # axis that the source joint's DOF policy has disabled.  Joint placer
-        # templates commonly author finger joints as Z-only hinges, while
-        # some production hand templates use local Y for curl.  Match the
-        # actual curl axis selected from this joint's frame so the IK solver
-        # can bend on the same axis as the stored preferred angle.
+        # The curl axis determines the preferred-angle direction, but an RP
+        # solver needs full rotational freedom to move a target in 3D. A
+        # single-axis DOF on each joint leaves the finger effector effectively
+        # frozen when the IK control moves. Keep the authored curl preference
+        # on its detected local axis and let the pole-vector plane guide the
+        # solver's remaining rotations.
         current_dof = cmds.joint(joint, query=True, degreeOfFreedom=True)
         current_dof = "".join(current_dof) if isinstance(
             current_dof, (list, tuple)
         ) else str(current_dof or "")
-        if current_dof.lower() != curl_axis.lower():
+        if current_dof.lower() != "xyz":
             original_rotate = {
                 axis: float(cmds.getAttr(joint + ".rotate" + axis))
                 for axis in "XYZ"
@@ -3996,7 +3996,7 @@ def _seed_finger_ik_preferred_angles(
                 cmds.joint(
                     joint,
                     edit=True,
-                    degreeOfFreedom=curl_axis.lower(),
+                    degreeOfFreedom="xyz",
                 )
             finally:
                 for axis, value in original_rotate.items():
