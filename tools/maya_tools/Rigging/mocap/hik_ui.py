@@ -5497,6 +5497,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
                     "constraints": inspection["constraints"],
                     "connections": inspection["connections"],
                 })
+            systems.extend(create_rig.get_embedded_secondary_arm_systems())
             systems.extend(create_rig.get_external_rig_systems(discover_live=True))
         except Exception as exc:
             cmds.warning("[HIK UI] Could not refresh additional rig systems: {}".format(exc))
@@ -5526,7 +5527,8 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             select_btn.setFixedSize(20, 20)
             root = system.get("root", "")
             select_btn.setEnabled(bool(root and cmds.objExists(root)))
-            select_btn.setToolTip("Select {}".format(root or system.get("label", "system")))
+            root_label = system.get("root_label") or root or system.get("label", "system")
+            select_btn.setToolTip("Select {}".format(root_label))
             if root:
                 select_btn.clicked.connect(
                     lambda checked=False, node=root: self._select_node(node)
@@ -5547,17 +5549,40 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             kind.setMinimumWidth(80)
             kind.setStyleSheet("color: #aaaaaa;")
             parent = system.get("parent") or "World"
-            details = QtWidgets.QLabel("{} · parent: {}".format(state, parent))
+            details = QtWidgets.QLabel("{}".format(state))
             details.setStyleSheet("color: #888888;")
+            parent_btn = QtWidgets.QPushButton("Parent: {}".format(parent))
+            parent_btn.setFlat(True)
+            parent_btn.setToolTip(
+                "Select parent control {}".format(parent)
+                if parent != "World" else "This system is parented to world."
+            )
+            parent_btn.setStyleSheet("border: none; color: #9ecbff; text-align: left;")
+            parent_btn.setEnabled(bool(parent != "World" and cmds.objExists(parent)))
+            if parent_btn.isEnabled():
+                parent_btn.clicked.connect(
+                    lambda checked=False, node=parent: self._select_node(node)
+                )
 
             add_btn = QtWidgets.QPushButton("Add")
             add_btn.setFixedWidth(58)
             add_btn.setStyleSheet("background-color: #2e6930; color: white; font-weight: bold;")
-            add_btn.setEnabled(state in {"preserved", "recipe saved"})
+            read_only = bool(system.get("read_only"))
+            add_btn.setEnabled(not read_only and state in {"preserved", "recipe saved"})
+            add_btn.setVisible(not read_only)
+            add_btn.setToolTip(
+                "This built-in system is part of the core rig; use its controls directly."
+                if read_only else "Attach or build this additional system."
+            )
             remove_btn = QtWidgets.QPushButton("Remove")
             remove_btn.setFixedWidth(64)
             remove_btn.setStyleSheet("background-color: #7d2a2a; color: white; font-weight: bold;")
-            remove_btn.setEnabled(state in {"attached", "built"})
+            remove_btn.setEnabled(not read_only and state in {"attached", "built"})
+            remove_btn.setVisible(not read_only)
+            remove_btn.setToolTip(
+                "This built-in system is part of the core rig and cannot be detached here."
+                if read_only else "Detach or remove this additional system."
+            )
             system_id = system.get("system_id", "")
             managed = bool(system.get("managed"))
             add_btn.clicked.connect(
@@ -5576,6 +5601,7 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             row_layout.addStretch(1)
             row_layout.addWidget(kind)
             row_layout.addWidget(details)
+            row_layout.addWidget(parent_btn)
             row_layout.addWidget(add_btn)
             row_layout.addWidget(remove_btn)
             system_layout.addWidget(row)
@@ -5587,14 +5613,15 @@ class HIKDefinitionUI(HIKSpecializedTabsMixin, QtWidgets.QDialog):
             constraints = system.get("constraints", [])
             connections = system.get("connections", [])
             lines = [
-                "Root: {}".format(root or "Generated from saved recipe"),
+                "Root: {}".format(root_label or "Generated from saved recipe"),
                 "Parent: {}".format(parent),
                 "Nodes: {}".format(system.get("node_count", "managed by recipe")),
-                "Constraints ({}):".format(len(constraints)),
             ]
-            lines.extend("  " + item for item in constraints)
-            lines.append("Connections ({}):".format(len(connections)))
-            lines.extend("  " + item for item in connections)
+            if not system.get("inventory_only"):
+                lines.append("Constraints ({}):".format(len(constraints)))
+                lines.extend("  " + item for item in constraints)
+                lines.append("Connections ({}):".format(len(connections)))
+                lines.extend("  " + item for item in connections)
             detail_view.setPlainText("\n".join(lines))
             detail_view.hide()
             toggle_btn.clicked.connect(

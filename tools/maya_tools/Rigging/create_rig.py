@@ -1788,6 +1788,98 @@ def get_external_rig_systems(discover_live=True):
     return systems
 
 
+def get_embedded_secondary_arm_systems():
+    """Discover complete secondary arm modules embedded in the core rig.
+
+    Divine Being's extra arms are authored beneath the main control hierarchy,
+    so the general external-extension scanner correctly treats them as owned
+    core nodes. Expose their complete low-arm chains as inventory-only entries
+    in the HIK UI without detaching or reparenting parts of the core rig.
+    """
+    joints = cmds.ls(type="joint", long=True) or []
+    transforms = cmds.ls(type="transform", long=True) or []
+
+    def _unique_leaf(nodes, expected):
+        matches = [
+            node for node in nodes
+            if _short_scene_name(node).split(":")[-1] == expected
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _has_curve(node):
+        return bool(cmds.listRelatives(node, shapes=True, type="nurbsCurve") or [])
+
+    systems = []
+    for side, side_label in (("l", "Left"), ("r", "Right")):
+        chain_names = [
+            "{}_upperarm_low".format(side),
+            "{}_lowerarm_low".format(side),
+            "{}_hand_low".format(side),
+        ]
+        chain = [_unique_leaf(joints, name) for name in chain_names]
+        if any(node is None for node in chain):
+            continue
+        contiguous = True
+        for parent_joint, child_joint in zip(chain[:-1], chain[1:]):
+            actual_parent = cmds.listRelatives(
+                child_joint, parent=True, type="joint", fullPath=True
+            ) or []
+            if not actual_parent or actual_parent[0] != parent_joint:
+                contiguous = False
+                break
+        if not contiguous:
+            continue
+
+        control_names = {
+            "root_pad": "{}_clavicle1_ctrl_pad".format(side),
+            "root_ctrl": "{}_clavicle1_ctrl".format(side),
+            "fk": "{}_upperarm_low_fk_ctrl".format(side),
+            "ik": "{}_hand_low_ik_ctrl".format(side),
+            "pole": "{}_lowerarm_low_pv_ctrl".format(side),
+        }
+        controls = {
+            key: _unique_leaf(transforms, name)
+            for key, name in control_names.items()
+        }
+        if any(node is None for node in controls.values()):
+            continue
+        if not all(_has_curve(controls[key]) for key in ("root_ctrl", "fk", "ik", "pole")):
+            continue
+        parent_control = "World"
+        current = controls["root_pad"]
+        while True:
+            parents = cmds.listRelatives(current, parent=True, fullPath=True) or []
+            if not parents:
+                break
+            current = parents[0]
+            leaf = _short_scene_name(current).split(":")[-1]
+            if leaf.endswith("_ctrl"):
+                parent_control = leaf
+                break
+
+        root_hierarchy = [controls["root_pad"]] + (
+            cmds.listRelatives(
+                controls["root_pad"], allDescendents=True, fullPath=True
+            ) or []
+        )
+        systems.append({
+            "system_id": "embedded:secondary_arm:{}".format(side),
+            "label": "{} Secondary Arm".format(side_label),
+            "kind": "Built In",
+            "state": "built",
+            "root": controls["root_ctrl"],
+            "root_label": _short_scene_name(controls["root_ctrl"]).split(":")[-1],
+            "parent": parent_control,
+            "node_count": len(root_hierarchy),
+            "constraints": [],
+            "connections": [],
+            "managed": False,
+            "read_only": True,
+            "inventory_only": True,
+        })
+    return systems
+
+
 def _short_plug(plug):
     node, attribute = str(plug).split(".", 1)
     return _short_scene_name(node) + "." + attribute
