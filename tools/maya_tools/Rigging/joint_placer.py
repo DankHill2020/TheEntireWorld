@@ -35,6 +35,7 @@ import maya.api.OpenMaya as om
 
 from maya_tools.Rigging.mocap import setup_hik
 from maya_tools.Rigging import rig_template
+from maya_tools.Rigging import joint_placement_ml
 from maya_tools.Rigging.create_rig_core import normalize_rfl_joint_suffixes
 from maya_tools.Rigging.undo_utils import undoable
 from maya_tools.Rigging.temp_cleanup import cleanup_temp_bones
@@ -68,7 +69,8 @@ STUDIO_CLAVICLE_LIFT_HEIGHT_RATIO = 0.006
 STUDIO_KNEE_DROP_HEIGHT_RATIO = 0.009
 STUDIO_FOOT_OUTWARD_HEIGHT_RATIO = 0.008
 STUDIO_PELVIS_RIDGE_LIFT_HEIGHT_RATIO = 0.015
-STUDIO_WRIST_DORSAL_FRACTION = 0.60
+STUDIO_WRIST_DORSAL_FRACTION = 2.0 / 3.0
+STUDIO_KNEE_PREFERRED_FLEXION_DEGREES = 8.0
 # Reference/volume fitting already places the femoral heads at the hip
 # sockets. A second medial inset put them inside the pelvis.
 STUDIO_THIGH_INSET_HEIGHT_RATIO = 0.0
@@ -331,6 +333,16 @@ HIGH_RES_TEMPLATE_SIGNATURE = (
 # also covers tongue and teeth geometry that is welded into the single body
 # mesh rather than exposed as separately named mesh transforms.
 INTERNAL_HEAD_REFERENCE_JOINTS = (
+    # These pivots sit inside continuous torso volumes. A local affine fit to
+    # nearby skin vertices can extrapolate dramatically in Y (the spine1
+    # failure seen on recent fits); preserve the approved mesh-relative
+    # landmarks instead and let the target mesh bounds provide scale.
+    "pelvis",
+    "spine1",
+    "spine3",
+    "spine5",
+    "spine5_Tip",
+    "neck1",
     "neck2",
     "head1",
     "head1_Tip",
@@ -752,6 +764,23 @@ def refine_shoulder_landmarks(
         if segment.length() <= 1.0e-8:
             continue
 
+        # Keep the humeral root near the superior shoulder landmark. The
+        # transferred upperarm pivot can land low on the deltoid even when its
+        # lateral/depth section is correct. Use the fitted clavicle and target
+        # mesh height to lift it modestly, capped for unusual proportions.
+        logical_start = frame.world_to_logical(tuple(start))
+        logical_bounds = _logical_mesh_bounds(query.mesh, frame)
+        clavicle = result.get("{0}_clavicle".format(side))
+        shoulder_up = logical_start[1]
+        if clavicle and logical_bounds["height"] > 1.0e-8:
+            logical_clavicle = frame.world_to_logical(clavicle)
+            lift = logical_bounds["height"] * 0.005
+            maximum_lift = logical_bounds["height"] * 0.025
+            shoulder_up = min(
+                logical_start[1] + maximum_lift,
+                max(logical_start[1], logical_clavicle[1] - lift),
+            )
+
         chosen = None
         fallback_sections = []
         for step in range(36):
@@ -778,9 +807,9 @@ def refine_shoulder_landmarks(
             largest = max(up_span, depth_span)
             smallest = min(up_span, depth_span)
             roundness = smallest / max(largest, 1.0e-8)
-            chosen_values = list(candidate)
-            chosen_values[up_component] = start[up_component]
-            chosen_candidate = tuple(chosen_values)
+            chosen_values = list(frame.world_to_logical(candidate))
+            chosen_values[1] = shoulder_up
+            chosen_candidate = frame.logical_to_world(tuple(chosen_values))
             if amount >= 0.06 and query.point_inside(chosen_candidate):
                 compactness = largest / max(roundness, 0.20)
                 fallback_sections.append((compactness, amount, chosen_candidate))
@@ -864,13 +893,36 @@ def refine_leg_landmarks(
 
         # The studio template expects both femoral roots to branch from the
         # pelvis line. Keep their anatomical height identical even for an
-        # A-stance; lateral/depth placement still comes from each leg volume.
+        # A-stance. Determine lateral/depth placement from a lower section,
+        # where the left and right thigh volumes are distinct from the pelvis.
         if "pelvis" in result:
-            logical_thigh = list(frame.world_to_logical(result[thigh_name]))
+            logical_thigh = frame.world_to_logical(result[thigh_name])
             logical_pelvis = frame.world_to_logical(result["pelvis"])
-            logical_thigh[1] = logical_pelvis[1]
-            thigh_candidate = frame.logical_to_world(tuple(logical_thigh))
-            result[thigh_name] = thigh_candidate
+            probe_y = logical_pelvis[1] - (height * 0.075)
+            probe = frame.logical_to_world(
+                (logical_thigh[0], probe_y, logical_thigh[2])
+            )
+            for _pass in range(2):
+                probe, _clearance, _side_ok = query.recenter_axis(probe, side_axis)
+                probe, _clearance, _depth_ok = query.recenter_axis(probe, depth_axis)
+            centered = frame.world_to_logical(probe)
+            # Transfer only the sampled cross-section center to the hip root;
+            # its authored pelvic height remains intact. Blend toward the
+            # section center only as far as this mesh can contain the root.
+            for amount in (1.0, 0.75, 0.5, 0.25):
+                candidate_logical = (
+                    logical_thigh[0] + ((centered[0] - logical_thigh[0]) * amount),
+                    logical_pelvis[1],
+                    logical_thigh[2] + ((centered[2] - logical_thigh[2]) * amount),
+                )
+                thigh_candidate = frame.logical_to_world(candidate_logical)
+                if query.point_inside(thigh_candidate):
+                    result[thigh_name] = thigh_candidate
+                    break
+            else:
+                result[thigh_name] = frame.logical_to_world(
+                    (logical_thigh[0], logical_pelvis[1], logical_thigh[2])
+                )
 
         knee = _smallest_section(result[knee_name], 0.24, 0.36)
         ankle = _smallest_section(result[ankle_name], 0.055, 0.13)
@@ -1623,6 +1675,7 @@ def _load_reference_placement_corpus() -> List[Dict[str, object]]:
             topology = data.get("topology") or {}
             entries.append({
                 "case_id": data.get("case_id") or source.stem,
+                "source_scene": data.get("source_scene") or "",
                 "width_over_height": float(mesh_data.get("width_over_height") or 0.0),
                 "depth_over_height": float(mesh_data.get("depth_over_height") or 0.0),
                 "vertex_count": int(mesh_data.get("vertex_count") or 0),
@@ -1745,6 +1798,33 @@ def solve_topology_reference_points(
     ]
     if not ranked:
         return {}, []
+    # A character may have several dated captures in the atlas. Keep the
+    # closest capture for that rig family so repeated versions of one rig do
+    # not outvote independent production references.
+    unique_ranked = []
+    seen_families = set()
+    for distance, entry in ranked:
+        source_parts = [
+            part for part in str(entry.get("source_scene") or "")
+            .replace("\\", "/").split("/") if part
+        ]
+        family = ""
+        for index, part in enumerate(source_parts[:-1]):
+            if part.casefold() == "chars" and index + 1 < len(source_parts) - 1:
+                family = source_parts[index + 1].casefold()
+                break
+        if not family:
+            family = re.sub(
+                r"_(?:approved|full|rig_new)_?\d{0,8}.*$", "",
+                str(entry.get("case_id") or "").casefold(),
+            )
+        if family in seen_families:
+            continue
+        seen_families.add(family)
+        unique_ranked.append((distance, entry))
+    ranked = unique_ranked
+    if not ranked:
+        return {}, []
     # Whole-body anchors use the closest proportional reference. Hand roots,
     # metacarpals, MCPs, and thumb joints use a robust consensus of the five
     # closest approved rigs because small authoring differences are highly
@@ -1836,7 +1916,7 @@ def solve_topology_reference_points(
 
     result = dict(transferred_sets[0])
     consensus_pattern = re.compile(
-        r"^(?:l|r)_(?:thumb_\d+|(?:index|middle|ring|pinky)_(?:01|02))$",
+        r"^(?:l|r)_(?:upperarm|lowerarm|hand(?:Tip)?|thumb_\d+|(?:index|middle|ring|pinky)_(?:01|02))$",
         re.IGNORECASE,
     )
 
@@ -1852,6 +1932,10 @@ def solve_topology_reference_points(
         for points in transferred_sets
         for name in points
         if consensus_pattern.match(name)
+        or name in {
+            "pelvis", "spine1", "spine3", "spine5",
+            "spine5_Tip", "neck1",
+        }
     })
     for name in consensus_names:
         samples = [points[name] for points in transferred_sets if name in points]
@@ -2454,6 +2538,199 @@ def fit_studio_scene_feature_joints(
     return {"placed": placed, "placed_count": len(placed)}
 
 
+def fit_studio_face_pivots_to_mesh(
+    mesh: str,
+    namespace: str = "",
+) -> Dict[str, object]:
+    """Finish internal face pivots from this character's face and throat mesh.
+
+    These anchors are especially vulnerable to atlas transfer: a nose root can
+    collapse onto the head pivot, a tongue can drift away from its separate
+    tongue surface, and an Adam's apple can land at the neck base. Use local
+    face landmarks and sagittal mesh sections so the rules scale with each
+    character rather than relying on scene-space offsets.
+    """
+    if not mesh or not cmds.objExists(mesh):
+        return {}
+    bounds = get_mesh_bounds(mesh)
+    query = _cached_mesh_interior_query(mesh)
+    spine_tip = _find_template_joint("spine5_Tip", namespace)
+    center_x = (
+        float(cmds.xform(
+            spine_tip, query=True, worldSpace=True, translation=True
+        )[0])
+        if spine_tip and cmds.objExists(spine_tip)
+        else float(bounds["center"].x)
+    )
+    result = {}
+
+    def _position(joint, point):
+        if not joint or not cmds.objExists(joint):
+            return False
+        _set_joint_world_translation_preserving_children(joint, point)
+        return True
+
+    # Head center is local to the facial landmarks, not overall character
+    # height. Lost Souls Kid's approved pivot is 41.8% of the eye-to-mouth span
+    # above the mouth; use that proportion on this mesh instead of a world
+    # offset or the former 43% placement.
+    eye_joints = [
+        _find_template_joint(name, namespace) for name in ("l_eye", "r_eye")
+    ]
+    mouth_joints = [
+        _find_template_joint(name, namespace)
+        for name in ("c_upper_lip", "c_lower_lip")
+    ]
+    head = _find_template_joint("head1", namespace)
+    neck1 = _find_template_joint("neck1", namespace)
+    neck2 = _find_template_joint("neck2", namespace)
+    face_span = 0.0
+    eye_y = mouth_y = None
+    if all(eye_joints) and all(mouth_joints):
+        eye_y = sum(float(cmds.xform(
+            joint, query=True, worldSpace=True, translation=True
+        )[1]) for joint in eye_joints) / float(len(eye_joints))
+        mouth_y = sum(float(cmds.xform(
+            joint, query=True, worldSpace=True, translation=True
+        )[1]) for joint in mouth_joints) / float(len(mouth_joints))
+        face_span = eye_y - mouth_y
+    if head and eye_y is not None and mouth_y is not None and face_span > bounds["height"] * 0.01:
+        head_y = mouth_y + (face_span * 0.418)
+        current = cmds.xform(head, query=True, worldSpace=True, translation=True)
+        head_x = float(cmds.xform(
+            spine_tip, query=True, worldSpace=True, translation=True
+        )[0]) if spine_tip else center_x
+        interval = _choose_interval(
+            query.axis_intervals((head_x, head_y, current[2]), "z"),
+            current[2],
+        )
+        head_point = (
+            head_x,
+            head_y,
+            interval[0] + ((interval[1] - interval[0]) * 0.25)
+            if interval else float(current[2]),
+        )
+        if _position(head, head_point):
+            result["head1"] = head_point
+            if neck1 and neck2:
+                neck1_point = cmds.xform(
+                    neck1, query=True, worldSpace=True, translation=True
+                )
+                neck2_point = tuple(
+                    (float(neck1_point[axis]) + float(head_point[axis])) * 0.5
+                    for axis in range(3)
+                )
+                if _position(neck2, neck2_point):
+                    result["neck2"] = neck2_point
+
+        # Match the approved hinge location to the face, not the body-height
+        # atlas. Lost Souls Kid places jaw at 39.8% of eye-to-mouth span above
+        # the mouth and 35.9% of head-to-nose-tip depth forward of head1.
+        jaw = _find_template_joint("jaw", namespace)
+        nose_tip = _find_template_joint("nose_tip", namespace)
+        if jaw and nose_tip:
+            jaw_y = mouth_y + (face_span * 0.398)
+            head_point = cmds.xform(
+                head, query=True, worldSpace=True, translation=True
+            ) if head and cmds.objExists(head) else (center_x, head_y, 0.0)
+            tip_point = cmds.xform(
+                nose_tip, query=True, worldSpace=True, translation=True
+            )
+            desired_z = float(head_point[2]) + (
+                (float(tip_point[2]) - float(head_point[2])) * 0.359
+            )
+            intervals = query.axis_intervals((center_x, jaw_y, desired_z), "z")
+            interval = _choose_interval(intervals, desired_z)
+            if interval:
+                inset = max(query.tolerance * 2.0, bounds["depth"] * 1.0e-5)
+                jaw_z = min(
+                    max(desired_z, interval[0] + inset),
+                    interval[1] - inset,
+                )
+                jaw_point = (center_x, jaw_y, jaw_z)
+                if query.point_inside(jaw_point) and _position(jaw, jaw_point):
+                    result["jaw"] = jaw_point
+
+    # Nose root belongs at the nasal bridge, a little below head1. The Lost
+    # Souls Kid reference places it 9.3% of the face span below the head pivot.
+    # Fit its depth just inside this mesh's anterior sagittal contour; do not
+    # force local Z to zero, which collapses it back to head1 on many rigs.
+    nose_root = _find_template_joint("nose_root", namespace)
+    if nose_root and eye_y is not None and mouth_y is not None and face_span > 0.0:
+        head_y = float(cmds.xform(
+            head, query=True, worldSpace=True, translation=True
+        )[1]) if head and cmds.objExists(head) else mouth_y + (face_span * 0.418)
+        nose_y = head_y - (face_span * 0.093)
+        intervals = query.axis_intervals((center_x, nose_y, 0.0), "z")
+        interval = max(intervals, key=lambda item: item[1]) if intervals else None
+        if interval:
+            # The approved reference keeps nose_root just behind nose_tip by
+            # about 11% of face span. Use that actual fitted landmark, then
+            # fall back to progressively deeper points inside the mesh section
+            # if this topology has a concave bridge at the sampled height.
+            nose_tip = _find_template_joint("nose_tip", namespace)
+            tip_z = float(cmds.xform(
+                nose_tip, query=True, worldSpace=True, translation=True
+            )[2]) if nose_tip and cmds.objExists(nose_tip) else interval[1]
+            front_sign = 1.0 if tip_z >= float(bounds["center"].z) else -1.0
+            nose_point = (
+                center_x,
+                nose_y,
+                tip_z - (front_sign * face_span * 0.11),
+            )
+            if not query.point_inside(nose_point):
+                nose_point = None
+                for front_fraction in (0.90, 0.88, 0.86, 0.84, 0.82):
+                    candidate = (
+                        center_x,
+                        nose_y,
+                        interval[0] + ((interval[1] - interval[0]) * front_fraction),
+                    )
+                    if query.point_inside(candidate):
+                        nose_point = candidate
+                        break
+            if nose_point is not None and _position(nose_root, nose_point):
+                result["nose_root"] = nose_point
+
+    # The scene's tongue mesh, when present, is the authoritative source for
+    # the four tongue pivots. Reapply it here after topology/approved restores.
+    oral_targets = solve_scene_oral_mesh_points(mesh)
+    for name in ("tongue1", "tongue2", "tongue3", "tongue4"):
+        joint = _find_template_joint(name, namespace)
+        point = oral_targets.get(name)
+        if joint and point is not None and _position(joint, point):
+            result[name] = point
+
+    # Place the laryngeal prominence halfway up the neck and inside the
+    # anterior sagittal contour. Both coordinates follow the character mesh.
+    adams = _find_template_joint("adams_apple1", namespace)
+    if adams and neck1 and neck2:
+        neck1_point = cmds.xform(
+            neck1, query=True, worldSpace=True, translation=True
+        )
+        neck2_point = cmds.xform(
+            neck2, query=True, worldSpace=True, translation=True
+        )
+        apple_y = float(neck1_point[1]) + (
+            (float(neck2_point[1]) - float(neck1_point[1])) * 0.50
+        )
+        interval = _choose_interval(
+            query.axis_intervals((center_x, apple_y, 0.0), "z"),
+            float(cmds.xform(
+                adams, query=True, worldSpace=True, translation=True
+            )[2]),
+        )
+        if interval:
+            apple_point = (
+                center_x,
+                apple_y,
+                interval[0] + ((interval[1] - interval[0]) * 0.86),
+            )
+            if query.point_inside(apple_point) and _position(adams, apple_point):
+                result["adams_apple1"] = apple_point
+    return result
+
+
 def smooth_reference_eyelid_tip_points(
     points: Dict[str, Vector3],
     iterations: int = 4,
@@ -2686,6 +2963,25 @@ def solve_reference_corpus_points(
                 topology_references[0] if topology_references else "",
             )
     bounds = get_mesh_bounds(mesh)
+    try:
+        learned_points = joint_placement_ml.predict_mesh(mesh)
+    except Exception as exc:
+        cmds.warning("[joint_placer] Learned mesh-profile proposal unavailable: {0}".format(exc))
+        learned_points = {}
+    if learned_points:
+        origin = (bounds["center"].x, bounds["min"].y, bounds["center"].z)
+        height = max(bounds["height"], 1.0e-6)
+        seeded_names = []
+        for name, normalized in learned_points.items():
+            fallback[name] = (
+                origin[0] + normalized[0] * height,
+                origin[1] + normalized[1] * height,
+                origin[2] + normalized[2] * height,
+            )
+            confidence[name] = 0.96
+            seeded_names.append(name)
+        return fallback, confidence, seeded_names, "learned_mesh_profile"
+
     width_ratio = bounds["width"] / max(bounds["height"], 1.0e-6)
     depth_ratio = bounds["depth"] / max(bounds["height"], 1.0e-6)
     vertex_count = int(cmds.polyEvaluate(_as_mesh_transform(mesh), vertex=True) or 0)
@@ -2876,6 +3172,36 @@ def validate_points_inside_mesh(
                 continue
         outside.append(name)
     return outside
+
+
+def straighten_core_spine_points(
+    points: Dict[str, Vector3],
+    query: Optional["MeshInteriorQuery"] = None,
+) -> Dict[str, Vector3]:
+    """Keep the fitted spine on one straight pelvis-to-neck centerline.
+
+    Preserve the target mesh's fitted vertebral heights and end pivots; remove
+    independent depth/lateral recentering from intermediate vertebrae, which
+    otherwise produces a visibly kinked chain.
+    """
+    result = dict(points)
+    if "pelvis" not in result or "neck" not in result:
+        return result
+    start = om.MVector(*result["pelvis"])
+    end = om.MVector(*result["neck"])
+    y_span = end.y - start.y
+    if abs(y_span) <= 1.0e-8:
+        return result
+    for name in ("spine_01", "spine_02", "spine_03", "spine_04"):
+        current = result.get(name)
+        if current is None:
+            continue
+        fraction = (float(current[1]) - start.y) / y_span
+        fraction = min(1.0, max(0.0, fraction))
+        target = tuple(start[i] + ((end[i] - start[i]) * fraction) for i in range(3))
+        if query is None or query.point_inside(target):
+            result[name] = target
+    return result
 
 
 def validate_anatomical_layout(
@@ -3082,6 +3408,14 @@ def solve_production_biped_points(
                 if name in topology_core and len(point) == 3:
                     topology_core[name] = tuple(float(value) for value in point)
                     confidence[name] = 0.72
+            # Atlas matches bypass generic refinement. Refit hip roots against
+            # this target mesh too; pelvis-level sections are joined through
+            # the torso, so sample each thigh slightly lower where the two
+            # femoral volumes are distinct.
+            topology_core = refine_leg_landmarks(
+                topology_core, query, frame=placement_frame
+            )
+            topology_core = straighten_core_spine_points(topology_core, query)
             outside = validate_points_inside_mesh(mesh, topology_core, query=query)
             return (
                 topology_core,
@@ -3305,6 +3639,7 @@ def solve_production_biped_points(
         resolved["origin"] = placement_frame.logical_to_world(
             (logical_pelvis[0], logical_bounds["min"].y, logical_pelvis[2])
         )
+    resolved = straighten_core_spine_points(resolved, query)
     outside = validate_points_inside_mesh(mesh, resolved, query=query)
     for name in outside:
         confidence[name] = min(confidence.get(name, 0.0), 0.25)
@@ -6199,8 +6534,11 @@ def _find_studio_elbow_section(
     section_axis.normalize()
 
     candidates = []
-    for step in range(45):
-        fraction = 0.40 + (step * (0.22 / 44.0))
+    # Search the broad anatomical elbow zone, then prefer the tightest
+    # cross-section. A fixed 42% preference masked the mesh evidence and put
+    # elbows too far down the forearm on characters with long upper arms.
+    for step in range(81):
+        fraction = 0.32 + (step * (0.20 / 80.0))
         sample = start + ((end - start) * fraction)
         point = (sample.x, sample.y, sample.z)
         depth_clearance = section_clearance = 0.0
@@ -6217,10 +6555,63 @@ def _find_studio_elbow_section(
         area = max(depth_clearance, query.tolerance) * max(
             section_clearance, query.tolerance
         )
-        candidates.append((area, abs(fraction - 0.52), point))
+        candidates.append((fraction, area, point))
     if not candidates:
         return None
-    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+    # Smooth over adjacent samples so a single noisy mesh slice does not
+    # become the hinge. Keep a modest anatomical prior around 42% as a tie
+    # breaker, not as the primary selection criterion.
+    candidates.sort(key=lambda item: item[0])
+    scored = []
+    for index, (fraction, area, point) in enumerate(candidates):
+        neighborhood = candidates[max(0, index - 1):min(len(candidates), index + 2)]
+        smoothed_area = sum(item[1] for item in neighborhood) / len(neighborhood)
+        prior = abs(fraction - 0.42) / 0.10
+        scored.append((smoothed_area * (1.0 + 0.06 * prior), fraction, point))
+    return min(scored, key=lambda item: (item[0], abs(item[1] - 0.42)))[2]
+
+
+def fit_studio_elbow_pivots_to_mesh(
+    mesh: str,
+    namespace: str = "",
+) -> Dict[str, object]:
+    """Fit both elbow pivots consistently at the approved arm-chain fraction."""
+    if not mesh or not cmds.objExists(mesh):
+        return {}
+    query = _cached_mesh_interior_query(mesh)
+    result = {}
+    for side in ("l", "r"):
+        shoulder = _find_template_joint("{0}_upperarm".format(side), namespace)
+        elbow = _find_template_joint("{0}_lowerarm".format(side), namespace)
+        wrist = _find_template_joint("{0}_hand".format(side), namespace)
+        if not all((shoulder, elbow, wrist)):
+            continue
+        shoulder_position = tuple(cmds.xform(
+            shoulder, query=True, worldSpace=True, translation=True
+        ))
+        elbow_position = tuple(cmds.xform(
+            elbow, query=True, worldSpace=True, translation=True
+        ))
+        wrist_position = tuple(cmds.xform(
+            wrist, query=True, worldSpace=True, translation=True
+        ))
+        target = _find_studio_elbow_section(
+            query, shoulder_position, wrist_position
+        )
+        if target is None:
+            continue
+        _set_joint_world_translation_preserving_children(elbow, target)
+        span = om.MVector(*wrist_position) - om.MVector(*shoulder_position)
+        actual_fraction = (
+            (om.MVector(*target) - om.MVector(*shoulder_position)) * span.normal()
+        ) / max(span.length(), 1.0e-8)
+        result[_short_name(elbow).split(":")[-1]] = {
+            "position": tuple(float(value) for value in target),
+            "previous_position": elbow_position,
+            "shoulder_to_wrist_fraction": float(actual_fraction),
+            "inside": bool(query.point_inside(target)),
+        }
+    return result
 
 
 def fit_studio_arm_hinge_plane_to_mesh(
@@ -6244,7 +6635,7 @@ def fit_studio_arm_hinge_plane_to_mesh(
     # solve—so an obsolete chest/armpit pivot cannot overwrite the deltoid fit.
     arm_points = {}
     for side in ("l", "r"):
-        for role in ("upperarm", "lowerarm"):
+        for role in ("clavicle", "upperarm", "lowerarm"):
             name = "{0}_{1}".format(side, role)
             joint = _find_template_joint(name, namespace)
             if joint:
@@ -6335,18 +6726,13 @@ def fit_studio_arm_hinge_plane_to_mesh(
                     target[2],
                 )
                 if elbow_interval:
-                    inner_z = (
-                        elbow_interval[0]
-                        if mesh_bend_sign > 0.0 else elbow_interval[1]
-                    )
-                    outer_z = (
-                        elbow_interval[1]
-                        if mesh_bend_sign > 0.0 else elbow_interval[0]
-                    )
+                    # Keep the hinge pivot at the center of the elbow's actual
+                    # through-volume section. The former 2/3-depth bias pulled
+                    # the hinge toward the outer surface and kinked the arm.
                     target = (
                         target[0],
                         target[1],
-                        inner_z + ((outer_z - inner_z) * (2.0 / 3.0)),
+                        (elbow_interval[0] + elbow_interval[1]) * 0.5,
                     )
                     found_z = True
                 else:
@@ -7024,7 +7410,36 @@ def fit_studio_toe_pivots_to_volume(
                 planar_tip.x += (
                     side_direction * (toe_vector - ankle_vector).length() * 0.006862
                 )
-                tip_target = (planar_tip.x, planar_tip.y, planar_tip.z)
+                projected_tip = (planar_tip.x, planar_tip.y, planar_tip.z)
+                # The plane projection can push a narrow toe beyond the mesh's
+                # side bounds. Keep as much of the correction as possible,
+                # while constraining the pivot to the original mesh bounds.
+                def _inside_mesh_bounds(point):
+                    return all(
+                        float(query.bounds['min'][axis]) - query.tolerance
+                        <= float(point[axis])
+                        <= float(query.bounds['max'][axis]) + query.tolerance
+                        for axis in range(3)
+                    )
+                if _inside_mesh_bounds(projected_tip):
+                    tip_target = projected_tip
+                else:
+                    low, high = 0.0, 1.0
+                    base = tuple(float(value) for value in tip_target)
+                    for _iteration in range(24):
+                        amount = (low + high) * 0.5
+                        candidate = tuple(
+                            base[axis] + (projected_tip[axis] - base[axis]) * amount
+                            for axis in range(3)
+                        )
+                        if _inside_mesh_bounds(candidate):
+                            low = amount
+                        else:
+                            high = amount
+                    tip_target = tuple(
+                        base[axis] + (projected_tip[axis] - base[axis]) * low
+                        for axis in range(3)
+                    )
 
         _set_joint_world_translation(toe_joint, toe_target)
         _set_joint_world_translation(tip_joint, tip_target)
@@ -8564,11 +8979,13 @@ def orient_studio_digit_chains(
                 target_tuple = (
                     straight_target.x, straight_target.y, straight_target.z
                 )
-                if kink_degrees < 12.0:
+                kink_threshold = 7.0 if digit == "ring" else 12.0
+                if kink_degrees < kink_threshold:
                     distal_kink_report = {
                         "applied": False,
                         "reason": "below_kink_threshold",
                         "kink_degrees_before": float(kink_degrees),
+                        "kink_threshold": kink_threshold,
                     }
                 elif chord_deviation > 0.08:
                     distal_kink_report = {
@@ -8598,6 +9015,7 @@ def orient_studio_digit_chains(
                         "applied": True,
                         "reason": "mesh_contained_distal_smoothing",
                         "kink_degrees_before": float(kink_degrees),
+                        "kink_threshold": kink_threshold,
                         "displacement": float(displacement),
                     }
         alignment_report = (
@@ -8823,7 +9241,7 @@ def configure_studio_bend_axes(root: str, namespace: str = "") -> Dict[str, str]
 def configure_studio_elbow_bend_axes_from_channels(
     namespace: str = "",
 ) -> Dict[str, str]:
-    """Record the project-standard local-Z elbow hinge without locking channels."""
+    """Bias elbow IK to local Z while keeping every rotate channel editable."""
     configured = {}
     for side in ("l", "r"):
         name = "{0}_lowerarm".format(side)
@@ -8836,8 +9254,43 @@ def configure_studio_elbow_bend_axes_from_channels(
             joint, BEND_PLANE_ATTR,
             "arm_reference_frame_local_{0}_hinge".format(axis),
         )
+        # The lowerarm rest frame is aligned to the arm bend plane so its
+        # neutral pose is on rotateZ. Keep XYZ editable; the bend-axis
+        # metadata defines the intended hinge without locking channels.
+        for component in "XYZ":
+            plug = "{0}.preferredAngle{1}".format(joint, component)
+            if cmds.objExists(plug):
+                cmds.setAttr(plug, 0.0)
+        for component in "XYZ":
+            plug = "{0}.rotate{1}".format(joint, component)
+            if cmds.objExists(plug) and cmds.getAttr(plug, lock=True):
+                cmds.setAttr(plug, lock=False)
         configured[name] = axis
     return configured
+
+
+def zero_studio_elbow_bind_rotations(
+    namespace: str = "",
+) -> Dict[str, Tuple[float, float, float]]:
+    """Keep fitted lowerarm bind orientation on rotate, never jointOrient.
+
+    The fitted world frame is preserved exactly while its Euler values are
+    stored in the animator-facing rotate channels. Joint Orient and Rotate
+    Axis remain zero, and every channel stays editable.
+    """
+    result = {}
+    for side in ("l", "r"):
+        joint = _find_template_joint("{0}_lowerarm".format(side), namespace)
+        if not joint or not cmds.objExists(joint):
+            continue
+        joint = (cmds.ls(joint, long=True) or [joint])[0]
+        solved_orientation = _move_joint_orientation_to_rotate(joint)
+        for axis in "XYZ":
+            plug = "{0}.preferredAngle{1}".format(joint, axis)
+            if cmds.objExists(plug):
+                cmds.setAttr(plug, 0.0)
+        result[_short_name(joint).split(":")[-1]] = solved_orientation
+    return result
 
 
 def enforce_studio_joint_dof_policy(
@@ -9063,6 +9516,370 @@ def align_studio_leg_front_projection(
     return placed
 
 
+def align_studio_knees_to_final_mesh_line(
+    mesh: str,
+    namespace: str = "",
+) -> Dict[str, Tuple[float, float, float]]:
+    """Place knee pivots on the final guided hip-to-ankle line in the mesh.
+
+    The mesh core pass runs before optional scene guides are restored. A later
+    thigh guide can therefore move the femoral root while leaving its knee at
+    the pre-guide position. Recompute the knee's front and depth placement
+    after guides, clamp both coordinates to that side's mesh section, and keep
+    knee height fixed. This prevents a mesh-depth offset from making a neutral
+    leg look like it is already hinging backward.
+    """
+    if not mesh or not cmds.objExists(mesh):
+        return {}
+    query = _cached_mesh_interior_query(mesh)
+    center_x = float(get_mesh_bounds(mesh)["center"].x)
+    aligned = {}
+    for side in ("l", "r"):
+        thigh = _find_template_joint("{0}_thigh".format(side), namespace)
+        knee = _find_template_joint("{0}_knee".format(side), namespace)
+        ankle = _find_template_joint("{0}_ankle".format(side), namespace)
+        if not all((thigh, knee, ankle)):
+            continue
+        hip_point = tuple(cmds.xform(
+            thigh, query=True, worldSpace=True, translation=True
+        ))
+        knee_point = tuple(cmds.xform(
+            knee, query=True, worldSpace=True, translation=True
+        ))
+        ankle_point = tuple(cmds.xform(
+            ankle, query=True, worldSpace=True, translation=True
+        ))
+        denominator = ankle_point[1] - hip_point[1]
+        if abs(denominator) <= 1.0e-8:
+            continue
+        fraction = (knee_point[1] - hip_point[1]) / denominator
+        target_x = hip_point[0] + (
+            (ankle_point[0] - hip_point[0]) * fraction
+        )
+        target_z = hip_point[2] + (
+            (ankle_point[2] - hip_point[2]) * fraction
+        )
+        section = _same_side_interval(
+            query.axis_intervals(
+                (center_x, knee_point[1], target_z), "x"
+            ),
+            side,
+            center_x,
+            target_x,
+        )
+        if section is not None:
+            target_x = min(max(target_x, section[0]), section[1])
+        depth = query.axis_intervals(
+            (target_x, knee_point[1], target_z), "z"
+        )
+        depth_interval = _choose_interval(depth, target_z)
+        target_z = (
+            min(max(target_z, float(depth_interval[0])), float(depth_interval[1]))
+            if depth_interval else knee_point[2]
+        )
+        target = (target_x, knee_point[1], target_z)
+        if not query.point_inside(target):
+            found = None
+            for amount in (0.75, 0.5, 0.25):
+                candidate = tuple(
+                    knee_point[index]
+                    + ((target[index] - knee_point[index]) * amount)
+                    for index in range(3)
+                )
+                if query.point_inside(candidate):
+                    found = candidate
+                    break
+            if found is None:
+                continue
+            target = found
+        _set_joint_world_translation_preserving_children(knee, target)
+        aligned[_short_name(knee).split(":")[-1]] = tuple(
+            float(value) for value in target
+        )
+    return aligned
+
+
+def finalize_studio_core_positions_from_mesh(
+    mesh: str,
+    namespace: str = "",
+) -> Dict[str, object]:
+    """Re-fit the central spine and leg pivots after orientation restores.
+
+    Preserve the fitted spine heights from the selected mesh/reference solve,
+    recenter each vertebra in its own torso section, and center each ankle in
+    its own side's mesh section. The knee stays on the hip-to-ankle front-view
+    line, clamped to the knee's mesh section.
+    """
+    if not mesh or not cmds.objExists(mesh):
+        return {}
+    query = _cached_mesh_interior_query(mesh)
+    bounds = get_mesh_bounds(mesh)
+    center_x = float(bounds["center"].x)
+    result = {"spine": {}, "legs": {}, "twists": []}
+
+    # Center the end pivots on their own mesh sections, then put every
+    # intermediate vertebra on the straight line between them. Re-centering
+    # each vertebra independently in depth creates the kinked spine reported
+    # on this mesh.
+    spine_names = {
+        "pelvis": "pelvis",
+        "spine_01": "spine1",
+        "spine_02": "spine3",
+        "spine_03": "spine5",
+        "spine_04": "spine5_Tip",
+        "neck": "neck1",
+    }
+    spine_joints = {}
+    spine_points = {}
+    for canonical, name in spine_names.items():
+        joint = _find_template_joint(name, namespace)
+        if not joint:
+            continue
+        current = tuple(cmds.xform(
+            joint, query=True, worldSpace=True, translation=True
+        ))
+        probe = (center_x, float(current[1]), float(current[2]))
+        x_interval = _choose_interval(query.axis_intervals(probe, "x"), center_x)
+        spine_x = (
+            min(max(center_x, float(x_interval[0])), float(x_interval[1]))
+            if x_interval else center_x
+        )
+        depth = _choose_interval(
+            query.axis_intervals((spine_x, float(current[1]), float(current[2])), "z"),
+            current[2],
+        )
+        spine_z = (float(depth[0]) + float(depth[1])) * 0.5 if depth else float(current[2])
+        point = (spine_x, float(current[1]), spine_z)
+        if query.point_inside(point):
+            spine_joints[canonical] = joint
+            spine_points[canonical] = point
+    spine_points = straighten_core_spine_points(spine_points, query)
+    for canonical, point in spine_points.items():
+        joint = spine_joints[canonical]
+        _set_joint_world_translation_preserving_children(joint, point)
+        result["spine"][_short_name(joint).split(":")[-1]] = point
+
+    for side in ("l", "r"):
+        thigh = _find_template_joint("{0}_thigh".format(side), namespace)
+        knee = _find_template_joint("{0}_knee".format(side), namespace)
+        ankle = _find_template_joint("{0}_ankle".format(side), namespace)
+        if not all((thigh, knee, ankle)):
+            continue
+        thigh_point = tuple(cmds.xform(
+            thigh, query=True, worldSpace=True, translation=True
+        ))
+        knee_point = tuple(cmds.xform(
+            knee, query=True, worldSpace=True, translation=True
+        ))
+        ankle_point = tuple(cmds.xform(
+            ankle, query=True, worldSpace=True, translation=True
+        ))
+
+        # The hip-to-femur pivot can otherwise remain too medial when the
+        # pelvis and thighs are one connected mesh section.  Sample just
+        # below the crotch, where the two upper-leg volumes are separate, and
+        # use that side's section center to place the femoral root.  Keep its
+        # fitted height/depth so the character's hip height and sagittal pose
+        # remain authored by the approved landmarks.
+        thigh_sample_y = max(
+            knee_point[1] + (bounds["height"] * 0.16),
+            thigh_point[1] - (bounds["height"] * 0.04),
+        )
+        thigh_sections = _same_side_interval(
+            query.axis_intervals(
+                (center_x, thigh_sample_y, thigh_point[2]), "x"
+            ),
+            side,
+            center_x,
+            thigh_point[0],
+        )
+        if thigh_sections is not None:
+            thigh_center_x = (thigh_sections[0] + thigh_sections[1]) * 0.5
+            thigh_depth_sections = query.axis_intervals(
+                (thigh_center_x, thigh_sample_y, thigh_point[2]), "z"
+            )
+            thigh_depth_section = _choose_interval(
+                thigh_depth_sections, thigh_point[2]
+            )
+            thigh_center_z = (
+                (thigh_depth_section[0] + thigh_depth_section[1]) * 0.5
+                if thigh_depth_section else thigh_point[2]
+            )
+            fitted_thigh = (
+                thigh_center_x,
+                thigh_point[1],
+                thigh_center_z,
+            )
+            if query.point_inside(fitted_thigh):
+                if fitted_thigh != thigh_point:
+                    _set_joint_world_translation_preserving_children(
+                        thigh, fitted_thigh
+                    )
+                    thigh_point = fitted_thigh
+                result["legs"][_short_name(thigh).split(":")[-1]] = fitted_thigh
+
+        ankle_intervals = _same_side_interval(
+            query.axis_intervals(
+                (center_x, ankle_point[1], ankle_point[2]), "x"
+            ),
+            side,
+            center_x,
+            ankle_point[0],
+        )
+        if ankle_intervals is not None:
+            ankle_x = (ankle_intervals[0] + ankle_intervals[1]) * 0.5
+            depth_intervals = query.axis_intervals(
+                (ankle_x, ankle_point[1], ankle_point[2]), "z"
+            )
+            depth_interval = _choose_interval(
+                depth_intervals, ankle_point[2]
+            )
+            ankle_z = ankle_point[2]
+            if depth_interval is not None:
+                ankle_z = (depth_interval[0] + depth_interval[1]) * 0.5
+            fitted_ankle = (ankle_x, ankle_point[1], ankle_z)
+            if query.point_inside(fitted_ankle):
+                delta = tuple(
+                    fitted_ankle[index] - ankle_point[index]
+                    for index in range(3)
+                )
+                _set_joint_world_translation_preserving_children(
+                    ankle, fitted_ankle
+                )
+                result["legs"][_short_name(ankle).split(":")[-1]] = fitted_ankle
+                # The foot is one rigid placement chain from the ankle. Carry
+                # its pivots by the same mesh-fit delta so the toe does not
+                # remain stranded at the old, over-wide ankle location.
+                for child_name in ("{0}_toe".format(side), "{0}_toeTip".format(side)):
+                    child = _find_template_joint(child_name, namespace)
+                    if not child:
+                        continue
+                    point = tuple(cmds.xform(
+                        child, query=True, worldSpace=True, translation=True
+                    ))
+                    target = tuple(
+                        point[index] + delta[index] for index in range(3)
+                    )
+                    _set_joint_world_translation_preserving_children(
+                        child, target
+                    )
+                    result["legs"][child_name] = target
+                ankle_point = fitted_ankle
+
+        denominator = ankle_point[1] - thigh_point[1]
+        if abs(denominator) <= 1.0e-8:
+            continue
+        fraction = (knee_point[1] - thigh_point[1]) / denominator
+        knee_x = thigh_point[0] + (
+            (ankle_point[0] - thigh_point[0]) * fraction
+        )
+        knee_intervals = _same_side_interval(
+            query.axis_intervals(
+                (center_x, knee_point[1], knee_point[2]), "x"
+            ),
+            side,
+            center_x,
+            knee_x,
+        )
+        if knee_intervals is not None:
+            knee_x = min(max(knee_x, knee_intervals[0]), knee_intervals[1])
+        knee_depth = query.axis_intervals(
+            (knee_x, knee_point[1], knee_point[2]), "z"
+        )
+        knee_depth_interval = _choose_interval(knee_depth, knee_point[2])
+        knee_z = (
+            (knee_depth_interval[0] + knee_depth_interval[1]) * 0.5
+            if knee_depth_interval else knee_point[2]
+        )
+        fitted_knee = (knee_x, knee_point[1], knee_z)
+        if query.point_inside(fitted_knee):
+            _set_joint_world_translation_preserving_children(knee, fitted_knee)
+            result["legs"][_short_name(knee).split(":")[-1]] = fitted_knee
+
+    if result["legs"]:
+        result["twists"] = _fit_studio_twist_segments(namespace)
+    return result
+
+
+def fit_studio_wrist_pivots_to_mesh(
+    mesh: str,
+    namespace: str = "",
+) -> Dict[str, object]:
+    """Re-seat wrist pivots in the hand volume after all reference restores.
+
+    Later approved-frame restores can put the wrist back on the dorsal edge
+    after the earlier arm fit.  Reapply the established 60-percent section
+    placement as the last positional pass, preserving every child in world
+    space so the finger roots/tips do not move with the wrist correction.
+    """
+    if not mesh or not cmds.objExists(mesh):
+        return {}
+    query = _cached_mesh_interior_query(mesh)
+    result = {}
+    for side in ("l", "r"):
+        joint = _find_template_joint("{0}_hand".format(side), namespace)
+        if not joint:
+            continue
+        point = tuple(float(value) for value in cmds.xform(
+            joint, query=True, worldSpace=True, translation=True
+        ))
+        interval = _choose_interval(
+            query.axis_intervals(point, "y"), point[1]
+        )
+        if interval is None:
+            continue
+        current_fraction = (point[1] - interval[0]) / max(
+            interval[1] - interval[0], 1.0e-8
+        )
+        # The approved right-side wrist already sits inside the intended
+        # section. Preserve hand-authored placements in that band; this final
+        # correction exists to pull back wrists that were restored above the
+        # palm volume by the template-frame pass.
+        if 0.45 <= current_fraction <= 0.65:
+            result[_short_name(joint).split(":")[-1]] = {
+                "position": point,
+                "section_y": interval,
+                "section_fraction": current_fraction,
+                "inside": bool(query.point_inside(point)),
+                "preserved_in_mesh_band": True,
+            }
+            continue
+        target_y = interval[0] + (
+            (interval[1] - interval[0]) * STUDIO_WRIST_DORSAL_FRACTION
+        )
+        target = (point[0], target_y, point[2])
+        if not query.point_inside(target):
+            # The wrist may sit on a narrow palm transition. Move only the
+            # through-volume coordinate onto the mesh before choosing height.
+            centered = point
+            for _pass in range(3):
+                centered, _clearance, found = query.recenter_axis(
+                    centered, "z"
+                )
+                if not found:
+                    break
+            interval = _choose_interval(
+                query.axis_intervals(centered, "y"), centered[1]
+            )
+            if interval is None:
+                continue
+            target_y = interval[0] + (
+                (interval[1] - interval[0]) * STUDIO_WRIST_DORSAL_FRACTION
+            )
+            target = (centered[0], target_y, centered[2])
+        if not query.point_inside(target):
+            continue
+        _set_joint_world_translation_preserving_children(joint, target)
+        result[_short_name(joint).split(":")[-1]] = {
+            "position": target,
+            "previous_position": point,
+            "section_y": interval,
+            "previous_section_fraction": current_fraction,
+            "inside": True,
+        }
+    return result
+
+
 def finalize_studio_spine_neck_head(
     mesh: str,
     namespace: str = "",
@@ -9126,27 +9943,67 @@ def enforce_studio_neck2_midpoint(
     return target
 
 
+def enforce_studio_neck2_head1_local_x_plane(
+    namespace: str = "",
+) -> Dict[str, object]:
+    """Keep neck2->head1 on the joint's local X axis after final restores.
+
+    The head pivot remains at its fitted mesh-relative location to within the
+    tiny off-plane correction required to put the segment in a single plane.
+    """
+    neck2 = _find_template_joint("neck2", namespace)
+    head1 = _find_template_joint("head1", namespace)
+    if not neck2 or not head1:
+        return {}
+    spine_tip = _find_template_joint("spine5_Tip", namespace)
+    world_up = (0.0, 0.0, 1.0)
+    if spine_tip and cmds.objExists(spine_tip):
+        forward = _joint_world_axes(spine_tip)["y"]
+        if forward.length() > 1.0e-8:
+            forward.normalize()
+            world_up = (float(forward.x), float(forward.y), float(forward.z))
+    _orient_joint_x_to_child(neck2, head1, world_up=world_up)
+    before = tuple(float(value) for value in cmds.getAttr(head1 + ".translate")[0])
+    for axis in "YZ":
+        plug = "{0}.translate{1}".format(head1, axis)
+        if cmds.getAttr(plug, lock=True):
+            cmds.setAttr(plug, lock=False)
+        cmds.setAttr(plug, 0.0)
+    after = tuple(float(value) for value in cmds.getAttr(head1 + ".translate")[0])
+    # Re-aim against the final, now-planar pivot and keep the result animator-facing.
+    _orient_joint_x_to_child(neck2, head1, world_up=world_up)
+    _move_joint_orientation_to_rotate(neck2)
+    segment = om.MVector(*cmds.xform(
+        head1, query=True, worldSpace=True, translation=True
+    )) - om.MVector(*cmds.xform(
+        neck2, query=True, worldSpace=True, translation=True
+    ))
+    axis_x = _joint_world_axes(neck2)["x"]
+    return {
+        "head1_translate_before": before,
+        "head1_translate_after": after,
+        "head1_local_yz_zero": float(abs(after[1]) <= 1.0e-8 and abs(after[2]) <= 1.0e-8),
+        "neck2_x_to_head1_alignment": float(axis_x * segment.normal()) if segment.length() > 1.0e-8 else 0.0,
+    }
+
+
 def align_studio_center_face_positions(
     mesh: str,
     namespace: str = "",
 ) -> Dict[str, object]:
-    """Place non-lateral facial anchors on the anatomical center plane.
+    """Place central body and face anchors on the mesh front-view midline.
 
-    Capture every target before moving a parent so hierarchy propagation can
-    never introduce an X offset into a child such as ``nose_upper``.
+    Capture targets before moving parents and preserve child world matrices.
     """
     bounds = get_mesh_bounds(mesh)
-    spine_tip = _find_template_joint("spine5_Tip", namespace)
-    center_x = (
-        float(cmds.xform(
-            spine_tip, query=True, worldSpace=True, translation=True
-        )[0])
-        if spine_tip and cmds.objExists(spine_tip)
-        else float(bounds["center"].x)
-    )
+    center_x = float(bounds["center"].x)
     names = (
+        "pelvis", "hipswing", "spine1", "spine3", "spine5", "spine5_Tip",
+        "neck1", "neck2", "head1", "head1_Tip", "jaw", "jaw_Tip",
+        "chin", "mandible", "adams_apple",
         "nose_root", "nose_upper", "nose_tip", "nose_base",
         "c_upper_lip", "c_lower_lip", "upper_teeth", "lower_teeth",
+        "tongue1", "tongue2", "tongue3", "tongue4",
     )
     targets = {}
     joints = {}
@@ -9162,7 +10019,7 @@ def align_studio_center_face_positions(
     for name in names:
         joint = joints.get(name)
         if joint:
-            _set_joint_world_translation(joint, targets[name])
+            _set_joint_world_translation_preserving_children(joint, targets[name])
     return {
         "center_x": center_x,
         "positions": targets,
@@ -9185,7 +10042,9 @@ def enforce_studio_center_face_local_zeroes(
         ("nose_tip", "X"),
         ("nose_base", "X"),
     ):
-        if name == "nose_root" and preserve_nose_root_depth:
+        # Nose-root depth is anatomical: forcing local Z to zero puts it on
+        # head1 for characters whose nasal bridge projects forward.
+        if name == "nose_root":
             continue
         joint = _find_template_joint(name, namespace)
         if not joint or not cmds.objExists(joint):
@@ -9828,7 +10687,10 @@ def validate_studio_final_joint_placement(
 
     outside_bounds = {}
     for name, point in current.items():
-        if name == "origin":
+        # Toe tips are deliberate terminal extensions beyond the toe mesh.
+        # They define the end of the foot chain and are expected to sit outside
+        # the body surface, so mesh bounds are not a valid placement test.
+        if name == "origin" or name.lower().endswith("_toetip"):
             continue
         joint_bounds_tolerance = max(
             bounds_tolerance,
@@ -9875,16 +10737,8 @@ def validate_studio_final_joint_placement(
             rotate_axis = tuple(float(value) for value in cmds.getAttr(
                 joint + ".rotateAxis"
             )[0])
-            articulated_digit_frame = bool(re.match(
-                r"^(?:l|r)_(?:thumb_0[1-4]|(?:index|middle|ring|pinky)_0[1-5])$",
-                short_name,
-                re.IGNORECASE,
-            ))
             if (
-                (
-                    not articulated_digit_frame
-                    and max(abs(value) for value in joint_orient) > position_tolerance
-                )
+                max(abs(value) for value in joint_orient) > position_tolerance
                 or max(abs(value) for value in rotate_axis) > position_tolerance
             ):
                 nonzero_orientation_channels[_short_name(joint)] = {
@@ -9895,6 +10749,22 @@ def validate_studio_final_joint_placement(
             orientation_issues["nonzero_joint_orientation_channels"] = (
                 nonzero_orientation_channels
             )
+        # Twist joints are positional samples along a parent segment. Their
+        # rest frame follows the parent, so they must never carry a default
+        # Euler rotation of their own. Keep this explicit even though the
+        # final placement pass also zeroes the channels.
+        twist_rotations = {}
+        for joint in validation_joints:
+            short_name = _short_name(joint).split(":")[-1].lower()
+            if "twist" not in short_name or "corrective" in short_name or "twistcor" in short_name:
+                continue
+            rotate = tuple(float(value) for value in cmds.getAttr(
+                joint + ".rotate"
+            )[0])
+            if max(abs(value) for value in rotate) > rotation_tolerance:
+                twist_rotations[_short_name(joint)] = rotate
+        if twist_rotations:
+            orientation_issues["nonzero_twist_rotations"] = twist_rotations
         # The center chain uses X down-bone and one continuous Y-forward
         # convention.  Neck/head roll must match spine5_Tip rather than an
         # unrelated local Euler value, otherwise pose matching twists at the
@@ -10089,9 +10959,10 @@ def validate_studio_final_joint_placement(
                     continue
                 axes = _joint_world_axes(joint)
                 dots = {"x": float(axes["x"] * desired_x[name])}
-                if name in reference_roll and not name.endswith(
-                    ("_thigh", "_knee")
-                ):
+                if name in reference_roll and name not in (
+                    "{0}_upperarm".format(side),
+                    "{0}_lowerarm".format(side),
+                ) and not name.endswith(("_thigh", "_knee")):
                     expected = _reference_roll_basis(
                         desired_x[name], reference_roll[name]
                     )
@@ -10143,6 +11014,11 @@ def validate_studio_final_joint_placement(
                     or abs(hand_translate[1]) > position_tolerance
                     or abs(hand_translate[2]) > position_tolerance
                     or dof.lower() != "xyz"
+                    or abs(rotate[0]) > rotation_tolerance
+                    or abs(rotate[1]) > rotation_tolerance
+                    or max(abs(value) for value in joint_orient) > rotation_tolerance
+                    or max(abs(value) for value in rotate_axis) > rotation_tolerance
+                    or max(abs(value) for value in preferred) > position_tolerance
                 ):
                     elbow_contract = {
                         "rotate": rotate,
@@ -10154,6 +11030,19 @@ def validate_studio_final_joint_placement(
                         "degreesOfFreedom": dof,
                         "bendAxis": bend_axis,
                     }
+                upperarm = chain[1]
+                if upperarm and names[1] in desired_x and names[2] in desired_x:
+                    plane_z = desired_x[names[1]] ^ desired_x[names[2]]
+                    if plane_z.length() > 1.0e-8:
+                        plane_z.normalize()
+                        upper_z = _joint_world_axes(upperarm)["z"]
+                        lower_z = _joint_world_axes(lowerarm)["z"]
+                        plane_dots = (
+                            float(upper_z * plane_z),
+                            float(lower_z * plane_z),
+                        )
+                        if min(plane_dots) < 0.999:
+                            elbow_contract["planeZDots"] = plane_dots
             if any(
                 min(dots.values()) < 0.98
                 for dots in segment_dots.values()
@@ -10344,16 +11233,6 @@ def validate_studio_final_joint_placement(
                 if (
                     dof.lower() != expected_dof
                     or bend_axis.lower() != "z"
-                    or (
-                        digit != "thumb"
-                        and (
-                            abs(rotate[0]) > position_tolerance
-                            or abs(rotate[1]) > position_tolerance
-                            or abs(rotate[2]) > position_tolerance
-                        )
-                    )
-                    or (digit == "thumb" and abs(rotate[0]) > position_tolerance)
-                    or (digit == "thumb" and abs(rotate[1]) > position_tolerance)
                     or shared_plane_dot < 0.999
                     or (
                         standard_frame_dots is not None
@@ -10496,6 +11375,23 @@ def validate_studio_final_joint_placement(
                     if cmds.attributeQuery(BEND_AXIS_ATTR, node=knee, exists=True)
                     else ""
                 )
+                ankle = chain[2] if len(chain) > 2 else None
+                posterior_preference_ok = False
+                posterior_preference_delta = 0.0
+                if ankle and cmds.objExists(ankle):
+                    knee_position = om.MVector(*cmds.xform(
+                        knee, query=True, worldSpace=True, translation=True
+                    ))
+                    ankle_position = om.MVector(*cmds.xform(
+                        ankle, query=True, worldSpace=True, translation=True
+                    ))
+                    shin_vector = ankle_position - knee_position
+                    positive_y_delta = _joint_world_axes(knee)["y"] ^ shin_vector
+                    posterior_sign = -1.0 if positive_y_delta.z > 0.0 else 1.0
+                    posterior_preference_delta = preferred[1] - rotate[1]
+                    posterior_preference_ok = (
+                        posterior_preference_delta * posterior_sign > 1.0e-3
+                    )
                 # Keep transform channels editable; BEND_AXIS_ATTR carries
                 # the authored knee-hinge policy without Maya DOF locks.
                 expected_dof = "xyz"
@@ -10506,6 +11402,7 @@ def validate_studio_final_joint_placement(
                     or max(abs(value) for value in rotate_axis) > position_tolerance
                     or abs(preferred[0]) > position_tolerance
                     or abs(preferred[2]) > position_tolerance
+                    or not posterior_preference_ok
                     or dof.lower() != expected_dof
                     or bend_axis.lower() != "y"
                 ):
@@ -10516,6 +11413,8 @@ def validate_studio_final_joint_placement(
                         "preferredAngle": preferred,
                         "degreesOfFreedom": dof,
                         "bendAxis": bend_axis,
+                        "posteriorPreferenceDelta": posterior_preference_delta,
+                        "posteriorPreferenceOk": posterior_preference_ok,
                     }
             expected_sign = 1.0 if side == "l" else -1.0
             if any(
@@ -10565,6 +11464,7 @@ def validate_studio_final_joint_placement(
 def orient_studio_arm_chains(
     mesh: str = "",
     namespace: str = "",
+    only_joints: Optional[Sequence[str]] = None,
 ) -> Dict[str, Tuple[float, float, float]]:
     """Aim arm X axes at placed children and transfer approved template roll.
 
@@ -10609,9 +11509,14 @@ def orient_studio_arm_chains(
         reference_roll = solve_template_joint_roll_vectors(desired_x)
 
         fallback_y = om.MVector(0.0, 1.0, 0.0)
+        selected_joints = set(only_joints) if only_joints is not None else None
         for name, joint in zip(names, chain):
             x_axis = desired_x.get(name)
-            if not joint or x_axis is None:
+            if (
+                not joint
+                or x_axis is None
+                or (selected_joints is not None and name not in selected_joints)
+            ):
                 continue
             y_axis = reference_roll.get(name)
             if y_axis is None:
@@ -10631,11 +11536,20 @@ def orient_studio_arm_chains(
 
         # Every child in the primary arm chain must sit solely on its parent's
         # local X axis. Re-aiming above makes Y/Z numerical noise only.
-        for joint in chain[1:]:
-            if not joint or not cmds.objExists(joint):
+        for index, joint in enumerate(chain[1:], start=1):
+            parent_name = names[index - 1]
+            if (
+                not joint
+                or not cmds.objExists(joint)
+                or (selected_joints is not None and parent_name not in selected_joints)
+            ):
                 continue
-            cmds.setAttr(joint + ".translateY", 0.0)
-            cmds.setAttr(joint + ".translateZ", 0.0)
+            # The handTip is the parent of the digit chains in production
+            # templates. Keep its fitted off-axis palm offset so reorienting
+            # the hand never drags the fingers into the hand's local-X plane.
+            if parent_name not in {"l_hand", "r_hand"}:
+                cmds.setAttr(joint + ".translateY", 0.0)
+                cmds.setAttr(joint + ".translateZ", 0.0)
             offsets[_short_name(joint)] = (
                 float(cmds.getAttr(joint + ".translateX")),
                 float(cmds.getAttr(joint + ".translateY")),
@@ -10742,6 +11656,83 @@ def enforce_studio_elbow_z_hinges(
         )[0])
     return result
 
+
+def orient_studio_elbow_z_hinge_frames(
+    namespace: str = "",
+) -> Dict[str, float]:
+    """Align upperarm/lowerarm frames to their bend plane for rotateZ curl.
+
+    The two segment X axes are aimed at their placed children. Their shared Z
+    axis is the shoulder-elbow-wrist plane normal, so the lowerarm's fitted
+    rest bend is representable by rotateZ alone with jointOrient and
+    rotateAxis both zero. Joint positions and child world matrices are kept.
+    """
+    result = {}
+    for side in ("l", "r"):
+        aim_sign = 1.0 if side == "l" else -1.0
+        upperarm = _find_template_joint("{0}_upperarm".format(side), namespace)
+        lowerarm = _find_template_joint("{0}_lowerarm".format(side), namespace)
+        hand = _find_template_joint("{0}_hand".format(side), namespace)
+        if not all((upperarm, lowerarm, hand)):
+            continue
+        upperarm = (cmds.ls(upperarm, long=True) or [upperarm])[0]
+        lowerarm = (cmds.ls(lowerarm, long=True) or [lowerarm])[0]
+        hand = (cmds.ls(hand, long=True) or [hand])[0]
+        shoulder_position = om.MVector(*cmds.xform(
+            upperarm, query=True, worldSpace=True, translation=True
+        ))
+        elbow_position = om.MVector(*cmds.xform(
+            lowerarm, query=True, worldSpace=True, translation=True
+        ))
+        wrist_position = om.MVector(*cmds.xform(
+            hand, query=True, worldSpace=True, translation=True
+        ))
+        upper_x = (elbow_position - shoulder_position) * aim_sign
+        lower_x = (wrist_position - elbow_position) * aim_sign
+        if upper_x.length() <= 1.0e-8 or lower_x.length() <= 1.0e-8:
+            continue
+        upper_x.normalize()
+        lower_x.normalize()
+        plane_z = upper_x ^ lower_x
+        if plane_z.length() <= 1.0e-8:
+            continue
+        plane_z.normalize()
+        existing_z = (
+            _joint_world_axes(upperarm)["z"]
+            + _joint_world_axes(lowerarm)["z"]
+        )
+        if plane_z * existing_z < 0.0:
+            plane_z *= -1.0
+
+        def _world_basis(x_axis):
+            y_axis = plane_z ^ x_axis
+            y_axis.normalize()
+            z_axis = x_axis ^ y_axis
+            z_axis.normalize()
+            return [
+                x_axis.x, x_axis.y, x_axis.z, 0.0,
+                y_axis.x, y_axis.y, y_axis.z, 0.0,
+                z_axis.x, z_axis.y, z_axis.z, 0.0,
+            ]
+
+        _set_joint_world_basis_preserving_children(
+            upperarm, _world_basis(upper_x)
+        )
+        _set_joint_world_basis_preserving_children(
+            lowerarm, _world_basis(lower_x)
+        )
+        for axis in "XYZ":
+            plug = "{0}.preferredAngle{1}".format(lowerarm, axis)
+            if cmds.objExists(plug):
+                cmds.setAttr(plug, 0.0)
+        _set_string_attr(lowerarm, BEND_AXIS_ATTR, "z")
+        _set_string_attr(lowerarm, BEND_PLANE_ATTR, "arm_local_z_hinge")
+        result[_short_name(lowerarm).split(":")[-1]] = float(
+            _joint_world_axes(upperarm)["z"]
+            * _joint_world_axes(lowerarm)["z"]
+        )
+    return result
+
 def enforce_studio_knee_y_hinges(
     namespace: str = "",
 ) -> Dict[str, Tuple[float, float, float]]:
@@ -10841,8 +11832,18 @@ def enforce_studio_knee_y_hinges(
         cmds.setAttr(knee + ".rotate", 0.0, best_angle, 0.0)
         # Bend policy is metadata/orientation, never a channel lock.
         cmds.joint(knee, edit=True, degreeOfFreedom="xyz")
+        # Prefer posterior knee flexion. Determine the sign from the live
+        # local-Y axis and the shin direction so mirrored sides bend the same
+        # anatomical way even though their local frames are mirrored.
+        knee_y_axis = _joint_world_axes(knee)["y"]
+        positive_rotation_delta = knee_y_axis ^ lower_segment
+        posterior_sign = -1.0 if positive_rotation_delta.z > 0.0 else 1.0
+        preferred_y = (
+            best_angle
+            + posterior_sign * STUDIO_KNEE_PREFERRED_FLEXION_DEGREES
+        )
         cmds.setAttr(knee + ".preferredAngleX", 0.0)
-        cmds.setAttr(knee + ".preferredAngleY", best_angle)
+        cmds.setAttr(knee + ".preferredAngleY", preferred_y)
         cmds.setAttr(knee + ".preferredAngleZ", 0.0)
 
         for child, child_matrix in detached:
@@ -10856,7 +11857,7 @@ def enforce_studio_knee_y_hinges(
             if joint and cmds.objExists(joint):
                 cmds.setAttr(joint + ".translateY", 0.0)
                 cmds.setAttr(joint + ".translateZ", 0.0)
-        result[side] = (0.0, best_angle, 0.0)
+        result[side] = (0.0, preferred_y, 0.0)
     return result
 
 
@@ -11203,10 +12204,17 @@ def fit_studio_neck_head_jaw_relative(
             joint, query=True, worldSpace=True, translation=True
         )[1]) for joint in mouth_joints) / float(len(mouth_joints))
         face_span = eye_y - mouth_y
-        if face_span > max(height * 0.01, 1.0e-5):
+        if (
+            face_span > max(height * 0.01, 1.0e-5)
+            and "head1" not in reference_points
+        ):
+            # Keep the topology-transferred head pivot when this mesh has a
+            # matched anatomical landmark. The generic eye/mouth fraction is
+            # only a fallback; on this mesh it lifts head1 above the actual
+            # neck/head transition and pulls neck2 away from the neck center.
             head_target = section_target(
                 head,
-                mouth_y + (face_span * 0.43),
+                mouth_y + (face_span * 0.418),
                 0.25,
                 center_x,
             )
@@ -11228,13 +12236,32 @@ def fit_studio_neck_head_jaw_relative(
         )[1]) for joint in mouth_joints) / float(len(mouth_joints))
         face_span = eye_y - mouth_y
         if face_span > max(height * 0.01, 1.0e-5):
-            jaw_y = mouth_y + (face_span * 0.56)
-    jaw_target = section_target(
-        jaw,
-        jaw_y,
-        0.28,
-        center_x,
+            jaw_y = mouth_y + (face_span * 0.398)
+    nose_tip = _find_template_joint("nose_tip", namespace)
+    nose_tip_point = tuple(cmds.xform(
+        nose_tip, query=True, worldSpace=True, translation=True
+    )) if nose_tip and cmds.objExists(nose_tip) else None
+    desired_jaw_z = (
+        float(head_target[2])
+        + ((float(nose_tip_point[2]) - float(head_target[2])) * 0.359)
+        if nose_tip_point else None
     )
+    jaw_intervals = query.axis_intervals(
+        (center_x, jaw_y, desired_jaw_z if desired_jaw_z is not None else 0.0),
+        "z",
+    )
+    jaw_interval = _choose_interval(jaw_intervals, desired_jaw_z or 0.0)
+    if jaw_interval and desired_jaw_z is not None:
+        inset = max(query.tolerance * 2.0, bounds["depth"] * 1.0e-5)
+        jaw_z = min(
+            max(desired_jaw_z, jaw_interval[0] + inset),
+            jaw_interval[1] - inset,
+        )
+        jaw_target = (center_x, jaw_y, jaw_z)
+        if not query.point_inside(jaw_target):
+            jaw_target = section_target(jaw, jaw_y, 0.4, center_x)
+    else:
+        jaw_target = section_target(jaw, jaw_y, 0.4, center_x)
 
     for name, joint, target in (
         ("neck1", neck1, neck1_target),
@@ -11282,7 +12309,8 @@ def fit_studio_neck_head_jaw_relative(
             "head1": 0.25,
             "jaw": 0.28,
         },
-        "face_relative_height_fractions": {"head1": 0.43, "jaw": 0.56},
+        "face_relative_height_fractions": {"head1": 0.418, "jaw": 0.398},
+        "jaw_depth_fraction_head_to_nose_tip": 0.359,
     }
 
 def orient_studio_teeth_scene_y_up(
@@ -11609,12 +12637,6 @@ def orient_studio_face_local_y_up(root: str) -> Dict[str, Dict[str, float]]:
         name = _short_name(joint).split(":")[-1]
         if not face_pattern.search(name):
             continue
-        if re.match(r"^(?:l|r)_eye$", name, re.IGNORECASE):
-            # Eye socket orientation is the parent frame for the authored lid
-            # arcs; preserve it so fitting other facial joints cannot rewrite
-            # eyelid local orientations through their parent hierarchy.
-            result[name] = {"skipped": 1.0, "reason_template_eye_socket_frame": 1.0}
-            continue
         if re.search(r"(?:eyelid|lid)", name, re.IGNORECASE):
             # The eyelid chains use the template's local frames to follow the
             # eyelid arcs; do not force them into the mirrored facial side frame.
@@ -11689,10 +12711,12 @@ def orient_studio_face_local_y_up(root: str) -> Dict[str, Dict[str, float]]:
     return result
 
 
-def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, float, float]]:
+def orient_studio_leg_chains(
+    namespace: str = "",
+    only_joints: Optional[Sequence[str]] = None,
+) -> Dict[str, Tuple[float, float, float]]:
     """Author studio-mirrored signed-X frames for both leg chains."""
     offsets = {}
-    lateral_reference = (1.0, 0.0, 0.0)
     for side in ("l", "r"):
         aim_sign = 1.0 if side == "l" else -1.0
         chain = [
@@ -11708,6 +12732,25 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
             ))
             for joint in chain if joint and cmds.objExists(joint)
         }
+        chain_names = (
+            "{0}_thigh".format(side),
+            "{0}_knee".format(side),
+            "{0}_ankle".format(side),
+            "{0}_toe".format(side),
+            "{0}_toeTip".format(side),
+        )
+        desired_x = {}
+        for name, parent, child in zip(
+            chain_names[:-1], chain[:-1], chain[1:]
+        ):
+            if not parent or not child:
+                continue
+            segment = om.MVector(*world_positions[child]) - om.MVector(
+                *world_positions[parent]
+            )
+            if segment.length() > 1.0e-8:
+                desired_x[name] = segment.normal() * aim_sign
+        reference_roll = solve_template_joint_roll_vectors(desired_x)
         thigh_joint, knee_joint, ankle_joint = chain[:3]
         bend_axis = "y"
         if knee_joint and cmds.attributeQuery(
@@ -11719,11 +12762,17 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
         hinge_direction = _studio_knee_hinge_direction(side, namespace)
         previous_y = None
         previous_z = None
+        selected_joints = set(only_joints) if only_joints is not None else None
         for parent, child in (
             (thigh_joint, knee_joint),
             (knee_joint, ankle_joint),
         ):
-            if not parent or not child:
+            parent_name = _short_name(parent).split(":")[-1] if parent else ""
+            if (
+                not parent
+                or not child
+                or (selected_joints is not None and parent_name not in selected_joints)
+            ):
                 continue
             segment = om.MVector(*world_positions[child]) - om.MVector(
                 *world_positions[parent]
@@ -11789,7 +12838,7 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
 
         # Parent-to-child conversion preserves both fitted world bases and
         # keeps all orientation on animator-visible rotate channels.
-        for joint in (thigh_joint, knee_joint):
+        for joint in (thigh_joint, knee_joint, ankle_joint):
             if joint and cmds.objExists(joint):
                 _move_joint_orientation_to_rotate(joint)
         if knee_joint and bend_axis in "yz":
@@ -11804,7 +12853,7 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
         # This preserves the authored foot roll while local X aims at the toe
         # and toeTip remains a pure local-X child of the toe.
         ankle_joint, toe_joint, tip_joint = chain[2], chain[3], chain[4]
-        if ankle_joint and toe_joint and tip_joint:
+        if ankle_joint and toe_joint and tip_joint and (selected_joints is None or _short_name(ankle_joint).split(":")[-1] in selected_joints):
             ankle_position = om.MVector(*world_positions[ankle_joint])
             toe_position = om.MVector(*world_positions[toe_joint])
             tip_position = om.MVector(*world_positions[tip_joint])
@@ -11816,29 +12865,17 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
             toe_x = (toe_vector * aim_sign).normal()
             knee_position = om.MVector(*world_positions[knee_joint])
             lower_leg_vector = ankle_position - knee_position
-            leg_plane_normal = foot_vector ^ toe_vector
-            if leg_plane_normal.length() <= 1.0e-8:
-                leg_plane_normal = (
-                    previous_z
-                    if previous_z is not None
-                    else om.MVector(*lateral_reference)
-                )
-            leg_plane_normal.normalize()
-            if previous_z is not None and leg_plane_normal * previous_z < 0.0:
-                leg_plane_normal *= -1.0
-            _orient_joint_with_world_z_hinge(
+            ankle_name = _short_name(ankle_joint).split(":")[-1]
+            ankle_roll = reference_roll.get(ankle_name)
+            if ankle_roll is None:
+                ankle_roll = _joint_world_axes(ankle_joint)["y"]
+            _orient_joint_x_to_child(
                 ankle_joint,
-                (
-                    foot_vector.x * aim_sign,
-                    foot_vector.y * aim_sign,
-                    foot_vector.z * aim_sign,
-                ),
-                (
-                    leg_plane_normal.x,
-                    leg_plane_normal.y,
-                    leg_plane_normal.z,
-                ),
+                toe_joint,
+                world_up=(ankle_roll.x, ankle_roll.y, ankle_roll.z),
+                aim_sign=aim_sign,
             )
+            _move_joint_orientation_to_rotate(ankle_joint)
             ankle_axes = _joint_world_axes(ankle_joint)
             if previous_z is not None and ankle_axes["z"] * previous_z < 0.0:
                 raise RuntimeError(
@@ -11861,8 +12898,13 @@ def orient_studio_leg_chains(namespace: str = "") -> Dict[str, Tuple[float, floa
             )
             cmds.setAttr(tip_joint + ".jointOrient", 0.0, 0.0, 0.0)
             cmds.setAttr(tip_joint + ".rotate", 0.0, 0.0, 0.0)
-        for joint in chain[1:]:
-            if not joint or not cmds.objExists(joint):
+        for index, joint in enumerate(chain[1:], start=1):
+            parent_name = _short_name(chain[index - 1]).split(":")[-1]
+            if (
+                not joint
+                or not cmds.objExists(joint)
+                or (selected_joints is not None and parent_name not in selected_joints)
+            ):
                 continue
             values = tuple(
                 float(cmds.getAttr("{0}.translate{1}".format(joint, axis)))
@@ -12701,6 +13743,10 @@ def fit_studio_template_skeleton(
             "l_thumb_04", "r_thumb_04",
             "l_index_05", "l_middle_05", "l_ring_05", "l_pinky_05",
             "r_index_05", "r_middle_05", "r_ring_05", "r_pinky_05",
+            # Toe pivots have a later same-mesh volume fit. Do not let a
+            # transferred template endpoint beyond this mesh's sole/toe bounds
+            # overwrite that corrected target before generic orientation.
+            "l_toe", "r_toe", "l_toeTip", "r_toeTip",
         }
     }
     if topology_restore_targets:
@@ -12789,44 +13835,41 @@ def fit_studio_template_skeleton(
             + list(toe_references)
         ))
 
-    if mesh and all(
-        name in targets_by_name
-        for name in ("spine5", "l_clavicle", "r_clavicle")
-    ):
-        # Local surface-affine transfer is excellent for limbs and digits, but
-        # an internal upper-thoracic point is far from a well-conditioned
-        # surface patch. Anchor the branch point to the reliable clavicle pair:
-        # approved studio rigs place spine5_Tip about 2.44% of body height above
-        # their average, at the base of the neck. Keep X/Z exactly above spine5.
-        bounds = get_mesh_bounds(mesh)
-        query = _cached_mesh_interior_query(mesh)
-        spine5_point = targets_by_name["spine5"]
-        clavicle_y = (
-            targets_by_name["l_clavicle"][1]
-            + targets_by_name["r_clavicle"][1]
-        ) * 0.5
-        preferred_y = clavicle_y + (bounds["height"] * 0.0244)
-        y_candidates = [preferred_y]
-        for step in range(1, 7):
-            offset = bounds["height"] * 0.0025 * step
-            y_candidates.extend((preferred_y - offset, preferred_y + offset))
-        tip_target = next(
-            (
-                (spine5_point[0], y_value, spine5_point[2])
-                for y_value in y_candidates
-                if query.point_inside((spine5_point[0], y_value, spine5_point[2]))
-            ),
-            (spine5_point[0], preferred_y, spine5_point[2]),
-        )
-        targets_by_name["spine5_Tip"] = tip_target
-        neck_offset = max(bounds["height"] * 0.001, query.tolerance * 20.0)
-        neck_target = (
-            tip_target[0],
-            tip_target[1] + neck_offset,
-            tip_target[2],
-        )
-        if query.point_inside(neck_target):
-            targets_by_name["neck1"] = neck_target
+        if not topology_targets and "spine5_Tip" not in targets_by_name and all(
+            name in targets_by_name
+            for name in ("spine5", "l_clavicle", "r_clavicle")
+        ):
+            # Use the clavicle-derived estimate only when no approved spine
+            # pivot exists. It must never override a mesh-relative reference.
+            bounds = get_mesh_bounds(mesh)
+            query = _cached_mesh_interior_query(mesh)
+            spine5_point = targets_by_name["spine5"]
+            clavicle_y = (
+                targets_by_name["l_clavicle"][1]
+                + targets_by_name["r_clavicle"][1]
+            ) * 0.5
+            preferred_y = clavicle_y + (bounds["height"] * 0.0244)
+            y_candidates = [preferred_y]
+            for step in range(1, 7):
+                offset = bounds["height"] * 0.0025 * step
+                y_candidates.extend((preferred_y - offset, preferred_y + offset))
+            tip_target = next(
+                (
+                    (spine5_point[0], y_value, spine5_point[2])
+                    for y_value in y_candidates
+                    if query.point_inside((spine5_point[0], y_value, spine5_point[2]))
+                ),
+                (spine5_point[0], preferred_y, spine5_point[2]),
+            )
+            targets_by_name["spine5_Tip"] = tip_target
+            neck_offset = max(bounds["height"] * 0.001, query.tolerance * 20.0)
+            neck_target = (
+                tip_target[0],
+                tip_target[1] + neck_offset,
+                tip_target[2],
+            )
+            if query.point_inside(neck_target):
+                targets_by_name["neck1"] = neck_target
 
     if mesh:
         # The reference transfer tends to settle the medial clavicle pivots on
@@ -13116,6 +14159,32 @@ def fit_studio_template_skeleton(
         volume_report["topology_reference_positions_before_orientation"] = (
             _restore_studio_joint_world_positions(root, topology_restore_targets)
         )
+    # Refit shoulder roots after topology restoration too: the common topology
+    # transfer can put them low on the deltoid, while clavicle-relative height
+    # and the target mesh volume give a better superior landmark.
+    if mesh:
+        query = _cached_mesh_interior_query(mesh)
+        shoulder_points = {}
+        for side in ("l", "r"):
+            for role in ("clavicle", "upperarm", "lowerarm"):
+                name = "{0}_{1}".format(side, role)
+                joint = _find_template_joint(name, namespace)
+                if joint:
+                    shoulder_points[name] = tuple(cmds.xform(
+                        joint, query=True, worldSpace=True, translation=True
+                    ))
+        refined_shoulders = refine_shoulder_landmarks(shoulder_points, query)
+        final_shoulders = {}
+        for side in ("l", "r"):
+            name = "{0}_upperarm".format(side)
+            joint = _find_template_joint(name, namespace)
+            target = refined_shoulders.get(name)
+            if joint and target:
+                _set_joint_world_translation_preserving_children(joint, target)
+                final_shoulders[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+        volume_report["final_mesh_superior_shoulders"] = final_shoulders
     fitted_positions = _capture_studio_joint_positions(root)
     if not brow_reference_positions:
         brow_reference_positions = {
@@ -13386,7 +14455,526 @@ def fit_studio_template_skeleton(
     # Keep the intended bend axes in the joint metadata while leaving every
     # transform channel directly editable for the rigging workflow.
     unlock_studio_joint_channels(root, namespace=namespace)
-    volume_report["eyelid_x_to_tip"] = orient_studio_eyelid_chains_to_tips(root)
+    # Approved and topology position restores above can replace the neck/head
+    # frames authored earlier. Rebuild the central head and face frames last.
+    if mesh:
+        volume_report["final_mesh_dependent_face_pivots"] = (
+            fit_studio_face_pivots_to_mesh(mesh, namespace=namespace)
+        )
+    volume_report["final_centerline_mesh_alignment"] = (
+        align_studio_center_face_positions(mesh, namespace=namespace)
+        if mesh else {}
+    )
+    centerline_names = volume_report["final_centerline_mesh_alignment"].get("positions", {})
+    for name, point in centerline_names.items():
+        fitted_positions[name] = tuple(point)
+    # The final anatomical face fit is authoritative for internal throat
+    # pivots such as adams_apple1. Refresh their drift baseline here; keeping
+    # the earlier provisional position falsely rejects a valid mesh-specific
+    # adjustment during final validation.
+    for name in volume_report["final_mesh_dependent_face_pivots"]:
+        joint = _find_template_joint(name, namespace)
+        if joint:
+            fitted_positions[name] = tuple(cmds.xform(
+                joint, query=True, worldSpace=True, translation=True
+            ))
+    volume_report["final_centerline_root_frame"] = (
+        orient_studio_root_pelvis_hipswing_y_up(namespace=namespace)
+    )
+    volume_report["final_centerline_spine_frame"] = orient_studio_spine_vertical(
+        namespace=namespace
+    )
+    volume_report["final_neck1_grid_standard"] = orient_studio_neck1_grid_standard(
+        namespace=namespace
+    )
+    volume_report["final_head_jaw_tongue_orientation"] = orient_studio_head_chains(
+        namespace=namespace, include_oral=True
+    )
+    volume_report["final_neck2_head1_local_x_plane"] = (
+        enforce_studio_neck2_head1_local_x_plane(namespace=namespace)
+    )
+    # The X-only neck correction may move the head subtree by a small amount;
+    # make the final anatomical fit the validation baseline for that subtree.
+    head1_joint = _find_template_joint("head1", namespace)
+    if head1_joint:
+        final_head_subtree = [head1_joint] + (
+            cmds.listRelatives(
+                head1_joint, allDescendents=True, type="joint", fullPath=True
+            ) or []
+        )
+        for joint in final_head_subtree:
+            fitted_positions[_short_name(joint).split(":")[-1]] = tuple(
+                cmds.xform(joint, query=True, worldSpace=True, translation=True)
+            )
+    volume_report["final_face_local_y_up_relative_to_x"] = (
+        orient_studio_face_local_y_up(root)
+    )
+    volume_report["final_brow_orientation"] = orient_studio_brow_joints(
+        mesh=mesh or "", namespace=namespace
+    )
+    volume_report["final_surface_face_orientation"] = (
+        orient_studio_surface_face_joints(mesh or "", root)
+    )
+    volume_report["final_eyelid_x_to_tip"] = orient_studio_eyelid_chains_to_tips(root)
+    volume_report["final_eyelid_tip_zero_rotates"] = zero_studio_eyelid_tip_rotates(root)
+    # The final neck and face passes above create the intended world frames.
+    # Store them on animator-facing rotate channels and leave every channel free.
+    volume_report["final_face_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    # Finish thigh-to-knee and knee-to-ankle X aims after pose restores while
+    # preserving the ankle, foot, and toe world frames.
+    volume_report["final_leg_x_targets"] = orient_studio_leg_chains(
+        namespace=namespace,
+        only_joints=("l_thigh", "r_thigh", "l_knee", "r_knee"),
+    )
+    # Refit the central spine and leg pivots from this mesh after all approved
+    # position/frame restores. Spine fractions follow the proven Lost Souls Kid
+    # proportions; knees/ankles are recentered in their own mesh sections, and
+    # the foot chain follows the ankle correction as a unit.
+    mesh_core_fit = (
+        finalize_studio_core_positions_from_mesh(mesh, namespace=namespace)
+        if mesh else {}
+    )
+    volume_report["final_mesh_dependent_spine_leg_fit"] = mesh_core_fit
+    volume_report["final_neck1_after_mesh_spine_fit"] = (
+        orient_studio_neck1_grid_standard(namespace=namespace)
+    )
+    volume_report["final_leg_x_targets_after_mesh_fit"] = orient_studio_leg_chains(
+        namespace=namespace,
+        only_joints=("l_thigh", "r_thigh", "l_knee", "r_knee"),
+    )
+    if mesh:
+        volume_report["final_leg_twists_after_mesh_fit"] = _fit_studio_twist_segments(
+            namespace
+        )
+        changed_core_names = (
+            "spine1", "spine3", "spine5", "spine5_Tip", "neck1",
+            "l_thigh", "r_thigh",
+            "l_knee", "r_knee", "l_ankle", "r_ankle",
+            "l_toe", "r_toe", "l_toeTip", "r_toeTip",
+            *(mesh_core_fit.get("twists") or ()),
+        )
+        for name in changed_core_names:
+            joint = _find_template_joint(name, namespace)
+            if joint:
+                fitted_positions[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+        # The core mesh fit above can move spine5_Tip/neck1 after the earlier
+        # face pass. Refit the skull and cervical chain against the final mesh
+        # anchors now, so head1 and neck2 cannot retain stale pre-spine-fit
+        # positions in the official build.
+        volume_report["final_face_pivots_after_spine_fit"] = (
+            fit_studio_face_pivots_to_mesh(mesh, namespace=namespace)
+        )
+        volume_report["final_face_centerline_after_spine_fit"] = (
+            align_studio_center_face_positions(mesh, namespace=namespace)
+        )
+        volume_report["final_neck1_frame_after_face_refit"] = (
+            orient_studio_neck1_grid_standard(namespace=namespace)
+        )
+        volume_report["final_neck2_midpoint_after_face_refit"] = (
+            enforce_studio_neck2_midpoint(namespace=namespace)
+        )
+        volume_report["final_head_chain_frames_after_face_refit"] = (
+            orient_studio_head_chains(namespace=namespace, include_oral=True)
+        )
+        volume_report["final_neck2_head1_plane_after_face_refit"] = (
+            enforce_studio_neck2_head1_local_x_plane(namespace=namespace)
+        )
+        volume_report["final_face_orientation_channels_after_refit"] = (
+            move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+        )
+        face_names = set(volume_report["final_face_pivots_after_spine_fit"])
+        face_names.update((
+            "neck1", "neck2", "head1", "head1_Tip", "jaw", "jaw_Tip",
+            "tongue1", "tongue2", "tongue3", "tongue4",
+            "nose_root", "nose_upper", "nose_tip", "nose_base",
+            "adams_apple1",
+        ))
+        for name in face_names:
+            joint = _find_template_joint(name, namespace)
+            if joint:
+                fitted_positions[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+        head1_joint = _find_template_joint("head1", namespace)
+        if head1_joint:
+            for joint in [head1_joint] + (
+                cmds.listRelatives(
+                    head1_joint, allDescendents=True, type="joint", fullPath=True
+                ) or []
+            ):
+                fitted_positions[_short_name(joint).split(":")[-1]] = tuple(
+                    cmds.xform(joint, query=True, worldSpace=True, translation=True)
+                )
+    # Finish after every frame/pose restore so every non-corrective twist joint
+    # lies on its parent's local X axis. Channels remain unlocked for editing.
+    volume_report["final_twist_translate_x"] = enforce_studio_twist_translate_x(
+        root
+    )
+    if mesh:
+        for name in volume_report["final_twist_translate_x"]:
+            joint = _find_template_joint(name, namespace)
+            if joint:
+                fitted_positions[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+    # Final mesh fitting and frame cleanup above can author jointOrient again.
+    # Convert the completed frames to animator-facing rotate channels only
+    # after those passes, then reassert the dedicated knee, twist, and finger
+    # channel rules. This keeps one consistent result from the UI build path.
+    volume_report["final_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    volume_report["final_knee_y_hinges"] = enforce_studio_knee_y_hinges(
+        namespace=namespace
+    )
+    # The knee solver re-authors the thigh basis, so absorb that basis into
+    # rotate channels as well before validating zeroed jointOrient values.
+    volume_report["final_post_knee_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    volume_report["final_twist_parent_frames"] = (
+        orient_studio_twist_joints_like_parents(root, namespace=namespace)
+    )
+    # Final world-frame conversion can leave a few intermediate phalanges a
+    # fraction off the shared plane. Project those pivots after all parent
+    # frames are stable, then rebuild their X-to-child frames and zero the
+    # non-curl channels once more. Tips stay fixed at their mesh-section center.
+    final_digit_plane_projection = {}
+    for name, chain in _studio_finger_chains(namespace).items():
+        final_digit_plane_projection[name] = _project_finger_chain_to_tip_plane(
+            chain, query=None
+        )
+    volume_report["final_finger_02_05_planarity"] = final_digit_plane_projection
+    volume_report["final_finger_02_05_frames"] = orient_studio_digit_chains(
+        mesh=mesh or "",
+        namespace=namespace,
+        preserve_positions=True,
+        preserve_knuckle_positions=True,
+    )
+    # The digit frame pass also adjusts the hand and hand-tip bases. Convert
+    # those final frames to rotate channels after it, then zero the phalange
+    # rest rotations without disturbing the established world frames.
+    volume_report["final_post_digit_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    volume_report["final_digit_non_curl_rotations_zeroed"] = (
+        zero_studio_digit_non_curl_rotations(namespace=namespace)
+    )
+    for chain in _studio_finger_chains(namespace).values():
+        for joint in chain:
+            name = _short_name(joint).split(":")[-1]
+            fitted_positions[name] = tuple(cmds.xform(
+                joint, query=True, worldSpace=True, translation=True
+            ))
+    if mesh:
+        volume_report["final_toe_pivots_inside_mesh_bounds"] = (
+            fit_studio_toe_pivots_to_volume(mesh, namespace=namespace)
+        )
+        volume_report["final_foot_local_x_frames"] = orient_studio_leg_chains(
+            namespace=namespace,
+            only_joints=("l_ankle", "r_ankle", "l_toe", "r_toe"),
+        )
+        for side in ("l", "r"):
+            for name in ("{0}_ankle".format(side), "{0}_toe".format(side), "{0}_toeTip".format(side)):
+                joint = _find_template_joint(name, namespace)
+                if joint:
+                    fitted_positions[name] = tuple(cmds.xform(
+                        joint, query=True, worldSpace=True, translation=True
+                    ))
+    # The visible *_guide locators are the artist-approved mesh-dependent
+    # landmarks. Read their live positions before falling back to the freshly
+    # solved points; later detailed-fit passes can otherwise pull the final
+    # joints away from the guides the artist actually reviewed.
+    guide_landmark_targets = (
+        ("l_upperarm", "l_upperarm"),
+        ("r_upperarm", "r_upperarm"),
+        ("l_lowerarm", "l_lowerarm"),
+        ("r_lowerarm", "r_lowerarm"),
+        ("l_thigh", "l_thigh"),
+        ("r_thigh", "r_thigh"),
+    )
+    guide_landmark_report = {}
+    guide_groups = cmds.ls(
+        "auto_joint_guides_grp", long=True, type="transform"
+    ) or []
+    if not guide_groups:
+        guide_groups = cmds.ls(
+            "*auto_joint_guides_grp*", long=True, type="transform"
+        ) or []
+    mesh_bounds = get_mesh_bounds(mesh) if mesh and cmds.objExists(mesh) else None
+    mesh_height = float(mesh_bounds["height"]) if mesh_bounds else 0.0
+    guide_bounds_tolerance = max(mesh_height * 0.005, 1.0e-4)
+    mesh_minimum = (
+        (float(mesh_bounds["min"].x), float(mesh_bounds["min"].y), float(mesh_bounds["min"].z))
+        if mesh_bounds else None
+    )
+    mesh_maximum = (
+        (float(mesh_bounds["max"].x), float(mesh_bounds["max"].y), float(mesh_bounds["max"].z))
+        if mesh_bounds else None
+    )
+    fallback_query = _cached_mesh_interior_query(mesh) if mesh else None
+    for point_name, joint_name in guide_landmark_targets:
+        guide_name = point_name + "_guide"
+        guide_node = None
+        for group in guide_groups:
+            for child in cmds.listRelatives(
+                group, children=True, type="transform", fullPath=True
+            ) or []:
+                if _short_name(child).split(":")[-1] == guide_name:
+                    guide_node = child
+                    break
+            if guide_node:
+                break
+        source = "scene_guide" if guide_node else "solver_point"
+        target = (
+            tuple(cmds.xform(
+                guide_node, query=True, worldSpace=True, translation=True
+            ))
+            if guide_node else points.get(point_name)
+        )
+        joint = _find_template_joint(joint_name, namespace)
+        if target is None or not joint:
+            guide_landmark_report[joint_name] = {
+                "applied": False,
+                "reason": "missing landmark or joint",
+                "source": source,
+            }
+            continue
+        target = tuple(float(value) for value in target)
+        if source == "scene_guide" and mesh_bounds:
+            inside_bounds = all(
+                mesh_minimum[index] - guide_bounds_tolerance
+                <= target[index]
+                <= mesh_maximum[index] + guide_bounds_tolerance
+                for index in range(3)
+            )
+        else:
+            inside_bounds = bool(
+                fallback_query is None or fallback_query.point_inside(target)
+            )
+        if not inside_bounds:
+            guide_landmark_report[joint_name] = {
+                "applied": False,
+                "reason": "landmark is outside mesh bounds",
+                "source": source,
+                "target": target,
+            }
+            continue
+        _set_joint_world_translation_preserving_children(joint, target)
+        fitted_positions[joint_name] = tuple(cmds.xform(
+            joint, query=True, worldSpace=True, translation=True
+        ))
+        guide_landmark_report[joint_name] = {
+            "applied": True,
+            "position": target,
+            "source": source,
+            "guide": guide_node,
+        }
+    volume_report["final_mesh_guide_landmarks"] = guide_landmark_report
+    # Guides can restore a thigh root after the earlier mesh-core pass has
+    # already positioned its knee. Refit both knee pivots against the final
+    # guided hip and ankle positions so the leg line remains mesh-centered.
+    volume_report["final_mesh_knee_alignment"] = (
+        align_studio_knees_to_final_mesh_line(mesh, namespace=namespace)
+        if mesh else {}
+    )
+    for name, position in volume_report["final_mesh_knee_alignment"].items():
+        fitted_positions[name] = position
+    changed_arm_joints = tuple(
+        name for name in ("l_upperarm", "r_upperarm", "l_lowerarm", "r_lowerarm")
+        if guide_landmark_report.get(name, {}).get("applied")
+    )
+    if changed_arm_joints:
+        volume_report["final_guide_arm_frames"] = orient_studio_arm_chains(
+            mesh=mesh or "",
+            namespace=namespace,
+            only_joints=changed_arm_joints,
+        )
+    changed_thigh_joints = tuple(
+        name for name in ("l_thigh", "r_thigh")
+        if guide_landmark_report.get(name, {}).get("applied")
+    )
+    if changed_thigh_joints:
+        volume_report["final_guide_thigh_frames"] = orient_studio_leg_chains(
+            namespace=namespace,
+            only_joints=changed_thigh_joints,
+        )
+        volume_report["final_guide_knee_hinges"] = enforce_studio_knee_y_hinges(
+            namespace=namespace
+        )
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    if changed_arm_joints or changed_thigh_joints:
+        volume_report["final_guide_twists"] = _fit_studio_twist_segments(namespace)
+        volume_report["final_guide_twist_local_x"] = enforce_studio_twist_translate_x(root)
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+        for name in changed_arm_joints + changed_thigh_joints:
+            joint = _find_template_joint(name, namespace)
+            if joint:
+                fitted_positions[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+        for name in volume_report["final_guide_twists"]:
+            joint = _find_template_joint(name, namespace)
+            if joint:
+                fitted_positions[_short_name(joint).split(":")[-1]] = tuple(
+                    cmds.xform(joint, query=True, worldSpace=True, translation=True)
+                )
+
+    # The guide pass can restore the original solver point after the earlier
+    # superior-shoulder fit. Reapply the mesh-relative landmark after guides so
+    # it is the actual final upperarm pivot used by the official placer.
+    if mesh:
+        query = _cached_mesh_interior_query(mesh)
+        shoulder_points = {}
+        for side in ("l", "r"):
+            for role in ("clavicle", "upperarm", "lowerarm"):
+                name = "{0}_{1}".format(side, role)
+                joint = _find_template_joint(name, namespace)
+                if joint:
+                    shoulder_points[name] = tuple(cmds.xform(
+                        joint, query=True, worldSpace=True, translation=True
+                    ))
+        refined_shoulders = refine_shoulder_landmarks(shoulder_points, query)
+        final_shoulders = {}
+        for side in ("l", "r"):
+            name = "{0}_upperarm".format(side)
+            joint = _find_template_joint(name, namespace)
+            target = refined_shoulders.get(name)
+            if joint and target:
+                _set_joint_world_translation_preserving_children(joint, target)
+                final_shoulders[name] = tuple(cmds.xform(
+                    joint, query=True, worldSpace=True, translation=True
+                ))
+                fitted_positions[name] = final_shoulders[name]
+        volume_report["final_mesh_superior_shoulders"] = final_shoulders
+        if final_shoulders:
+            volume_report["final_superior_shoulder_arm_frames"] = (
+                orient_studio_arm_chains(
+                    mesh=mesh,
+                    namespace=namespace,
+                    only_joints=tuple(final_shoulders),
+                )
+            )
+    # The final mesh fit can move the thigh roots. Bring them a small,
+    # character-scaled amount toward the body midline, retaining the change
+    # only when each candidate stays inside its own leg volume. Match pelvis
+    # height to those final thigh pivots before restoring the coincident
+    # hipswing pivot.
+    pelvis_joint = _find_template_joint("pelvis", namespace)
+    hipswing_joint = _find_template_joint("hipswing", namespace)
+    final_thigh_positions = {}
+    if mesh:
+        query = _cached_mesh_interior_query(mesh)
+        bounds = get_mesh_bounds(mesh)
+        center_x = float(bounds["center"].x)
+        inset = float(bounds["height"]) * 0.0075
+        # The guide/solver pass above resets these roots to the same mesh
+        # landmarks each run, so this scale-relative inset is deterministic.
+        apply_thigh_inset = True
+        for side in ("l", "r"):
+            name = "{0}_thigh".format(side)
+            joint = _find_template_joint(name, namespace)
+            if not joint:
+                continue
+            point = tuple(float(value) for value in cmds.xform(
+                joint, query=True, worldSpace=True, translation=True
+            ))
+            direction = 1.0 if point[0] > center_x else -1.0
+            target = (point[0] - (direction * inset), point[1], point[2])
+            if apply_thigh_inset and query.point_inside(target):
+                _set_joint_world_translation_preserving_children(joint, target)
+            final_thigh_positions[name] = tuple(cmds.xform(
+                joint, query=True, worldSpace=True, translation=True
+            ))
+        if len(final_thigh_positions) == 2 and pelvis_joint:
+            thigh_height = sum(
+                point[1] for point in final_thigh_positions.values()
+            ) * 0.5
+            pelvis_position = tuple(float(value) for value in cmds.xform(
+                pelvis_joint, query=True, worldSpace=True, translation=True
+            ))
+            pelvis_target = (
+                pelvis_position[0], thigh_height, pelvis_position[2]
+            )
+            if query.point_inside(pelvis_target):
+                _set_joint_world_translation_preserving_children(
+                    pelvis_joint, pelvis_target
+                )
+            volume_report["final_pelvis_thigh_height"] = {
+                "pelvis_y": float(cmds.xform(
+                    pelvis_joint, query=True, worldSpace=True, translation=True
+                )[1]),
+                "thigh_y": thigh_height,
+            }
+        if final_thigh_positions:
+            volume_report["final_thigh_inset"] = {
+                "inset": inset,
+                "positions": final_thigh_positions,
+            }
+            volume_report["final_thigh_knee_alignment"] = (
+                align_studio_knees_to_final_mesh_line(mesh, namespace=namespace)
+            )
+            for name, position in final_thigh_positions.items():
+                fitted_positions[name] = position
+            for name, position in volume_report["final_thigh_knee_alignment"].items():
+                fitted_positions[name] = position
+    # The final spine/leg mesh fit can move pelvis after its earlier frame
+    # alignment. Reassert the shared pelvis/hipswing pivot at the end of the
+    # official build so the two controls remain exactly coincident.
+    hipswing_joint = _find_template_joint("hipswing", namespace)
+    if pelvis_joint and hipswing_joint:
+        pelvis_position = tuple(cmds.xform(
+            pelvis_joint, query=True, worldSpace=True, translation=True
+        ))
+        _set_joint_world_translation_preserving_children(
+            hipswing_joint, pelvis_position
+        )
+        volume_report["final_hipswing_pelvis_pivot"] = {
+            "position": pelvis_position,
+            "coincident": True,
+        }
+        for joint in (pelvis_joint, hipswing_joint):
+            fitted_positions[_short_name(joint).split(":")[-1]] = tuple(
+                cmds.xform(joint, query=True, worldSpace=True, translation=True)
+            )
+    # Reapply the production joint policies after every fitting/frame pass:
+    # twist bones carry no rest rotation, and remain positioned on local X.
+    volume_report["final_knee_y_hinges"] = enforce_studio_knee_y_hinges(
+        namespace=namespace
+    )
+    volume_report["final_post_knee_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    volume_report["final_elbow_z_preferred_angles"] = (
+        configure_studio_elbow_bend_axes_from_channels(namespace=namespace)
+    )
+    volume_report["final_elbow_z_hinge_frames"] = (
+        orient_studio_elbow_z_hinge_frames(namespace=namespace)
+    )
+    volume_report["final_elbow_orientation_channels"] = (
+        move_all_studio_joint_orientation_to_rotate(root, namespace=namespace)
+    )
+    volume_report["final_elbow_zero_bind_rotations"] = (
+        zero_studio_elbow_bind_rotations(namespace=namespace)
+    )
+    volume_report["final_twist_zero_rotations"] = (
+        orient_studio_twist_joints_like_parents(root, namespace=namespace)
+    )
+    volume_report["final_twist_local_x"] = enforce_studio_twist_translate_x(root)
+    # Refresh twist anchors after the final thigh inset and segment rebuild,
+    # while leaving unrelated fitted positions available to drift validation.
+    for joint in cmds.listRelatives(
+        root, allDescendents=True, type="joint", fullPath=True
+    ) or []:
+        short = _short_name(joint).split(":")[-1]
+        if "twist" in short.lower():
+            fitted_positions[short] = tuple(float(value) for value in cmds.xform(
+                joint, query=True, worldSpace=True, translation=True
+            ))
     unlock_studio_joint_channels(root, namespace=namespace)
     if mesh:
         volume_report["final_joint_placement"] = validate_studio_final_joint_placement(
@@ -13397,7 +14985,7 @@ def fit_studio_template_skeleton(
             validate_center_face_alignment=not (approved_rerun or topology_targets),
             validate_fingertip_centering=True,
             validate_neck2_midpoint="neck2" not in topology_restore_targets,
-            validate_nose_root_local_zero="nose_root" not in topology_restore_targets,
+            validate_nose_root_local_zero=False,
         )
         _set_string_attr(
             root,
@@ -13495,6 +15083,42 @@ def build_basic_biped_skeleton(
     joint_map: Optional[dict] = None,
     import_skin_weights: bool = False,
 ) -> PlacementResult:
+    # Existing artist-adjusted guide locators are authoritative inputs to the
+    # official fit.  Preview normally refreshes the guide group from the raw
+    # solver output, so snapshot the arm/thigh guides before preview and keep
+    # them intact through the final guide-driven joint pass below.
+    guide_landmark_names = (
+        "l_upperarm", "r_upperarm", "l_lowerarm", "r_lowerarm",
+        "l_thigh", "r_thigh",
+    )
+    existing_guide_points = {}
+    existing_guide_nodes = {}
+    if create_guides:
+        guide_groups = cmds.ls(
+            "auto_joint_guides_grp", long=True, type="transform"
+        ) or cmds.ls(
+            "*auto_joint_guides_grp*", long=True, type="transform"
+        ) or []
+        for group in guide_groups:
+            for child in cmds.listRelatives(
+                group, children=True, type="transform", fullPath=True
+            ) or []:
+                short_name = _short_name(child).split(":")[-1]
+                if short_name not in {
+                    name + "_guide" for name in guide_landmark_names
+                }:
+                    continue
+                landmark = short_name[:-6]
+                existing_guide_nodes[landmark] = child
+                existing_guide_points[landmark] = tuple(
+                    float(value) for value in cmds.xform(
+                        child, query=True, worldSpace=True, translation=True
+                    )
+                )
+        if existing_guide_points:
+            landmark_points = dict(landmark_points or {})
+            landmark_points.update(existing_guide_points)
+
     approved_world_matrices = None
     existing_root = _find_template_joint("origin", namespace=template_namespace)
     if (
@@ -13541,9 +15165,15 @@ def build_basic_biped_skeleton(
         solver=solver,
         landmark_points=landmark_points,
         template_path=template_path,
-        create_guides=create_guides,
+        # Keep a previously reviewed guide group stable. A fresh guide group
+        # is still created on first placement when no artist guides exist.
+        create_guides=create_guides and not bool(existing_guide_points),
         joint_map=joint_map,
     )
+    for landmark, position in existing_guide_points.items():
+        guide = existing_guide_nodes.get(landmark)
+        if guide and cmds.objExists(guide):
+            cmds.xform(guide, worldSpace=True, translation=position)
     if require_interior and preview.outside_joints:
         cmds.error(
             "Joint placement could not prove these joints are inside the mesh: {0}".format(
