@@ -6,11 +6,27 @@ import maya.OpenMaya as om1
 import maya.OpenMayaUI as omui1
 from collections import OrderedDict
 from array import array
+import difflib
+import importlib
 import json
 import math
 import os
 import re
+import tempfile
 import time
+import xml.etree.ElementTree as ET
+
+from tech_connector.game_engine.deformation import spatial_skin_smoothing_service as _spatial_smoothing
+
+# Maya keeps imported modules alive between tool reloads.  Refresh the shared
+# service when this adapter expects a newer API, avoiding a required Maya restart
+# after updating the tools checkout.
+if not all(hasattr(_spatial_smoothing, name) for name in (
+        "detect_weight_outlier_indices", "detect_deformation_ripple_indices")):
+    _spatial_smoothing = importlib.reload(_spatial_smoothing)
+detect_weight_outlier_indices = _spatial_smoothing.detect_weight_outlier_indices
+detect_deformation_ripple_indices = _spatial_smoothing.detect_deformation_ripple_indices
+estimate_spatial_smoothing_radius = _spatial_smoothing.estimate_spatial_smoothing_radius
 
 try:
     from PySide2 import QtCore, QtGui, QtWidgets
@@ -205,14 +221,39 @@ def _vertex_surface_area_weights(mesh_path):
     return [value if value > 1.0e-12 else fallback for value in weights]
 
 
+def _pre_skin_surface_points(transform, visible_shape, vertex_count):
+    """Return the undeformed sibling mesh points when Maya exposes a shapeOrig."""
+    candidates = cmds.listRelatives(
+        transform, shapes=True, fullPath=True, type="mesh"
+    ) or []
+    for candidate in candidates:
+        if candidate == visible_shape:
+            continue
+        if not cmds.getAttr(candidate + ".intermediateObject"):
+            continue
+        selection = om.MSelectionList()
+        selection.add(candidate)
+        path = selection.getDagPath(0)
+        mesh_fn = om.MFnMesh(path)
+        if mesh_fn.numVertices == vertex_count:
+            return mesh_fn.getPoints(om.MSpace.kWorld)
+    return None
+
+
 def smooth_skin_weights_spatial_from_selection(
         radius=1.0, iterations=4, strength=0.5, max_influences=4,
-        normal_angle=75.0, max_neighbors=48, cross_region_share=0.45):
-    """Smooth the selected skin using surface position instead of edge topology."""
+        normal_angle=75.0, max_neighbors=48, cross_region_share=0.10,
+        entire_mesh=False, automatic_radius=False, artifact_only=False):
+    """Smooth the selected skin using surface position instead of edge topology.
+
+    The automatic batch path intentionally ignores a component subset.  It is
+    the one-click alternative to painting and should repair the full selected
+    skinned surface, including disconnected and mixed-density regions.
+    """
     mesh, vertices = _selected_mesh_and_vertices()
     return smooth_skin_weights_spatial(
         mesh,
-        vertex_indices=vertices,
+        vertex_indices=None if entire_mesh else vertices,
         radius=radius,
         iterations=iterations,
         strength=strength,
@@ -221,6 +262,9 @@ def smooth_skin_weights_spatial_from_selection(
         max_neighbors=max_neighbors,
         adaptive_radius=True,
         cross_region_share=cross_region_share,
+        automatic_radius=automatic_radius,
+        topology_share=0.8,
+        artifact_only=artifact_only,
     )
 
 
@@ -236,6 +280,10 @@ def smooth_skin_weights_spatial(
         sample_weights=None,
         adaptive_radius=False,
         cross_region_share=0.45,
+        automatic_radius=False,
+        topology_share=0.0,
+        artifact_only=False,
+        outlier_threshold=0.06,
 ):
     """Diffuse weights through world-space neighborhoods, ignoring mesh edges.
 
@@ -250,6 +298,7 @@ def smooth_skin_weights_spatial(
     normal_angle = float(normal_angle)
     max_neighbors = int(max_neighbors)
     cross_region_share = max(0.0, min(0.49, float(cross_region_share)))
+    topology_share = max(0.0, min(1.0, float(topology_share)))
     if radius <= 0.0:
         raise ValueError("Radius must be greater than zero.")
     if iterations < 1:
@@ -306,6 +355,13 @@ def smooth_skin_weights_spatial(
         sample_weights = [float(value) for value in sample_weights]
         if len(sample_weights) != vertex_count:
             raise ValueError("Surface-area weight count does not match the mesh vertex count.")
+    auto_sized_radius = False
+    if automatic_radius:
+        radius = estimate_spatial_smoothing_radius(
+            [(point.x, point.y, point.z) for point in points],
+            sample_weights=sample_weights,
+        )
+        auto_sized_radius = True
     dominant_influences = []
     for vertex_index in range(vertex_count):
         offset = vertex_index * influence_count
@@ -313,6 +369,65 @@ def smooth_skin_weights_spatial(
             range(influence_count),
             key=lambda influence: original[offset + influence],
         ))
+
+    connected_vertices = [[] for _index in range(vertex_count)]
+    vertex_iterator = om.MItMeshVertex(mesh_path)
+    while not vertex_iterator.isDone():
+        vertex_index = int(vertex_iterator.index())
+        connected_vertices[vertex_index] = [
+            int(value) for value in vertex_iterator.getConnectedVertices()
+        ]
+        vertex_iterator.next()
+
+    inspected_vertex_count = len(targets)
+    detected_artifacts = ()
+    if artifact_only:
+        weight_rows = []
+        for vertex_index in range(vertex_count):
+            offset = vertex_index * influence_count
+            weight_rows.append({
+                str(influence): original[offset + influence]
+                for influence in range(influence_count)
+                if original[offset + influence] > 1.0e-12
+            })
+        weight_artifacts = detect_weight_outlier_indices(
+            weight_rows,
+            connected_vertices,
+            minimum_difference=outlier_threshold,
+        )
+        input_points = _pre_skin_surface_points(transform, shape, vertex_count)
+        deformation_artifacts = ()
+        if input_points is not None:
+            deformation_artifacts = detect_deformation_ripple_indices(
+                [(point.x, point.y, point.z) for point in input_points],
+                [(point.x, point.y, point.z) for point in points],
+                connected_vertices,
+            )
+        detected_artifacts = tuple(sorted(set(weight_artifacts) | set(deformation_artifacts)))
+        allowed_targets = set(targets)
+        targets = [index for index in detected_artifacts if index in allowed_targets]
+        # A few restrained passes emulate repeated Weight Hammer application;
+        # allowing dozens of passes would erase intentional cape stiffness.
+        iterations = min(iterations, 3)
+        if not targets:
+            return {
+                "cancelled": False,
+                "mesh": transform,
+                "skinCluster": skin,
+                "vertices": 0,
+                "inspectedVertices": inspected_vertex_count,
+                "artifactVertices": 0,
+                "weightArtifactVertices": len(weight_artifacts),
+                "deformationArtifactVertices": len(deformation_artifacts),
+                "iterations": 0,
+                "radius": radius,
+                "requestedRadius": requested_radius,
+                "autoExpandedRadius": False,
+                "automaticRadius": auto_sized_radius,
+                "changedVertices": 0,
+                "maxDelta": 0.0,
+                "weightRegions": len(set(dominant_influences)),
+            }
 
     def build_spatial_index(search_radius):
         inverse = 1.0 / search_radius
@@ -485,6 +600,34 @@ def smooth_skin_weights_spatial(
             for candidate, value in found
         ]
 
+    def smoothing_neighbors(vertex_index):
+        """Favor connected rows so posed deformation cannot form saw teeth."""
+        spatial = balanced_neighbors(vertex_index)
+        if topology_share <= 0.0 or not connected_vertices[vertex_index]:
+            return spatial
+        connected = []
+        point = points[vertex_index]
+        for candidate in connected_vertices[vertex_index]:
+            delta = points[candidate] - point
+            distance = math.sqrt(max(delta * delta, 1.0e-12))
+            # Square-root inverse distance is density aware without starving
+            # the long edges common in garment and cape topology.
+            connected.append((candidate, 1.0 / math.sqrt(distance)))
+        spatial_total = sum(value for _candidate, value in spatial)
+        connected_total = sum(value for _candidate, value in connected)
+        combined = {}
+        spatial_share = 1.0 - topology_share
+        if spatial_total > 1.0e-12 and spatial_share > 0.0:
+            for candidate, value in spatial:
+                combined[candidate] = combined.get(candidate, 0.0) + (
+                    spatial_share * value / spatial_total
+                )
+        for candidate, value in connected:
+            combined[candidate] = combined.get(candidate, 0.0) + (
+                topology_share * value / connected_total
+            )
+        return list(combined.items())
+
     completed = 0
     cancelled = False
     cmds.progressWindow(
@@ -513,7 +656,7 @@ def smooth_skin_weights_spatial(
                 current = [working[weight_offset + influence] for influence in range(influence_count)]
                 averaged = [0.0] * influence_count
                 total_falloff = 0.0
-                for neighbor, falloff in balanced_neighbors(vertex_index):
+                for neighbor, falloff in smoothing_neighbors(vertex_index):
                     neighbor_offset = neighbor * influence_count
                     total_falloff += falloff
                     for influence in range(influence_count):
@@ -603,10 +746,15 @@ def smooth_skin_weights_spatial(
         "mesh": transform,
         "skinCluster": skin,
         "vertices": len(targets),
+        "inspectedVertices": inspected_vertex_count,
+        "artifactVertices": len(detected_artifacts) if artifact_only else len(targets),
+        "weightArtifactVertices": len(weight_artifacts) if artifact_only else 0,
+        "deformationArtifactVertices": len(deformation_artifacts) if artifact_only else 0,
         "iterations": completed,
         "radius": radius,
         "requestedRadius": requested_radius,
         "autoExpandedRadius": auto_expanded,
+        "automaticRadius": auto_sized_radius,
         "strength": strength,
         "maxInfluences": max_influences,
         "normalAngle": normal_angle,
@@ -616,6 +764,8 @@ def smooth_skin_weights_spatial(
         "lockedInfluences": len(locked),
         "weightRegions": len(set(dominant_influences)),
         "crossRegionShare": cross_region_share,
+        "topologyShare": topology_share,
+        "artifactOnly": bool(artifact_only),
     }
 
 
@@ -1214,6 +1364,28 @@ def _run_weight_hammer(mesh):
             cmds.select(clear=True)
 
 
+def _canonical_skin_meshes(meshes):
+    """Return unique long transform paths for mesh shapes or transforms."""
+    canonical = []
+    seen = set()
+    for mesh in meshes or []:
+        node = mesh
+        if cmds.objExists(node):
+            long_names = cmds.ls(node, long=True, objectsOnly=True) or [node]
+            node = long_names[0]
+            if cmds.nodeType(node) == "mesh":
+                parents = cmds.listRelatives(
+                    node, parent=True, fullPath=True
+                ) or []
+                if parents:
+                    node = parents[0]
+        if node in seen:
+            continue
+        seen.add(node)
+        canonical.append(node)
+    return canonical
+
+
 def export_skin_weights(meshes, export_dir="C:/temp/weights"):
     """
     Exports skin weights for a list of meshes to XML using deformerWeights.
@@ -1225,10 +1397,12 @@ def export_skin_weights(meshes, export_dir="C:/temp/weights"):
     if not os.path.exists(export_dir):
         os.makedirs(export_dir)
 
-    for mesh in meshes:
+    for mesh in _canonical_skin_meshes(meshes):
         if not cmds.objExists(mesh):
             print(f"[!] Skipping '{mesh}': does not exist.")
             continue
+
+        mesh_name = _influence_node_name(mesh)
 
         shape_node = cmds.listRelatives(mesh, shapes=True, fullPath=True)
         if not shape_node:
@@ -1251,8 +1425,8 @@ def export_skin_weights(meshes, export_dir="C:/temp/weights"):
             print(f"[!] Skipping '{mesh}': no influences found.")
             continue
 
-        export_name = f"{mesh}_weights.xml"
-        json_name = f"{mesh}_weights_influences.json"
+        export_name = f"{mesh_name}_weights.xml"
+        json_name = f"{mesh_name}_weights_influences.json"
 
         try:
             cmds.deformerWeights(export_name,
@@ -1261,77 +1435,679 @@ def export_skin_weights(meshes, export_dir="C:/temp/weights"):
                                  export=True,
                                  shape=shape_node)
         except Exception as e:
-            print(f"[!] Failed to export weights for '{mesh}': {e}")
+            print(f"[!] Failed to export weights for '{mesh_name}': {e}")
             continue
 
         with open(os.path.join(export_dir, json_name), 'w') as f:
             json.dump(influences, f, indent=2)
 
-        print(f"[?] Exported: {mesh}")
+        print(f"[?] Exported: {mesh_name}")
 
 
-def import_skin_weights(meshes, export_dir="C:/temp/weights"):
+def _influence_leaf_name(influence):
+    """Return an influence name without its DAG path or Maya namespace."""
+    leaf_name = str(influence).rsplit("|", 1)[-1]
+    return leaf_name.rsplit(":", 1)[-1]
+
+
+def _influence_node_name(influence):
+    """Return an influence leaf name while retaining its Maya namespace."""
+    return str(influence).rsplit("|", 1)[-1]
+
+
+def _influence_match_key(influence):
+    """Normalize harmless punctuation differences for influence-name matching."""
+    return re.sub(r"[^a-z0-9]+", "", _influence_leaf_name(influence).lower())
+
+
+def _find_similar_scene_influences(missing_influences, scene_influences,
+                                   limit=3, cutoff=0.6, short_names=True):
+    """Return likely scene-name matches without silently remapping influences."""
+    unique_candidates = list(OrderedDict.fromkeys(scene_influences or []))
+    candidate_keys = {
+        candidate: _influence_match_key(candidate)
+        for candidate in unique_candidates
+    }
+    suggestions = {}
+    for missing in missing_influences:
+        missing_key = _influence_match_key(missing)
+        ranked = []
+        for candidate, candidate_key in candidate_keys.items():
+            if not missing_key or not candidate_key:
+                continue
+            score = difflib.SequenceMatcher(
+                None, missing_key, candidate_key
+            ).ratio()
+            if score >= cutoff:
+                ranked.append((score, _influence_leaf_name(candidate), candidate))
+        ranked.sort(key=lambda item: (-item[0], item[1].lower(), item[2]))
+        ranked_short_names = OrderedDict()
+        for score, short_name, _candidate in ranked:
+            ranked_short_names.setdefault(short_name, score)
+            if len(ranked_short_names) >= limit:
+                break
+        if short_names:
+            suggestions[missing] = list(ranked_short_names)
+        else:
+            suggestions[missing] = [item[2] for item in ranked[:limit]]
+    return suggestions
+
+
+def _twist_influence_match_key(influence):
+    """Canonicalize the two supported limb-twist ordinal conventions."""
+    leaf_name = _influence_leaf_name(influence).lower()
+    limb_pattern = r"(thigh|knee|upperarm|lowerarm)"
+    match = re.match(
+        r"^([lr])_{}(\d+)_twist$".format(limb_pattern), leaf_name
+    )
+    if not match:
+        match = re.match(
+            r"^([lr])_{}_twist(\d+)$".format(limb_pattern), leaf_name
+        )
+    if not match:
+        return None
+    side, limb, ordinal = match.groups()
+    return "{}_{}_twist{}".format(side, limb, ordinal)
+
+
+def _resolve_scene_influences(saved_influences, scene_influences):
+    """Resolve saved influences to scene joints without renaming any nodes.
+
+    Matching is deliberately conservative. Full paths and namespaced leaf names
+    win first, followed by unique namespace-free leaf names. The only fuzzy
+    rule accepted is the studio limb-twist ordinal swap for thighs, knees,
+    upper arms, and lower arms (for example, ``l_upperarm1_twist`` to
+    ``l_upperarm_twist1``). A tier with multiple candidates is ambiguous and is
+    never resolved by falling through to a weaker tier.
     """
-    Imports skin weights for a list of meshes from XML and JSON files.
+    candidates = list(OrderedDict.fromkeys(scene_influences or []))
+    mapping = OrderedDict()
+    missing = []
+    ambiguous = OrderedDict()
+
+    for saved in saved_influences or []:
+        saved_text = str(saved)
+        saved_node = _influence_node_name(saved_text)
+        saved_leaf = _influence_leaf_name(saved_text)
+        twist_key = _twist_influence_match_key(saved_text)
+        tiers = [
+            [candidate for candidate in candidates if str(candidate) == saved_text],
+            [candidate for candidate in candidates
+             if _influence_node_name(candidate) == saved_node],
+            [candidate for candidate in candidates
+             if _influence_leaf_name(candidate) == saved_leaf],
+        ]
+        if twist_key:
+            tiers.append([
+                candidate for candidate in candidates
+                if _twist_influence_match_key(candidate) == twist_key
+            ])
+
+        matches = next((tier for tier in tiers if tier), [])
+        if len(matches) == 1:
+            mapping[saved] = matches[0]
+        elif len(matches) > 1:
+            ambiguous[saved] = matches
+        else:
+            missing.append(saved)
+
+    # Two weight-map entries may not target the same scene joint. Importing
+    # that collision would silently merge or overwrite weights.
+    destinations = {}
+    for saved, scene_joint in list(mapping.items()):
+        destinations.setdefault(scene_joint, []).append(saved)
+    for scene_joint, saved_names in destinations.items():
+        if len(saved_names) < 2:
+            continue
+        for saved in saved_names:
+            mapping.pop(saved, None)
+            ambiguous[saved] = [scene_joint]
+
+    return {
+        "mapping": mapping,
+        "missing": missing,
+        "ambiguous": ambiguous,
+    }
+
+
+def _influence_requires_remap(saved_influence, scene_influence):
+    """Return whether Maya's XML source name actually needs remapping."""
+    return (
+        _influence_node_name(saved_influence)
+        != _influence_node_name(scene_influence)
+    )
+
+
+def _prepare_deformer_weights_xml(
+        source_path, influence_mapping, target_deformer, target_shape):
+    """Create a temporary XML copy addressed directly to the target skin."""
+    source_names = OrderedDict(
+        (
+            _influence_node_name(saved_name),
+            _influence_node_name(scene_influence),
+        )
+        for saved_name, scene_influence in influence_mapping.items()
+    )
+    tree = ET.parse(source_path)
+    root = tree.getroot()
+    matched_sources = set()
+
+    for shape_element in root.iter("shape"):
+        shape_element.set("name", _influence_node_name(target_shape))
+    for weights_element in root.iter("weights"):
+        source_name = weights_element.get("source")
+        if source_name in source_names:
+            weights_element.set("source", source_names[source_name])
+            matched_sources.add(source_name)
+        weights_element.set("deformer", _influence_node_name(target_deformer))
+        weights_element.set("shape", _influence_node_name(target_shape))
+
+    unmatched_sources = sorted(set(source_names) - matched_sources)
+    if unmatched_sources:
+        raise ValueError(
+            "Influence sidecar does not match the XML sources: {}".format(
+                ", ".join(unmatched_sources)
+            )
+        )
+
+    handle, prepared_path = tempfile.mkstemp(
+        prefix="tc_skin_weights_", suffix=".xml"
+    )
+    os.close(handle)
+    try:
+        tree.write(prepared_path, encoding="utf-8", xml_declaration=True)
+    except Exception:
+        if os.path.exists(prepared_path):
+            os.remove(prepared_path)
+        raise
+    return prepared_path
+
+
+def _deformer_weights_vertex_count(source_path):
+    """Read the exported point count used by Maya's index mapping method."""
+    for _event, element in ET.iterparse(source_path, events=("start",)):
+        if element.tag != "shape":
+            continue
+        size = element.get("size")
+        return int(size) if size is not None else None
+    return None
+
+
+def _influence_alias_keys(influence):
+    """Return conservative keys for common exported-joint name variants."""
+    leaf_name = _influence_leaf_name(influence).lower()
+    normalized = re.sub(
+        r"\d+", lambda match: str(int(match.group(0))), leaf_name
+    )
+    keys = {
+        re.sub(r"[^a-z0-9]+", "", normalized),
+    }
+    # A trailing 1 is commonly omitted for the first/only joint in a group.
+    # Do not strip the final digit from multi-digit ordinals such as brow11.
+    without_default_one = re.sub(r"(?<!\d)_?1$", "", normalized)
+    keys.add(re.sub(r"[^a-z0-9]+", "", without_default_one))
+    return {key for key in keys if key}
+
+
+def _influence_side(influence):
+    """Return l/r for explicitly sided influences, otherwise None."""
+    match = re.match(r"^([lr])(?:_|$)", _influence_leaf_name(influence).lower())
+    return match.group(1) if match else None
+
+
+def _propose_safe_influence_renames(missing_influences, scene_joints):
+    """Propose unique formatting-only joint renames for user confirmation."""
+    candidates = list(OrderedDict.fromkeys(scene_joints or []))
+    proposals = OrderedDict()
+    unresolved = []
+    ambiguous = OrderedDict()
+    used_nodes = set()
+
+    for saved_name in missing_influences or []:
+        saved_keys = _influence_alias_keys(saved_name)
+        saved_side = _influence_side(saved_name)
+        matches = [
+            candidate for candidate in candidates
+            if _influence_side(candidate) == saved_side
+            and saved_keys.intersection(_influence_alias_keys(candidate))
+        ]
+        matches = [candidate for candidate in matches if candidate not in used_nodes]
+        if len(matches) == 1:
+            proposals[saved_name] = matches[0]
+            used_nodes.add(matches[0])
+        elif len(matches) > 1:
+            ambiguous[saved_name] = matches
+        else:
+            unresolved.append(saved_name)
+
+    return {
+        "proposals": proposals,
+        "unresolved": unresolved,
+        "ambiguous": ambiguous,
+    }
+
+
+def _rename_scene_influences(rename_requests):
+    """Atomically rename confirmed scene joints while retaining namespaces."""
+    renamed = OrderedDict()
+    failures = OrderedDict()
+    ordered_requests = sorted(
+        (rename_requests or {}).items(),
+        key=lambda item: str(item[1]).count("|"),
+        reverse=True,
+    )
+    cmds.undoInfo(openChunk=True, chunkName="Rename Skin Import Influences")
+    try:
+        for saved_name, scene_joint in ordered_requests:
+            source_node = _influence_node_name(scene_joint)
+            namespace = source_node.rpartition(":")[0]
+            target_leaf = _influence_leaf_name(saved_name)
+            target_name = (
+                "{}:{}".format(namespace, target_leaf)
+                if namespace else target_leaf
+            )
+            try:
+                renamed_joint = cmds.rename(scene_joint, target_name)
+            except Exception as exc:
+                failures[saved_name] = str(exc)
+                continue
+            if _influence_leaf_name(renamed_joint) != target_leaf:
+                failures[saved_name] = (
+                    "Maya returned '{}' instead of the requested name '{}'."
+                ).format(_influence_leaf_name(renamed_joint), target_leaf)
+                continue
+            renamed[saved_name] = {
+                "previous_scene_influence": scene_joint,
+                "scene_influence": renamed_joint,
+            }
+    finally:
+        cmds.undoInfo(closeChunk=True)
+    if failures:
+        cmds.undo()
+        renamed = OrderedDict()
+    return renamed, failures
+
+
+def _format_missing_influence_failure(mesh, missing_influences, suggestions):
+    lines = [
+        "[!] Skipping '{}': {} required skin influence(s) are missing from "
+        "the scene.".format(mesh, len(missing_influences)),
+    ]
+    for influence in missing_influences:
+        matches = suggestions.get(influence) or []
+        if matches:
+            lines.append(
+                "    - {} (similar scene joint{}: {})".format(
+                    influence,
+                    "s" if len(matches) != 1 else "",
+                    ", ".join(matches),
+                )
+            )
+        else:
+            lines.append("    - {} (no similar scene joint found)".format(influence))
+    lines.append(
+        "    Skin weights were not imported because every saved influence "
+        "must resolve to an existing scene node. Rename/remap the joints or "
+        "restore the missing influences, then import again."
+    )
+    return "\n".join(lines)
+
+
+def import_skin_weights(meshes, export_dir="C:/temp/weights",
+                        missing_influence_resolver=None):
+    """
+    Import skin weights without rebuilding an existing skinCluster.
+
+    Existing influences and dagPose membership are preserved. Influences present
+    in the saved data but missing from the cluster are added at zero weight
+    before the weights are loaded.
     :param meshes: list of mesh names to import to
     :param export_dir: directory where XML and JSON files are stored
+    :param missing_influence_resolver: optional confirmation callback. It
+        receives ``mesh, proposals, unresolved, ambiguous`` and returns truthy
+        to rename the proposed scene joints before retrying influence matching.
     """
     export_dir = os.path.normpath(export_dir)
+    imported_meshes = []
+    influence_reports = []
+    failure_reports = []
 
-    for mesh in meshes:
+    for mesh in _canonical_skin_meshes(meshes):
+        mesh_name = _influence_node_name(mesh)
         if not cmds.objExists(mesh):
-            print(f"[!] Skipping '{mesh}': does not exist.")
+            message = "Mesh does not exist in the scene."
+            print(f"[!] Skipping '{mesh_name}': {message}")
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": "mesh_not_found",
+                "message": message,
+            })
             continue
 
-        export_file = f"{mesh}_weights.xml"
-        json_file = f"{mesh}_weights_influences.json"
+        export_file = f"{mesh_name}_weights.xml"
+        json_file = f"{mesh_name}_weights_influences.json"
 
         xml_path = os.path.join(export_dir, export_file)
         json_path = os.path.join(export_dir, json_file)
 
         if not os.path.exists(json_path):
-            print(f"[!] Skipping '{mesh}': missing JSON {json_path}")
+            message = "Missing influence file: {}".format(json_path)
+            print(f"[!] Skipping '{mesh_name}': {message}")
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": "missing_influence_file",
+                "message": message,
+            })
             continue
 
         if not os.path.exists(xml_path):
-            print(f"[!] Skipping '{mesh}': missing XML {xml_path}")
+            message = "Missing weight file: {}".format(xml_path)
+            print(f"[!] Skipping '{mesh_name}': {message}")
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": "missing_weight_file",
+                "message": message,
+            })
             continue
 
         with open(json_path, "r") as f:
             influences = json.load(f)
 
-        if not all(cmds.objExists(jnt) for jnt in influences):
-            print(f"[!] Skipping '{mesh}': missing influences in scene.")
+        scene_joints = cmds.ls(type="joint", long=True) or []
+        scene_influences = list(scene_joints)
+        for saved_influence in influences:
+            for exact_node in cmds.ls(saved_influence, long=True) or []:
+                if exact_node not in scene_influences:
+                    scene_influences.append(exact_node)
+        resolution = _resolve_scene_influences(influences, scene_influences)
+        influence_mapping = resolution["mapping"]
+        missing_influences = resolution["missing"]
+        ambiguous_influences = resolution["ambiguous"]
+        renamed_influences = []
+        rename_failures = {}
+        rename_candidates = {}
+        if missing_influences and missing_influence_resolver:
+            rename_plan = _propose_safe_influence_renames(
+                missing_influences, scene_joints
+            )
+            rename_candidates = rename_plan["proposals"]
+            if rename_candidates and missing_influence_resolver(
+                    mesh_name,
+                    rename_candidates,
+                    rename_plan["unresolved"],
+                    rename_plan["ambiguous"],
+            ):
+                renamed, rename_failures = _rename_scene_influences(
+                    rename_candidates
+                )
+                renamed_influences = list(renamed.values())
+                if renamed and not rename_failures:
+                    scene_joints = cmds.ls(type="joint", long=True) or []
+                    scene_influences = list(scene_joints)
+                    for saved_influence in influences:
+                        for exact_node in cmds.ls(
+                                saved_influence, long=True
+                        ) or []:
+                            if exact_node not in scene_influences:
+                                scene_influences.append(exact_node)
+                    resolution = _resolve_scene_influences(
+                        influences, scene_influences
+                    )
+                    influence_mapping = resolution["mapping"]
+                    missing_influences = resolution["missing"]
+                    ambiguous_influences = resolution["ambiguous"]
+        if missing_influences or ambiguous_influences:
+            suggestions = _find_similar_scene_influences(
+                missing_influences, scene_joints
+            )
+            if missing_influences:
+                message = _format_missing_influence_failure(
+                    mesh_name, missing_influences, suggestions
+                )
+            else:
+                message = (
+                    "[!] Skipping '{}': saved skin influences do not map "
+                    "uniquely to scene joints."
+                ).format(mesh_name)
+            if ambiguous_influences:
+                ambiguity_lines = [
+                    "    Ambiguous influence mappings were refused:"
+                ]
+                for saved_name, matches in ambiguous_influences.items():
+                    ambiguity_lines.append(
+                        "    - {}: {}".format(saved_name, ", ".join(matches))
+                    )
+                ambiguity_lines.append(
+                    "    No scene joints were renamed and no weights were imported."
+                )
+                message = "{}\n{}".format(message, "\n".join(ambiguity_lines))
+            print(message)
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": (
+                    "ambiguous_influences"
+                    if ambiguous_influences else "missing_influences"
+                ),
+                "message": message,
+                "missing_influences": missing_influences,
+                "ambiguous_influences": ambiguous_influences,
+                "similar_influences": suggestions,
+                "rename_candidates": rename_candidates,
+                "rename_failures": rename_failures,
+                "renamed_influences": renamed_influences,
+            })
             continue
 
-        # Remove old skinCluster
+        resolved_influences = [influence_mapping[name] for name in influences]
+        mapped_influences = [
+            {
+                "weight_map_influence": saved_name,
+                "scene_influence": scene_joint,
+            }
+            for saved_name, scene_joint in influence_mapping.items()
+            if _influence_requires_remap(saved_name, scene_joint)
+        ]
+        exported_vertex_count = _deformer_weights_vertex_count(xml_path)
+        scene_vertex_count = int(cmds.polyEvaluate(mesh, vertex=True) or 0)
+        if (
+                exported_vertex_count is not None
+                and exported_vertex_count != scene_vertex_count
+        ):
+            message = (
+                "Topology mismatch: weight file contains {} vertices, but "
+                "the target mesh contains {}. Index-based weights were not "
+                "imported."
+            ).format(exported_vertex_count, scene_vertex_count)
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": "topology_mismatch",
+                "message": message,
+                "exported_vertex_count": exported_vertex_count,
+                "scene_vertex_count": scene_vertex_count,
+            })
+            print("[!] Skipping '{}': {}".format(mesh_name, message))
+            continue
+
+        # Reuse an existing skinCluster so every current influence and its
+        # dagPose membership remain intact. Imported influences missing from the
+        # cluster are added at zero weight; no influence is ever removed.
         existing = cmds.listHistory(mesh, pdo=True) or []
-        existing_skin = next((h for h in existing if cmds.nodeType(h) == "skinCluster"), None)
-        if existing_skin:
-            cmds.delete(existing_skin)
+        existing_skin = next(
+            (node for node in existing if cmds.nodeType(node) == "skinCluster"),
+            None,
+        )
+        existing_influences = (
+            list(cmds.skinCluster(existing_skin, query=True, influence=True) or [])
+            if existing_skin else []
+        )
+        original_influence_names = {
+            (cmds.ls(influence, long=True) or [influence])[0]
+            for influence in existing_influences
+        }
+        original_bind_poses = {
+            influence: set(cmds.listConnections(
+                influence + ".bindPose",
+                source=True,
+                destination=False,
+                type="dagPose",
+            ) or [])
+            for influence in existing_influences
+            if cmds.objExists(influence + ".bindPose")
+        }
+        added_influences = []
 
-        # Create new skinCluster
+        import_stage = "skin_cluster_setup"
+        transaction_open = False
+        transaction_started = False
         try:
-            skin_cluster = cmds.skinCluster(influences, mesh, toSelectedBones=True,
-                                            normalizeWeights=1, bindMethod=0,
-                                            skinMethod=0, removeUnusedInfluence=False)[0]
+            cmds.undoInfo(
+                openChunk=True,
+                chunkName="Prepare and Import Skin Weights",
+            )
+            transaction_open = True
+            transaction_started = True
+            if existing_skin:
+                skin_cluster = existing_skin
+                current_names = set(original_influence_names)
+                for influence in resolved_influences:
+                    long_name = (cmds.ls(influence, long=True) or [influence])[0]
+                    if long_name in current_names:
+                        continue
+                    cmds.skinCluster(
+                        skin_cluster,
+                        edit=True,
+                        addInfluence=influence,
+                        lockWeights=False,
+                        weight=0.0,
+                    )
+                    current_names.add(long_name)
+                    added_influences.append(influence)
+            else:
+                skin_cluster = cmds.skinCluster(
+                    resolved_influences,
+                    mesh,
+                    toSelectedBones=True,
+                    normalizeWeights=1,
+                    bindMethod=0,
+                    skinMethod=0,
+                    removeUnusedInfluence=False,
+                )[0]
+            import_stage = "weight_import"
+            shape_nodes = cmds.listRelatives(
+                mesh, shapes=True, noIntermediate=True, fullPath=True
+            ) or cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
+            if not shape_nodes:
+                raise RuntimeError("Target mesh has no importable shape node.")
+            prepared_xml_path = _prepare_deformer_weights_xml(
+                xml_path,
+                influence_mapping,
+                skin_cluster,
+                shape_nodes[0],
+            )
+            import_options = {
+                "path": os.path.dirname(prepared_xml_path),
+                "deformer": skin_cluster,
+                "im": True,
+                "method": "index",
+            }
+            try:
+                cmds.deformerWeights(
+                    os.path.basename(prepared_xml_path), **import_options
+                )
+            finally:
+                if os.path.exists(prepared_xml_path):
+                    os.remove(prepared_xml_path)
         except Exception as e:
-            print(f"[!] Failed to create skinCluster for '{mesh}': {e}")
+            if transaction_open:
+                cmds.undoInfo(closeChunk=True)
+                transaction_open = False
+            rollback_error = None
+            if transaction_started:
+                try:
+                    cmds.undo()
+                except Exception as undo_exc:
+                    rollback_error = str(undo_exc)
+            else:
+                rollback_error = "The import undo transaction could not be opened."
+            if import_stage == "skin_cluster_setup":
+                reason = "skin_cluster_setup_failed"
+                message = "Failed to prepare skinCluster: {}".format(e)
+            else:
+                reason = "weight_import_failed"
+                message = "Failed to load weight data: {}".format(e)
+            if rollback_error:
+                message += " Automatic rollback also failed: {}".format(
+                    rollback_error
+                )
+            else:
+                message += " Skin setup changes were rolled back."
+            print("[!] {} for '{}'.".format(message, mesh_name))
+            failure_reports.append({
+                "mesh": mesh_name,
+                "reason": reason,
+                "message": message,
+                "rolled_back": rollback_error is None,
+            })
             continue
+        else:
+            if transaction_open:
+                cmds.undoInfo(closeChunk=True)
+                transaction_open = False
 
-        try:
-            cmds.deformerWeights(export_file,
-                                 path=export_dir,
-                                 deformer=skin_cluster,
-                                 im=True,
-                                 method="index")
-        except Exception as e:
-            print(f"[!] Failed to import weights for '{mesh}': {e}")
-            continue
+        final_influences = list(
+            cmds.skinCluster(skin_cluster, query=True, influence=True) or []
+        )
+        final_influence_names = {
+            (cmds.ls(influence, long=True) or [influence])[0]
+            for influence in final_influences
+        }
+        removed_influences = sorted(original_influence_names - final_influence_names)
+        changed_bind_poses = []
+        for influence, bind_poses in original_bind_poses.items():
+            current_bind_poses = set(cmds.listConnections(
+                influence + ".bindPose",
+                source=True,
+                destination=False,
+                type="dagPose",
+            ) or [])
+            if not bind_poses.issubset(current_bind_poses):
+                changed_bind_poses.append(influence)
+        if removed_influences or changed_bind_poses:
+            raise RuntimeError(
+                "Skin import changed the existing bind: removed influences={} "
+                "changed bind poses={}".format(
+                    removed_influences,
+                    changed_bind_poses,
+                )
+            )
 
         _run_weight_hammer(mesh)
-        print(f"[?] Imported: {mesh}")
+        imported_meshes.append(mesh_name)
+        influence_reports.append({
+            "mesh": mesh_name,
+            "skin_cluster": skin_cluster,
+            "preserved_influences": existing_influences,
+            "added_influences": added_influences,
+            "renamed_influences": renamed_influences,
+            "mapped_influences": mapped_influences,
+            "final_influences": final_influences,
+            "bind_pose_preserved": True,
+        })
+        print(f"[?] Imported: {mesh_name}")
 
+    # Skin import must not reposition rig pivots. Reverse-foot helpers are snapped
+    # only after the deformation legs have been normalized by set_t_pose().
+    return {
+        "imported_meshes": imported_meshes,
+        "influence_reports": influence_reports,
+        "failure_reports": failure_reports,
+        "rfl_snap": {
+            "stage": "skin_import_deferred_to_t_pose",
+            "skipped": True,
+            "skeleton_count": 0,
+            "reports": [],
+        },
+    }
 
 
 #export_skin_weights(cmds.ls(sl=True), "C:/temp/weights")

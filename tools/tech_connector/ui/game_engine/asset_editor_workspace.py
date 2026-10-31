@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,12 @@ from PySide6.QtWidgets import (
 )
 
 from tech_connector.game_engine.assets import (
-    GRAPH_ASSET_TYPES, AssetDatabase, AssetGraphCompileService, AssetOperationsService,
+    GRAPH_ASSET_TYPES, AnimationAssetService, AssetDatabase, AssetGraphCompileService, AssetOperationsService,
     AssetProductionService, AssetTypeRegistry, GameplayClassService, MaterialService, PrefabService,
     WORLD_ASSET_TYPES, WorldAssetService, WorldBuildService,
     ProceduralGraphAssetService,
     asset_property_schema, builtin_asset_type_registry, read_asset_metadata, write_asset_metadata,
+    validate_animation_clip, validate_animation_controller, validate_skeleton_properties, validate_skin_binding_properties,
 )
 from tech_connector.ui.game_engine.asset_specialized_editors import (
     AssetCurveEditorWidget, AssetNodeGraphWidget, AudioWaveformEditorWidget, AudioMixerEditorWidget,
@@ -27,12 +29,23 @@ from tech_connector.ui.game_engine.asset_specialized_editors import (
     GameplayClassDefinitionEditorWidget, GameplayClassDebuggerWidget,
     ProjectSettingsEditorWidget,
     CollisionGenerationEditorWidget, EmitterStackEditorWidget, MaterialPreviewEditorWidget,
-    MaterialInstanceEditorWidget, MaterialCompileInspectorWidget, ShaderGeneratedCodeWidget,
-    TextureInspectorEditorWidget,
+    MaterialInstanceEditorWidget, MaterialInstancePreviewEditorWidget, MaterialInstanceCostEditorWidget,
+    MaterialCompileInspectorWidget, ShaderGeneratedCodeWidget,
+    MaterialParameterEditorWidget, MeshGeometryEditorWidget, MeshInspectionEditorWidget, MeshMaterialSlotsEditorWidget,
+    AnimationControllerDebuggerWidget, AnimationControllerParametersEditorWidget,
+    AnimationControllerTransitionsEditorWidget, AnimationStateMachineEditorWidget,
+    EffectTimelineEditorWidget, EffectScalabilityEditorWidget,
+    TextureInspectorEditorWidget, TextureChannelEditorWidget, TextureMipEditorWidget, TexturePlatformEditorWidget,
     MeshLodEditorWidget, ProceduralIKEditorWidget, VehicleRigEditorWidget,
-    InputMapEditorWidget, FxBudgetProfilerWidget, BuildProfileEditorWidget,
+    InputMapEditorWidget, InputActionsEditorWidget, InputContextsEditorWidget, InputLiveDebugWidget,
+    FxBudgetProfilerWidget, BuildProfileEditorWidget,
     ClothSetupEditorWidget, FabricMaterialEditorWidget, SkinWeightsEditorWidget,
     PhysicsAssetEditorWidget, PhysicsConstraintAssetEditorWidget,
+    PhysicsPhysicalAnimationEditorWidget, PhysicsSolverProfilesEditorWidget,
+    AnimationClipTimelineEditorWidget, AnimationClipCurvesEditorWidget, AnimationClipEventsEditorWidget,
+    AnimationRootMotionEditorWidget, AnimationCompressionEditorWidget,
+    SkeletonHierarchyEditorWidget, SkeletonSocketsEditorWidget, SkeletonRetargetPoseEditorWidget,
+    SkinDeformerStackEditorWidget, SkinTransferEditorWidget, SkinExportEditorWidget,
     CharacterLodEditorWidget,
     IKRigEditorWidget, IKRetargeterEditorWidget,
     GeometryOptimizationEditorWidget,
@@ -46,10 +59,13 @@ from tech_connector.ui.game_engine.sequence_editor import (
     SequenceBindingsEditorWidget, SequenceCurveEditorWidget, SequenceEditorWidget,
     SequenceRenderExportWidget,
 )
-from tech_connector.ui.game_engine.world_asset_editors import WorldAssetAuthoringWidget
+from tech_connector.ui.game_engine.world_asset_editors import NavigationToolsEditorWidget, WorldAssetAuthoringWidget
+from tech_connector.ui.game_engine.ui_document_editor import UIDocumentEditorWidget
+from tech_connector.game_engine.assets.ui_document_asset_service import UIDocumentAssetService, validate_ui_document
 
 
 EDITOR_PAGES: dict[str, tuple[str, ...]] = {
+    "tc.ui_document": ("Layout & Hierarchy", "Validation"),
     "tc.procedural_graph": ("Graph", "Parameters", "Geometry Preview", "Cook & Cache", "Runtime Generation", "Interchange", "Diagnostics"),
     "tc.terrain": ("Sculpt", "Paint", "Layers", "Erosion", "LODs & Collision", "Build & Validate"),
     "tc.foliage_type": ("Placement", "Terrain Rules", "Instance LODs", "Collision & Navigation", "Wind", "Validation"),
@@ -76,13 +92,13 @@ EDITOR_PAGES: dict[str, tuple[str, ...]] = {
     "tc.animation_clip": ("Timeline", "Curves", "Events", "Root Motion", "Compression"),
     "tc.blend_space": ("Blend Space", "Samples", "Axes", "Preview", "Diagnostics"),
     "tc.animation_mask": ("Skeleton", "Bone Weights", "Feathering", "Preview"),
-    "tc.animation_controller": ("State Graph", "Parameters", "Transitions", "Debugger"),
+    "tc.animation_controller": ("State Machine", "Parameters", "Transitions", "Pose Graph", "Debugger"),
     "tc.procedural_animation_profile": ("Rig Preview", "Ground IK", "Limb Setup", "Pelvis", "Runtime Debug"),
     "tc.control_rig": ("Rig Graph", "Controls", "Hierarchy", "Variables", "Rig LOD", "Debugger", "Validate & Bake"),
     "tc.ik_rig": ("Chains & Goals", "Solver Preview", "Excluded Bones", "Debug", "Validate & Cook"),
     "tc.ik_retargeter": ("Chain Mapping", "Retarget Poses", "Root Motion", "Preview", "Validate & Bake"),
     "tc.material": ("Preview", "Material Graph", "Parameters", "Compile", "Usage"),
-    "tc.material_instance": ("Preview", "Parent & Overrides", "Parameters", "Permutation Cost"),
+    "tc.material_instance": ("Preview", "Parent & Overrides", "Permutation Cost"),
     "tc.shader_graph": ("Preview", "Shader Graph", "Generated Code", "Compile Targets", "Errors"),
     "tc.texture": ("Preview & Import", "Channels", "Mips", "Compression", "Usage"),
     "tc.effect_system": ("Viewport", "System Timeline", "Emitter Stack", "Modules", "Scalability", "Profiler"),
@@ -323,6 +339,12 @@ class DedicatedAssetEditor(QWidget):
             return {}
 
     def _specialized_page(self, record, page_name: str, values: dict[str, Any]) -> QWidget | None:
+        if page_name == "Layout & Hierarchy" and record.asset_type == "tc.ui_document":
+            widget = UIDocumentEditorWidget(self)
+            widget.load_settings(values)
+            self._specialized_widgets.append(("__ui_document__", widget))
+            widget.changed.connect(self._mark_specialized_dirty)
+            return widget
         if page_name == "Graph" and record.asset_type == "tc.procedural_graph":
             widget = AssetNodeGraphWidget("procedural_geometry", self)
             widget.load_graph(dict(values.get("graph") or {}))
@@ -343,6 +365,15 @@ class DedicatedAssetEditor(QWidget):
                 WorldAssetService(self.project_root, self.database), record.asset_id, record.asset_type, self,
             )
             self._specialized_widgets.append(("__world_asset__", widget))
+            widget.changed.connect(self._mark_specialized_dirty)
+            widget.visualizationChanged.connect(self.worldVisualizationRequested)
+            widget.load_settings(values)
+            return widget
+        if record.asset_type == "tc.navigation_mesh" and page_name in {"Agents", "Areas & Costs", "Links", "Build", "Runtime Debug"}:
+            widget = NavigationToolsEditorWidget(
+                WorldAssetService(self.project_root, self.database), record.asset_id, page_name, self,
+            )
+            self._specialized_widgets.append(("__navigation__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             widget.visualizationChanged.connect(self.worldVisualizationRequested)
             widget.load_settings(values)
@@ -377,11 +408,25 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("__material_instance__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Preview" and record.asset_type == "tc.material_instance":
+            widget = MaterialInstancePreviewEditorWidget(self.project_root, self.database, record.asset_id, self)
+            widget.load_settings(values)
+            self._specialized_widgets.append(("__material_instance_preview__", widget))
+            widget.changed.connect(self._mark_specialized_dirty)
+            return widget
+        if page_name == "Permutation Cost" and record.asset_type == "tc.material_instance":
+            widget = MaterialInstanceCostEditorWidget(self.project_root, self.database, record.asset_id, self)
+            widget.load_settings(values)
+            self._specialized_widgets.append(("__material_instance_cost__", widget))
+            return widget
         if page_name == "Compile" and record.asset_type == "tc.material":
             widget = MaterialCompileInspectorWidget(self)
             widget.load_settings(values)
             self._specialized_widgets.append(("__material_compile__", widget))
             return widget
+        if page_name == "Parameters" and record.asset_type == "tc.material":
+            widget = MaterialParameterEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__material_parameters__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Generated Code" and record.asset_type == "tc.shader_graph":
             widget = ShaderGeneratedCodeWidget(self)
             widget.load_settings(values)
@@ -394,6 +439,15 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("__texture_import__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Channels" and record.asset_type == "tc.texture":
+            widget = TextureChannelEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__texture_channels__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Mips" and record.asset_type == "tc.texture":
+            widget = TextureMipEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__texture_mips__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Compression" and record.asset_type == "tc.texture":
+            widget = TexturePlatformEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__texture_platforms__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Hierarchy" and record.asset_type == "tc.prefab":
             widget = PrefabHierarchyEditorWidget(self.project_root, self.database, record.asset_id, self)
             widget.load_settings(values)
@@ -423,6 +477,12 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("__physics_asset__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Physical Animation" and record.asset_type == "tc.physics_asset":
+            widget = PhysicsPhysicalAnimationEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__physics_animation__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Profiles" and record.asset_type == "tc.physics_asset":
+            widget = PhysicsSolverProfilesEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__physics_profiles__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Constraint Setup" and record.asset_type == "tc.physics_constraint":
             widget = PhysicsConstraintAssetEditorWidget(self)
             widget.load_settings(values)
@@ -462,12 +522,24 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("__material_preview__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Viewport" and record.asset_type in {"tc.static_mesh", "tc.skeletal_mesh"}:
+            widget = MeshInspectionEditorWidget(record.source_path, record.asset_type, self)
+            widget.load_settings(values)
+            self._specialized_widgets.append(("__mesh_inspection__", widget))
+            widget.changed.connect(self._mark_specialized_dirty)
+            return widget
         if page_name == "LODs" and record.asset_type in {"tc.static_mesh", "tc.skeletal_mesh"}:
             widget = MeshLodEditorWidget(self)
             widget.load_lods(list(values.get("lods") or ()))
             self._specialized_widgets.append(("lods", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Geometry" and record.asset_type in {"tc.static_mesh", "tc.skeletal_mesh"}:
+            widget = MeshGeometryEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__mesh_geometry__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Materials" and record.asset_type in {"tc.static_mesh", "tc.skeletal_mesh"}:
+            widget = MeshMaterialSlotsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__mesh_materials__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "LODs & Bone LODs" and record.asset_type == "tc.skeletal_mesh":
             widget = CharacterLodEditorWidget(self)
             widget.load_settings(values)
@@ -486,12 +558,21 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("wheels", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Actions" and record.asset_type == "tc.input_map":
+            widget = InputActionsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__input_actions__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Contexts" and record.asset_type == "tc.input_map":
+            widget = InputContextsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__input_contexts__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Bindings" and record.asset_type == "tc.input_map":
             widget = InputMapEditorWidget(self)
             widget.load_settings(values)
             self._specialized_widgets.append(("__input_map__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Live Input Debug" and record.asset_type == "tc.input_map":
+            widget = InputLiveDebugWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__input_debug__", widget)); return widget
         if page_name == "Profiler" and record.asset_type == "tc.effect_system":
             widget = FxBudgetProfilerWidget(self)
             widget.load_effect(values)
@@ -510,34 +591,82 @@ class DedicatedAssetEditor(QWidget):
             self._specialized_widgets.append(("__skin_weights__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Deformers" and record.asset_type == "tc.skin_binding":
+            widget = SkinDeformerStackEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skin_deformers__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Transfer" and record.asset_type == "tc.skin_binding":
+            widget = SkinTransferEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skin_transfer__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Export" and record.asset_type == "tc.skin_binding":
+            widget = SkinExportEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skin_export__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Hierarchy" and record.asset_type == "tc.skeleton":
+            widget = SkeletonHierarchyEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skeleton_hierarchy__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Sockets" and record.asset_type == "tc.skeleton":
+            widget = SkeletonSocketsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skeleton_sockets__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Retarget Pose" and record.asset_type == "tc.skeleton":
+            widget = SkeletonRetargetPoseEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__skeleton_retarget__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Blend Space" and record.asset_type == "tc.blend_space":
             widget = BlendSpaceEditorWidget(self)
             widget.load_settings(values)
             self._specialized_widgets.append(("__blend_space__", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if page_name == "Parameters" and record.asset_type == "tc.animation_controller":
+            widget = AnimationControllerParametersEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_parameters__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "State Machine" and record.asset_type == "tc.animation_controller":
+            widget = AnimationStateMachineEditorWidget(self.project_root, self.database, self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_state_machine__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Transitions" and record.asset_type == "tc.animation_controller":
+            widget = AnimationControllerTransitionsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_transitions__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Debugger" and record.asset_type == "tc.animation_controller":
+            widget = AnimationControllerDebuggerWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_debugger__", widget)); return widget
+        if page_name == "System Timeline" and record.asset_type == "tc.effect_system":
+            widget = EffectTimelineEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__effect_timeline__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if page_name == "Scalability" and record.asset_type == "tc.effect_system":
+            widget = EffectScalabilityEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__effect_scalability__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         graph_pages = {
-            "Material Graph": "material", "Shader Graph": "shader", "State Graph": "animation_state",
+            "Material Graph": "material", "Shader Graph": "shader", "Pose Graph": "animation_state",
             "Event Graph": "gameplay", "Solver Graph": "simulation", "Components": "gameplay_components",
             "Rig Graph": "control_rig", "Sound Graph": "audio",
         }
         if page_name in graph_pages and not (record.asset_type == "tc.gameplay_class" and page_name == "Components"):
-            widget = AssetNodeGraphWidget(graph_pages[page_name], self)
+            widget = AssetNodeGraphWidget(
+                graph_pages[page_name], self, project_root=self.project_root,
+                database=self.database, asset_id=record.asset_id,
+            )
             widget.load_graph(dict(values.get("event_graph") or values.get("pose_graph") or values.get("graph") or values.get("solver_graph") or {}))
             key = "event_graph" if record.asset_type == "tc.gameplay_class" and page_name == "Event Graph" else ("solver_graph" if page_name == "Solver Graph" else ("pose_graph" if page_name == "State Graph" else "graph"))
             self._specialized_widgets.append((key, widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
+        if record.asset_type == "tc.animation_clip" and page_name == "Timeline":
+            widget = AnimationClipTimelineEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_timeline__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if record.asset_type == "tc.animation_clip" and page_name == "Curves":
+            widget = AnimationClipCurvesEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_curves__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if record.asset_type == "tc.animation_clip" and page_name == "Events":
+            widget = AnimationClipEventsEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_events__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if record.asset_type == "tc.animation_clip" and page_name == "Root Motion":
+            widget = AnimationRootMotionEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_root_motion__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
+        if record.asset_type == "tc.animation_clip" and page_name == "Compression":
+            widget = AnimationCompressionEditorWidget(self); widget.load_settings(values)
+            self._specialized_widgets.append(("__animation_compression__", widget)); widget.changed.connect(self._mark_specialized_dirty); return widget
         if page_name == "Curves":
             widget = AssetCurveEditorWidget(self)
             widget.load_keys(list(values.get("curves") or ()))
             self._specialized_widgets.append(("curves", widget))
-            widget.changed.connect(self._mark_specialized_dirty)
-            return widget
-        if page_name == "Timeline" and record.asset_type == "tc.animation_clip":
-            widget = DopesheetEditorWidget(self)
-            widget.load_events(list(values.get("events") or ()))
-            self._specialized_widgets.append(("events", widget))
             widget.changed.connect(self._mark_specialized_dirty)
             return widget
         if page_name == "Waveform":
@@ -639,6 +768,14 @@ class DedicatedAssetEditor(QWidget):
             for _key, widget in self._specialized_widgets:
                 if isinstance(widget, SequenceEditorWidget):
                     widget._values["render_settings"] = sender.render_settings()
+        if isinstance(sender, MaterialInstanceEditorWidget):
+            instance_values = sender.settings()
+            for _key, widget in self._specialized_widgets:
+                if isinstance(widget, MaterialInstancePreviewEditorWidget):
+                    instance_values.update(widget.settings())
+            for _key, widget in self._specialized_widgets:
+                if isinstance(widget, (MaterialInstancePreviewEditorWidget, MaterialInstanceCostEditorWidget)):
+                    widget.load_instance_settings(instance_values)
         if isinstance(sender, (AssetNodeGraphWidget, MaterialPreviewEditorWidget)):
             values = self._collect_editor_values()
             for _key, widget in self._specialized_widgets:
@@ -653,6 +790,22 @@ class DedicatedAssetEditor(QWidget):
                 if isinstance(widget, FxBudgetProfilerWidget):
                     effect_values["scalability"] = widget.scalability()
                     widget.load_effect(effect_values)
+        if isinstance(sender, (MeshLodEditorWidget, CharacterLodEditorWidget, MeshMaterialSlotsEditorWidget)):
+            mesh_values: dict[str, Any] = {}
+            if isinstance(sender, MeshLodEditorWidget): mesh_values["lods"] = sender.lods()
+            elif isinstance(sender, CharacterLodEditorWidget): mesh_values.update(sender.settings())
+            else: mesh_values.update(sender.settings())
+            for _key, widget in self._specialized_widgets:
+                if isinstance(widget, MeshInspectionEditorWidget): widget.update_related_settings(mesh_values)
+        if isinstance(sender, (AnimationStateMachineEditorWidget, AnimationControllerParametersEditorWidget, AnimationControllerTransitionsEditorWidget)):
+            controller_values = self._collect_editor_values()
+            for _key, widget in self._specialized_widgets:
+                if isinstance(widget, AnimationControllerDebuggerWidget): widget.load_settings(controller_values)
+        if isinstance(sender, NavigationToolsEditorWidget):
+            navigation_values = self._collect_editor_values()
+            for _key, widget in self._specialized_widgets:
+                if widget is not sender and isinstance(widget, (NavigationToolsEditorWidget, WorldAssetAuthoringWidget)):
+                    widget.load_settings(navigation_values)
         self._specialized_dirty = True
         self.diagnostics.setText("UNSAVED • Specialized editor values changed. Save to update the asset and invalidate its cook.")
         self._edit_capture_timer.start()
@@ -695,6 +848,8 @@ class DedicatedAssetEditor(QWidget):
                 values.update(widget.settings())
             elif isinstance(widget, MaterialPreviewEditorWidget):
                 values.update(widget.settings())
+            elif isinstance(widget, MaterialInstancePreviewEditorWidget):
+                values.update(widget.settings())
             elif isinstance(widget, MeshLodEditorWidget):
                 values[key] = widget.lods()
             elif isinstance(widget, ProceduralIKEditorWidget):
@@ -702,7 +857,28 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, VehicleRigEditorWidget):
                 values[key] = widget.wheels()
             elif isinstance(widget, InputMapEditorWidget):
-                values.update(widget.settings())
+                binding_values = widget.settings()
+                actions = deepcopy(dict(values.get("actions") or {}))
+                action_editor = next(
+                    (editor for _editor_key, editor in self._specialized_widgets
+                     if isinstance(editor, InputActionsEditorWidget)), None,
+                )
+                original_names = set(action_editor._actions) if action_editor is not None else set()
+                renamed_actions: dict[str, str] = {}
+                if action_editor is not None:
+                    for row in range(action_editor.table.rowCount()):
+                        name_item = action_editor.table.item(row, 0)
+                        if name_item is not None:
+                            renamed_actions[str(name_item.data(Qt.UserRole) or name_item.text())] = name_item.text()
+                for name, descriptor in dict(binding_values.get("actions") or {}).items():
+                    target_name = renamed_actions.get(name, name)
+                    if name in original_names and target_name not in actions:
+                        continue  # An action removed in the Actions editor must stay removed.
+                    merged = dict(actions.get(target_name) or {})
+                    merged.setdefault("value_type", descriptor.get("value_type", "button"))
+                    merged["bindings"] = list(descriptor.get("bindings") or ())
+                    actions[target_name] = merged
+                values["actions"] = actions
             elif isinstance(widget, FxBudgetProfilerWidget):
                 values["scalability"] = widget.scalability()
             elif isinstance(widget, BuildProfileEditorWidget):
@@ -736,6 +912,31 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, ShaderGeneratedCodeWidget):
                 values.update(widget.settings())
             elif isinstance(widget, WorldAssetAuthoringWidget):
+                values.update(widget.settings())
+            elif isinstance(widget, UIDocumentEditorWidget):
+                values.update(widget.settings())
+            elif isinstance(widget, NavigationToolsEditorWidget):
+                values.update(widget.settings())
+            elif isinstance(widget, (TextureChannelEditorWidget, TextureMipEditorWidget, TexturePlatformEditorWidget,
+                                     InputActionsEditorWidget, InputContextsEditorWidget,
+                                     PhysicsPhysicalAnimationEditorWidget, PhysicsSolverProfilesEditorWidget)):
+                values.update(widget.settings())
+            elif isinstance(widget, (
+                AnimationClipTimelineEditorWidget, AnimationClipCurvesEditorWidget, AnimationClipEventsEditorWidget,
+                AnimationRootMotionEditorWidget, AnimationCompressionEditorWidget,
+                SkeletonHierarchyEditorWidget, SkeletonSocketsEditorWidget, SkeletonRetargetPoseEditorWidget,
+                SkinDeformerStackEditorWidget, SkinTransferEditorWidget, SkinExportEditorWidget,
+            )):
+                values.update(widget.settings())
+            elif isinstance(widget, AnimationStateMachineEditorWidget):
+                values.update(widget.settings())
+            elif isinstance(widget, AnimationControllerTransitionsEditorWidget):
+                widget.apply_to(values)
+            elif isinstance(widget, (
+                MaterialParameterEditorWidget, MeshGeometryEditorWidget, MeshInspectionEditorWidget, MeshMaterialSlotsEditorWidget,
+                AnimationControllerParametersEditorWidget,
+                EffectTimelineEditorWidget, EffectScalabilityEditorWidget,
+            )):
                 values.update(widget.settings())
         return values
 
@@ -790,6 +991,10 @@ class DedicatedAssetEditor(QWidget):
                 widget.load_settings(values)
             elif isinstance(widget, WorldAssetAuthoringWidget):
                 widget.load_settings(values)
+            elif isinstance(widget, UIDocumentEditorWidget):
+                widget.load_settings(values)
+            elif isinstance(widget, NavigationToolsEditorWidget):
+                widget.load_settings(values)
             elif isinstance(widget, (AudioMixerEditorWidget, AudioAttenuationEditorWidget)):
                 widget.load_settings(values)
             elif isinstance(widget, (DataSchemaEditorWidget, ComponentArchetypeEditorWidget, GameplayClassDefinitionEditorWidget, ProjectSettingsEditorWidget)):
@@ -807,6 +1012,10 @@ class DedicatedAssetEditor(QWidget):
             elif isinstance(widget, VehicleRigEditorWidget):
                 widget.load_wheels(list(value or ()))
             elif isinstance(widget, InputMapEditorWidget):
+                widget.load_settings(values)
+            elif isinstance(widget, (InputActionsEditorWidget, InputContextsEditorWidget)):
+                widget.load_settings(values)
+            elif isinstance(widget, InputLiveDebugWidget):
                 widget.load_settings(values)
             elif isinstance(widget, FxBudgetProfilerWidget):
                 widget.load_effect(values)
@@ -832,11 +1041,32 @@ class DedicatedAssetEditor(QWidget):
                 widget.load_settings(values)
             elif isinstance(widget, MaterialInstanceEditorWidget):
                 widget.load_settings(values)
+            elif isinstance(widget, (MaterialInstancePreviewEditorWidget, MaterialInstanceCostEditorWidget)):
+                widget.load_instance_settings(values)
             elif isinstance(widget, MaterialCompileInspectorWidget):
                 widget.load_settings(values)
             elif isinstance(widget, TextureInspectorEditorWidget):
                 widget.load_settings(values)
+            elif isinstance(widget, (TextureChannelEditorWidget, TextureMipEditorWidget, TexturePlatformEditorWidget)):
+                widget.load_settings(values)
             elif isinstance(widget, ShaderGeneratedCodeWidget):
+                widget.load_settings(values)
+            elif isinstance(widget, (PhysicsPhysicalAnimationEditorWidget, PhysicsSolverProfilesEditorWidget)):
+                widget.load_settings(values)
+            elif isinstance(widget, (
+                AnimationClipTimelineEditorWidget, AnimationClipCurvesEditorWidget, AnimationClipEventsEditorWidget,
+                AnimationRootMotionEditorWidget, AnimationCompressionEditorWidget,
+                SkeletonHierarchyEditorWidget, SkeletonSocketsEditorWidget, SkeletonRetargetPoseEditorWidget,
+                SkinDeformerStackEditorWidget, SkinTransferEditorWidget, SkinExportEditorWidget,
+            )):
+                widget.load_settings(values)
+            elif isinstance(widget, (AnimationStateMachineEditorWidget, AnimationControllerDebuggerWidget)):
+                widget.load_settings(values)
+            elif isinstance(widget, (
+                MaterialParameterEditorWidget, MeshGeometryEditorWidget, MeshInspectionEditorWidget, MeshMaterialSlotsEditorWidget,
+                AnimationControllerParametersEditorWidget, AnimationControllerTransitionsEditorWidget,
+                EffectTimelineEditorWidget, EffectScalabilityEditorWidget,
+            )):
                 widget.load_settings(values)
         self._applying_snapshot = False
         self._specialized_dirty = self.session.dirty
@@ -903,14 +1133,63 @@ class DedicatedAssetEditor(QWidget):
         if record is None or self._mode not in {"authored", "import"}:
             return False
         self._edit_capture_timer.stop()
+        specialized_issues = []
+        for _key, widget in self._specialized_widgets:
+            validator = getattr(widget, "validation_issues", None)
+            if callable(validator):
+                specialized_issues.extend(str(value) for value in validator())
+        if record is not None and record.asset_type == "tc.ui_document":
+            specialized_issues.extend(
+                item.message for item in validate_ui_document(self._collect_editor_values())
+                if item.severity == "error" and item.message not in specialized_issues
+            )
+        if record is not None and record.asset_type in {"tc.animation_clip", "tc.animation_controller", "tc.skeleton", "tc.skin_binding"}:
+            candidate = self._collect_editor_values()
+            cross_validator = {
+                "tc.animation_clip": validate_animation_clip,
+                "tc.animation_controller": validate_animation_controller,
+                "tc.skeleton": validate_skeleton_properties,
+                "tc.skin_binding": validate_skin_binding_properties,
+            }[record.asset_type]
+            specialized_issues.extend(
+                item.message for item in cross_validator(candidate)
+                if item.severity == "error" and item.message not in specialized_issues
+            )
+        if specialized_issues:
+            self.diagnostics.setText("\n".join(f"[ERROR] {message}" for message in specialized_issues))
+            self.statusMessage.emit("Save blocked • Fix the asset editor validation errors first.")
+            return False
         values = self._collect_editor_values()
+        cross_issues = []
+        if record.asset_type == "tc.animation_clip":
+            cross_issues = [item.message for item in validate_animation_clip(values) if item.severity == "error"]
+        elif record.asset_type == "tc.animation_controller":
+            cross_issues = [item.message for item in validate_animation_controller(values) if item.severity == "error"]
+        elif record.asset_type == "tc.skeleton":
+            cross_issues = [item.message for item in validate_skeleton_properties(values) if item.severity == "error"]
+        elif record.asset_type == "tc.skin_binding":
+            cross_issues = [item.message for item in validate_skin_binding_properties(values) if item.severity == "error"]
+        if cross_issues:
+            self.diagnostics.setText("\n".join(f"[ERROR] {message}" for message in cross_issues))
+            self.statusMessage.emit("Save blocked • Fix the cross-page asset validation errors first.")
+            return False
         updated = None
-        if self._mode == "authored" and record.asset_type == "tc.gameplay_class":
+        if self._mode == "authored" and record.asset_type == "tc.ui_document":
+            try:
+                UIDocumentAssetService(self.project_root, self.database).update(record.asset_id, values, replace=True)
+            except Exception as exc:
+                self._show_error(str(exc))
+                return False
+            updated = self.database.asset(record.asset_id)
+        elif self._mode == "authored" and record.asset_type == "tc.gameplay_class":
             try:
                 GameplayClassService(self.project_root, self.database).update(record.asset_id, values, replace=True)
             except Exception as exc:
                 self._show_error(str(exc))
                 return False
+            updated = self.database.asset(record.asset_id)
+        elif self._mode == "authored" and record.asset_type in {"tc.animation_clip", "tc.blend_space", "tc.animation_mask", "tc.animation_controller"}:
+            AnimationAssetService(self.project_root, self.database).update(record.asset_id, values, replace=True)
             updated = self.database.asset(record.asset_id)
         elif self._mode == "authored":
             payload = json.loads(record.source_path.read_text(encoding="utf-8"))
@@ -941,7 +1220,28 @@ class DedicatedAssetEditor(QWidget):
                 str(value) for value in values.get("include_asset_ids") or ()
                 if self.database.asset(str(value)) is not None
             ]
-            self.database.set_dependencies(updated.asset_id, [(value, "shader_include") for value in include_ids])
+            function_ids = [
+                str(dict(node.get("parameters") or {}).get("function_asset_id") or "")
+                for node in dict(values.get("graph") or {}).get("nodes") or () if isinstance(node, dict)
+                and str(node.get("opcode") or "") == "material_function"
+            ]
+            dependencies = [(value, "shader_include") for value in include_ids]
+            dependencies.extend(
+                (value, "shader_function") for value in function_ids
+                if value and value != updated.asset_id and self.database.asset(value) is not None
+            )
+            self.database.set_dependencies(updated.asset_id, sorted(set(dependencies)))
+            updated = self.database.asset(updated.asset_id) or updated
+        if updated.asset_type == "tc.skin_binding":
+            dependency_rows = []
+            for key, kind in (("mesh_id", "skeletal_mesh"), ("skeleton_id", "skeleton")):
+                value = str(values.get(key) or "")
+                if value and self.database.asset(value) is not None:
+                    dependency_rows.append((value, kind))
+            transfer_source = str(dict(values.get("transfer") or {}).get("source_skin_binding_id") or "")
+            if transfer_source and self.database.asset(transfer_source) is not None and transfer_source != updated.asset_id:
+                dependency_rows.append((transfer_source, "skin_transfer_source"))
+            self.database.set_dependencies(updated.asset_id, dependency_rows)
             updated = self.database.asset(updated.asset_id) or updated
         if updated.asset_type in WORLD_ASSET_TYPES:
             WorldAssetService(self.project_root, self.database).update(updated.asset_id, values, replace=True)
@@ -1086,6 +1386,9 @@ class DedicatedAssetEditor(QWidget):
 
     def preview(self) -> None:
         record = self.database.asset(self.asset_id)
+        if record is not None and record.asset_type == "tc.ui_document":
+            self.pages.setCurrentIndex(0)
+            return
         if record is not None:
             self.previewRequested.emit(str(record.source_path), record.asset_type, record.asset_id)
 

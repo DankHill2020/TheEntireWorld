@@ -79,9 +79,9 @@ Provider Setup dialog -> Paste API key once -> store in Windows Credential Manag
 The model selector stores provider-prefixed model strings:
 
 ```text
-ollama:qwen2.5-coder:14b
-ollama:qwen3:14b
-openai:gpt-5.6-terra
+ollama:qwen3.5:4b
+ollama:qwen3.5:9b
+openai:gpt-6.1-sol
 google:gemini-3.1-pro
 anthropic:claude-sonnet-5
 ```
@@ -94,9 +94,32 @@ OpenAI API-key requests use `/v1/responses`, including `instructions`, reasoning
 controls, text verbosity, and `text.format` structured output. See
 `CODE_AGENT_WORKFLOW.md` for the visible depth presets and authority contract.
 
-The router settings currently default local code work to
-`qwen2.5-coder:14b` and planning/deep Unreal work to `qwen3:14b`, unless the
-user changes the values in settings.
+## Hardware-aware local models
+
+The default `local_model_policy` is `hardware_aware`. Tech Connector detects
+available NVIDIA VRAM and keeps a speed-first primary model separate from the
+local quality lane. Explicit `custom_model_mappings` still win. Set the policy
+to `manual` when every role should use the model fields exactly as configured.
+
+For an 8 GB GPU the recommended layout is:
+
+```text
+Intent, general, code, and visual: qwen3.5:4b
+Deeper local work:                 qwen3.5:9b
+Maximum or difficult work:         configured cloud model
+Default context:                   4096 tokens
+Maximum routine context:           8192 tokens
+Parallel local generations:        1
+Keep-alive:                        30 minutes
+```
+
+The 4B model is small enough to remain GPU-resident and is the latency-first
+choice. The 9B model is optional: it improves the local quality lane but is a
+tight fit on 8 GB once context memory is included. `qwen3-coder:30b` is reserved
+for systems with at least 24 GB VRAM rather than spilling most inference to CPU.
+
+The public API exposes this policy through `api.ai.local_recommendation()` and
+can measure the real machine through `api.ai.benchmark_local()`.
 
 ## Fallback Behavior
 

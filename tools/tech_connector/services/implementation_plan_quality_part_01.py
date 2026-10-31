@@ -2272,7 +2272,32 @@ def _mechanics(
             "progress rather than a fixed illustrative range. When the callback is "
             "None, continue without emitting."
         )
-    if re.search(
+    non_bool_integer_bounds = bool(re.search(
+        r"\b(?:integer|integers|int)\s+"
+        r"(?:other\s+than|excluding)\s+bool\b",
+        text,
+        re.IGNORECASE,
+    ))
+    if non_bool_integer_bounds:
+        comparison = re.search(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(<=|>=|<|>)\s*"
+            r"([A-Za-z_][A-Za-z0-9_]*)\b",
+            text,
+        )
+        if comparison:
+            left, operator, right = comparison.groups()
+            steps.append(
+                f"Reject bool and non-integer values for `{left}` and `{right}` "
+                f"using exact integer type checks, then enforce `{left} "
+                f"{operator} {right}` as the requested bound."
+            )
+        else:
+            steps.append(
+                "Reject bool and non-integer values for each named integer "
+                "field using exact integer type checks before enforcing its "
+                "requested bound."
+            )
+    if not non_bool_integer_bounds and re.search(
         r"\b(?:exclude|excluding|omit|filter(?:ing|ed)?)\b",
         text,
         re.IGNORECASE,
@@ -2282,14 +2307,15 @@ def _mechanics(
             "request, not an arbitrary case-sensitive substring. Prove that similar "
             "but non-equal values remain included."
         )
-    if re.search(
-        r"\b(?:sort|sorted|order|ordered)\b",
-        text,
-        re.IGNORECASE,
-    ):
+    if re.search(r"\b(?:sort|sorted)\b", text, re.IGNORECASE):
         steps.append(
             "Define a total deterministic ordering key. Preserve the requested "
             "primary order and add a stable semantic tie-breaker."
+        )
+    elif re.search(r"\b(?:order|ordered)\b", text, re.IGNORECASE):
+        steps.append(
+            "Preserve the explicitly requested order; if it is input or project "
+            "order, retain first-seen items without sorting them."
         )
     if re.search(
         r"\btemporary\b[^.!?\n]{0,80}\b(?:file|path|FBX|asset)\b"
@@ -2489,10 +2515,16 @@ def _mechanics(
             "ValueError without mutating the instance when that condition is true."
         )
     if re.search(r"\bblank\s+names?\b", text, flags=re.IGNORECASE):
-        specific_validation_steps.append(
-            "Normalize each command name with `strip().casefold()` and raise "
-            "ValueError before registration when the normalized value is empty."
-        )
+        if re.search(r"\b(?:command|registry|register|alias)\b", text, re.IGNORECASE):
+            specific_validation_steps.append(
+                "Normalize each command name with `strip().casefold()` and raise "
+                "ValueError before registration when the normalized value is empty."
+            )
+        else:
+            specific_validation_steps.append(
+                "Strip each candidate name and raise ValueError for a blank name "
+                "before producing output or mutating input state."
+            )
     if re.search(
         r"\bnon[- ]?callable\b[^.!?\n]{0,80}\bhandlers?\b"
         r"|\bhandlers?\b[^.!?\n]{0,80}\bnon[- ]?callable\b",
@@ -2507,7 +2539,7 @@ def _mechanics(
         r"\bduplicate\b[^.!?\n]{0,100}\b(?:names?|aliases?)\b",
         text,
         flags=re.IGNORECASE,
-    ):
+    ) and re.search(r"\b(?:command|registry|register|alias)\b", text, re.IGNORECASE):
         specific_validation_steps.append(
             "While holding the registry lock, compare the normalized canonical name "
             "and every normalized alias against the complete existing name/alias "

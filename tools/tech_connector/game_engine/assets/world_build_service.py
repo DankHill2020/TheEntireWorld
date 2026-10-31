@@ -100,6 +100,9 @@ class WorldBuildService:
         values = self.world.properties(asset_id)
         terrain_ids = _terrain_ids(values, self.database)
         agents = [dict(row) for row in values.get("agents") or ()]
+        areas = {str(row.get("name") or "Walkable"): dict(row) for row in values.get("areas") or ()}
+        areas.setdefault("Walkable", {"name": "Walkable", "cost": 1.0})
+        modifiers = [dict(row) for row in values.get("modifiers") or () if bool(dict(row).get("enabled", True))]
         tiles: list[dict[str, Any]] = []; polygon_count = 0
         tile_size = max(1.0, float(values.get("tile_size", 1024.0)))
         for terrain_id in terrain_ids:
@@ -116,10 +119,19 @@ class WorldBuildService:
                             continue
                         heights = [terrain.heights[z * terrain.width + x], terrain.heights[z * terrain.width + x + 1],
                                    terrain.heights[(z + 1) * terrain.width + x + 1], terrain.heights[(z + 1) * terrain.width + x]]
+                        u = (x + 0.5) / max(1, terrain.width - 1); v = (z + 0.5) / max(1, terrain.depth - 1)
+                        area_name = "Walkable"
+                        for modifier in modifiers:
+                            minimum, maximum = list(modifier.get("minimum") or [0, 0]), list(modifier.get("maximum") or [1, 1])
+                            if float(minimum[0]) <= u <= float(maximum[0]) and float(minimum[-1]) <= v <= float(maximum[-1]):
+                                area_name = str(modifier.get("area") or "Walkable")
+                        area_cost = float(areas.get(area_name, areas["Walkable"]).get("cost", 1.0))
+                        if area_cost < 0.0:
+                            continue
                         polygon = {"vertices": [[world_x, heights[0], world_z], [world_x + terrain.cell_size, heights[1], world_z],
                                                  [world_x + terrain.cell_size, heights[2], world_z + terrain.cell_size],
                                                  [world_x, heights[3], world_z + terrain.cell_size]],
-                                   "area": "Walkable", "cost": 1.0, "slope": slope}
+                                   "area": area_name, "cost": area_cost, "slope": slope}
                         by_tile.setdefault((int(world_x // tile_size), int(world_z // tile_size)), []).append(polygon)
                         polygon_count += 1
                 for (tile_x, tile_z), polygons in sorted(by_tile.items()):
@@ -127,7 +139,8 @@ class WorldBuildService:
                                   "agent": agent_name, "x": tile_x, "z": tile_z, "polygons": polygons})
         payload = {"schema": WORLD_BUILD_SCHEMA, "kind": "navigation_tiles", "asset_id": asset_id,
                    "platform": platform, "quality": quality, "tile_size": tile_size, "tiles": tiles,
-                   "areas": list(values.get("areas") or ()), "off_mesh_links": list(values.get("off_mesh_links") or ())}
+                   "areas": list(values.get("areas") or ()), "modifiers": modifiers,
+                   "off_mesh_links": list(values.get("off_mesh_links") or ())}
         return payload, {"tile_count": len(tiles), "polygon_count": polygon_count,
                          "agent_count": len(agents), "terrain_count": len(terrain_ids)}
 

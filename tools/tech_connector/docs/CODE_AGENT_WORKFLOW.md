@@ -25,18 +25,18 @@ OpenAI API-key requests use the Responses API. The current presets are:
 
 | Depth | Model | Reasoning | Context | Verbosity |
 | --- | --- | --- | --- | --- |
-| Fast | `gpt-5.6-luna` | low | current turn | low |
-| Balanced | `gpt-5.6-terra` | medium | all turns | medium |
-| Deep | `gpt-5.6-sol` | high | all turns | medium |
-| Maximum quality | `gpt-5.6-sol` | max, pro | all turns | high |
+| Fast | `gpt-6-luna` | low | current turn | low |
+| Balanced | `gpt-6.1-sol` | medium | all turns | medium |
+| Deep | `gpt-6.1-sol` | high | all turns | medium |
+| Maximum quality | `gpt-6-astra` | max, pro | all turns | high |
 
 The model selector follows the chosen depth when OpenAI automatic model selection
-is enabled and the selected model belongs to the GPT-5.6/Codex family. Explicitly
-selected unrelated models are preserved.
+is enabled and the selected model belongs to a supported GPT-6, GPT-5.6, or
+GPT-5.3 Codex family. Explicitly selected unrelated models are preserved.
 
 Structured output is sent as `text.format`; developer instructions use
 `instructions`; response text is read from `output_text` or the typed output
-content sequence. Temperature is omitted for GPT-5 and reasoning model families.
+content sequence. Temperature is omitted for GPT-5, GPT-6, and reasoning model families.
 
 ## Model catalog discovery
 

@@ -14,12 +14,12 @@ import time
 from pathlib import Path
 from tech_connector.bridges.error_detection import bridge_output_has_error
 from tech_connector.bridges.host_bridge import HostBridgeInfo, call_python_function_via_execute
-from tech_connector.bridges.session_preferences import preferred_session_port
+from tech_connector.bridges.session_discovery import candidate_session_ports
 from tech_connector.bridges.session_authorization import (
     bridge_session_token,
     embedded_bridge_authorization_source,
 )
-from tech_connector.models.constants import APP_ROOT, TOOLS_ROOT
+from tech_connector.models.constants import APP_DIR, APP_ROOT, TOOLS_ROOT
 from tech_connector.game_engine.scene.scene_delta_contract import normalize_frame_delta
 
 
@@ -204,6 +204,7 @@ def _write_port_files(port):
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         paths.append(Path(local_app_data) / "TA_AI_Studio_MCPHost" / "blender_port.txt")
+        paths.append(Path(local_app_data) / "TechConnector" / "blender_port.txt")
     app_root = os.environ.get("TECH_CONNECTOR_APP_ROOT", "").strip()
     if app_root:
         paths.append(Path(app_root) / "bridges" / "ports" / "blender_port.txt")
@@ -285,7 +286,7 @@ def _handle_client(conn):
                 if not _tech_connector_bridge_authorized(payload):
                     response = {
                         "ok": False,
-                        "error": "Tech Connector activation is required for this DCC bridge.",
+                        "error": "A valid local Tech Connector bridge session is required.",
                         "code": "bridge_authorization_required",
                     }
                     conn.sendall((json.dumps(response) + "\\n").encode("utf-8"))
@@ -557,8 +558,14 @@ if addon_dir not in sys.path:
     sys.path.append(addon_dir)
 
 module = importlib.import_module("{ADDON_MODULE}")
-if hasattr(module, "register"):
-    module.register()
+
+def register():
+    if hasattr(module, "register"):
+        module.register()
+
+def unregister():
+    if hasattr(module, "unregister"):
+        module.unregister()
 """
 
 
@@ -596,33 +603,26 @@ class BlenderBridge(DCCBridgeDelegateMixin):
         default_port=7021,
         setup_script="bridges/blender/blender_bridge.py",
         supports_direct_execute=True,
-        supports_mcp=False,
+        supports_mcp=True,
     )
     DEFAULT_PORT = 7021
+    PORT_FILES = [
+        str(APP_DIR / "blender_port.txt"),
+        str(Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "TA_AI_Studio_MCPHost" / "blender_port.txt"),
+    ]
     SYS_PATHS = [
         str(TOOLS_ROOT),
         str(APP_ROOT),
     ]
 
     def _candidate_ports(self) -> list[int]:
-        candidates = []
-        preferred_port = preferred_session_port("blender")
-        if preferred_port:
-            candidates.append(preferred_port)
-
-        env_port = os.environ.get("BLENDER_COMMAND_PORT")
-        if env_port:
-            try:
-                candidates.append(int(env_port))
-            except Exception:
-                pass
-
-        try:
-            scan_count = int(os.environ.get("BLENDER_COMMAND_PORT_SCAN_COUNT", "10"))
-        except (TypeError, ValueError):
-            scan_count = 10
-        candidates.extend(range(self.DEFAULT_PORT, self.DEFAULT_PORT + max(1, min(100, scan_count))))
-        return list(dict.fromkeys(int(port) for port in candidates if int(port) > 0))
+        return candidate_session_ports(
+            "blender",
+            port_files=self.PORT_FILES,
+            environment_variable="BLENDER_COMMAND_PORT",
+            default_port=self.DEFAULT_PORT,
+            scan_count_variable="BLENDER_COMMAND_PORT_SCAN_COUNT",
+        )
 
     @staticmethod
     def _is_port_open(host: str, port: int) -> bool:

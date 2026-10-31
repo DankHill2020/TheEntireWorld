@@ -11,7 +11,8 @@ from tech_connector.game_engine.integration.adaptive_scene_command_service impor
 from tech_connector.game_engine.integration.capability_maturity_service import audit_capability_maturity
 from tech_connector.game_engine.integration.dcc_release_readiness_service import audit_dcc_release_readiness
 from tech_connector.game_engine.integration.playable_project_qualification_service import (
-    load_playable_project_qualification, validate_playable_project_qualification,
+    load_playable_project_qualification, playable_project_source_fingerprint,
+    validate_playable_project_qualification,
 )
 from tech_connector.game_engine.integration.fx_qualification_service import (
     load_realtime_fx_qualification, validate_realtime_fx_qualification,
@@ -33,7 +34,8 @@ from tech_connector.game_engine.integration.maya_version_qualification_service i
 )
 from tech_connector.packaging.release_gate import (
     publication_candidates, sensitive_artifacts, validate_github_root_surface, validate_legal_surface,
-    validate_production_configuration, validate_production_legal_approval, validate_production_source_access,
+    validate_production_configuration, validate_production_legal_approval, validate_production_readiness,
+    validate_production_source_access,
 )
 
 
@@ -104,9 +106,14 @@ def audit_launch_readiness(
                             {"operation_count": sum(len(value) for key, value in contract.items() if key.endswith("_operations") and isinstance(value, list))}))
 
     project_root = Path(getattr(editor_api, "project_root", root))
+    # The qualification receipts all cover the same source tree. Hash it once
+    # per audit while keeping each standalone validator independently fresh.
+    source_fingerprint = playable_project_source_fingerprint(root)
     playable_receipt_path = project_root / ".tech_connector" / "qualification" / "playable_project" / "playable_project_qualification.json"
     playable_receipt = load_playable_project_qualification(playable_receipt_path)
-    playable_validation = validate_playable_project_qualification(root, playable_receipt)
+    playable_validation = validate_playable_project_qualification(
+        root, playable_receipt, source_fingerprint=source_fingerprint,
+    )
     playable_blockers = [f"playable_project.{gate}" for gate in playable_validation["gates"]]
     gates.append(LaunchGate(
         "playable_project_qualification", "passed" if not playable_blockers else "blocked",
@@ -116,7 +123,10 @@ def audit_launch_readiness(
     ))
     fx_receipt_path = project_root / ".tech_connector" / "qualification" / "realtime_fx" / "realtime_fx_qualification.json"
     fx_receipt = load_realtime_fx_qualification(fx_receipt_path)
-    fx_validation = validate_realtime_fx_qualification(root, fx_receipt, require_production_backend=True)
+    fx_validation = validate_realtime_fx_qualification(
+        root, fx_receipt, require_production_backend=True,
+        source_fingerprint=source_fingerprint,
+    )
     fx_blockers = [f"realtime_fx.{gate}" for gate in fx_validation["gates"]]
     gates.append(LaunchGate(
         "realtime_fx_qualification", "passed" if not fx_blockers else "blocked", tuple(fx_blockers),
@@ -128,7 +138,9 @@ def audit_launch_readiness(
     ))
     world_receipt_path = project_root / ".tech_connector" / "qualification" / "world_production" / "world_production_qualification.json"
     world_receipt = load_world_production_qualification(world_receipt_path)
-    world_validation = validate_world_production_qualification(root, world_receipt)
+    world_validation = validate_world_production_qualification(
+        root, world_receipt, source_fingerprint=source_fingerprint,
+    )
     world_blockers = [f"world_production.{gate}" for gate in world_validation["gates"]]
     gates.append(LaunchGate(
         "world_production_qualification", "passed" if not world_blockers else "blocked", tuple(world_blockers),
@@ -138,7 +150,9 @@ def audit_launch_readiness(
     ))
     content_receipt_path = project_root / ".tech_connector" / "qualification" / "content_production" / "content_production_qualification.json"
     content_receipt = load_content_production_qualification(content_receipt_path)
-    content_validation = validate_content_production_qualification(root, content_receipt)
+    content_validation = validate_content_production_qualification(
+        root, content_receipt, source_fingerprint=source_fingerprint,
+    )
     content_blockers = [f"content_production.{gate}" for gate in content_validation["gates"]]
     gates.append(LaunchGate(
         "content_production_qualification", "passed" if not content_blockers else "blocked", tuple(content_blockers),
@@ -179,7 +193,9 @@ def audit_launch_readiness(
 
     capability_receipt_path = project_root / ".tech_connector" / "qualification" / "capabilities" / "capability_qualification.json"
     capability_receipt = load_capability_qualification(capability_receipt_path)
-    capability_validation = validate_capability_qualification(root, capability_receipt)
+    capability_validation = validate_capability_qualification(
+        root, capability_receipt, source_fingerprint=source_fingerprint,
+    )
     capability_evidence_blockers = [f"capability_evidence.{gate}" for gate in capability_validation["gates"]]
     gates.append(LaunchGate(
         "capability_evidence_qualification", "passed" if not capability_evidence_blockers else "blocked",
@@ -191,7 +207,9 @@ def audit_launch_readiness(
 
     regression_receipt_path = project_root / ".tech_connector" / "qualification" / "release_regression" / "release_regression_qualification.json"
     regression_receipt = load_release_regression_qualification(regression_receipt_path)
-    regression_validation = validate_release_regression_qualification(root, regression_receipt)
+    regression_validation = validate_release_regression_qualification(
+        root, regression_receipt, source_fingerprint=source_fingerprint,
+    )
     regression_blockers = [f"release_regression.{gate}" for gate in regression_validation["gates"]]
     gates.append(LaunchGate(
         "release_regression_qualification", "passed" if not regression_blockers else "blocked",
@@ -203,7 +221,9 @@ def audit_launch_readiness(
     ))
     maya_receipt_path = project_root / ".tech_connector" / "qualification" / "maya_versions" / "maya_version_qualification.json"
     maya_receipt = load_maya_version_qualification(maya_receipt_path)
-    maya_validation = validate_maya_version_qualification(root, maya_receipt)
+    maya_validation = validate_maya_version_qualification(
+        root, maya_receipt, source_fingerprint=source_fingerprint,
+    )
     maya_blockers = [f"maya_versions.{gate}" for gate in maya_validation["gates"]]
     gates.append(LaunchGate(
         "maya_version_compatibility", "passed" if not maya_blockers else "blocked",
@@ -232,7 +252,7 @@ def audit_launch_readiness(
 
     if production:
         production_failures = [*validate_production_configuration(root), *validate_production_legal_approval(root),
-                               *validate_production_source_access(root)]
+                               *validate_production_source_access(root), *validate_production_readiness(root)]
         gates.append(LaunchGate("production_controls", "passed" if not production_failures else "blocked", tuple(production_failures)))
     blocking = [gate.gate for gate in gates if gate.status != "passed"]
     return {"schema": LAUNCH_READINESS_SCHEMA, "status": "launch_ready" if not blocking else "blocked",

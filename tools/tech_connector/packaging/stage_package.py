@@ -40,7 +40,7 @@ def matches_any(path_text: str, patterns: list[str]) -> bool:
 
 def copy_tree_entry(src_root: Path, rel: str, out_root: Path, excludes: list[str]) -> None:
     src = src_root / rel
-    if not src.exists():
+    if not src.exists() or matches_any(rel, excludes):
         return
     if src.is_file():
         if matches_any(rel, excludes):
@@ -51,16 +51,27 @@ def copy_tree_entry(src_root: Path, rel: str, out_root: Path, excludes: list[str
         make_writable(dest)
         return
 
-    for path in src.rglob("*"):
-        rel_path = path.relative_to(src_root).as_posix()
-        if matches_any(rel_path, excludes):
-            continue
-        if path.is_dir():
-            continue
-        dest = out_root / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, dest)
-        make_writable(dest)
+    resolved_output = out_root.resolve()
+    output_is_nested = resolved_output.is_relative_to(src.resolve())
+    for directory, subdirectories, filenames in os.walk(src):
+        directory_path = Path(directory)
+        subdirectories[:] = sorted(
+            name for name in subdirectories
+            if not matches_any((directory_path / name).relative_to(src_root).as_posix(), excludes)
+            and not (
+                output_is_nested
+                and (directory_path / name).resolve() == resolved_output
+            )
+        )
+        for name in sorted(filenames):
+            path = directory_path / name
+            rel_path = path.relative_to(src_root).as_posix()
+            if matches_any(rel_path, excludes):
+                continue
+            dest = out_root / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
+            make_writable(dest)
 
 
 def copy_repository_files(

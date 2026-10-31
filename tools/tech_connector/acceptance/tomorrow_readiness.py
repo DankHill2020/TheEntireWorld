@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 
@@ -104,15 +105,21 @@ class TomorrowReadinessRunner:
         return report
 
     def _python_suite(self) -> None:
-        base = self.output_directory / "pytest"
-        self.checks.append(_command_check(
-            "python_suite", "Engine and DCC Python suite",
-            [sys.executable, "-m", "pytest", "tech_connector/tests", "-q", "--basetemp", str(base)],
-            timeout=300 if self.full else 180,
-        ))
+        # The report can live beneath .tech_connector, which source-fingerprint
+        # checks intentionally ignore. Keeping pytest fixtures there makes those
+        # tests appear source-free and creates false qualification failures.
+        with tempfile.TemporaryDirectory(prefix="tc_acceptance_pytest_") as temp_dir:
+            base = Path(temp_dir) / "pytest"
+            self.checks.append(_command_check(
+                "python_suite", "Engine and DCC Python suite",
+                [sys.executable, "-m", "pytest", "tech_connector/tests", "-q", "--basetemp", str(base)],
+                timeout=450 if self.full else 300,
+            ))
 
     def _native_suite(self) -> None:
-        build = NATIVE_ROOT / ".tech_connector" / "cmake" / "Release"
+        # Acceptance must not mutate a developer's (possibly Perforce read-only)
+        # cached build. Keep the compiled evidence with this run's report.
+        build = self.output_directory / "native_build"
         if not (build / "CMakeCache.txt").is_file():
             self.checks.append(_command_check(
                 "native_configure", "Configure native runtime",
@@ -147,12 +154,31 @@ class TomorrowReadinessRunner:
             receipt = compile_tcscene_for_runtime(scene, self.output_directory / "vertical_slice.tcruntime")
             log = self.output_directory / "vertical_slice.jsonl"
             log.unlink(missing_ok=True)
-            player = _resolve_player_executable(None)
+            build = self.output_directory / "native_build"
+            player = next(
+                (candidate for candidate in (
+                    build / "Release" / "tc_player.exe", build / "tc_player.exe",
+                    build / "tc_player",
+                ) if candidate.is_file()),
+                None,
+            ) or _resolve_player_executable(None)
             frames = 300 if self.full else 90
             completed = subprocess.run(
                 [str(player), "--headless", "--scene", str(receipt.runtime_manifest), "--frames", str(frames), "--log", str(log)],
                 cwd=ROOT, env=_environment(), capture_output=True, text=True, timeout=120, check=False,
             )
+            if not log.is_file():
+                diagnostic = (completed.stderr or completed.stdout or "").strip().splitlines()
+                self.checks.append(AcceptanceCheck(
+                    "native_vertical_slice", "Converted scene in standalone player", "fail", True,
+                    time.perf_counter() - started,
+                    f"Native player exited {completed.returncode} without a telemetry log. "
+                    + (diagnostic[-1] if diagnostic else "Check the player build and runtime manifest."),
+                    {"scene": str(scene), "manifest": str(receipt.runtime_manifest),
+                     "player": str(player), "return_code": completed.returncode,
+                     "stderr": diagnostic[-20:]},
+                ))
+                return
             telemetry = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.startswith("{")]
             passed = completed.returncode == 0 and len(telemetry) == frames and receipt.graph_operations > 0
             self.checks.append(AcceptanceCheck(

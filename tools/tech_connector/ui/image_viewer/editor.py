@@ -62,6 +62,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QRadialGradient,
+    QShortcut,
     QTransform,
 )
 from PySide6.QtWidgets import (
@@ -165,6 +166,9 @@ class ImageEditorWidget(QWidget):
         self.atmos_swatch_btns: list[QPushButton] = []
         
         self._build_ui()
+        self._install_standard_shortcuts()
+        from tech_connector.ui.ux_polish import apply_widget_discoverability
+        apply_widget_discoverability(self)
         self.update_atmospheric_palette()
         if image_path and Path(image_path).exists():
             self.load_image(image_path)
@@ -213,6 +217,7 @@ class ImageEditorWidget(QWidget):
 
         top_bar.addWidget(QLabel("Mode:"))
         self.mode_combo = QComboBox()
+        self.mode_combo.setAccessibleName("Image diagnostic mode")
         for label, mode_id in (
             ("Standard view", "standard"),
             ("PBR albedo range", "pbr_albedo"),
@@ -262,12 +267,14 @@ class ImageEditorWidget(QWidget):
 
         brush_layout.addWidget(QLabel("Preset:"))
         self.preset_combo = QComboBox()
+        self.preset_combo.setAccessibleName("Brush preset")
         self.preset_combo.addItems(["Hard Round", "Soft Round", "Airbrush", "Redline Markup Pen", "Highlighter", "Emissive Glow", "Eraser"])
         self.preset_combo.currentTextChanged.connect(self._change_brush_preset)
         brush_layout.addWidget(self.preset_combo)
 
         brush_layout.addWidget(QLabel("Size:"))
         self.size_spin = QSpinBox()
+        self.size_spin.setAccessibleName("Brush size in pixels")
         self.size_spin.setRange(1, 500)
         self.size_spin.setValue(self.brush_size)
         self.size_spin.valueChanged.connect(self._change_brush_size)
@@ -275,6 +282,7 @@ class ImageEditorWidget(QWidget):
 
         brush_layout.addWidget(QLabel("Hardness:"))
         self.hardness_slider = QSlider(Qt.Horizontal)
+        self.hardness_slider.setAccessibleName("Brush hardness")
         self.hardness_slider.setRange(0, 100)
         self.hardness_slider.setValue(int(self.brush_hardness * 100))
         self.hardness_slider.setFixedWidth(80)
@@ -283,6 +291,7 @@ class ImageEditorWidget(QWidget):
 
         brush_layout.addWidget(QLabel("Opacity:"))
         self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setAccessibleName("Brush opacity")
         self.opacity_slider.setRange(0, 100)
         self.opacity_slider.setValue(int(self.brush_opacity * 100))
         self.opacity_slider.setFixedWidth(80)
@@ -291,6 +300,7 @@ class ImageEditorWidget(QWidget):
 
         brush_layout.addWidget(QLabel("📐 Lean / Tilt:"))
         self.tilt_graph = BrushTiltGraphWidget()
+        self.tilt_graph.setAccessibleName("Brush lean and tilt control")
         self.tilt_graph.setToolTip("Click & Drag cursor to lean/tilt brush angle (-1.0 to +1.0). Double-click to reset upright (0.0).")
         self.tilt_graph.tilt_changed.connect(self._change_brush_tilt)
         brush_layout.addWidget(self.tilt_graph)
@@ -803,7 +813,13 @@ class ImageEditorWidget(QWidget):
         splitter.addWidget(tool_panel)
 
         self.view = ImageViewerGraphicsView()
+        self.view.setAccessibleName("Image editing canvas")
+        self.view.setAccessibleDescription(
+            "Editable image canvas. B Brush, E Eraser, M Marquee, L Lasso, I Eyedropper, G Fill, "
+            "brackets change brush size, Space plus drag pans, Ctrl+0 fits the image, and Ctrl+plus or minus zooms."
+        )
         self.view.color_hovered.connect(self._update_hud_color)
+        self.view.draw_stroke_updated.connect(self._handle_viewport_stroke_updated)
         self.view.draw_stroke_finished.connect(self._handle_viewport_stroke_finished)
         splitter.addWidget(self.view)
 
@@ -830,6 +846,7 @@ class ImageEditorWidget(QWidget):
         layer_lay.addLayout(layer_hdr)
 
         self.layer_list = QListWidget()
+        self.layer_list.setAccessibleName("Image layers")
         self.layer_list.setStyleSheet("background:#04080c; color:#ddffe9; border:1px solid #0c7a47;")
         self.layer_list.currentRowChanged.connect(self._select_layer_row)
         layer_lay.addWidget(self.layer_list)
@@ -943,6 +960,42 @@ class ImageEditorWidget(QWidget):
 
         splitter.setSizes([54, 780, 280])
         root.addWidget(splitter, 1)
+
+    def _install_standard_shortcuts(self) -> None:
+        """Install application-standard commands without stealing keys from text fields."""
+        self._standard_shortcuts = []
+
+        def bind(sequence: str | QKeySequence, callback: Callable[[], object]) -> None:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(callback)
+            self._standard_shortcuts.append(shortcut)
+
+        bind(QKeySequence.Open, self.open_image_file)
+        bind(QKeySequence.Save, self.save_image)
+        bind("Ctrl+Shift+S", self.save_image_as)
+        bind(QKeySequence.Undo, self.undo)
+        bind(QKeySequence.Redo, self.redo)
+        bind("Ctrl+0", self.fit_image_to_view)
+        bind("Ctrl++", lambda: self.zoom_image_view(1.15))
+        bind("Ctrl+=", lambda: self.zoom_image_view(1.15))
+        bind("Ctrl+-", lambda: self.zoom_image_view(1.0 / 1.15))
+
+    def fit_image_to_view(self) -> None:
+        rect = self.view.pixmap_item.sceneBoundingRect()
+        if rect.isEmpty():
+            return
+        self.view.fitInView(rect, Qt.KeepAspectRatio)
+        self.view.zoom_level = max(0.05, min(32.0, float(self.view.transform().m11())))
+        self.view.show_hud_toast("Fit image to view (Ctrl+0)")
+
+    def zoom_image_view(self, factor: float) -> None:
+        factor = max(0.05, float(factor))
+        new_zoom = float(self.view.zoom_level) * factor
+        if 0.05 <= new_zoom <= 32.0:
+            self.view.zoom_level = new_zoom
+            self.view.scale(factor, factor)
+            self.view.show_hud_toast(f"Zoom: {new_zoom * 100:.0f}%")
 
     def load_image(self, image_path: str) -> bool:
         self.image_path = image_path
@@ -1384,6 +1437,33 @@ class ImageEditorWidget(QWidget):
         self.view.pixmap_item.setPixmap(pixmap)
         self.view.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
+    def update_composited_region(self, dirty_rect: QRectF) -> None:
+        """Refresh a small live-paint region and defer the exact full composite until release."""
+        if (
+            self.diagnostic_mode != "standard"
+            or self.view.value_check_mode
+            or self.view.false_color_mode
+        ):
+            self.update_composited_view()
+            return
+        patch, aligned_rect = self.stack.composite_region(dirty_rect)
+        current = self.view.pixmap_item.pixmap()
+        if (
+            patch.isNull()
+            or current.isNull()
+            or current.width() != self.stack.width
+            or current.height() != self.stack.height
+        ):
+            self.update_composited_view()
+            return
+        updated = QPixmap(current)
+        painter = QPainter(updated)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(aligned_rect.topLeft(), patch)
+        painter.end()
+        self.view.pixmap_item.setPixmap(updated)
+        self.view.pixmap_item.update(aligned_rect)
+
     def _apply_value_check_filter(self, img: QImage) -> QImage:
         """Convert image to Greyscale for evaluating value hierarchy & contrast (Hotkey M)."""
         res = QImage(img.size(), QImage.Format_ARGB32_Premultiplied)
@@ -1776,6 +1856,9 @@ class ImageEditorWidget(QWidget):
         if row >= 0:
             self.stack.active_index = len(self.stack.layers) - 1 - row
 
+    def _handle_viewport_stroke_updated(self, path: QPainterPath, start: QPointF, end: QPointF, tool: str):
+        self._handle_viewport_stroke_finished(path, start, end, "brush-live-segment")
+
     def _handle_viewport_stroke_finished(self, path: QPainterPath, start: QPointF, end: QPointF, tool: str):
         layer = self.stack.active_layer
         if not layer or layer.locked or not layer.visible:
@@ -1783,6 +1866,12 @@ class ImageEditorWidget(QWidget):
 
         target_img = layer.mask if (layer.editing_mask and layer.mask is not None) else layer.image
         if target_img is None or target_img.isNull():
+            return
+
+        if tool == "brush-live-finalize":
+            self.stack.save_snapshot()
+            self.mark_dirty()
+            self.update_composited_view()
             return
 
         painter = QPainter(target_img)
@@ -1862,9 +1951,14 @@ class ImageEditorWidget(QWidget):
             self.has_selection = True
 
         painter.end()
-        self.stack.save_snapshot()
-        self.mark_dirty()
-        self.update_composited_view()
+        if tool != "brush-live-segment":
+            self.stack.save_snapshot()
+            self.mark_dirty()
+            self.update_composited_view()
+        else:
+            radius = max(2.0, float(self.brush_size) * 0.5 + 2.0)
+            dirty_rect = path.boundingRect().adjusted(-radius, -radius, radius, radius)
+            self.update_composited_region(dirty_rect)
 
     def invert_selection(self):
         QMessageBox.information(self, "Selection", "Inverted active selection region.")

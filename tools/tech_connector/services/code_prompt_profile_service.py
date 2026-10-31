@@ -129,7 +129,7 @@ def openai_execution_options(profile: CodePromptProfile | dict[str, Any]) -> dic
 
 
 def preferred_openai_model(depth: str) -> str:
-    """Return the GPT-5.6 family member for a workload depth.
+    """Return the current OpenAI model for a workload depth.
 
     :param depth: Fast, balanced, deep, or maximum depth.
     :return: OpenAI model identifier.
@@ -137,10 +137,10 @@ def preferred_openai_model(depth: str) -> str:
 
     normalized = _choice(depth, PROMPT_DEPTHS, "balanced")
     if normalized == "fast":
-        return "gpt-5.6-luna"
-    if normalized == "balanced":
-        return "gpt-5.6-terra"
-    return "gpt-5.6-sol"
+        return "gpt-6-luna"
+    if normalized in {"balanced", "deep"}:
+        return "gpt-6.1-sol"
+    return "gpt-6-astra"
 
 
 def render_code_prompt_contract(profile: CodePromptProfile | dict[str, Any]) -> str:

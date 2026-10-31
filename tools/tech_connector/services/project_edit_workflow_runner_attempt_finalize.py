@@ -1,6 +1,11 @@
 """Project-edit workflow phase: _run_attempt_finalize_phase."""
 
 from __future__ import annotations
+import copy
+import re
+import textwrap
+from pathlib import Path
+from typing import Callable
 from tech_connector.services import project_edit_workflow_runner_dependencies as _deps
 from tech_connector.services.project_edit_workflow_runner_control import (
     _WorkflowReturn,
@@ -29,6 +34,649 @@ def _bounded_repair_model_sequence(
     if len(unique_models) == 1:
         return [unique_models[0], unique_models[0]]
     return unique_models[:2]
+
+
+def _salvage_focused_unused_local_regressions(
+    proposed_files: list[tuple[str, str, str]],
+    current_errors: list[str],
+    proposed_errors: list[str],
+    target_symbol: str,
+    validate: Callable[[list[tuple[str, str, str]]], list[str]],
+) -> tuple[list[tuple[str, str, str]], list[str], list[str]]:
+    """Prune only validator-proven dead locals before rejecting a behavioral repair."""
+
+    new_owned = [
+        error for error in proposed_errors
+        if error not in current_errors
+        and not _deps._contract_error_is_owned_by_other_callable(
+            error, target_symbol
+        )
+    ]
+    if not new_owned or any(
+        not re.search(
+            r"\.py:[A-Za-z_][A-Za-z0-9_.]*: unused local assignment\(s\) "
+            r"introduce dead code: [A-Za-z_][A-Za-z0-9_, ]*\.",
+            error,
+        )
+        for error in new_owned
+    ):
+        return proposed_files, proposed_errors, []
+    repaired_files, notes = _deps._repair_standardized_local_quality_issues(
+        proposed_files, new_owned
+    )
+    if repaired_files == proposed_files:
+        return proposed_files, proposed_errors, []
+    repaired_errors = validate(repaired_files)
+    if (
+        len(repaired_errors) >= len(proposed_errors)
+        or any(error not in proposed_errors for error in repaired_errors)
+    ):
+        return proposed_files, proposed_errors, []
+    return repaired_files, repaired_errors, notes
+
+
+def _salvage_focused_preserved_contracts(
+    current_files: list[tuple[str, str, str]],
+    proposed_files: list[tuple[str, str, str]],
+    current_errors: list[str],
+    proposed_errors: list[str],
+    target_symbol: str,
+    validate: Callable[[list[tuple[str, str, str]]], list[str]],
+) -> tuple[list[tuple[str, str, str]], list[str], list[str]]:
+    """Graft only static, previously clean guards and literal row shapes."""
+
+    new_errors = [
+        error for error in proposed_errors
+        if error not in current_errors
+        and not _deps._contract_error_is_owned_by_other_callable(
+            error, target_symbol
+        )
+    ]
+    if not new_errors:
+        return proposed_files, proposed_errors, []
+    blank_regression = any(
+        "approved blank `output_dir` rejection is missing before Path(output_dir)"
+        in error for error in new_errors
+    )
+    row_regression = any(
+        "appended dict-row keys" in error
+        and "differ from approved exact keys" in error
+        for error in new_errors
+    )
+    if not (blank_regression or row_regression):
+        return proposed_files, proposed_errors, []
+    current_by_path = {Path(path).resolve(): source for path, _, source in current_files}
+    updated = list(proposed_files)
+    notes: list[str] = []
+    owner_name = target_symbol.rsplit(".", 1)[-1]
+    for index, (path, original, source) in enumerate(updated):
+        previous = current_by_path.get(Path(path).resolve())
+        if previous is None:
+            continue
+        try:
+            old_tree = _deps.ast.parse(previous, filename=path)
+            new_tree = _deps.ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        old_owner = next((node for node in old_tree.body if isinstance(
+            node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef)
+        ) and node.name == owner_name), None)
+        new_owner = next((node for node in new_tree.body if isinstance(
+            node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef)
+        ) and node.name == owner_name), None)
+        if old_owner is None or new_owner is None:
+            continue
+        changed = False
+        if blank_regression:
+            def blank_guard(statement: _deps.ast.stmt) -> bool:
+                return (
+                    isinstance(statement, _deps.ast.If)
+                    and any(isinstance(node, _deps.ast.Call)
+                            and isinstance(node.func, _deps.ast.Attribute)
+                            and isinstance(node.func.value, _deps.ast.Name)
+                            and node.func.value.id == "output_dir"
+                            and node.func.attr == "strip"
+                            for node in _deps.ast.walk(statement.test))
+                    and any(isinstance(node, _deps.ast.Raise)
+                            for body in statement.body for node in _deps.ast.walk(body))
+                )
+
+            old_guard = next((item for item in old_owner.body if blank_guard(item)), None)
+            has_guard = any(blank_guard(item) for item in new_owner.body)
+            if old_guard is not None and not has_guard:
+                path_use = next((position for position, statement in enumerate(new_owner.body)
+                                 if any(isinstance(node, _deps.ast.Call)
+                                        and ((isinstance(node.func, _deps.ast.Name)
+                                              and node.func.id == "Path")
+                                             or (isinstance(node.func, _deps.ast.Attribute)
+                                                 and node.func.attr == "Path"))
+                                        and node.args
+                                        and isinstance(node.args[0], _deps.ast.Name)
+                                        and node.args[0].id == "output_dir"
+                                        for node in _deps.ast.walk(statement))), -1)
+                if path_use >= 0:
+                    new_owner.body.insert(path_use, copy.deepcopy(old_guard))
+                    notes.append(f"{Path(path).name}:{owner_name}: preserved blank output guard")
+                    changed = True
+        if row_regression:
+            def returned_collector(function: _deps.ast.AST) -> str:
+                for statement in function.body:
+                    if not isinstance(statement, _deps.ast.Return):
+                        continue
+                    value = statement.value
+                    if isinstance(value, _deps.ast.Call) and isinstance(value.func, _deps.ast.Name) and value.func.id == "tuple" and len(value.args) == 1:
+                        value = value.args[0]
+                    if isinstance(value, _deps.ast.Name):
+                        return value.id
+                return ""
+
+            def appended_row(function: _deps.ast.AST, collector: str) -> tuple[_deps.ast.For, _deps.ast.Call] | None:
+                for loop in (node for node in _deps.ast.walk(function) if isinstance(node, _deps.ast.For)):
+                    for statement in loop.body:
+                        for call in (node for node in _deps.ast.walk(statement) if isinstance(node, _deps.ast.Call)):
+                            if (isinstance(call.func, _deps.ast.Attribute)
+                                    and isinstance(call.func.value, _deps.ast.Name)
+                                    and call.func.value.id == collector
+                                    and call.func.attr == "append"
+                                    and len(call.args) == 1
+                                    and isinstance(call.args[0], _deps.ast.Dict)):
+                                return loop, call
+                return None
+
+            old_collector = returned_collector(old_owner)
+            new_collector = returned_collector(new_owner)
+            old_row = appended_row(old_owner, old_collector) if old_collector else None
+            new_row = appended_row(new_owner, new_collector) if new_collector else None
+            if old_row and new_row and _deps.ast.dump(old_row[0].target) == _deps.ast.dump(new_row[0].target):
+                old_dict, new_dict = old_row[1].args[0], new_row[1].args[0]
+                old_keys = [key.value for key in old_dict.keys
+                            if isinstance(key, _deps.ast.Constant) and isinstance(key.value, str)]
+                if len(old_keys) == len(old_dict.keys) and len(old_keys) == len(set(old_keys)):
+                    required = next((set(_deps.ast.literal_eval(match.group(1)))
+                                     for error in new_errors
+                                     if (match := re.search(r"approved exact keys (\[[^\]]*\])", error))), set())
+                    bound_names = {
+                        node.id for node in _deps.ast.walk(new_owner)
+                        if isinstance(node, _deps.ast.Name) and isinstance(node.ctx, _deps.ast.Store)
+                    }
+                    bound_names.update(arg.arg for arg in [*new_owner.args.posonlyargs, *new_owner.args.args, *new_owner.args.kwonlyargs])
+                    used_names = {node.id for node in _deps.ast.walk(old_dict)
+                                  if isinstance(node, _deps.ast.Name) and isinstance(node.ctx, _deps.ast.Load)}
+                    if required and set(old_keys) == required and used_names <= bound_names:
+                        new_row[1].args[0] = copy.deepcopy(old_dict)
+                        notes.append(f"{Path(path).name}:{owner_name}: preserved exact returned row keys")
+                        changed = True
+        if changed:
+            _deps.ast.fix_missing_locations(new_tree)
+            updated[index] = (path, original, _deps.ast.unparse(new_tree).rstrip() + "\n")
+    if not notes:
+        return proposed_files, proposed_errors, []
+    repaired_errors = validate(updated)
+    if (len(repaired_errors) >= len(proposed_errors)
+            or any(error not in proposed_errors for error in repaired_errors)):
+        return proposed_files, proposed_errors, []
+    return updated, repaired_errors, notes
+
+
+def _repair_focused_python_contract_surface(
+    files: list[tuple[str, str, str]],
+    target_path: str,
+    errors: list[str],
+    request_prompt: str,
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Keep mechanical type/docstring repair inside the owned splice file."""
+
+    target = Path(target_path).resolve()
+    indices = [
+        index for index, (path, _original, _source) in enumerate(files)
+        if Path(path).resolve() == target
+    ]
+    if len(indices) != 1:
+        return files, []
+    index = indices[0]
+    repaired, notes = _deps._repair_requested_python_contract_surface(
+        [files[index]], errors, request_prompt=request_prompt
+    )
+    if len(repaired) != 1:
+        return files, []
+    updated = list(files)
+    updated[index] = repaired[0]
+    return updated, notes
+
+
+def _validator_supplies_repair_instruction(errors: list[str]) -> bool:
+    """Skip a second diagnosis when one validator finding already states the fix."""
+
+    errors = [
+        error for error in errors
+        if not str(error).startswith((
+            "CONTRACT PRECEDENCE:",
+            "APPROVED BEHAVIOR CONTRACTS FOR THIS OWNER:",
+        ))
+    ]
+    if errors and all(
+        "selective return predicate omits requested state(s): enabled" in str(error)
+        or "selective return requirement appends loop records without a per-record eligibility predicate" in str(error)
+        for error in errors
+    ):
+        # The focused callable prompt spells out the enabled-record invariant.
+        # A separate local plan call has repeatedly spent its budget restating
+        # or contradicting these exact static findings.
+        return True
+    if len(errors) != 1:
+        return False
+    message = str(errors[0]).strip()
+    if not message or len(message) > 1600:
+        return False
+    if re.search(
+        r"approved `using [A-Za-z_][A-Za-z0-9_]*` dependency is never called "
+        r"by the public owner or its nested helpers\.$",
+        message,
+    ):
+        # The approved owner capsule already names the exact sibling callable.
+        # A separate model diagnosis has only repeated this validator finding.
+        return True
+    if (
+        "Requested complete type hints are invalid or missing:" in message
+        and "Public annotations must use concrete types" in message
+    ):
+        return True
+    return bool(re.search(
+        r"[.!?]\s+(?:Compare|Replace|Remove|Add|Use|Guard|Call|Iterate|Return|Validate)\b",
+        message,
+        flags=re.IGNORECASE,
+    ))
+
+
+def _requested_return_annotation_repair(errors: list[str]) -> bool:
+    """Permit a signature correction only for an exact return-type contract."""
+
+    return any(
+        (
+            "return type" in str(error).casefold()
+            and "type hint" in str(error).casefold()
+        )
+        or (
+            str(error).startswith("Requested complete type hints are invalid or missing: ")
+            and re.search(r"\breturn\)", str(error)) is not None
+        )
+        or "approved immutable snapshot must return a tuple" in str(error).casefold()
+        for error in errors
+    )
+
+
+def _requested_parameter_annotation_repairs(errors: list[str]) -> set[str]:
+    """Identify only parameters a failed proof explicitly calls untyped."""
+
+    names: set[str] = set()
+    for error in errors:
+        message = str(error)
+        for match in re.finditer(
+            r"Requested complete type hints are invalid or missing: "
+            r"[^\n]{0,500}?\(parameters ([A-Za-z_][A-Za-z_0-9/]*)"
+            r"(?:; return)?\)",
+            message,
+        ):
+            names.update(match.group(1).split("/"))
+        for match in re.finditer(
+            r"(?:annotation|parameter)=['\"]([A-Za-z_][A-Za-z_0-9]*)['\"]"
+            r"(?:(?!(?:annotation|parameter)=['\"]).){0,1600}?(?:"
+            r"\b\1 needs (?:a concrete type|a useful, specific) annotation\b"
+            r"|AssertionError: unexpectedly identical: "
+            r"(?:<class ['\"]object['\"]>|typing\.Any))",
+            message,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            names.add(match.group(1))
+    return names
+
+
+def _approved_parameter_annotation_changed(
+    before: str, after: str, symbol: str, names: set[str]
+) -> bool:
+    """Accept a behavior-preserving repair only when a failed public hint improves."""
+
+    if not names:
+        return False
+    try:
+        before_tree = _deps.ast.parse(before)
+        after_tree = _deps.ast.parse(after)
+    except SyntaxError:
+        return False
+    leaf = str(symbol).rsplit(".", 1)[-1]
+
+    def annotations(tree):
+        owners = [
+            node for node in _deps.ast.walk(tree)
+            if isinstance(node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+            and node.name == leaf
+        ]
+        if len(owners) != 1:
+            return {}
+        return {
+            argument.arg: argument.annotation
+            for argument in (
+                *owners[0].args.posonlyargs,
+                *owners[0].args.args,
+                *owners[0].args.kwonlyargs,
+            )
+            if argument.arg in names
+        }
+
+    old = annotations(before_tree)
+    new = annotations(after_tree)
+    for name in names & old.keys() & new.keys():
+        candidate = new[name]
+        if candidate is None or any(
+            (isinstance(node, _deps.ast.Name) and node.id in {"Any", "object"})
+            or (isinstance(node, _deps.ast.Attribute) and node.attr == "Any")
+            for node in _deps.ast.walk(candidate)
+        ):
+            continue
+        previous = old[name]
+        if previous is None or _deps.ast.dump(
+            previous, include_attributes=False
+        ) != _deps.ast.dump(candidate, include_attributes=False):
+            return True
+    return False
+
+
+def _owner_repair_requires_full_contract(errors: list[str]) -> bool:
+    """Do not focus away requirements when the whole owner is still the seed."""
+
+    return any(
+        "executable implementation is unchanged from the original"
+        in str(error).casefold()
+        for error in errors
+    )
+
+
+def _placeholder_can_retype_return(source: str, symbol: str) -> bool:
+    """A docstring-only seed has no implemented return contract to preserve."""
+
+    try:
+        tree = _deps.ast.parse(textwrap.dedent(source))
+    except SyntaxError:
+        return False
+    leaf = str(symbol).rsplit(".", 1)[-1]
+    candidates = [
+        node for node in tree.body
+        if isinstance(node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+        and node.name == leaf
+    ]
+    if len(candidates) != 1:
+        return False
+    function = candidates[0]
+    if not isinstance(function.returns, _deps.ast.Constant) or function.returns.value is not None:
+        return False
+    body = list(function.body)
+    if body and isinstance(body[0], _deps.ast.Expr) and isinstance(
+        body[0].value, _deps.ast.Constant
+    ) and isinstance(body[0].value.value, str):
+        body = body[1:]
+    return not body or all(isinstance(node, _deps.ast.Pass) for node in body)
+
+
+def _annotation_only_failure(errors: list[str]) -> bool:
+    """Recognize a hint failure plus only mechanically formatted long lines."""
+
+    hints = [
+        error for error in errors
+        if str(error).startswith("Requested complete type hints are invalid or missing: ")
+    ]
+    return len(hints) == 1 and all(
+        error in hints or str(error).startswith(
+            "Generated Python presentation defects: line exceeds 100 characters:"
+        ) for error in errors
+    )
+
+
+def _transplant_requested_annotations(
+    source: str, response: str, symbol: str, errors: list[str],
+    request_prompt: str = "",
+) -> str:
+    """Use a model's type proposal without accepting any executable rewrite."""
+
+    requested = _requested_parameter_annotation_repairs(errors)
+    repair_return = _requested_return_annotation_repair(errors)
+    if not requested and not repair_return:
+        return ""
+    candidate = str(response).strip()
+    if candidate.startswith("```python"):
+        candidate = candidate[len("```python"):].strip()
+    elif candidate.startswith("```"):
+        candidate = candidate[3:].strip()
+    if candidate.endswith("```"):
+        candidate = candidate[:-3].strip()
+    try:
+        original_tree = _deps.ast.parse(textwrap.dedent(source))
+        proposal_tree = _deps.ast.parse(textwrap.dedent(candidate))
+    except SyntaxError:
+        return ""
+    leaf = str(symbol).rsplit(".", 1)[-1]
+    originals = [
+        node for node in original_tree.body
+        if isinstance(node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+        and node.name == leaf
+    ]
+    proposals = [
+        node for node in proposal_tree.body
+        if isinstance(node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+        and node.name == leaf
+    ]
+    if len(originals) != 1 or len(proposals) != 1:
+        return ""
+    original, proposed = originals[0], proposals[0]
+    if type(original) is not type(proposed):
+        return ""
+    original_args = [
+        *original.args.posonlyargs, *original.args.args, *original.args.kwonlyargs
+    ]
+    proposed_args = [
+        *proposed.args.posonlyargs, *proposed.args.args, *proposed.args.kwonlyargs
+    ]
+    if [arg.arg for arg in original_args] != [arg.arg for arg in proposed_args]:
+        return ""
+    if _deps.ast.dump(original.args, include_attributes=False) == _deps.ast.dump(
+        proposed.args, include_attributes=False
+    ) and not repair_return:
+        return ""
+
+    def directly_iterated_mapping_record(name: str) -> bool:
+        loop_items = {
+            node.target.id
+            for node in _deps.ast.walk(original)
+            if isinstance(node, (_deps.ast.For, _deps.ast.AsyncFor, _deps.ast.comprehension))
+            and isinstance(node.iter, _deps.ast.Name)
+            and node.iter.id == name
+            and isinstance(node.target, _deps.ast.Name)
+        }
+        return bool(loop_items) and any(
+            (
+                isinstance(node, _deps.ast.Subscript)
+                and isinstance(node.value, _deps.ast.Name)
+                and node.value.id in loop_items
+                and isinstance(node.slice, _deps.ast.Constant)
+                and isinstance(node.slice.value, str)
+            ) or (
+                isinstance(node, _deps.ast.Call)
+                and isinstance(node.func, _deps.ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, _deps.ast.Name)
+                and node.func.value.id in loop_items
+                and bool(node.args)
+                and isinstance(node.args[0], _deps.ast.Constant)
+                and isinstance(node.args[0].value, str)
+            )
+            for node in _deps.ast.walk(original)
+        )
+
+    def iterated_mapping_annotation(annotation: _deps.ast.AST, name: str) -> bool:
+        if not isinstance(annotation, _deps.ast.Subscript):
+            return False
+        outer = annotation.value
+        outer_name = outer.id if isinstance(outer, _deps.ast.Name) else (
+            outer.attr if isinstance(outer, _deps.ast.Attribute) else ""
+        )
+        requires_general_iterable = re.search(
+            rf"\b{re.escape(name)}\s+(?:is|accepts)\s+an?\s+iterable\b",
+            request_prompt,
+            flags=re.IGNORECASE,
+        ) is not None
+        allowed_outer = (
+            {"Iterable", "Iterator"}
+            if requires_general_iterable
+            else {"Iterable", "Iterator", "Sequence", "list", "tuple", "set"}
+        )
+        if outer_name not in allowed_outer:
+            return False
+        element = annotation.slice
+        if isinstance(element, _deps.ast.Tuple) and element.elts:
+            element = element.elts[0]
+        if not isinstance(element, _deps.ast.Subscript):
+            return False
+        element_name = (
+            element.value.id if isinstance(element.value, _deps.ast.Name)
+            else element.value.attr if isinstance(element.value, _deps.ast.Attribute)
+            else ""
+        )
+        return element_name in {"Mapping", "MutableMapping", "dict"}
+
+    def concrete(annotation: _deps.ast.AST | None) -> bool:
+        return annotation is not None and not any(
+            isinstance(node, _deps.ast.Name) and node.id in {"Any", "object"}
+            or isinstance(node, _deps.ast.Attribute) and node.attr == "Any"
+            or isinstance(node, _deps.ast.Constant) and isinstance(node.value, str)
+            for node in _deps.ast.walk(annotation)
+        )
+
+    changed = False
+    for old_arg, new_arg in zip(original_args, proposed_args):
+        if old_arg.arg not in requested:
+            continue
+        if not concrete(new_arg.annotation):
+            return ""
+        if directly_iterated_mapping_record(old_arg.arg) and not iterated_mapping_annotation(
+            new_arg.annotation, old_arg.arg
+        ):
+            return ""
+        old_annotation = (
+            _deps.ast.dump(old_arg.annotation, include_attributes=False)
+            if old_arg.annotation is not None else ""
+        )
+        new_annotation = _deps.ast.dump(new_arg.annotation, include_attributes=False)
+        if old_annotation != new_annotation:
+            old_arg.annotation = copy.deepcopy(new_arg.annotation)
+            changed = True
+    if repair_return:
+        if not concrete(proposed.returns):
+            return ""
+        if (
+            original.returns is None
+            or _deps.ast.dump(original.returns, include_attributes=False)
+            != _deps.ast.dump(proposed.returns, include_attributes=False)
+        ):
+            original.returns = copy.deepcopy(proposed.returns)
+            changed = True
+    if not changed:
+        return ""
+    _deps.ast.fix_missing_locations(original_tree)
+    return _deps.ast.unparse(original).rstrip() + "\n"
+
+
+def _ensure_annotation_imports(
+    files: list[tuple[str, str, str]], path: str, symbol: str
+) -> list[tuple[str, str, str]]:
+    """Bind standard-library annotation names introduced by a focused repair."""
+
+    updated = list(files)
+    known = {
+        "Iterable": "collections.abc",
+        "Iterator": "collections.abc",
+        "Mapping": "collections.abc",
+        "MutableMapping": "collections.abc",
+        "Sequence": "collections.abc",
+        "Callable": "collections.abc",
+        "Path": "pathlib",
+    }
+    for index, (file_path, original, source) in enumerate(updated):
+        if Path(file_path).resolve() != Path(path).resolve():
+            continue
+        try:
+            tree = _deps.ast.parse(source)
+        except SyntaxError:
+            return updated
+        leaf = symbol.rsplit(".", 1)[-1]
+        targets = [
+            node for node in _deps.ast.walk(tree)
+            if isinstance(node, (_deps.ast.FunctionDef, _deps.ast.AsyncFunctionDef))
+            and node.name == leaf
+        ]
+        if len(targets) != 1:
+            return updated
+        function = targets[0]
+        annotations = [
+            arg.annotation for arg in (
+                *function.args.posonlyargs, *function.args.args,
+                *function.args.kwonlyargs,
+            ) if arg.annotation is not None
+        ]
+        if function.returns is not None:
+            annotations.append(function.returns)
+        used = {
+            node.id for annotation in annotations
+            for node in _deps.ast.walk(annotation)
+            if isinstance(node, _deps.ast.Name)
+        }
+        bound = {
+            alias.asname or alias.name.split(".", 1)[0]
+            for statement in tree.body
+            if isinstance(statement, _deps.ast.Import)
+            for alias in statement.names
+        } | {
+            alias.asname or alias.name
+            for statement in tree.body
+            if isinstance(statement, _deps.ast.ImportFrom)
+            for alias in statement.names
+        } | {
+            statement.name for statement in tree.body
+            if isinstance(statement, (_deps.ast.ClassDef, _deps.ast.FunctionDef))
+        }
+        missing = sorted(name for name in used & known.keys() if name not in bound)
+        qualified_imports = [
+            module for module in ("typing", "collections", "pathlib")
+            if module in used and module not in bound
+        ]
+        if not missing and not qualified_imports:
+            return updated
+        insert_at = 0
+        if tree.body and isinstance(tree.body[0], _deps.ast.Expr) and isinstance(
+            tree.body[0].value, _deps.ast.Constant
+        ) and isinstance(tree.body[0].value.value, str):
+            insert_at = 1
+        while insert_at < len(tree.body) and isinstance(
+            tree.body[insert_at], _deps.ast.ImportFrom
+        ) and tree.body[insert_at].module == "__future__":
+            insert_at += 1
+        for module in sorted({known[name] for name in missing}):
+            names = [name for name in missing if known[name] == module]
+            tree.body.insert(insert_at, _deps.ast.ImportFrom(
+                module=module,
+                names=[_deps.ast.alias(name=name) for name in names],
+                level=0,
+            ))
+            insert_at += 1
+        for module in qualified_imports:
+            tree.body.insert(insert_at, _deps.ast.Import(
+                names=[_deps.ast.alias(
+                    name="collections.abc" if module == "collections" else module
+                )]
+            ))
+            insert_at += 1
+        _deps.ast.fix_missing_locations(tree)
+        updated[index] = (file_path, original, _deps.ast.unparse(tree).rstrip() + "\n")
+        return updated
+    return updated
 
 
 class _ProjectEditAttemptFinalizePhase:
@@ -167,6 +815,18 @@ class _ProjectEditAttemptFinalizePhase:
                 self.target_errors = list(
                     dict.fromkeys([*self.target_errors, *self.causal_owner_errors])
                 )
+                self.target_annotation_only = _annotation_only_failure(
+                    self.target_errors
+                )
+                self.annotation_failure = next(
+                    (
+                        error for error in self.target_errors
+                        if str(error).startswith(
+                            "Requested complete type hints are invalid or missing: "
+                        )
+                    ),
+                    "",
+                )
                 self.repair_terms = {
                     self.target_method_name.casefold(),
                     *(
@@ -228,6 +888,19 @@ class _ProjectEditAttemptFinalizePhase:
                     for row in self.relevant_mechanics
                     if str(row.get("requirement_id") or "")
                 }
+                if _owner_repair_requires_full_contract(self.target_errors):
+                    # A seed/placeholder body has not implemented any of this
+                    # callable's approved behavior. Keyword-matching just one
+                    # nearby mechanic can otherwise hide later output-shape and
+                    # path requirements from the atomic repair envelope.
+                    self.relevant_requirement_ids.clear()
+                    self.relevant_mechanics = [
+                        dict(row)
+                        for row in self.owner_plan_chunk.get(
+                            "implementation_mechanics"
+                        ) or []
+                        if isinstance(row, _deps.Mapping)
+                    ]
                 self.relevant_requirements: list[_deps.Any] = []
                 for self.requirement in self.owner_plan_chunk.get("requirements") or []:
                     if isinstance(self.requirement, _deps.Mapping):
@@ -406,16 +1079,14 @@ class _ProjectEditAttemptFinalizePhase:
                             separators=(",", ":"),
                         )
                     )
-                self.focused_repair_scope_files = [
-                    record
-                    for record in self.repair_scope_files
-                    if _deps.Path(record[0]).resolve()
-                    == _deps.Path(str(self.target["path"])).resolve()
-                ]
-                self.repair_objective = "Repair only the exact callable in the approved atomic owner capsule and preserve unrelated executable behavior."
+                self.repair_objective = (
+                    str(self.prompt or "")
+                    + "\nRepair only the exact callable in the approved atomic owner "
+                    "capsule and preserve unrelated executable behavior."
+                )
                 self.contract, self.contract_errors = (
                     _deps.build_project_edit_function_repair_contract(
-                        self.focused_repair_scope_files or self.repair_scope_files,
+                        self.repair_scope_files,
                         target=self.target,
                         validation_errors=self.target_errors,
                         objective=self.repair_objective,
@@ -475,6 +1146,18 @@ class _ProjectEditAttemptFinalizePhase:
                                 self.contract.get("forbidden_names") or []
                             ),
                             approved_signature=self.approved_signature,
+                            allow_return_annotation_repair=(
+                                _requested_return_annotation_repair(self.target_errors)
+                                or _placeholder_can_retype_return(
+                                    str(self.contract.get("source") or ""),
+                                    str(self.target["symbol"]),
+                                )
+                            ),
+                            allow_parameter_annotation_repair=(
+                                _requested_parameter_annotation_repairs(self.target_errors)
+                            ),
+                            preserve_existing_parameter_annotations=True,
+                            preserve_existing_return_annotation=True,
                         )
                     )
                     if (
@@ -567,6 +1250,12 @@ class _ProjectEditAttemptFinalizePhase:
                     or len(self.target_behavior_contracts) >= 3
                 ) and (
                     not self.target_has_explicit_mechanical_fix
+                    and not self.target_annotation_only
+                    and not _validator_supplies_repair_instruction(self.target_errors)
+                    # A seed callable needs the complete approved owner contract,
+                    # which is already in the atomic repair envelope. A separate
+                    # diagnosis model call only restates that missing implementation.
+                    and not _owner_repair_requires_full_contract(self.target_errors)
                 ):
                     self.plan_stage = (
                         _deps.build_project_edit_function_repair_plan_stage(
@@ -622,6 +1311,36 @@ class _ProjectEditAttemptFinalizePhase:
                     attempt=self.attempt + 1,
                     repair_plan=self.repair_plan,
                 )
+                if self.target_annotation_only:
+                    self.repair_stage = _deps.replace(
+                        self.repair_stage,
+                        key="annotation_repair",
+                        system_prompt=(
+                            "Repair only Python type annotations. Return one def "
+                            "with original parameter names and a pass body. Use "
+                            "concrete PEP 585/604 types; never Any, object, quoted "
+                            "forward references, or invented domain types. For "
+                            "heterogeneous mapping fields, use a primitive union "
+                            "such as Mapping[str, str | bool]. No Markdown."
+                        ),
+                        user_prompt=(
+                            f"Original request:\n{self.prompt}\n\n"
+                            f"Failed type proof:\n{self.annotation_failure}\n\n"
+                            f"Existing imports:\n{chr(10).join(self.contract.get('module_imports') or [])}\n\n"
+                            f"Current callable:\n{self.contract.get('source') or ''}\n\n"
+                            "Return only this callable's signature with a `pass` "
+                            "body. Existing executable statements will be retained "
+                            "automatically. Use concrete standard-library types "
+                            "for mapping/iterable records and precise output shape. "
+                            "Keep the outer iterable distinct from each mapping "
+                            "record; do not annotate an iterable of records as "
+                            "one dict or mapping. Do not narrow an explicitly "
+                            "general iterable to a tuple or list."
+                        ),
+                        num_predict=360,
+                        num_ctx=4096,
+                        metadata={"disable_thinking": True},
+                    )
                 self.repair_stage = _deps.replace(
                     self.repair_stage,
                     metadata={
@@ -649,6 +1368,10 @@ class _ProjectEditAttemptFinalizePhase:
                 if self.target_documentation_only:
                     self.repair_stage = _deps.replace(
                         self.repair_stage,
+                        metadata={
+                            **dict(self.repair_stage.metadata or {}),
+                            "repair_reasoning_effort": "medium",
+                        },
                         user_prompt=self.repair_stage.user_prompt
                         + "\n\nDOCUMENTATION-ONLY REPAIR:\n- Every supplied failure for this callable concerns its documentation only.\n- Preserve the signature, decorators, and every executable statement exactly.\n- Replace only the docstring with a concrete behavioral summary and semantic\n  :param, :return, and :raises descriptions required by the request.\n- A documentation-only source change is substantive for this repair. Do not\n  alter the algorithm merely to make the replacement executable fingerprint\n  differ.\n",
                     )
@@ -707,7 +1430,7 @@ class _ProjectEditAttemptFinalizePhase:
                         user_prompt=self.repair_stage.user_prompt
                         + "\n\nSHARED STATE-WRITER DIAGNOSIS:\nMultiple observer tests fail with assertion mismatches after calling this\nmutator. Inspect the owning class state initialization, sibling observer\nsemantics, bounded callers, and objective together. Repair the shared state at\nthe point it is written instead of compensating in every observer. For paired\nforward/reverse mappings, make each key/value direction match the public method\nnames and update both directions atomically. Preserve the initialized container\ntypes and use only operations supported by those exact types. Do not return the\ncurrent mutator unchanged when its writes contradict the observer contract.\n",
                     )
-                if any(
+                if not self.target_annotation_only and any(
                     (
                         marker in error
                         for error in self.errors
@@ -719,7 +1442,17 @@ class _ProjectEditAttemptFinalizePhase:
                         user_prompt=self.repair_stage.user_prompt
                         + "\n\nRUNTIME FAILURE RULE:\nThe supplied traceback is authoritative API evidence. Change the exact failing\ncall or name; do not return the current callable unchanged. Resolve the real\nowner/import or conversion path from the available runtime API, preserve all\nunrelated working lines, and return only this callable replacement.\n",
                     )
-                if not self.snapshot_owner_plan and (not self.target_is_verification):
+                if _requested_parameter_annotation_repairs(self.target_errors):
+                    self.repair_stage = _deps.replace(
+                        self.repair_stage,
+                        user_prompt=self.repair_stage.user_prompt
+                        + "\n\nCONCRETE TYPE REPAIR:\nA named public parameter annotation failed proof. Replace only the named\nparameter annotations with types justified by this callable, its approved\ninput contract, and any delegated callable. Neither bare object nor Any inside\na container is concrete. For heterogeneous records, use a precise union of\nfield value types or an existing record type; preserve the runtime signature\nand all working behavior.\n",
+                    )
+                if (
+                    not self.snapshot_owner_plan
+                    and not self.target_is_verification
+                    and not self.target_annotation_only
+                ):
                     self.repair_stage = _deps.replace(
                         self.repair_stage,
                         user_prompt=self.repair_stage.user_prompt
@@ -816,10 +1549,23 @@ class _ProjectEditAttemptFinalizePhase:
                             "symbol_attempt": self.symbol_attempt,
                             "path": self.target["path"],
                             "symbol": self.target["symbol"],
-                            "stage": "focused_function_repair",
+                            "stage": (
+                                "focused_annotation_repair"
+                                if self.target_annotation_only
+                                else "focused_function_repair"
+                            ),
                         }
                     )
                     self.timings.append(self.timing)
+                    if self.target_annotation_only:
+                        self.annotation_candidate_response = self.replacement
+                        self.replacement = _transplant_requested_annotations(
+                            str(self.contract.get("source") or ""),
+                            self.replacement,
+                            str(self.target["symbol"]),
+                            [self.annotation_failure],
+                            self.prompt,
+                        )
                     self.current_target_source_for_docstring = next(
                         (
                             source
@@ -895,19 +1641,53 @@ class _ProjectEditAttemptFinalizePhase:
                                 self.contract.get("forbidden_names") or []
                             ),
                             approved_signature=self.approved_signature,
+                            allow_return_annotation_repair=(
+                                _requested_return_annotation_repair(self.target_errors)
+                                or _placeholder_can_retype_return(
+                                    str(self.contract.get("source") or ""),
+                                    str(self.target["symbol"]),
+                                )
+                            ),
+                            allow_parameter_annotation_repair=(
+                                _requested_parameter_annotation_repairs(self.target_errors)
+                            ),
+                            preserve_existing_parameter_annotations=True,
+                            preserve_existing_return_annotation=True,
                         )
                     )
                     if (
                         not self.splice_errors
                         and self.updated_files != self.repair_scope_files
                     ):
-                        self.updated_files, self._docstring_repairs = (
-                            _deps._repair_requested_python_contract_surface(
+                        if self.target_annotation_only:
+                            self.updated_files = _ensure_annotation_imports(
                                 self.updated_files,
-                                self.errors,
-                                request_prompt=self.prompt,
+                                str(self.target["path"]),
+                                str(self.target["symbol"]),
+                            )
+                        self.updated_files, self._docstring_repairs = (
+                            _repair_focused_python_contract_surface(
+                                self.updated_files,
+                                str(self.target["path"]),
+                                self.target_errors,
+                                self.prompt,
                             )
                         )
+                        for file_index, record in enumerate(self.updated_files):
+                            if _deps.Path(record[0]).resolve() != _deps.Path(
+                                str(self.target["path"])
+                            ).resolve():
+                                continue
+                            formatted, formatting_notes = (
+                                _deps.format_project_edit_generated_python([record])
+                            )
+                            self.updated_files[file_index] = formatted[0]
+                            if formatting_notes and self.status_callback:
+                                self.status_callback(
+                                    f"Normalized repaired callable presentation: "
+                                    f"{', '.join(formatting_notes)}"
+                                )
+                            break
                     if (
                         not self.splice_errors
                         and self.updated_files != self.repair_scope_files
@@ -948,6 +1728,15 @@ class _ProjectEditAttemptFinalizePhase:
                                 self.current_target_behavior
                                 == self.proposed_target_behavior
                             )
+                            and not self.target_annotation_only
+                            and not _approved_parameter_annotation_changed(
+                                self.current_target_source,
+                                self.proposed_target_source,
+                                str(self.target["symbol"]),
+                                _requested_parameter_annotation_repairs(
+                                    self.target_errors
+                                ),
+                            )
                         ):
                             self.splice_errors = [
                                 "focused replacement changed no executable behavior in the exact target callable"
@@ -967,6 +1756,44 @@ class _ProjectEditAttemptFinalizePhase:
                                 self.implementation_plan, self.updated_files
                             )
                         )
+                        (
+                            self.updated_files,
+                            self.proposed_contract_errors,
+                            self.preserved_contract_notes,
+                        ) = _salvage_focused_preserved_contracts(
+                            self.repair_scope_files,
+                            self.updated_files,
+                            self.current_contract_errors,
+                            self.proposed_contract_errors,
+                            str(self.target["symbol"]),
+                            lambda files: self.validate_generated_files_against_implementation_plan(
+                                self.implementation_plan, files
+                            ),
+                        )
+                        if self.preserved_contract_notes and self.status_callback:
+                            self.status_callback(
+                                "Preserved validated guard and row contracts in focused replacement: "
+                                + "; ".join(self.preserved_contract_notes)
+                            )
+                        (
+                            self.updated_files,
+                            self.proposed_contract_errors,
+                            self.mechanical_salvage_notes,
+                        ) = _salvage_focused_unused_local_regressions(
+                            self.updated_files,
+                            self.current_contract_errors,
+                            self.proposed_contract_errors,
+                            str(self.target["symbol"]),
+                            lambda files: self.validate_generated_files_against_implementation_plan(
+                                self.implementation_plan, files
+                            ),
+                        )
+                        if self.mechanical_salvage_notes and self.status_callback:
+                            self.status_callback(
+                                "Removed validator-proven dead locals from focused "
+                                "replacement before monotonic validation: "
+                                + "; ".join(self.mechanical_salvage_notes)
+                            )
                         self.focused_regressions = [
                             error
                             for error in self.proposed_contract_errors
@@ -1166,6 +1993,21 @@ class _ProjectEditAttemptFinalizePhase:
                             f"\n\nREJECTED SYMBOL REPAIR:\nRepair retry {self.symbol_attempt + 1}. The previous response was rejected because {self.failure_detail}.\nExact rejected response:\n```python\n"
                             + str(self.replacement or "")[-2000:]
                             + f"\n```\nReturn a materially changed, complete replacement for only {self.target['symbol']} that fixes the supplied validation failure. Do not return the whole file, do not repeat the rejected implementation, and preserve unrelated working behavior. Write the corrected algorithm from the validated failure and postconditions rather than copying the rejected body."
+                        )
+                    if self.target_annotation_only:
+                        self.repair_feedback = (
+                            "\n\nREJECTED TYPE PROPOSAL: The prior signature was "
+                            "not a concrete match for the stated input/output "
+                            "shape or failed the approved signature check. "
+                            "If the request specifies an iterable of mapping "
+                            "records, annotate the "
+                            "outer collection as Iterable[...] and each element "
+                            "as Mapping[...] (not a single dict or a tuple-only "
+                            "input). Preserve parameter names and defaults. "
+                            "The executable body is retained automatically. "
+                            "Return only one corrected def with a pass body.\n"
+                            "Prior proposal:\n"
+                            + str(self.annotation_candidate_response or "")[:800]
                         )
                     if self.status_callback:
                         self.status_callback(

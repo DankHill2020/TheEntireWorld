@@ -63,6 +63,7 @@ class DccHostQualificationReceipt:
     exact_session_identity_verified: bool = False
     identity_latency_sample_count: int = 1
     install_recovery_evidence: dict[str, Any] = field(default_factory=dict)
+    discovery_evidence: dict[str, Any] = field(default_factory=dict)
     receipt_id: str = ""
     environment_fingerprint: str = ""
     bridge_implementation: dict[str, Any] = field(default_factory=dict)
@@ -146,6 +147,7 @@ def probe_dcc_host(
     host: str,
     *,
     bridge: Any | None = None,
+    requested_ports: tuple[int, ...] = (),
     timeout: float = 3.0,
     max_sessions: int = 16,
     install_recovery_verified: bool = False,
@@ -161,17 +163,22 @@ def probe_dcc_host(
     target = bridge if bridge is not None else bridge_for_host(key)
     protocol = str(getattr(getattr(target, "info", None), "protocol", "unknown") or "unknown")
     preferred = preferred_session_port(key)
-    ports: list[int] = []
+    explicit_ports = list(dict.fromkeys(
+        int(port) for port in requested_ports if 0 < int(port) < 65536
+    ))
+    ports: list[int] = list(explicit_ports)
     sessions: list[dict[str, Any]] = []
     errors: list[str] = []
     multi_supported = callable(getattr(target, "find_ports", None)) and callable(getattr(target, "session_info", None))
 
     try:
         if callable(getattr(target, "find_ports", None)):
-            ports = [int(port) for port in target.find_ports()][:max(1, int(max_sessions))]
+            discovered = [int(port) for port in target.find_ports()]
+            ports = list(dict.fromkeys([*ports, *discovered]))[:max(1, int(max_sessions))]
         else:
             port = target.find_port()
-            ports = [int(port)] if port else []
+            if port:
+                ports = list(dict.fromkeys([*ports, int(port)]))
     except Exception as exc:
         errors.append(f"Endpoint discovery failed: {exc}")
     sample_count = max(1, int(identity_latency_samples))
@@ -282,7 +289,15 @@ def probe_dcc_host(
             }
         except Exception as exc:
             install_evidence = {"automatic_recovery_verified": False, "error": str(exc)}
-    preferred_honored = None if preferred is None else bool(ports and ports[0] == preferred and any(row.get("port") == preferred for row in sessions))
+    # A saved preference for a closed session must not block a healthy
+    # discovered fallback. Keep the stale preference visible in evidence.
+    stale_preferred = preferred is not None and not any(
+        int(row.get("port") or 0) == preferred for row in sessions
+    )
+    preferred_honored = (
+        None if preferred is None or stale_preferred
+        else bool(ports and ports[0] == preferred and any(row.get("port") == preferred for row in sessions))
+    )
     multi_verified = len(sessions) >= 2 and exact_session_identity
     missing_gates: list[str] = []
     if missing_operations:
@@ -293,7 +308,7 @@ def probe_dcc_host(
         missing_gates.append("exact_session_identity_readback")
     if live_readback and not latency_budget_met:
         missing_gates.append("identity_latency_budget")
-    if preferred is not None and not preferred_honored:
+    if preferred is not None and not stale_preferred and not preferred_honored:
         missing_gates.append("preferred_session_readback")
     if not multi_supported:
         missing_gates.append("multi_session_contract")
@@ -301,7 +316,7 @@ def probe_dcc_host(
         missing_gates.append("install_recovery_readback")
     if missing_operations:
         status = "incomplete"
-    elif live_readback and exact_session_identity and latency_budget_met and install_recovery_verified:
+    elif not missing_gates and live_readback and exact_session_identity and latency_budget_met and install_recovery_verified:
         status = "qualified"
     elif live_readback and exact_session_identity and latency_budget_met:
         status = "live"
@@ -310,6 +325,21 @@ def probe_dcc_host(
     checked_at = datetime.now(timezone.utc).isoformat()
     environment = receipt_environment_fingerprint()
     bridge_implementation = bridge_implementation_fingerprint(target)
+    discovery_evidence: dict[str, Any] = {}
+    if callable(getattr(target, "session_registry", None)):
+        try:
+            discovery_evidence = dict(target.session_registry() or {})
+        except Exception as exc:
+            discovery_evidence = {"error": str(exc)}
+    discovery_evidence["requested_ports"] = list(explicit_ports)
+    if stale_preferred:
+        discovery_evidence["stale_preferred_port"] = preferred
+    source_rows = discovery_evidence.setdefault("port_sources", {})
+    for port in explicit_ports:
+        sources = list(source_rows.get(str(port)) or [])
+        if "explicit_selection" not in sources:
+            sources.insert(0, "explicit_selection")
+        source_rows[str(port)] = sources
     integrity = {
         "schema": QUALIFICATION_SCHEMA,
         "host": key,
@@ -331,6 +361,7 @@ def probe_dcc_host(
         "identity_latency_budget_met": latency_budget_met,
         "exact_session_identity_verified": exact_session_identity,
         "identity_latency_sample_count": sample_count,
+        "discovery_evidence": discovery_evidence,
         "environment_fingerprint": environment,
         "bridge_implementation": bridge_implementation,
     }
@@ -359,6 +390,7 @@ def probe_dcc_host(
         exact_session_identity_verified=exact_session_identity,
         identity_latency_sample_count=sample_count,
         install_recovery_evidence=install_evidence,
+        discovery_evidence=discovery_evidence,
         receipt_id=stable_receipt_digest(integrity),
         environment_fingerprint=environment,
         bridge_implementation=bridge_implementation,

@@ -417,7 +417,7 @@ def extract_mentions(text: str) -> list[str]:
         raw_token = match.group(1)
         lower = raw_token.lower()
         if re.match(
-            r"^(?:maya|unreal(?:_engine)?|blender|houdini|substance(?:_painter)?|motionbuilder|mobu|unity)\.",
+            r"^(?:maya|unreal(?:_engine)?|blender|houdini|substance(?:_painter)?|motionbuilder|mobu|unity|slack|discord|jira|confluence)\.",
             lower,
         ) or re.match(r"^[a-z0-9_]+_tools[/.]", lower):
             # Smart Search resolves these references while preserving hierarchy.

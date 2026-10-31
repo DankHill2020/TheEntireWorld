@@ -6,9 +6,18 @@ import copy
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from tech_connector.game_engine.scene.federated_scene_service import EditableRigGraph, IDENTITY_MATRIX
+if TYPE_CHECKING:
+    from tech_connector.game_engine.scene.federated_scene_service import EditableRigGraph
+
+
+IDENTITY_MATRIX = (
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0,
+)
 
 
 TC_RIG_TEMPLATE_SCHEMA = "tech_connector.rig_template.v1"
@@ -39,7 +48,7 @@ def expanded_tc_rig_template_joints(
 
 
 def instantiate_tc_rig_template(
-    graph: EditableRigGraph,
+    graph: "EditableRigGraph",
     *,
     template_path: str | Path = DEFAULT_TC_BIPED_TEMPLATE,
     namespace: str = "",

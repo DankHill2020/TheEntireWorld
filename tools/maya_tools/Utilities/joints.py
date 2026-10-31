@@ -10,13 +10,25 @@ def find_skinned_or_top_joints(namespace=''):
     :return: Name of the topmost joint (str)
     """
 
+    root_cache = {}
+
     def get_topmost_joint(joint):
         current = joint
+        traversed = []
         while True:
+            cached_root = root_cache.get(current)
+            if cached_root:
+                current = cached_root
+                break
+            traversed.append(current)
             parent = cmds.listRelatives(current, parent=True, type='joint')
             if not parent:
-                return current
+                break
             current = parent[0]
+        root = current
+        for node in traversed:
+            root_cache[node] = root
+        return root
 
     assembly_nodes = cmds.ls(assemblies=True)
 

@@ -45,6 +45,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+
+_provider_status_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="provider-status")
 
 class ProjectChangesDialog(QDialog):
     def __init__(self, changes, explanation, parent=None):
@@ -344,6 +347,15 @@ class CredentialsPromptDialog(QDialog):
         self.api_key = ""
         self.auth_method = ""
         self.user_email = ""
+        self._account_status = None
+        self._account_status_future = None
+        self._status_check_timer = QTimer(self)
+        self._status_check_timer.setInterval(150)
+        self._status_check_timer.timeout.connect(self._finish_status_check)
+        self._login_refresh_timer = QTimer(self)
+        self._login_refresh_timer.setInterval(3000)
+        self._login_refresh_timer.timeout.connect(self._refresh_during_login)
+        self._login_refresh_attempts = 0
 
         self.setStyleSheet("""
             QDialog {
@@ -400,9 +412,15 @@ class CredentialsPromptDialog(QDialog):
         layout.addWidget(self.status_lbl)
 
         account_actions = QHBoxLayout()
-        self.sign_in_btn = QPushButton("Sign in with provider")
-        self.sign_in_btn.clicked.connect(self.begin_login)
+        self.sign_in_btn = QPushButton(
+            "OpenAI browser sign-in" if provider_id == "openai" else "Sign in with provider"
+        )
+        self.sign_in_btn.clicked.connect(lambda: self.begin_login())
         account_actions.addWidget(self.sign_in_btn)
+        if provider_id == "openai":
+            device_sign_in_btn = QPushButton("Use device code instead")
+            device_sign_in_btn.clicked.connect(lambda: self.begin_login(device_auth=True))
+            account_actions.addWidget(device_sign_in_btn)
         refresh_btn = QPushButton("Refresh status")
         refresh_btn.clicked.connect(lambda: self.refresh_status(refresh=True))
         account_actions.addWidget(refresh_btn)
@@ -457,32 +475,65 @@ class CredentialsPromptDialog(QDialog):
             provider_account_status,
         )
 
-        status = provider_account_status(
-            self.provider_id,
-            refresh=refresh,
-            timeout=3,
+        if self._account_status_future is not None:
+            return
+        self.status_lbl.setText("Checking account connection…")
+        self._account_status_future = _provider_status_executor.submit(
+            provider_account_status, self.provider_id, refresh=refresh, timeout=8
         )
+        self._status_check_timer.start()
+
+    def _finish_status_check(self):
+        future = self._account_status_future
+        if future is None or not future.done():
+            return
+        self._status_check_timer.stop()
+        self._account_status_future = None
+        try:
+            status = future.result()
+        except Exception as exc:
+            self.status_lbl.setText(f"Could not check connection: {exc}")
+            self.connect_btn.setEnabled(self.advanced_key_toggle.isChecked())
+            return
+        self._account_status = status
         self.connect_btn.setEnabled(status.connected or self.advanced_key_toggle.isChecked())
         if status.connected:
+            self._login_refresh_timer.stop()
             self.status_lbl.setText(f"Connected. {status.detail}")
         elif status.installed:
-            self.status_lbl.setText(f"Installed, but not connected. {status.detail}")
+            self.status_lbl.setText(
+                "Waiting for browser approval…" if self._login_refresh_timer.isActive()
+                else f"Not connected. {status.detail}"
+            )
         else:
             self.status_lbl.setText(
-                "Official command-line client not found. Install it or configure its "
-                "executable path in provider settings."
+                "No sign-in helper found. For OpenAI, install Node/npm or configure "
+                "the official Codex executable; no preinstalled Codex is required "
+                "when npm is available."
             )
 
-    def begin_login(self):
+    def _refresh_during_login(self):
+        self._login_refresh_attempts += 1
+        if self._login_refresh_attempts > 40:
+            self._login_refresh_timer.stop()
+            self.status_lbl.setText(
+                "Sign-in has not completed. Check the browser approval, then refresh status."
+            )
+            return
+        self.refresh_status(refresh=True)
+
+    def begin_login(self, *, device_auth: bool = False):
         from tech_connector.services.authenticated_provider_service import (
             begin_provider_login,
         )
 
         try:
-            begin_provider_login(self.provider_id)
-            self.status_lbl.setText(
-                "Login opened in a provider-owned terminal. Complete sign-in, then click Refresh status."
-            )
+            message = begin_provider_login(self.provider_id, device_auth=device_auth)
+            self.status_lbl.setText(message)
+            if message.startswith("Opened"):
+                self._login_refresh_attempts = 0
+                self._login_refresh_timer.start()
+                self.refresh_status(refresh=True)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Provider Login", str(exc))
 
@@ -501,16 +552,11 @@ class CredentialsPromptDialog(QDialog):
             self.accept()
             return
 
-        from tech_connector.services.authenticated_provider_service import (
-            provider_account_status,
-        )
-
-        status = provider_account_status(self.provider_id, refresh=True, timeout=3)
-        if not status.connected:
+        if not (self._account_status and self._account_status.connected):
             QMessageBox.information(
                 self,
                 "Sign In Required",
-                "Complete provider sign-in, then refresh the connection status.",
+                "Complete browser sign-in; connection status updates automatically.",
             )
             return
         self.auth_method = "account"

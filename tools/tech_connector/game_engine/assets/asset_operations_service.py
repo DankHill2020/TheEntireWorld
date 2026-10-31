@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from contextlib import contextmanager
 import json
+import mmap
 import os
 from pathlib import Path
 import re
@@ -15,6 +17,34 @@ from .asset_database_service import AssetDatabase, AssetRecord
 from .asset_metadata_service import asset_metadata_path, read_asset_metadata, write_asset_metadata
 from .asset_schema_service import merge_asset_properties, merge_import_settings
 from .asset_type_registry import AssetTypeRegistry, builtin_asset_type_registry
+
+
+def validate_fbx_import(source: Path, type_id: str) -> None:
+    """Preflight FBX imports before a raw file is registered as a native asset."""
+    if source.suffix.casefold() != ".fbx":
+        return
+    if type_id in {"tc.skeletal_mesh", "tc.animation_clip"}:
+        raise ValueError(
+            "Raw FBX cannot be tagged as a native skeletal mesh or animation clip. "
+            "Use a verified character/animation converter before engine import."
+        )
+    if not source.stat().st_size:
+        return
+    with source.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as content:
+        if not any(content.find(marker) >= 0 for marker in (b"LimbNode", b"AnimationCurve", b"Deformer")):
+            return
+    from tech_connector.game_engine.scene.native_fbx_service import import_native_fbx
+
+    manifest = import_native_fbx(source).manifest
+    actions = list(manifest.get("actions") or [])
+    skinned = [mesh for mesh in manifest.get("meshes") or []
+               if mesh.get("armature_id") and int(mesh.get("influence_count") or 0) > 0]
+    if actions or skinned:
+        kind = "animation" if actions and not skinned else "skinned character"
+        raise ValueError(
+            f"FBX contains {kind} data and cannot be imported as {type_id}: {source}. "
+            "Use a verified character/animation importer; raw type_id tagging does not convert the asset."
+        )
 
 
 @dataclass(frozen=True)
@@ -39,6 +69,33 @@ class AssetReferenceFixupReceipt:
     scanned_assets: int
     updated_assets: tuple[str, ...]
     replacements: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AssetReferenceReplacementPlan:
+    asset_id: str
+    replacement_asset_id: str
+    referencers: tuple[str, ...]
+    authored_replacements: int
+    blockers: tuple[str, ...] = ()
+
+    @property
+    def can_execute(self) -> bool:
+        return bool(self.referencers) and not self.blockers
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "can_execute": self.can_execute}
+
+
+@dataclass(frozen=True)
+class AssetReferenceReplacementReceipt:
+    asset_id: str
+    replacement_asset_id: str
+    updated_assets: tuple[str, ...]
+    authored_replacements: int
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -78,6 +135,10 @@ class AssetInUseError(ValueError):
         )
 
 
+class AssetImportCancelled(RuntimeError):
+    """Raised when an import is cancelled before its atomic destination commit."""
+
+
 class AssetOperationsService:
     def __init__(
         self,
@@ -105,6 +166,22 @@ class AssetOperationsService:
         _label, callback = self._undo_stack.pop()
         return callback()
 
+    @contextmanager
+    def undo_group(self, label: str):
+        """Collapse child operations into one undo and roll all of them back on failure."""
+        start = len(self._undo_stack)
+        try:
+            yield
+        except Exception:
+            entries = self._undo_stack[start:]; del self._undo_stack[start:]
+            for _child_label, callback in reversed(entries):
+                callback()
+            raise
+        entries = self._undo_stack[start:]; del self._undo_stack[start:]
+        if entries:
+            callbacks = tuple(callback for _child_label, callback in entries)
+            self._remember_undo(str(label), lambda: tuple(callback() for callback in reversed(callbacks)))
+
     def create_asset(
         self,
         type_id: str,
@@ -116,6 +193,15 @@ class AssetOperationsService:
         descriptor = self.registry.require(type_id)
         if not descriptor.creatable:
             raise ValueError(f"{descriptor.display_name} assets must be imported.")
+        authored_properties = merge_asset_properties(descriptor.type_id, properties)
+        dependency_edges: list[tuple[str, str]] = []
+        if descriptor.type_id == "tc.ui_document":
+            from .ui_document_asset_service import UIDocumentAssetService, validate_ui_document
+
+            errors = [item.message for item in validate_ui_document(authored_properties) if item.severity == "error"]
+            if errors:
+                raise ValueError("Invalid UI document: " + "; ".join(errors))
+            dependency_edges = UIDocumentAssetService(self.project_root, self.database)._dependency_edges("", authored_properties)
         extension = descriptor.extensions[0] if descriptor.extensions else ".tcasset"
         safe_name = _safe_asset_name(name)
         destination = self._project_destination(folder, safe_name + extension)
@@ -134,10 +220,10 @@ class AssetOperationsService:
                 "schema": f"tech_connector.asset.{descriptor.type_id.removeprefix('tc.')}.v1",
                 "type_id": descriptor.type_id,
                 "name": safe_name,
-                "properties": merge_asset_properties(descriptor.type_id, properties),
+                "properties": authored_properties,
             }
             destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        record = self.database.register_asset(destination, descriptor.type_id)
+        record = self.database.register_asset(destination, descriptor.type_id, dependencies=dependency_edges)
         self._remember_undo(
             f"Create {safe_name}",
             lambda value=record.asset_id: self.delete_asset(value, _record_undo=False),
@@ -154,6 +240,9 @@ class AssetOperationsService:
         folder: str | Path = "Assets",
         type_id: str = "",
         importer_settings: dict[str, Any] | None = None,
+        conflict_policy: str = "error",
+        cancellation_event: Any | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> AssetOperationReceipt:
         source = Path(source_path).expanduser().resolve()
         if not source.is_file():
@@ -163,16 +252,40 @@ class AssetOperationsService:
             raise ValueError(f"No registered importer recognizes '{source.suffix}'.")
         if not descriptor.importable:
             raise ValueError(f"{descriptor.display_name} does not support source import.")
+        validate_fbx_import(source, descriptor.type_id)
         resolved_importer_settings = merge_import_settings(descriptor.type_id, importer_settings)
         destination = self._project_destination(folder, source.name)
-        if destination.exists():
+        policy = str(conflict_policy or "error").strip().casefold()
+        if policy not in {"error", "rename", "replace", "skip"}:
+            raise ValueError(f"Unknown import conflict policy: {conflict_policy}")
+        if destination.exists() and policy == "rename":
+            destination = _unique_copy_path(destination)
+        if destination.exists() and policy == "skip":
+            existing = self.database.asset_for_path(destination)
+            return AssetOperationReceipt(
+                "skip_import", existing.asset_id if existing else "",
+                existing.asset_type if existing else descriptor.type_id,
+                str(source), str(destination), (), f"Skipped {source.name}; destination already exists.",
+            )
+        replacing = self.database.asset_for_path(destination) if destination.exists() and policy == "replace" else None
+        if destination.exists() and policy == "error":
             raise FileExistsError(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        _copy_file_cancellable(
+            source, destination, cancellation_event=cancellation_event,
+            progress_callback=progress_callback,
+        )
         record = self.database.register_asset(
             destination,
             descriptor.type_id,
-            metadata={"import_source": str(source), "importer_settings": resolved_importer_settings},
+            asset_id=replacing.asset_id if replacing else "",
+            metadata={
+                **(replacing.metadata if replacing else {}),
+                "import_source": str(source),
+                "import_source_modified_ns": source.stat().st_mtime_ns,
+                "importer_settings": resolved_importer_settings,
+            },
+            dependencies=self.database.dependency_edges(replacing.asset_id) if replacing else (),
         )
         metadata = read_asset_metadata(destination)
         write_asset_metadata(
@@ -188,7 +301,7 @@ class AssetOperationsService:
         )
         return AssetOperationReceipt(
             "import", record.asset_id, descriptor.type_id, str(source), str(destination), (),
-            f"Imported {source.name} as {descriptor.display_name}.",
+            f"{'Replaced' if replacing else 'Imported'} {source.name} as {descriptor.display_name}.",
         )
 
     def move_asset(
@@ -286,7 +399,7 @@ class AssetOperationsService:
             destination,
             record.asset_type,
             asset_id=record.asset_id,
-            metadata=record.metadata,
+            metadata={**record.metadata, "import_source_modified_ns": import_source.stat().st_mtime_ns},
             dependencies=self.database.dependency_edges(record.asset_id),
         )
         self._remember_undo(
@@ -298,6 +411,29 @@ class AssetOperationsService:
         return AssetOperationReceipt(
             "reimport", updated.asset_id, updated.asset_type, str(import_source), str(destination), (),
             f"Reimported {destination.name} and invalidated affected derived data.",
+        )
+
+    def set_asset_tags(
+        self, asset_id: str, *, add: tuple[str, ...] = (), remove: tuple[str, ...] = (),
+        _record_undo: bool = True,
+    ) -> AssetOperationReceipt:
+        record = self._require_asset(asset_id); previous = dict(record.metadata)
+        tags = {str(value).strip() for value in previous.get("tags") or () if str(value).strip()}
+        tags.update(str(value).strip() for value in add if str(value).strip())
+        tags.difference_update(str(value).strip() for value in remove if str(value).strip())
+        metadata = {**previous, "tags": sorted(tags)}
+        updated = self.database.register_asset(
+            record.source_path, record.asset_type, asset_id=record.asset_id,
+            metadata=metadata, dependencies=self.database.dependency_edges(record.asset_id),
+        )
+        if _record_undo:
+            self._remember_undo(
+                f"Tag {record.source_path.name}",
+                lambda value=record.asset_id, state=previous: self._restore_metadata(value, state),
+            )
+        return AssetOperationReceipt(
+            "tag", updated.asset_id, updated.asset_type, str(updated.source_path), str(updated.source_path), (),
+            f"Updated tags for {updated.source_path.name}.",
         )
 
     def delete_asset(
@@ -366,6 +502,99 @@ class AssetOperationsService:
             )
         return receipt
 
+    def plan_reference_replacement(
+        self, asset_id: str, replacement_asset_id: str, *, owner_asset_ids: tuple[str, ...] = (),
+    ) -> AssetReferenceReplacementPlan:
+        target = self._require_asset(asset_id)
+        replacement = self._require_asset(replacement_asset_id)
+        blockers: list[str] = []
+        if target.asset_id == replacement.asset_id:
+            blockers.append("The replacement must be a different asset.")
+        if target.asset_type != replacement.asset_type:
+            blockers.append("Replacement assets must have the same registered type.")
+        available = set(self.database.referencers(target.asset_id))
+        owners = tuple(dict.fromkeys(str(value) for value in owner_asset_ids)) if owner_asset_ids else tuple(sorted(available))
+        unknown = sorted(set(owners) - available)
+        if unknown:
+            blockers.append("These assets do not reference the target: " + ", ".join(unknown))
+        replacement_closure = set(self.database.dependency_closure((replacement.asset_id,)))
+        risks = sorted(owner for owner in owners if owner == replacement.asset_id or owner in replacement_closure)
+        if risks:
+            blockers.append("Replacement would create a dependency cycle for: " + ", ".join(risks))
+        replacements = 0
+        values = {
+            target.asset_id.casefold(): replacement.asset_id,
+            self._project_relative(target.source_path).casefold(): self._project_relative(replacement.source_path),
+            str(target.source_path).replace("\\", "/").casefold(): str(replacement.source_path).replace("\\", "/"),
+        }
+        for owner_id in owners:
+            owner = self.database.asset(owner_id)
+            if owner is None or not _is_json_authored_asset(owner.source_path):
+                continue
+            try:
+                authored = json.loads(owner.source_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            _updated, count = _replace_legacy_paths(authored, values)
+            replacements += count
+        return AssetReferenceReplacementPlan(
+            target.asset_id, replacement.asset_id, owners, replacements, tuple(blockers),
+        )
+
+    def replace_asset_references(
+        self, asset_id: str, replacement_asset_id: str, *, owner_asset_ids: tuple[str, ...] = (),
+        _record_undo: bool = True,
+    ) -> AssetReferenceReplacementReceipt:
+        plan = self.plan_reference_replacement(
+            asset_id, replacement_asset_id, owner_asset_ids=owner_asset_ids,
+        )
+        if plan.blockers:
+            raise ValueError(" ".join(plan.blockers))
+        target = self._require_asset(plan.asset_id)
+        replacement = self._require_asset(plan.replacement_asset_id)
+        snapshots: dict[str, tuple[tuple[tuple[str, str], ...], bytes | None]] = {}
+        updated: list[str] = []
+        replacements = 0
+        values = {
+            target.asset_id.casefold(): replacement.asset_id,
+            self._project_relative(target.source_path).casefold(): self._project_relative(replacement.source_path),
+            str(target.source_path).replace("\\", "/").casefold(): str(replacement.source_path).replace("\\", "/"),
+        }
+        try:
+            for owner_id in plan.referencers:
+                owner = self._require_asset(owner_id)
+                payload = owner.source_path.read_bytes() if _is_json_authored_asset(owner.source_path) else None
+                snapshots[owner_id] = (self.database.dependency_edges(owner_id), payload)
+                if not self.database.replace_dependency(owner_id, target.asset_id, replacement.asset_id):
+                    continue
+                if payload is not None:
+                    try:
+                        authored = json.loads(payload.decode("utf-8"))
+                        authored, count = _replace_legacy_paths(authored, values)
+                        replacements += count
+                        if count:
+                            owner.source_path.write_text(
+                                json.dumps(authored, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                            )
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        pass
+                self.database.register_asset(
+                    owner.source_path, owner.asset_type, asset_id=owner.asset_id,
+                    metadata=owner.metadata, dependencies=self.database.dependency_edges(owner.asset_id),
+                )
+                updated.append(owner_id)
+        except Exception:
+            self._restore_reference_snapshots(snapshots)
+            raise
+        if _record_undo and snapshots:
+            self._remember_undo(
+                f"Replace references to {target.source_path.name}",
+                lambda states=snapshots: self._restore_reference_snapshots(states),
+            )
+        return AssetReferenceReplacementReceipt(
+            target.asset_id, replacement.asset_id, tuple(updated), replacements,
+        )
+
     def validate_asset(self, asset_id: str) -> AssetValidationReport:
         record = self._require_asset(asset_id)
         issues: list[AssetValidationIssue] = []
@@ -401,6 +630,10 @@ class AssetOperationsService:
                 issues.append(AssetValidationIssue("error", "invalid_cloth", "Cloth source is not valid authored JSON."))
             for issue in validate_cloth_properties(cloth_properties):
                 issues.append(AssetValidationIssue(issue.severity, issue.code, issue.message))
+        if record.asset_type == "tc.ui_document" and record.source_path.is_file():
+            from .ui_document_asset_service import UIDocumentAssetService
+
+            issues.extend(UIDocumentAssetService(self.project_root, self.database).validate(asset_id))
         if record.asset_type in {"tc.physics_asset", "tc.physics_constraint"} and record.source_path.is_file():
             from .physics_asset_service import validate_constraint_properties, validate_physics_asset_properties
 
@@ -508,12 +741,60 @@ class AssetOperationsService:
 
     def move_assets(self, asset_ids: list[str] | tuple[str, ...], destination_folder: str | Path) -> tuple[AssetOperationReceipt, ...]:
         folder = self._resolve_project_path(destination_folder)
-        return tuple(self.move_asset(asset_id, folder) for asset_id in dict.fromkeys(asset_ids))
+        identifiers = tuple(dict.fromkeys(asset_ids)); receipts: list[AssetOperationReceipt] = []
+        with self.undo_group(f"Bulk Move ({len(identifiers)} assets)"):
+            for asset_id in identifiers:
+                receipts.append(self.move_asset(asset_id, folder))
+        return tuple(receipts)
 
     def resolve_redirect(self, previous_path: str | Path) -> AssetRecord | None:
         key = str(previous_path).replace("\\", "/").casefold()
         entry = self._read_redirectors().get(key)
         return self.database.asset(str(entry.get("asset_id") or "")) if isinstance(entry, dict) else None
+
+    def redirector_report(self) -> tuple[dict[str, Any], ...]:
+        """Describe every recorded path redirect and whether it still resolves."""
+
+        rows = []
+        for previous_path, entry in sorted(self._read_redirectors().items()):
+            asset_id = str(entry.get("asset_id") or "") if isinstance(entry, dict) else ""
+            record = self.database.asset(asset_id) if asset_id else None
+            rows.append({
+                "previous_path": previous_path,
+                "asset_id": asset_id,
+                "current_path": str(entry.get("current_path") or "") if isinstance(entry, dict) else "",
+                "resolved_path": self._project_relative(record.source_path) if record else "",
+                "valid": bool(record and record.source_path.is_file()),
+            })
+        return tuple(rows)
+
+    def repair_project_references(self, *, prune_stale_redirectors: bool = True) -> dict[str, Any]:
+        """Repair all known legacy path aliases and optionally remove dead redirectors."""
+
+        receipts = []
+        for record in self.database.list_assets(status="ready"):
+            metadata = read_asset_metadata(record.source_path)
+            aliases = metadata.get("previous_paths") or record.metadata.get("previous_paths") or ()
+            if aliases:
+                receipts.append(self.fix_legacy_path_references(record.asset_id))
+        redirectors = self._read_redirectors()
+        scanned_redirectors = len(redirectors)
+        stale = [
+            key for key, entry in redirectors.items()
+            if not isinstance(entry, dict) or self.database.asset(str(entry.get("asset_id") or "")) is None
+        ]
+        if prune_stale_redirectors and stale:
+            for key in stale:
+                redirectors.pop(key, None)
+            self._save_redirectors(redirectors)
+        return {
+            "schema": "tech_connector.asset_reference_repair.v1",
+            "scanned_redirectors": scanned_redirectors,
+            "pruned_redirectors": len(stale) if prune_stale_redirectors else 0,
+            "scanned_assets": sum(receipt.scanned_assets for receipt in receipts),
+            "updated_assets": tuple(sorted({value for receipt in receipts for value in receipt.updated_assets})),
+            "replacements": sum(receipt.replacements for receipt in receipts),
+        }
 
     def reference_report(self, asset_id: str) -> dict[str, Any]:
         record = self._require_asset(asset_id)
@@ -623,6 +904,17 @@ class AssetOperationsService:
             f"Restored the previous content for {path.name}.",
         )
 
+    def _restore_metadata(self, asset_id: str, metadata: dict[str, Any]) -> AssetOperationReceipt:
+        record = self._require_asset(asset_id)
+        restored = self.database.register_asset(
+            record.source_path, record.asset_type, asset_id=record.asset_id,
+            metadata=metadata, dependencies=self.database.dependency_edges(record.asset_id),
+        )
+        return AssetOperationReceipt(
+            "undo_metadata", restored.asset_id, restored.asset_type, str(restored.source_path),
+            str(restored.source_path), (), f"Restored metadata for {restored.source_path.name}.",
+        )
+
     def _restore_deleted(
         self,
         record: AssetRecord,
@@ -656,6 +948,23 @@ class AssetOperationsService:
             f"Restored {record.source_path.name} from project trash.",
         )
 
+    def _restore_reference_snapshots(
+        self, snapshots: dict[str, tuple[tuple[tuple[str, str], ...], bytes | None]],
+    ) -> tuple[str, ...]:
+        restored = []
+        for owner_id, (edges, payload) in snapshots.items():
+            owner = self.database.asset(owner_id)
+            if owner is None:
+                continue
+            if payload is not None:
+                owner.source_path.write_bytes(payload)
+            self.database.register_asset(
+                owner.source_path, owner.asset_type, asset_id=owner.asset_id,
+                metadata=owner.metadata, dependencies=edges,
+            )
+            restored.append(owner_id)
+        return tuple(restored)
+
     def _read_redirectors(self) -> dict[str, dict[str, str]]:
         if not self._redirector_path.is_file():
             return {}
@@ -670,6 +979,9 @@ class AssetOperationsService:
         redirectors[str(previous_path).replace("\\", "/").casefold()] = {
             "asset_id": str(asset_id), "current_path": str(current_path),
         }
+        self._save_redirectors(redirectors)
+
+    def _save_redirectors(self, redirectors: dict[str, dict[str, str]]) -> None:
         self._redirector_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._redirector_path.with_name(f".{self._redirector_path.name}.{os.getpid()}.tmp")
         temporary.write_text(
@@ -686,6 +998,38 @@ def _safe_asset_name(value: str) -> str:
     return name
 
 
+def _copy_file_cancellable(
+    source: Path, destination: Path, *, cancellation_event: Any | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> None:
+    """Copy in chunks and atomically publish only a fully completed import."""
+
+    total = int(source.stat().st_size)
+    completed = 0
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.{time.time_ns()}.import")
+    try:
+        with source.open("rb") as reader, temporary.open("xb") as writer:
+            while True:
+                if cancellation_event is not None and cancellation_event.is_set():
+                    raise AssetImportCancelled(f"Import cancelled: {source.name}")
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                writer.write(chunk)
+                completed += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(completed, total)
+            writer.flush()
+            os.fsync(writer.fileno())
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise AssetImportCancelled(f"Import cancelled: {source.name}")
+        shutil.copystat(source, temporary)
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def _unique_copy_path(source: Path) -> Path:
     suffix = "".join(source.suffixes)
     stem = source.name[:-len(suffix)] if suffix else source.name
@@ -698,8 +1042,8 @@ def _unique_copy_path(source: Path) -> Path:
 
 
 def _is_json_authored_asset(path: Path) -> bool:
-    name = path.name.casefold()
-    return name.endswith((".tcasset", ".json", ".tcprefab", ".tcfx", ".tcsim"))
+    suffix = path.suffix.casefold()
+    return suffix == ".json" or suffix.startswith(".tc")
 
 
 def _replace_legacy_paths(value: Any, aliases: dict[str, str]) -> tuple[Any, int]:

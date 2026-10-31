@@ -17,6 +17,24 @@ scene presentation lives in `tech_connector.ui.dcc_viewer`.
 `tech_connector.engine` is intentionally separate: it is the AI request engine,
 not the game engine.
 
+## Windows PC mouse and keyboard preview
+
+The native Player reads movement keys from the packaged scene. New scenes
+default to WASD, Space jump, C crouch, and V crawl; the third-person acceptance
+fixture deliberately remaps movement to I/J/K/L to test scene-defined bindings.
+Hold the right mouse button and drag to orbit a scene's `camera.follow` camera.
+Left-click UI buttons, or use Tab/Shift+Tab and Enter; Esc dismisses focused UI
+or exits. F5 saves and F6 loads. The fallback HUD shows the scene's actual
+movement and jump bindings rather than always claiming WASD.
+
+Right-drag orbit is a desktop input path, not a completed third-person camera
+or controller acceptance result. In free-3D character scenes, movement and
+character facing now follow the horizontal camera orbit: W advances into the
+view, while A/D strafe left/right. The 2D movement mode remains world-aligned.
+Mouse feel, camera-obstruction feel, visual save/resume facing, and graphical UI
+acceptance need an explicit windowed test when the user allows those tests again. No
+controller is required to use the keyboard/mouse preview.
+
 ## Audio asset pipeline
 
 The portable audio slice treats source media as immutable and stores import,

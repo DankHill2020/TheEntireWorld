@@ -8,11 +8,12 @@ pipelines, and community-distributed tools.
 from __future__ import annotations
 
 import time
+import sys
 from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtWidgets import QMenu, QMenuBar, QMessageBox
+from PySide6.QtWidgets import QApplication, QMenu, QMenuBar, QMessageBox, QProgressDialog
 
 from tech_connector.models.constants import APP_ROOT, LOGO_PATH
 
@@ -144,9 +145,19 @@ def _open_image_editor_window(window, image_path: str = ""):
 
 
 def _open_mesh_painter_window(window):
+    loading = None
+    if "tech_connector.ui.three_d_mesh_painter_widget" not in sys.modules:
+        loading = QProgressDialog("Preparing the DCC viewport…", "", 0, 0, window)
+        loading.setWindowTitle(THE_GARDEN_DCC_VIEWER_NAME)
+        loading.setCancelButton(None)
+        loading.setMinimumDuration(0)
+        loading.setWindowModality(Qt.WindowModal)
+        loading.show()
+        QApplication.processEvents()
     try:
         from tech_connector.ui.three_d_mesh_painter_widget import ThreeDMeshPainterViewport
     except Exception as exc:
+        if loading is not None: loading.close()
         QMessageBox.warning(window, f"{THE_GARDEN_DCC_VIEWER_NAME} unavailable", str(exc))
         return None
     mesh_window = getattr(window, "_mesh_painter_window", None)
@@ -160,8 +171,10 @@ def _open_mesh_painter_window(window):
         mesh_window.show()
         mesh_window.raise_()
         mesh_window.activateWindow()
+        if loading is not None: loading.close()
         return mesh_window
     except Exception as exc:
+        if loading is not None: loading.close()
         QMessageBox.warning(window, f"{THE_GARDEN_DCC_VIEWER_NAME} unavailable", str(exc))
         return None
 

@@ -307,8 +307,12 @@ class TCSetupHikFacade:
 
     def set_t_pose(self, joint_map=None):
         definition = _definition_from_maps(joint_map or {}, {})
-        _ctx().adapter._op_definition_set_reference_pose({"definition": definition})
-        return True
+        _ctx().checkpoint("Set T-Pose")
+        result = _ctx().adapter._op_rig_set_t_pose({"definition": definition})
+        if not result.ok:
+            raise RuntimeError(result.message)
+        _ctx().changed()
+        return result.to_dict()
 
     def setup_hik_character(self, character_name, joint_map, fbx_export_path="", namespace=""):
         definition = _definition_from_maps(joint_map, {})
@@ -472,8 +476,95 @@ class TCCreateRigFacade:
             "parent": str(kwargs.get("root_parent") or ""),
         }
         result = _ctx().adapter._op_rig_create_ribbon(payload)
+        if not result.ok:
+            raise RuntimeError(result.message)
         _ctx().changed()
         return result.to_dict()
+
+    def dynamic_module_spec(self, joints, parent=None, **settings):
+        spec = {"joints": [str(joint) for joint in joints], "parent": str(parent) if parent else None}
+        spec.update(settings)
+        return spec
+
+    def get_dynamic_rig_modules(self):
+        records = _ctx().graph.metadata.setdefault("hik_ui", {}).setdefault("dynamic_modules", [])
+        return copy.deepcopy(sorted(records, key=lambda record: int(record.get("order", 0))))
+
+    def register_dynamic_rig_module(self, module_id, module_type, build_spec, build_now=True):
+        module_id = str(module_id or "").strip()
+        if not module_id:
+            raise ValueError("A unique module name is required.")
+        if module_type not in {"controls", "surface_rig", "arm", "leg"}:
+            raise ValueError(f"Unsupported dynamic rig module type: {module_type}")
+        records = _ctx().graph.metadata.setdefault("hik_ui", {}).setdefault("dynamic_modules", [])
+        if any(record.get("module_id") == module_id for record in records):
+            raise ValueError(f"Dynamic rig module already exists: {module_id}")
+        spec = copy.deepcopy(build_spec or {})
+        joints = [str(joint) for joint in spec.get("joints") or []]
+        missing = [joint for joint in joints if joint not in _ctx().graph.joints]
+        if missing:
+            raise ValueError(f"Unknown joints for {module_id}: {', '.join(missing)}")
+        record = {
+            "module_id": module_id, "module_type": module_type, "build_spec": spec,
+            "order": len(records) + 1, "generated_nodes": [], "built": False, "enabled": True,
+        }
+        if build_now:
+            record["generated_nodes"] = self._build_dynamic_rig_module(record)
+            record["built"] = True
+        records.append(record)
+        _ctx().changed()
+        return copy.deepcopy(record)
+
+    def _build_dynamic_rig_module(self, record):
+        spec = record["build_spec"]
+        joints = [str(joint) for joint in spec.get("joints") or []]
+        module = str(record["module_id"])
+        kind = record["module_type"]
+        _ctx().checkpoint(f"Build {module}")
+        if kind == "surface_rig":
+            result = self.setup_surface_rig_with_drivers(
+                joint_list=joints, root_parent=spec.get("parent"),
+                loft_name=spec.get("loft_name"), offset=spec.get("offset", 0.5),
+                driver_follicle_indices=spec.get("driver_follicle_indices"),
+                side=spec.get("side"), region=spec.get("region"),
+            )
+            return list(result.get("created_ids") or [])
+        if kind == "controls":
+            created = []
+            for joint in joints:
+                result = _ctx().adapter._op_rig_create_control({
+                    "target": joint, "control_id": f"{module}_{joint}_ctrl", "module": module,
+                    "shape": spec.get("control_shape", "circle"),
+                    "parent": spec.get("parent") or "",
+                    "constrain": bool(spec.get("keep_constraint", True)),
+                })
+                if not result.ok:
+                    raise RuntimeError(result.message)
+                created.extend(result.created_ids)
+            return created
+        required = 3 if kind == "arm" else 4
+        if len(joints) < required:
+            raise ValueError(f"{kind.title()} module requires at least {required} ordered joints.")
+        result = _ctx().adapter._op_rig_create_ik_fk_limb({
+            "start": joints[0], "mid": joints[1], "end": joints[2],
+            "module": module, "parent": spec.get("parent") or "",
+        })
+        if not result.ok:
+            raise RuntimeError(result.message)
+        return list(result.created_ids)
+
+    def inspect_dynamic_rig_module(self, record):
+        graph = _ctx().graph
+        created = set(record.get("generated_nodes") or [])
+        return {
+            "node_count": sum(node in graph.nodes for node in created),
+            "constraints": [key for key in created if key in graph.constraints],
+            "connections": [],
+        }
+
+    def get_external_rig_systems(self, discover_live=True):
+        # A TC graph has no Maya DAG to discover; registered modules are above.
+        return []
 
     def _ensure_space_switch(self, driven, targets, mode, module):
         graph = _ctx().graph

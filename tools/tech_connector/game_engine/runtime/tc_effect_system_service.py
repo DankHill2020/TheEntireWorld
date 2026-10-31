@@ -165,7 +165,7 @@ def create_effect_world(preset: str, *, quality: str = "high", seed: int = 1) ->
             # The eight-node demo body converges well before six iterations.
             # Preserve the authored high/cinematic solve while keeping the
             # interactive tiers comfortably inside their 4 ms solver budget.
-            world.constraint_iterations = 3 if quality_key not in {"mobile", "retro"} else 2
+            world.constraint_iterations = 2
         world.plane_colliders.append(PlaneCollider())
     else:
         world = SimulationWorld(fields=[], substeps=max(1, int(profile.solver_substeps)), constraint_iterations=1, self_collision=False)

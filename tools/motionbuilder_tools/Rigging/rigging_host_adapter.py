@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import importlib
 from typing import Any
 
 from pyfbsdk import (
@@ -27,6 +28,21 @@ from tech_connector.services.dcc.rigging_workspace_service import (
 HOST = "motionbuilder"
 _definitions: dict[str, CharacterDefinition] = {}
 _space_switches: dict[str, dict[str, Any]] = {}
+
+
+def reload_dependencies() -> str:
+    """Refresh the shared portable contract used by this live MotionBuilder host."""
+    global CharacterDefinition, RiggingOperationResult
+    global auto_map_character, mirror_character_slots, validate_character_definition
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    for name in (
+        "CharacterDefinition", "RiggingOperationResult", "auto_map_character",
+        "mirror_character_slots", "validate_character_definition",
+    ):
+        globals()[name] = getattr(contract, name)
+    return "motionbuilder-portable-contract-current"
 
 
 def _result(ok: bool, capability: str, message: str = "", **kwargs: Any) -> dict[str, Any]:

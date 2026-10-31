@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import math
 from pathlib import Path
 import shutil
@@ -17,7 +18,8 @@ from tech_connector.game_engine.assets import (
     FABRIC_PRESETS, RAGDOLL_PRESETS, automatic_cloth_maps, audit_input_map,
     CHARACTER_PERFORMANCE_PROFILES, generate_bone_lods, recommended_mesh_lods,
     constraint_from_preset, plan_build_profile, validate_constraint_properties,
-    validate_character_lods, validate_physics_asset_properties,
+    validate_character_lods, validate_skeleton_properties, validate_skin_binding_properties,
+    validate_physics_asset_properties,
     GEOMETRY_OPTIMIZATION_PRESETS, GEOMETRY_PROCESSORS, geometry_optimization_preset,
     plan_geometry_optimization,
     GROOM_GROUP_PRESETS, HAIR_MATERIAL_PRESETS, automatic_groom_lods, hair_material_preset,
@@ -34,14 +36,14 @@ from tech_connector.game_engine.authoring.tc_physics_joint_service import PHYSIC
 from tech_connector.game_engine.runtime.tc_effect_system_service import QUALITY_PROFILES
 from tech_connector.game_engine.runtime.graph_debugger_service import default_graph_debug_session_manager
 from tech_connector.game_engine.deformation.skinning_tool_service import normalize_skin_weights
-from tech_connector.game_engine.assets.animation_asset_service import evaluate_blend_space, validate_blend_space
+from tech_connector.game_engine.assets.animation_asset_service import evaluate_animation_controller, evaluate_blend_space, validate_animation_clip, validate_blend_space
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
-    QColor, QKeySequence, QPainter, QPainterPath, QPen, QRadialGradient, QShortcut,
+    QColor, QKeySequence, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
     QGraphicsItem, QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
     QGraphicsView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
     QLineEdit, QPlainTextEdit, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTreeWidget,
@@ -332,13 +334,59 @@ class PrefabHierarchyEditorWidget(QWidget):
                     child = QTreeWidgetItem([str(component_name), "", state, "Component"])
                     child.setFlags(child.flags() & ~Qt.ItemIsSelectable)
                     item.addChild(child)
-            if entity.get("prefab_asset_id") or entity.get("source_asset_id"):
-                child = QTreeWidgetItem(["Nested Prefab", "", "Linked", source])
-                child.setFlags(child.flags() & ~Qt.ItemIsSelectable)
-                item.addChild(child)
+            nested_id = str(entity.get("prefab_asset_id") or entity.get("source_asset_id") or "")
+            if nested_id:
+                self._append_nested_prefab(item, nested_id, entity, ancestors=(self.asset_id,))
         self.hierarchy.expandAll()
         for column in range(4):
             self.hierarchy.resizeColumnToContents(column)
+
+    def _append_nested_prefab(
+        self,
+        parent: QTreeWidgetItem,
+        asset_id: str,
+        reference: dict[str, Any],
+        *,
+        ancestors: tuple[str, ...],
+    ) -> None:
+        """Expose linked Prefab contents without making them editable in this stage."""
+        link = QTreeWidgetItem(["Nested Prefab", "", "Linked", asset_id])
+        link.setFlags(link.flags() & ~Qt.ItemIsSelectable)
+        link.setForeground(2, QColor("#7dc4ff"))
+        parent.addChild(link)
+        if asset_id in ancestors:
+            error = QTreeWidgetItem(["Cycle detected", "", "Error", asset_id])
+            error.setFlags(error.flags() & ~Qt.ItemIsSelectable)
+            error.setForeground(2, QColor("#ef8793"))
+            link.addChild(error)
+            return
+        try:
+            resolved = self.prefabs.resolve(asset_id, expand_nested=True)
+            nested_entities = list(resolved.entities)
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            error = QTreeWidgetItem([str(exc), "", "Unavailable", asset_id])
+            error.setFlags(error.flags() & ~Qt.ItemIsSelectable)
+            error.setForeground(2, QColor("#ef8793"))
+            link.addChild(error)
+            return
+        overrides = dict(reference.get("prefab_overrides") or {})
+        for nested in nested_entities:
+            entity_id = str(nested.get("entity_id") or "")
+            overridden = any(path == entity_id or path.startswith(entity_id + ".") for path in overrides)
+            state = "Overridden" if overridden else "Inherited"
+            child = QTreeWidgetItem([str(nested.get("name") or "Entity"), entity_id, state, asset_id])
+            child.setFlags(child.flags() & ~Qt.ItemIsSelectable)
+            child.setForeground(2, QColor("#72d9ca" if overridden else "#91aaba"))
+            link.addChild(child)
+            components = nested.get("components")
+            names = sorted(components) if isinstance(components, dict) else [str(value.get("type") or "Component") for value in components or () if isinstance(value, dict)]
+            for component_name in names:
+                component = QTreeWidgetItem([str(component_name), "", state, "Component"])
+                component.setFlags(component.flags() & ~Qt.ItemIsSelectable)
+                child.addChild(component)
+            child_nested_id = str(nested.get("prefab_asset_id") or nested.get("source_asset_id") or "")
+            if child_nested_id:
+                self._append_nested_prefab(child, child_nested_id, nested, ancestors=(*ancestors, asset_id))
 
     def _add_entity(self) -> None:
         key = "added_entities" if self._settings.get("base_prefab_id") else "entities"
@@ -1168,6 +1216,38 @@ def _dotted_value(values: dict[str, Any], path: str) -> Any:
     return current
 
 
+def _set_dotted_value(values: dict[str, Any], path: str, value: Any) -> None:
+    parts = [part for part in str(path).split(".") if part]
+    if not parts:
+        return
+    current = values
+    for part in parts[:-1]:
+        child = current.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            current[part] = child
+        current = child
+    current[parts[-1]] = deepcopy(value)
+
+
+def _resolved_material_instance(materials: MaterialService, values: dict[str, Any]) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Resolve persisted parents plus the instance's current unsaved overrides."""
+    parent_id = str(values.get("parent_material_id") or values.get("parent") or "")
+    if not parent_id:
+        return {}, ()
+    try:
+        resolution = materials.resolve(parent_id)
+    except (KeyError, ValueError):
+        return {}, ()
+    resolved = deepcopy(resolution.properties)
+    for path, value in dict(values.get("overrides") or {}).items():
+        _set_dotted_value(resolved, str(path), value)
+    switches = dict(resolved.get("static_switches") or {})
+    switches.update({str(key): bool(value) for key, value in dict(values.get("static_switch_overrides") or {}).items()})
+    resolved["static_switches"] = switches
+    return resolved, tuple(resolution.inheritance_chain)
+
+
 def _material_parameter_group(name: str) -> str:
     key = str(name)
     if key.startswith("texture_bindings."):
@@ -1218,9 +1298,15 @@ class GraphView(QGraphicsView):
 class AssetNodeGraphWidget(QWidget):
     changed = Signal()
 
-    def __init__(self, graph_kind: str, parent=None) -> None:
+    def __init__(
+        self, graph_kind: str, parent=None, *, project_root: str | Path | None = None,
+        database: AssetDatabase | None = None, asset_id: str = "",
+    ) -> None:
         super().__init__(parent)
         self.graph_kind = str(graph_kind)
+        self.project_root = Path(project_root).expanduser().resolve() if project_root is not None else None
+        self.database = database
+        self.asset_id = str(asset_id)
         self._nodes: list[dict[str, Any]] = []
         self._connections: list[dict[str, str]] = []
         self._clipboard: dict[str, Any] = {"nodes": [], "connections": []}
@@ -1236,12 +1322,19 @@ class AssetNodeGraphWidget(QWidget):
         connect = QPushButton("Connect Selected")
         remove = QPushButton("Delete")
         frame = QPushButton("Frame All")
+        self.target_platform = QComboBox(self); self.target_platform.addItems(["desktop", "windows", "linux", "macos", "mobile", "android", "ios", "web"])
+        self.target_platform.setVisible(self.graph_kind in {"material", "shader"})
+        self.choose_function = QPushButton("Choose Function...", self)
+        self.choose_function.setVisible(self.graph_kind in {"material", "shader"})
+        self.choose_function.setEnabled(database is not None and project_root is not None)
         toolbar.addWidget(self.node_search)
         toolbar.addWidget(self.node_palette)
         toolbar.addWidget(add)
         toolbar.addWidget(connect)
         toolbar.addWidget(remove)
         toolbar.addWidget(frame)
+        toolbar.addWidget(self.target_platform)
+        toolbar.addWidget(self.choose_function)
         toolbar.addStretch(1)
         self.summary = QLabel("")
         toolbar.addWidget(self.summary)
@@ -1252,6 +1345,8 @@ class AssetNodeGraphWidget(QWidget):
         self.view.setRenderHint(QPainter.Antialiasing, True)
         self.view.setStyleSheet("background:#071018; border:1px solid #1b3040;")
         root.addWidget(self.view, 1)
+        self.compile_feedback = QLabel("", self); self.compile_feedback.setWordWrap(True)
+        self.compile_feedback.setVisible(self.graph_kind in {"material", "shader"}); root.addWidget(self.compile_feedback)
         parameter_header = QHBoxLayout()
         parameter_header.addWidget(QLabel("Selected Node Parameters"))
         add_parameter = QPushButton("+ Parameter", self); add_parameter.clicked.connect(self._add_parameter)
@@ -1270,6 +1365,8 @@ class AssetNodeGraphWidget(QWidget):
         connect.clicked.connect(self.connect_selected)
         remove.clicked.connect(self.delete_selected)
         frame.clicked.connect(self.frame_all)
+        self.target_platform.currentTextChanged.connect(lambda _value: self._rebuild_scene())
+        self.choose_function.clicked.connect(self._choose_function_asset)
         QShortcut(QKeySequence.Copy, self, activated=self.copy_selected)
         QShortcut(QKeySequence.Paste, self, activated=self.paste)
         QShortcut(QKeySequence.Delete, self, activated=self.delete_selected)
@@ -1361,6 +1458,12 @@ class AssetNodeGraphWidget(QWidget):
             issues.append(f"{self.graph_kind.title()} graphs cannot contain dependency cycles.")
         return issues
 
+    def compile_diagnostics(self) -> list[dict[str, Any]]:
+        if self.graph_kind not in {"material", "shader"}:
+            return []
+        issues, _stats = analyze_material_graph(self.graph(), platform=self.target_platform.currentText())
+        return [issue.to_dict() for issue in issues]
+
     def add_node(self, title: str = "") -> str:
         node_id = f"node_{uuid.uuid4().hex[:10]}"
         index = len(self._nodes)
@@ -1431,7 +1534,27 @@ class AssetNodeGraphWidget(QWidget):
             if name:
                 parameters[name] = _json_value(_table_text(self.parameter_table, row, 1))
         node["parameters"] = parameters
-        self._load_selected_parameters(); self.changed.emit()
+        self._load_selected_parameters(); self._refresh_compile_feedback(); self.changed.emit()
+
+    def _choose_function_asset(self) -> None:
+        node = self._selected_node()
+        if node is None or str(node.get("opcode") or "") != "material_function" or self.database is None or self.project_root is None:
+            self.compile_feedback.setText("Select a Material Function or Shader Function node first.")
+            return
+        from tech_connector.ui.game_engine.asset_picker import AssetPickerDialog
+        current = str(dict(node.get("parameters") or {}).get("function_asset_id") or "")
+        picker = AssetPickerDialog(
+            self.project_root, self.database, allowed_types=("tc.shader_graph",), current_asset_id=current,
+            title="Choose Reusable Shader Function", parent=self,
+        )
+        if picker.exec() != QDialog.Accepted or not picker.selected_asset_id or picker.selected_asset_id == self.asset_id:
+            return
+        parameters = dict(node.get("parameters") or {}); parameters["function_asset_id"] = picker.selected_asset_id; node["parameters"] = parameters
+        selected_id = str(node.get("id") or ""); self._rebuild_scene()
+        for item in self.scene.items():
+            if isinstance(item, QGraphicsRectItem) and str(item.data(0) or "") == selected_id:
+                item.setSelected(True); break
+        self.changed.emit()
 
     def copy_selected(self) -> bool:
         self._capture_positions()
@@ -1541,18 +1664,32 @@ class AssetNodeGraphWidget(QWidget):
     def _rebuild_scene(self) -> None:
         self.scene.clear()
         items: dict[str, QGraphicsRectItem] = {}
+        node_issues: dict[str, list[Any]] = {}
+        material_stats: dict[str, Any] = {}
+        material_issues: list[Any] = []
+        if self.graph_kind in {"material", "shader"}:
+            material_issues, material_stats = analyze_material_graph(
+                {"nodes": self._nodes, "connections": self._connections}, platform=self.target_platform.currentText(),
+            )
+            for issue in material_issues:
+                if issue.subject:
+                    node_issues.setdefault(issue.subject, []).append(issue)
         for node in self._nodes:
             ports = max(len(node.get("inputs") or ()), len(node.get("outputs") or ()))
             height = max(64, 42 + ports * 16)
             item = QGraphicsRectItem(QRectF(0, 0, 170, height))
-            item.setBrush(QColor("#13283a"))
-            item.setPen(QPen(QColor("#4ba3d8"), 1.4))
+            issues = node_issues.get(str(node.get("id") or ""), [])
+            severity = "error" if any(issue.severity == "error" for issue in issues) else ("warning" if issues else "")
+            item.setBrush(QColor("#3a1d25" if severity == "error" else ("#3a3017" if severity == "warning" else "#13283a")))
+            item.setPen(QPen(QColor("#ff6178" if severity == "error" else ("#f5bd50" if severity == "warning" else "#4ba3d8")), 2.2 if severity else 1.4))
             item.setFlags(QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable)
             item.setData(0, str(node.get("id") or ""))
             item.setPos(float(node.get("x", 0.0)), float(node.get("y", 0.0)))
             label = QGraphicsSimpleTextItem(str(node.get("title") or "Node"), item)
             label.setBrush(QColor("#e7f6ff"))
             label.setPos(10, 8)
+            if issues:
+                badge = QGraphicsSimpleTextItem("! " + str(issues[0].message), item); badge.setBrush(QColor("#ffb5bf" if severity == "error" else "#ffd67a")); badge.setPos(10, height - 18)
             inputs = QGraphicsSimpleTextItem("\n".join(str(value).split(":", 1)[0] for value in node.get("inputs") or ()), item)
             inputs.setBrush(QColor("#8eb6ce"))
             inputs.setPos(10, 28)
@@ -1572,9 +1709,24 @@ class AssetNodeGraphWidget(QWidget):
             midpoint = (a.x() + b.x()) * 0.5
             path.cubicTo(midpoint, a.y(), midpoint, b.y(), b.x(), b.y())
             self.scene.addPath(path, QPen(QColor("#6ee7b7"), 2.0))
-        self.summary.setText(f"{len(self._nodes)} nodes • {len(self._connections)} links")
+        if self.graph_kind in {"material", "shader"}:
+            self.summary.setText(f"{len(self._nodes)} nodes - {material_stats['estimated_alu']} ALU - {material_stats['texture_samples']} samples - {len(material_issues)} diagnostics")
+            self.compile_feedback.setText("\n".join(
+                f"{issue.severity.upper()} [{issue.subject or 'Graph'}] {issue.message}" for issue in material_issues
+            ) or f"READY [{self.target_platform.currentText()}] No compile diagnostics.")
+        else:
+            self.summary.setText(f"{len(self._nodes)} nodes • {len(self._connections)} links")
         self.scene.setSceneRect(self.scene.itemsBoundingRect().adjusted(-80, -80, 80, 80))
         self._load_selected_parameters()
+
+    def _refresh_compile_feedback(self) -> None:
+        if self.graph_kind not in {"material", "shader"}:
+            return
+        issues, stats = analyze_material_graph(self.graph(), platform=self.target_platform.currentText())
+        self.summary.setText(f"{len(self._nodes)} nodes - {stats['estimated_alu']} ALU - {stats['texture_samples']} samples - {len(issues)} diagnostics")
+        self.compile_feedback.setText("\n".join(
+            f"{issue.severity.upper()} [{issue.subject or 'Graph'}] {issue.message}" for issue in issues
+        ) or f"READY [{self.target_platform.currentText()}] No compile diagnostics.")
 
 
 class ProceduralGeometryPreviewCanvas(QWidget):
@@ -1716,9 +1868,10 @@ class MaterialInstanceEditorWidget(QWidget):
         header = QHBoxLayout()
         self.parent_id = QLineEdit(self)
         self.parent_id.setPlaceholderText("Parent Material asset ID")
+        choose_parent = QPushButton("Choose…", self); choose_parent.setAccessibleName("Choose parent Material"); choose_parent.clicked.connect(self._choose_parent)
         self.inheritance = QLabel("No parent resolved", self)
         self.inheritance.setStyleSheet("color:#91aaba;")
-        header.addWidget(QLabel("Parent")); header.addWidget(self.parent_id, 1); header.addWidget(self.inheritance)
+        header.addWidget(QLabel("Parent")); header.addWidget(self.parent_id, 1); header.addWidget(choose_parent); header.addWidget(self.inheritance)
         root.addLayout(header)
         self.parameters = QTableWidget(0, 5, self)
         self.parameters.setHorizontalHeaderLabels(["Parameter", "Group", "Inherited", "Override", "State"])
@@ -1730,9 +1883,10 @@ class MaterialInstanceEditorWidget(QWidget):
         clear = QPushButton("Revert All", self); clear.clicked.connect(self._revert_all)
         actions.addWidget(add); actions.addWidget(revert); actions.addWidget(clear); actions.addStretch(1)
         root.addLayout(actions)
-        self.switches = QTableWidget(0, 3, self)
-        self.switches.setHorizontalHeaderLabels(["Static Switch", "Value", "Permutation Impact"])
+        self.switches = QTableWidget(0, 4, self)
+        self.switches.setHorizontalHeaderLabels(["Static Switch", "Inherited", "Override", "State"])
         root.addWidget(self.switches, 1)
+        switch_actions = QHBoxLayout(); override_switch = QPushButton("Override Switch", self); revert_switch = QPushButton("Revert Switch", self); override_switch.clicked.connect(self._override_switch); revert_switch.clicked.connect(self._revert_switch); switch_actions.addWidget(override_switch); switch_actions.addWidget(revert_switch); switch_actions.addStretch(1); root.addLayout(switch_actions)
         self.summary = QLabel(self)
         self.summary.setWordWrap(True)
         root.addWidget(self.summary)
@@ -1774,10 +1928,11 @@ class MaterialInstanceEditorWidget(QWidget):
         self.switches.setRowCount(0)
         for name in sorted(set(switches) | set(switch_overrides)):
             row = self.switches.rowCount(); self.switches.insertRow(row)
-            self.switches.setItem(row, 0, QTableWidgetItem(name))
-            self.switches.setItem(row, 1, QTableWidgetItem(str(switch_overrides.get(name, switches.get(name, False))).lower()))
-            impact = QTableWidgetItem("2× permutations" if name in switch_overrides else "Inherited")
-            impact.setFlags(impact.flags() & ~Qt.ItemIsEditable); self.switches.setItem(row, 2, impact)
+            inherited_switch = bool(switches.get(name, False)); is_override = name in switch_overrides
+            for column, value in enumerate((name, str(inherited_switch).lower(), str(bool(switch_overrides[name])).lower() if is_override else "", "Overridden" if is_override else "Inherited")):
+                item = QTableWidgetItem(value)
+                if column in {0, 1, 3}: item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.switches.setItem(row, column, item)
         self.inheritance.setText(f"{len(chain)} level(s) • root {chain[0]}" if chain else "Parent unresolved")
         self._loading = False
         self._update_summary()
@@ -1797,10 +1952,13 @@ class MaterialInstanceEditorWidget(QWidget):
         result["overrides"] = overrides
         switches: dict[str, bool] = {}
         for row in range(self.switches.rowCount()):
-            if _table_text(self.switches, row, 2) != "Inherited":
-                switches[_table_text(self.switches, row, 0)] = _table_text(self.switches, row, 1).casefold() in {"true", "1", "yes", "on"}
+            if _table_text(self.switches, row, 3) == "Overridden":
+                switches[_table_text(self.switches, row, 0)] = _table_text(self.switches, row, 2).casefold() in {"true", "1", "yes", "on"}
         result["static_switch_overrides"] = switches
         return result
+
+    def resolved_properties(self) -> dict[str, Any]:
+        return _resolved_material_instance(self.materials, self.settings())[0]
 
     def validation_issues(self) -> list[str]:
         parent_id = self.parent_id.text().strip()
@@ -1847,14 +2005,137 @@ class MaterialInstanceEditorWidget(QWidget):
         self.load_settings(values)
         self.changed.emit()
 
-    def _edited(self, *_args) -> None:
-        if not self._loading:
-            self._update_summary(); self.changed.emit()
+    def _choose_parent(self) -> None:
+        from tech_connector.ui.game_engine.asset_picker import AssetPickerDialog
+        picker = AssetPickerDialog(self.materials.project_root, self.materials.database, allowed_types=("tc.material", "tc.material_instance"), current_asset_id=self.parent_id.text().strip(), title="Choose Parent Material", parent=self)
+        workspace = self.window()
+        if hasattr(workspace, "locate_asset"): picker.locateRequested.connect(workspace.locate_asset)
+        if hasattr(workspace, "open_asset_id"): picker.inspectRequested.connect(workspace.open_asset_id)
+        if picker.exec() == QDialog.Accepted and picker.selected_asset_id != self.asset_id:
+            self.parent_id.setText(picker.selected_asset_id); self._parent_changed()
+
+    def _override_switch(self) -> None:
+        row = self.switches.currentRow()
+        if row < 0: return
+        self.switches.item(row, 2).setText(self.switches.item(row, 1).text()); self.switches.item(row, 3).setText("Overridden"); self._edited()
+
+    def _revert_switch(self) -> None:
+        row = self.switches.currentRow()
+        if row < 0: return
+        self.switches.item(row, 2).setText(""); self.switches.item(row, 3).setText("Inherited"); self._edited()
+
+    def _edited(self, item=None) -> None:
+        if self._loading:
+            return
+        if isinstance(item, QTableWidgetItem) and item.tableWidget() is self.switches and item.column() == 2:
+            self._loading = True
+            state = self.switches.item(item.row(), 3)
+            if state is not None:
+                state.setText("Overridden" if item.text().strip() else "Inherited")
+            self._loading = False
+        self._update_summary(); self.changed.emit()
 
     def _update_summary(self) -> None:
         overrides = sum(_table_text(self.parameters, row, 4) == "Overridden" for row in range(self.parameters.rowCount()))
-        static = sum(_table_text(self.switches, row, 2) != "Inherited" for row in range(self.switches.rowCount()))
+        static = sum(_table_text(self.switches, row, 3) == "Overridden" for row in range(self.switches.rowCount()))
         self.summary.setText(f"{overrides} parameter override(s) • {static} static override(s) • up to {2 ** static} compiled permutation(s)")
+
+
+class MaterialInstancePreviewEditorWidget(QWidget):
+    """Live resolved preview for a Material Instance without exposing parent-owned values."""
+
+    changed = Signal()
+
+    def __init__(self, project_root: str | Path, database: AssetDatabase, asset_id: str, parent=None) -> None:
+        super().__init__(parent)
+        self.materials = MaterialService(project_root, database)
+        self.asset_id = str(asset_id)
+        self._authoring: dict[str, Any] = {}
+        self._loading = False
+        root = QVBoxLayout(self)
+        self.canvas = MaterialPreviewCanvas(self); root.addWidget(self.canvas, 1)
+        controls = QHBoxLayout()
+        self.preview_mesh = QComboBox(self); self.preview_mesh.addItems(["Sphere", "Cube", "Plane"])
+        self.environment = QComboBox(self); self.environment.addItems(["Studio", "Outdoor", "Night", "Neutral"])
+        self.exposure = QDoubleSpinBox(self); self.exposure.setRange(-5.0, 5.0); self.exposure.setSingleStep(0.25)
+        controls.addWidget(QLabel("Preview Mesh")); controls.addWidget(self.preview_mesh)
+        controls.addWidget(QLabel("Environment")); controls.addWidget(self.environment)
+        controls.addWidget(QLabel("Exposure")); controls.addWidget(self.exposure); controls.addStretch(1)
+        root.addLayout(controls)
+        self.summary = QLabel("", self); self.summary.setWordWrap(True); root.addWidget(self.summary)
+        self.preview_mesh.currentTextChanged.connect(self._preview_changed)
+        self.environment.currentTextChanged.connect(self._preview_changed)
+        self.exposure.valueChanged.connect(self._preview_changed)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True
+        self._authoring = dict(values or {})
+        resolved, chain = _resolved_material_instance(self.materials, self._authoring)
+        mesh = str(self._authoring.get("preview_mesh") or resolved.get("preview_mesh") or "Sphere")
+        environment = str(self._authoring.get("preview_environment") or resolved.get("preview_environment") or "Studio")
+        exposure = float(self._authoring.get("preview_exposure", resolved.get("preview_exposure", 0.0)))
+        self.preview_mesh.setCurrentText(mesh); self.environment.setCurrentText(environment); self.exposure.setValue(exposure)
+        self.canvas.base_color = QColor(str(resolved.get("base_color") or "#ffffff"))
+        self.canvas.roughness = float(resolved.get("roughness", 0.5)); self.canvas.metalness = float(resolved.get("metalness", 0.0))
+        self.canvas.preview_mesh = mesh; self.canvas.environment = environment; self.canvas.exposure = exposure; self.canvas.update()
+        override_count = len(dict(self._authoring.get("overrides") or {}))
+        self.summary.setText(f"Resolved through {len(chain)} parent level(s) - {override_count} parameter override(s) - preview updates before save")
+        self._loading = False
+
+    load_instance_settings = load_settings
+
+    def settings(self) -> dict[str, Any]:
+        return {"preview_mesh": self.preview_mesh.currentText(), "preview_environment": self.environment.currentText(), "preview_exposure": float(self.exposure.value())}
+
+    def _preview_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        self.canvas.preview_mesh = self.preview_mesh.currentText(); self.canvas.environment = self.environment.currentText(); self.canvas.exposure = float(self.exposure.value())
+        self.canvas.update(); self.changed.emit()
+
+
+class MaterialInstanceCostEditorWidget(QWidget):
+    """Readable inherited shader cost and concrete instance permutation report."""
+
+    def __init__(self, project_root: str | Path, database: AssetDatabase, asset_id: str, parent=None) -> None:
+        super().__init__(parent)
+        self.materials = MaterialService(project_root, database)
+        self.asset_id = str(asset_id)
+        self._authoring: dict[str, Any] = {}
+        self._report: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        toolbar = QHBoxLayout(); self.platform = QComboBox(self); self.platform.addItems(["desktop", "windows", "mobile", "android", "ios", "web"])
+        toolbar.addWidget(QLabel("Target Platform")); toolbar.addWidget(self.platform); toolbar.addStretch(1); root.addLayout(toolbar)
+        self.table = QTableWidget(0, 2, self); self.table.setHorizontalHeaderLabels(["Metric", "Value"]); self.table.horizontalHeader().setStretchLastSection(True); root.addWidget(self.table, 1)
+        self.diagnostics = QLabel("", self); self.diagnostics.setWordWrap(True); root.addWidget(self.diagnostics)
+        self.platform.currentTextChanged.connect(lambda _value: self._refresh())
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._authoring = dict(values or {}); self._refresh()
+
+    load_instance_settings = load_settings
+
+    def report(self) -> dict[str, Any]:
+        return deepcopy(self._report)
+
+    def _refresh(self) -> None:
+        resolved, chain = _resolved_material_instance(self.materials, self._authoring)
+        issues, stats = analyze_material_graph(dict(resolved.get("graph") or {}), platform=self.platform.currentText())
+        overrides = dict(self._authoring.get("overrides") or {}); static_overrides = dict(self._authoring.get("static_switch_overrides") or {})
+        active_switches = dict(resolved.get("static_switches") or {})
+        permutation_key = ", ".join(f"{name}={'1' if value else '0'}" for name, value in sorted(active_switches.items())) or "Default"
+        self._report = {**stats, "inheritance_depth": len(chain), "parameter_overrides": len(overrides), "static_overrides": len(static_overrides), "permutation_key": permutation_key}
+        rows = (
+            ("Inheritance depth", len(chain)), ("Parameter overrides", len(overrides)), ("Static overrides", len(static_overrides)),
+            ("Graph nodes", stats["node_count"]), ("Estimated ALU", stats["estimated_alu"]), ("Texture samples", stats["texture_samples"]),
+            ("Potential graph permutations", stats["permutations"]), ("This instance permutation", permutation_key),
+        )
+        self.table.setRowCount(len(rows))
+        for row, (name, value) in enumerate(rows):
+            self.table.setItem(row, 0, QTableWidgetItem(str(name))); self.table.setItem(row, 1, QTableWidgetItem(str(value)))
+        warnings = [issue.message for issue in issues]
+        budget = "HIGH COST" if stats["estimated_alu"] > 120 or stats["texture_samples"] > 12 else "WITHIN GUIDANCE"
+        self.diagnostics.setText(f"{budget} - " + (" - ".join(warnings) if warnings else "No graph diagnostics for this target."))
 
 
 class MaterialCompileInspectorWidget(QWidget):
@@ -2145,6 +2426,226 @@ class MaterialPreviewEditorWidget(QWidget):
             values[key] = current[key]
         self.load_settings(values)
         self.changed.emit()
+
+
+class MeshInspectionCanvas(QWidget):
+    """Lightweight mesh-analysis view with explicit diagnostic display modes."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.mode = "lit"
+        self.setMinimumHeight(250)
+        self.setAccessibleName("Mesh inspection preview")
+
+    def set_mode(self, mode: str) -> None:
+        self.mode = str(mode or "lit").casefold().replace(" ", "_")
+        self.setAccessibleDescription(f"Mesh preview showing {self.mode.replace('_', ' ')} visualization")
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), QColor("#071018"))
+        width, height = float(self.width()), float(self.height())
+        center = QPointF(width * 0.5, height * 0.52)
+        scale = min(width, height) * 0.28
+        if self.mode == "uv_checker":
+            size = scale * 1.65
+            left, top = center.x() - size * 0.5, center.y() - size * 0.5
+            for y in range(8):
+                for x in range(8):
+                    color = QColor("#2b6380" if (x + y) % 2 else "#163247")
+                    painter.fillRect(QRectF(left + x * size / 8, top + y * size / 8, size / 8, size / 8), color)
+            painter.setPen(QPen(QColor("#75d7ff"), 2))
+            painter.drawRect(QRectF(left, top, size, size))
+            painter.drawLine(QPointF(left, top + size), QPointF(left + size * 0.5, top))
+            painter.drawLine(QPointF(left + size * 0.5, top), QPointF(left + size, top + size))
+        else:
+            points = [QPointF(center.x() + x * scale, center.y() + y * scale) for x, y in ((-0.65,-0.45),(0.15,-0.72),(0.68,-0.25),(0.55,0.55),(-0.3,0.72),(-0.72,0.2))]
+            painter.setBrush(QColor("#294b61" if self.mode != "collision" else "#2d413f"))
+            painter.setPen(QPen(QColor("#78c9ef"), 2))
+            painter.drawPolygon(QPolygonF(points))
+            for first, second in ((0,2),(0,3),(0,4),(1,3),(1,5),(2,4),(2,5)):
+                painter.drawLine(points[first], points[second])
+            if self.mode == "normals":
+                painter.setPen(QPen(QColor("#70efad"), 2))
+                for point in points:
+                    painter.drawLine(point, QPointF(point.x(), point.y() - scale * 0.22))
+            elif self.mode == "collision":
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(QPen(QColor("#ffbf69"), 3, Qt.DashLine))
+                painter.drawEllipse(QRectF(center.x() - scale * 0.9, center.y() - scale * 0.82, scale * 1.8, scale * 1.64))
+            elif self.mode == "wireframe":
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(QPen(QColor("#8ad8ff"), 1))
+                painter.drawPolygon(QPolygonF(points))
+        painter.setPen(QColor("#9fb7c8"))
+        painter.drawText(QRectF(12, 10, width - 24, 24), Qt.AlignLeft, self.mode.replace("_", " ").title())
+
+
+class MeshInspectionEditorWidget(QWidget):
+    """Mesh viewport diagnostics, source statistics, and platform cost estimates."""
+
+    changed = Signal()
+    PLATFORM_BUDGETS = {
+        "desktop": (1_000_000, 128 * 1024 * 1024),
+        "mobile": (250_000, 32 * 1024 * 1024),
+        "web": (500_000, 64 * 1024 * 1024),
+    }
+
+    def __init__(self, source_path: str | Path, asset_type: str, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = Path(source_path)
+        self.asset_type = str(asset_type)
+        self._values: dict[str, Any] = {}
+        self._statistics: dict[str, Any] = {}
+        self._loading = False
+        root = QVBoxLayout(self)
+        controls = QHBoxLayout()
+        self.mode = QComboBox(self)
+        for label, value in (("Lit", "lit"), ("Wireframe", "wireframe"), ("UV Checker", "uv_checker"), ("Vertex Normals", "normals"), ("Collision", "collision")):
+            self.mode.addItem(label, value)
+        self.lod = QComboBox(self)
+        self.platform = QComboBox(self)
+        self.platform.addItems(["desktop", "mobile", "web"])
+        controls.addWidget(QLabel("Visualization")); controls.addWidget(self.mode)
+        controls.addWidget(QLabel("LOD")); controls.addWidget(self.lod)
+        controls.addWidget(QLabel("Budget")); controls.addWidget(self.platform)
+        controls.addStretch(1); root.addLayout(controls)
+        self.canvas = MeshInspectionCanvas(self); root.addWidget(self.canvas, 2)
+        self.summary = QLabel(self); self.summary.setWordWrap(True); self.summary.setAccessibleName("Mesh performance summary"); root.addWidget(self.summary)
+        self.metrics = QTableWidget(0, 3, self)
+        self.metrics.setHorizontalHeaderLabels(["Metric", "Value", "Meaning"])
+        self.metrics.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.metrics.horizontalHeader().setStretchLastSection(True)
+        root.addWidget(self.metrics, 1)
+        self.mode.currentIndexChanged.connect(self._changed)
+        self.lod.currentIndexChanged.connect(self._changed)
+        self.platform.currentTextChanged.connect(self._changed)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._values = dict(values or {})
+        preview = dict(self._values.get("mesh_preview") or {})
+        self._statistics = self._inspect_source(self._values)
+        self._loading = True
+        mode_index = self.mode.findData(str(preview.get("visualization") or "lit"))
+        self.mode.setCurrentIndex(max(0, mode_index))
+        self.platform.setCurrentText(str(preview.get("platform") or "desktop"))
+        self.lod.clear()
+        lods = list(self._values.get("lods") or ())
+        self.lod.addItem("LOD 0 · 100%", 100.0)
+        authored = lods[1:] if lods and float(dict(lods[0]).get("triangle_percent", 100.0)) == 100.0 else lods
+        for index, item in enumerate(authored, 1):
+            percent = float(dict(item).get("triangle_percent", 100.0))
+            self.lod.addItem(f"LOD {index} · {percent:g}%", percent)
+        requested = int(preview.get("lod", 0))
+        self.lod.setCurrentIndex(max(0, min(requested, self.lod.count() - 1)))
+        self._loading = False
+        self._refresh_report()
+
+    def settings(self) -> dict[str, Any]:
+        return {"mesh_preview": {"visualization": str(self.mode.currentData() or "lit"), "lod": self.lod.currentIndex(), "platform": self.platform.currentText()}}
+
+    def update_related_settings(self, values: dict[str, Any]) -> None:
+        """Refresh LOD and slot costs without reparsing a potentially large source mesh."""
+        selected = self.lod.currentIndex(); self._values.update(deepcopy(dict(values or {})))
+        if "material_slots" in values or "materials" in values:
+            self._statistics["material_slots"] = len(values.get("material_slots") or values.get("materials") or ())
+        self._loading = True; self.lod.clear(); lods = list(self._values.get("lods") or ())
+        self.lod.addItem("LOD 0 · 100%", 100.0)
+        authored = lods[1:] if lods and float(dict(lods[0]).get("triangle_percent", 100.0)) == 100.0 else lods
+        for index, item in enumerate(authored, 1):
+            percent = float(dict(item).get("triangle_percent", 100.0)); self.lod.addItem(f"LOD {index} · {percent:g}%", percent)
+        self.lod.setCurrentIndex(max(0, min(selected, self.lod.count() - 1))); self._loading = False; self._refresh_report()
+
+    def report(self) -> dict[str, Any]:
+        source_triangles = int(self._statistics.get("triangles") or 0)
+        ratio = float(self.lod.currentData() or 100.0) / 100.0
+        triangles = max(0, round(source_triangles * ratio))
+        vertices = int(self._statistics.get("vertices") or 0)
+        uv_channels = max(0, int(self._statistics.get("uv_channels") or 0))
+        stride = 12 + 12 + 16 + uv_channels * 8 + (16 if self.asset_type == "tc.skeletal_mesh" else 0)
+        gpu_bytes = vertices * stride + triangles * 3 * (2 if vertices < 65536 else 4)
+        slots = max(1, int(self._statistics.get("material_slots") or 0))
+        triangle_budget, memory_budget = self.PLATFORM_BUDGETS.get(self.platform.currentText(), self.PLATFORM_BUDGETS["desktop"])
+        return {**self._statistics, "lod": self.lod.currentIndex(), "triangle_percent": ratio * 100.0,
+                "visible_triangles": triangles, "estimated_gpu_bytes": gpu_bytes, "estimated_draw_calls": slots,
+                "triangle_budget": triangle_budget, "memory_budget": memory_budget,
+                "over_budget": triangles > triangle_budget or gpu_bytes > memory_budget}
+
+    def validation_issues(self) -> list[str]:
+        return []
+
+    def _changed(self, *_args) -> None:
+        if not self._loading:
+            self._refresh_report(); self.changed.emit()
+
+    def _refresh_report(self) -> None:
+        self.canvas.set_mode(str(self.mode.currentData() or "lit"))
+        report = self.report(); self.metrics.setRowCount(0)
+        bounds = report.get("bounds") or {}; minimum, maximum = bounds.get("minimum", []), bounds.get("maximum", [])
+        rows = (
+            ("Source vertices", f"{int(report.get('vertices') or 0):,}", "Imported vertex count"),
+            ("Visible triangles", f"{int(report['visible_triangles']):,}", f"LOD {report['lod']} at {report['triangle_percent']:g}%"),
+            ("UV channels", str(int(report.get("uv_channels") or 0)), "Texture coordinate sets"),
+            ("Normals", "Present" if report.get("has_normals") else "Missing", "Imported vertex-normal data"),
+            ("Material slots / draws", f"{int(report.get('material_slots') or 0)} / {report['estimated_draw_calls']}", "Estimated draw submissions"),
+            ("GPU geometry", self._format_bytes(report["estimated_gpu_bytes"]), "Vertex and index buffers"),
+            ("Source file", self._format_bytes(int(report.get("source_bytes") or 0)), self.source_path.name),
+            ("Bounds minimum", self._vector(minimum), "Local-space XYZ"),
+            ("Bounds maximum", self._vector(maximum), "Local-space XYZ"),
+        )
+        for values in rows:
+            row = self.metrics.rowCount(); self.metrics.insertRow(row)
+            for column, value in enumerate(values): self.metrics.setItem(row, column, QTableWidgetItem(str(value)))
+        status = "OVER BUDGET" if report["over_budget"] else "Within budget"
+        self.summary.setText(f"{status} for {self.platform.currentText()} • {report['visible_triangles']:,} / {report['triangle_budget']:,} triangles • {self._format_bytes(report['estimated_gpu_bytes'])} / {self._format_bytes(report['memory_budget'])} geometry memory")
+        self.summary.setStyleSheet("color:#ef8793; font-weight:700;" if report["over_budget"] else "color:#72d9ca;")
+
+    def _inspect_source(self, values: dict[str, Any]) -> dict[str, Any]:
+        supplied = dict(values.get("mesh_statistics") or values.get("statistics") or {})
+        result = {
+            "vertices": int(supplied.get("vertices") or supplied.get("vertex_count") or 0),
+            "triangles": int(supplied.get("triangles") or supplied.get("triangle_count") or 0),
+            "uv_channels": int(supplied.get("uv_channels") or 0),
+            "has_normals": bool(supplied.get("has_normals", False)),
+            "material_slots": len(values.get("material_slots") or values.get("materials") or ()),
+            "bounds": dict(supplied.get("bounds") or values.get("bounds") or {}),
+            "source_bytes": self.source_path.stat().st_size if self.source_path.is_file() else 0,
+        }
+        if self.source_path.suffix.casefold() != ".obj" or not self.source_path.is_file():
+            return result
+        vertices: list[tuple[float, float, float]] = []; triangles = texture_coordinates = normals = 0; materials: set[str] = set()
+        try:
+            with self.source_path.open("r", encoding="utf-8", errors="ignore") as stream:
+                for line in stream:
+                    if line.startswith("v "):
+                        parts = line.split()
+                        if len(parts) >= 4: vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                    elif line.startswith("vt "): texture_coordinates += 1
+                    elif line.startswith("vn "): normals += 1
+                    elif line.startswith("f "): triangles += max(0, len(line.split()) - 3)
+                    elif line.startswith("usemtl "): materials.add(line[7:].strip())
+        except (OSError, ValueError):
+            return result
+        result.update({"vertices": len(vertices), "triangles": triangles, "uv_channels": 1 if texture_coordinates else 0,
+                       "has_normals": bool(normals), "material_slots": len(materials) or result["material_slots"]})
+        if vertices:
+            result["bounds"] = {"minimum": [min(value[index] for value in vertices) for index in range(3)],
+                                "maximum": [max(value[index] for value in vertices) for index in range(3)]}
+        return result
+
+    @staticmethod
+    def _vector(values: Any) -> str:
+        return ", ".join(f"{float(value):g}" for value in values) if values else "Unavailable"
+
+    @staticmethod
+    def _format_bytes(value: int) -> str:
+        size = float(max(0, int(value)))
+        for unit in ("B", "KiB", "MiB", "GiB"):
+            if size < 1024.0 or unit == "GiB": return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} GiB"
 
 
 class MeshLodEditorWidget(QWidget):
@@ -4014,19 +4515,38 @@ class GameplayClassDebuggerWidget(QWidget):
     def __init__(self, project_root: str | Path, database: AssetDatabase, asset_id: str, parent=None) -> None:
         super().__init__(parent); self.service = GameplayClassService(project_root, database); self.asset_id = str(asset_id); self.manager = default_graph_debug_session_manager(); self.session = None
         root = QVBoxLayout(self); title = QLabel("Gameplay Graph Debugger"); title.setStyleSheet("font-size:16px; font-weight:600;"); root.addWidget(title)
-        hint = QLabel("Save, attach to an editor instance, and debug the same manifest used by runtime cooking. Breakpoints stop before a node; Step commits one atomic node; Apply Changes preserves compatible instance state."); hint.setWordWrap(True); root.addWidget(hint)
-        target = QHBoxLayout(); target.addWidget(QLabel("Instance")); self.instance = QComboBox(self); self.instance.setEditable(True); self.instance.addItem("EditorPreview")
-        for row in self.manager.list_sessions():
-            if str(row.get("program_id") or "") == f"gameplay_class_{self.asset_id}" and self.instance.findText(str(row.get("instance_id") or "")) < 0: self.instance.addItem(str(row.get("instance_id") or ""))
+        hint = QLabel("Editor Simulation uses an isolated copy. Runtime Session attaches to an already registered live instance. Breakpoints stop before a node; Step commits one atomic node; Apply Changes rolls back automatically when validation fails."); hint.setWordWrap(True); root.addWidget(hint)
+        target = QHBoxLayout(); self.mode = QComboBox(self); self.mode.addItem("Editor Simulation", "editor_simulation"); self.mode.addItem("Runtime Session", "runtime_execution"); target.addWidget(QLabel("Mode")); target.addWidget(self.mode)
+        target.addWidget(QLabel("Instance")); self.instance = QComboBox(self); self.instance.setEditable(True)
+        self.entity = QComboBox(self); self.entity.setEditable(True); target.addWidget(QLabel("Entity")); target.addWidget(self.entity)
+        refresh = QPushButton("Refresh Targets", self); refresh.clicked.connect(self.refresh_targets); target.addWidget(refresh)
         target.addWidget(self.instance, 1); attach = QPushButton("Attach & Run", self); attach.clicked.connect(self.attach); target.addWidget(attach); root.addLayout(target)
         debug_options = QFormLayout(); self.breakpoints = QLineEdit(self); self.breakpoints.setPlaceholderText("set_health, emit_event"); self.watches = QLineEdit(self); self.watches.setPlaceholderText("metadata.variables.Health, actors.Self.velocity, outputs.node_id"); debug_options.addRow("Breakpoints", self.breakpoints); debug_options.addRow("Watches", self.watches); root.addLayout(debug_options)
+        self.nodes = QTableWidget(0, 4, self); self.nodes.setHorizontalHeaderLabels(("Break", "Node", "Operation", "Execution")); self.nodes.setMaximumHeight(170); self.nodes.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.nodes)
         controls = QHBoxLayout()
         for label, handler in (("Continue", self.continue_execution), ("Pause", self.pause), ("Step", self.step), ("Restart", self.restart), ("Apply Changes", self.hot_swap), ("Stop", self.stop)): button = QPushButton(label, self); button.clicked.connect(handler); controls.addWidget(button)
         controls.addStretch(1); root.addLayout(controls)
         self.context = QPlainTextEdit(self); self.context.setMaximumHeight(105); self.context.setPlainText('{"authority":"local","input_actions":{"Move":[0.0,0.0]},"actors":{"Self":{"velocity":[0.0,0.0,0.0]}},"metadata":{"variables":{}}}'); root.addWidget(self.context)
         self.status = QLabel("Ready"); root.addWidget(self.status)
         self.traces = QTableWidget(0, 5, self); self.traces.setHorizontalHeaderLabels(("Node", "Operation", "Time ms", "Inputs", "Output")); root.addWidget(self.traces, 1)
+        self.watch_values = QTableWidget(0, 2, self); self.watch_values.setHorizontalHeaderLabels(("Watch", "Live Value")); self.watch_values.setMaximumHeight(130); root.addWidget(self.watch_values)
         self.details = QPlainTextEdit(self); self.details.setReadOnly(True); self.details.setMaximumHeight(150); root.addWidget(self.details)
+        self.mode.currentIndexChanged.connect(self.refresh_targets); self.entity.currentTextChanged.connect(self._entity_changed); self.refresh_targets()
+
+    def refresh_targets(self, *_args) -> None:
+        current_instance = self.instance.currentText(); current_entity = self.entity.currentText(); runtime = self.mode.currentData() == "runtime_execution"
+        sessions = [row for row in self.manager.list_sessions() if str(row.get("program_id") or "") == f"gameplay_class_{self.asset_id}"]
+        self.instance.blockSignals(True); self.instance.clear()
+        if not runtime: self.instance.addItem("EditorPreview")
+        for row in sessions:
+            if not runtime or row.get("execution_mode") == "runtime_execution": self.instance.addItem(str(row.get("instance_id") or ""), str(row.get("session_id") or ""))
+        if current_instance: self.instance.setCurrentText(current_instance)
+        self.instance.blockSignals(False)
+        entities: list[str] = []
+        try: entities.extend(str(value) for value in dict(json.loads(self.context.toPlainText() or "{}").get("actors") or {}))
+        except (ValueError, TypeError): pass
+        for row in sessions: entities.extend(str(value) for value in dict(dict(row.get("runtime_state") or {}).get("actors") or {}))
+        self.entity.blockSignals(True); self.entity.clear(); self.entity.addItems(list(dict.fromkeys(entities or ["Self"]))); self.entity.setCurrentText(current_entity or "Self"); self.entity.blockSignals(False)
 
     def attach(self) -> dict[str, Any]:
         import json
@@ -4034,12 +4554,18 @@ class GameplayClassDebuggerWidget(QWidget):
             context = json.loads(self.context.toPlainText() or "{}")
             instance_id = self.instance.currentText().strip() or "EditorPreview"
             existing = next((row for row in self.manager.list_sessions() if row.get("program_id") == f"gameplay_class_{self.asset_id}" and row.get("instance_id") == instance_id), None)
+            execution_mode = str(self.mode.currentData() or "editor_simulation")
+            if execution_mode == "runtime_execution" and not existing:
+                raise RuntimeError("No live runtime session is registered for this instance. Start Play or select Editor Simulation.")
             if existing:
                 self.session = self.manager.session(str(existing["session_id"]))
+                self._populate_nodes(self.session.manifest)
             else:
                 session_id = f"editor:{self.asset_id}:{instance_id}"
-                self.session = self.manager.attach(session_id, instance_id, self.service.debug_manifest(self.asset_id), self.service.debug_context(self.asset_id, context))
-            self.session.set_breakpoints(self._csv(self.breakpoints.text())); self.session.set_watches(self._csv(self.watches.text()))
+                manifest = self.service.debug_manifest(self.asset_id); self._populate_nodes(manifest)
+                self.session = self.manager.attach(session_id, instance_id, manifest, self.service.debug_context(self.asset_id, context), execution_mode=execution_mode, selected_entity_id=self.entity.currentText())
+            self.session.set_breakpoints(self._breakpoint_ids()); self.session.set_watches(self._csv(self.watches.text()))
+            if self.entity.currentText(): self.session.select_entity(self.entity.currentText())
             result = (self.session.snapshot() if existing else self.session.start()).to_dict()
         except Exception as exc:
             result = {"status": "failed", "error": {"message": str(exc)}, "traces": []}
@@ -4065,14 +4591,16 @@ class GameplayClassDebuggerWidget(QWidget):
 
     def hot_swap(self) -> dict[str, Any]:
         if self.session is None: return self.attach()
-        try: result = self.session.hot_swap(self.service.debug_manifest(self.asset_id)).to_dict()
-        except Exception as exc: result = {"status": "failed", "error": {"message": str(exc)}, "traces": []}
+        try:
+            manifest = self.service.debug_manifest(self.asset_id); result = self.session.hot_swap(manifest).to_dict(); self._populate_nodes(manifest)
+        except Exception as exc:
+            result = self.session.reject_hot_swap(str(exc)).to_dict()
         self._render(result); return result
 
     def _command(self, name: str) -> dict[str, Any]:
         if self.session is None: return self.attach()
         try:
-            self.session.set_breakpoints(self._csv(self.breakpoints.text())); self.session.set_watches(self._csv(self.watches.text()))
+            self.session.set_breakpoints(self._breakpoint_ids()); self.session.set_watches(self._csv(self.watches.text()))
             result = getattr(self.session, name)().to_dict()
         except Exception as exc: result = {"status": "failed", "error": {"message": str(exc)}, "traces": []}
         self._render(result); return result
@@ -4084,9 +4612,35 @@ class GameplayClassDebuggerWidget(QWidget):
             values = (trace.get("node_id", ""), trace.get("operation", ""), f"{float(trace.get('elapsed_ms', 0.0)):.3f}", ", ".join(trace.get("input_names") or ()), trace.get("output_summary", ""))
             for column, value in enumerate(values): self.traces.setItem(row, column, QTableWidgetItem(str(value)))
         status = str(result.get("status") or "failed").upper(); reason = str(result.get("pause_reason") or ""); next_node = str(result.get("next_node_id") or "")
-        self.status.setText(f"{status} • {len(traces)}/{int(result.get('instruction_count', len(traces)))} nodes" + (f" • {reason}" if reason else "") + (f" • next: {next_node}" if next_node else ""))
-        details = result.get("error") or {"watches": result.get("watches") or {}, "outputs": result.get("outputs") or {}, "runtime_state": result.get("runtime_state") or {}}
+        mode = "RUNTIME" if result.get("execution_mode") == "runtime_execution" else "SIMULATION"
+        hot_reload = dict(result.get("hot_reload") or {}); reload_status = " - HOT RELOAD ROLLED BACK" if hot_reload.get("rolled_back") else (" - HOT RELOAD APPLIED" if hot_reload.get("applied") else "")
+        self.status.setText(f"{mode} - {status} - {len(traces)}/{int(result.get('instruction_count', len(traces)))} nodes" + (f" - {reason}" if reason else "") + (f" - next: {next_node}" if next_node else "") + reload_status)
+        watches = dict(result.get("watches") or {}); self.watch_values.setRowCount(len(watches))
+        for row, (path, value) in enumerate(watches.items()): self.watch_values.setItem(row, 0, QTableWidgetItem(str(path))); self.watch_values.setItem(row, 1, QTableWidgetItem(_render_json(value)))
+        completed = {str(trace.get("node_id") or "") for trace in traces}; current = str(result.get("current_node_id") or "")
+        for row in range(self.nodes.rowCount()):
+            node_id = _table_text(self.nodes, row, 1); state = "NEXT" if node_id == next_node else ("CURRENT" if node_id == current else ("DONE" if node_id in completed else "WAITING")); self.nodes.setItem(row, 3, QTableWidgetItem(state))
+        details = result.get("error") or {"selected_entity_id": result.get("selected_entity_id") or "", "hot_reload": hot_reload, "outputs": result.get("outputs") or {}, "runtime_state": result.get("runtime_state") or {}}
         self.details.setPlainText(json.dumps(details, indent=2, default=str))
+
+    def _populate_nodes(self, manifest: dict[str, Any]) -> None:
+        selected = set(self._csv(self.breakpoints.text()))
+        if self.session is not None: selected.update(self.session.breakpoints)
+        self.nodes.setRowCount(0)
+        for node_id in manifest.get("execution_order") or ():
+            node = next((dict(row) for row in manifest.get("nodes") or () if str(dict(row).get("node_id") or "") == str(node_id)), {})
+            row = self.nodes.rowCount(); self.nodes.insertRow(row); check = QTableWidgetItem(""); check.setFlags(check.flags() | Qt.ItemIsUserCheckable); check.setCheckState(Qt.Checked if str(node_id) in selected else Qt.Unchecked); self.nodes.setItem(row, 0, check)
+            for column, value in enumerate((node_id, node.get("operation", ""), "WAITING"), start=1): self.nodes.setItem(row, column, QTableWidgetItem(str(value)))
+
+    def _breakpoint_ids(self) -> list[str]:
+        values = self._csv(self.breakpoints.text())
+        values.extend(_table_text(self.nodes, row, 1) for row in range(self.nodes.rowCount()) if self.nodes.item(row, 0) and self.nodes.item(row, 0).checkState() == Qt.Checked)
+        return list(dict.fromkeys(value for value in values if value))
+
+    def _entity_changed(self, entity_id: str) -> None:
+        if self.session is None or not entity_id: return
+        try: self._render(self.session.select_entity(entity_id).to_dict())
+        except KeyError: pass
 
     @staticmethod
     def _csv(value: str) -> list[str]:
@@ -4597,6 +5151,1085 @@ class BlendSpaceEditorWidget(QWidget):
         rows = sorted({item.row() for item in self.samples.selectedItems()}, reverse=True)
         for row in rows: self.samples.removeRow(row)
         if rows: self._refresh_preview(); self.changed.emit()
+
+
+class MaterialParameterEditorWidget(QWidget):
+    """Named runtime parameters and static permutation switches."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        self.table = QTableWidget(0, 5, self)
+        self.table.setHorizontalHeaderLabels(["Name", "Type", "Default", "Group", "Static"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Parameter"); remove = QPushButton("Delete")
+        controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        self.summary = QLabel("0 parameters • 0 static switches"); root.addWidget(self.summary)
+        self._loading = False
+        add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for name, raw in dict(values.get("parameters") or {}).items():
+            descriptor = dict(raw) if isinstance(raw, dict) and any(key in raw for key in ("default", "type", "group", "static")) else {"default": raw}
+            default = descriptor.get("default")
+            kind = str(descriptor.get("type") or _value_type(default))
+            self._append(str(name), kind, default, str(descriptor.get("group") or "General"), bool(descriptor.get("static", False)))
+        self._loading = False; self._summary()
+
+    def settings(self) -> dict[str, Any]:
+        parameters = {}
+        groups = {}
+        for row in range(self.table.rowCount()):
+            name = _table_text(self.table, row, 0).strip()
+            if not name: continue
+            group = _table_text(self.table, row, 3).strip() or "General"
+            descriptor = {"type": _table_text(self.table, row, 1) or "float", "default": _json_value(_table_text(self.table, row, 2)), "group": group, "static": _table_text(self.table, row, 4).casefold() in {"true", "yes", "1", "on"}}
+            parameters[name] = descriptor; groups.setdefault(group, []).append(name)
+        return {"parameters": parameters, "parameter_groups": groups}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).strip() for row in range(self.table.rowCount())]
+        issues = []
+        if any(not name for name in names): issues.append("Every material parameter needs a name.")
+        if len({name.casefold() for name in names}) != len(names): issues.append("Material parameter names must be unique.")
+        return issues
+
+    def _append(self, name: str, kind: str, default: Any, group: str, static: bool) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        values = (name, kind, _json_text(default), group, "Yes" if static else "No")
+        for column, value in enumerate(values): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+
+    def _add(self) -> None:
+        self._append(f"Parameter{self.table.rowCount() + 1}", "float", 0.0, "General", False); self.changed.emit()
+
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self._summary(); self.changed.emit()
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self._summary(); self.changed.emit()
+
+    def _summary(self) -> None:
+        static = sum(_table_text(self.table, row, 4).casefold() in {"yes", "true", "1", "on"} for row in range(self.table.rowCount()))
+        self.summary.setText(f"{self.table.rowCount()} parameter(s) • {static} static switch(es) • up to {2 ** static} permutation(s)")
+
+
+class MeshGeometryEditorWidget(QWidget):
+    """Import-safe geometry processing controls for static and skeletal meshes."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); form = QFormLayout()
+        self.normals = QComboBox(self); self.normals.addItems(["preserve", "recompute_if_missing", "recompute"])
+        self.tangents = QComboBox(self); self.tangents.addItems(["preserve", "mikktspace", "recompute"])
+        self.lightmap = QCheckBox("Generate non-overlapping lightmap UVs")
+        self.lightmap_channel = QSpinBox(self); self.lightmap_channel.setRange(0, 15)
+        self.weld = QDoubleSpinBox(self); self.weld.setRange(0.0, 10.0); self.weld.setDecimals(6)
+        self.degenerate = QCheckBox("Remove degenerate triangles")
+        self.cpu_access = QCheckBox("Allow CPU access")
+        self.streaming = QCheckBox("Enable geometry streaming")
+        form.addRow("Normals", self.normals); form.addRow("Tangents", self.tangents)
+        form.addRow("Lightmap UVs", self.lightmap); form.addRow("Lightmap Channel", self.lightmap_channel)
+        form.addRow("Weld Threshold", self.weld); form.addRow("Cleanup", self.degenerate)
+        form.addRow("Runtime Access", self.cpu_access); form.addRow("Streaming", self.streaming)
+        root.addLayout(form); root.addStretch(1); self._loading = False
+        for widget in (self.normals, self.tangents): widget.currentTextChanged.connect(self._edited)
+        for widget in (self.lightmap, self.degenerate, self.cpu_access, self.streaming): widget.toggled.connect(self._edited)
+        for widget in (self.lightmap_channel, self.weld): widget.valueChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        settings = dict(values.get("geometry") or values.get("geometry_settings") or {})
+        self._loading = True; self.normals.setCurrentText(str(settings.get("normals") or "preserve")); self.tangents.setCurrentText(str(settings.get("tangents") or "mikktspace"))
+        self.lightmap.setChecked(bool(settings.get("generate_lightmap_uvs", True))); self.lightmap_channel.setValue(int(settings.get("lightmap_uv_channel", 1)))
+        self.weld.setValue(float(settings.get("weld_threshold", 0.0001))); self.degenerate.setChecked(bool(settings.get("remove_degenerates", True)))
+        self.cpu_access.setChecked(bool(settings.get("allow_cpu_access", False))); self.streaming.setChecked(bool(settings.get("streaming", True))); self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"geometry": {"normals": self.normals.currentText(), "tangents": self.tangents.currentText(), "generate_lightmap_uvs": self.lightmap.isChecked(), "lightmap_uv_channel": self.lightmap_channel.value(), "weld_threshold": self.weld.value(), "remove_degenerates": self.degenerate.isChecked(), "allow_cpu_access": self.cpu_access.isChecked(), "streaming": self.streaming.isChecked()}}
+
+    def validation_issues(self) -> list[str]:
+        return ["Lightmap UV channel must differ from the primary texture UV channel 0."] if self.lightmap.isChecked() and self.lightmap_channel.value() == 0 else []
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class MeshMaterialSlotsEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self)
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Slot", "Material Asset ID", "Section", "Cast Shadow"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Slot"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        self._loading = False; add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for index, value in enumerate(values.get("material_slots") or values.get("materials") or []):
+            row = dict(value) if isinstance(value, dict) else {"material_asset_id": value}
+            self._append(str(row.get("name") or f"Slot {index}"), str(row.get("material_asset_id") or row.get("asset_id") or ""), int(row.get("section", index)), bool(row.get("cast_shadow", True)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"material_slots": [{"name": _table_text(self.table, row, 0), "material_asset_id": _table_text(self.table, row, 1), "section": _safe_int(_table_text(self.table, row, 2), row), "cast_shadow": _table_text(self.table, row, 3).casefold() in {"yes", "true", "1", "on"}} for row in range(self.table.rowCount())]}
+
+    def validation_issues(self) -> list[str]:
+        return [
+            f"Material slot row {row + 1} needs a whole-number section index."
+            for row in range(self.table.rowCount())
+            if not _is_int(_table_text(self.table, row, 2))
+        ]
+
+    def _append(self, name: str, asset_id: str, section: int, shadow: bool) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, asset_id, section, "Yes" if shadow else "No")): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+
+    def _add(self) -> None: self._append(f"Slot {self.table.rowCount()}", "", self.table.rowCount(), True); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationStateMachineEditorWidget(QWidget):
+    """Layer and state authoring with explicit entry state and motion assignment."""
+
+    changed = Signal()
+
+    def __init__(self, project_root: str | Path, database: AssetDatabase, parent=None) -> None:
+        super().__init__(parent); self.project_root = Path(project_root).resolve(); self.database = database
+        self._layers: list[dict[str, Any]] = []; self._current_layer = -1; self._loading = False
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Animation Layers"))
+        self.layers_table = QTableWidget(0, 5, self); self.layers_table.setHorizontalHeaderLabels(["ID", "Name", "Weight", "Blend", "Mask Asset"]); self.layers_table.setMaximumHeight(145); self.layers_table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.layers_table)
+        layer_actions = QHBoxLayout(); add_layer = QPushButton("+ Layer"); remove_layer = QPushButton("Delete Layer"); layer_actions.addWidget(add_layer); layer_actions.addWidget(remove_layer); layer_actions.addStretch(1); root.addLayout(layer_actions)
+        entry_row = QHBoxLayout(); self.entry_state = QComboBox(self); entry_row.addWidget(QLabel("Entry State")); entry_row.addWidget(self.entry_state); entry_row.addStretch(1); root.addLayout(entry_row)
+        self.states = QTableWidget(0, 7, self); self.states.setHorizontalHeaderLabels(["ID", "Name", "Motion Type", "Motion Asset", "Speed", "Loop", "Blend Parameters"]); self.states.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.states, 1)
+        state_actions = QHBoxLayout(); add_state = QPushButton("+ State"); remove_state = QPushButton("Delete State"); choose_motion = QPushButton("Choose Motion..."); state_actions.addWidget(add_state); state_actions.addWidget(remove_state); state_actions.addWidget(choose_motion); state_actions.addStretch(1); root.addLayout(state_actions)
+        self.summary = QLabel("", self); root.addWidget(self.summary)
+        add_layer.clicked.connect(self._add_layer); remove_layer.clicked.connect(self._remove_layer); add_state.clicked.connect(self._add_state); remove_state.clicked.connect(self._remove_state); choose_motion.clicked.connect(self._choose_motion)
+        self.layers_table.currentCellChanged.connect(self._switch_layer); self.layers_table.itemChanged.connect(self._layer_edited); self.states.itemChanged.connect(self._states_edited); self.entry_state.currentTextChanged.connect(self._entry_edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self._layers = deepcopy(list(values.get("layers") or []))
+        if not self._layers:
+            self._layers = [{"id": "base", "name": "Base Layer", "weight": 1.0, "blend_mode": "override", "mask_asset_id": "", "state_machine": {"entry_state": "entry", "states": [{"id": "entry", "name": "Entry", "motion": None, "speed": 1.0, "loop": True}], "transitions": []}}]
+        self.layers_table.setRowCount(0)
+        for layer in self._layers:
+            row = self.layers_table.rowCount(); self.layers_table.insertRow(row)
+            for column, value in enumerate((layer.get("id", "base"), layer.get("name", "Layer"), layer.get("weight", 1.0), layer.get("blend_mode", "override"), layer.get("mask_asset_id", ""))): self.layers_table.setItem(row, column, QTableWidgetItem(str(value)))
+        self._current_layer = 0; self.layers_table.selectRow(0); self._load_layer(0); self._loading = False; self._update_summary()
+
+    def settings(self) -> dict[str, Any]:
+        self._sync_layer(self._current_layer)
+        return {"layers": deepcopy(self._layers)}
+
+    def validation_issues(self) -> list[str]:
+        values = self.settings(); issues = []
+        for index, layer in enumerate(values["layers"]):
+            machine = dict(layer.get("state_machine") or {}); ids = [str(row.get("id") or "") for row in machine.get("states") or []]
+            if not ids or any(not value for value in ids): issues.append(f"Animation layer {index + 1} needs named states.")
+            if len(ids) != len(set(ids)): issues.append(f"Animation layer {index + 1} has duplicate state IDs.")
+            if str(machine.get("entry_state") or "") not in ids: issues.append(f"Animation layer {index + 1} entry state must reference a state.")
+        return issues
+
+    def _load_layer(self, row: int) -> None:
+        self.states.setRowCount(0); self.entry_state.clear()
+        if not 0 <= row < len(self._layers): return
+        machine = dict(self._layers[row].get("state_machine") or {})
+        for raw in machine.get("states") or []:
+            state = dict(raw); motion = state.get("motion"); motion = dict(motion) if isinstance(motion, dict) else ({"type": "clip", "asset_id": motion} if motion else {})
+            target = self.states.rowCount(); self.states.insertRow(target)
+            values = (state.get("id", "state"), state.get("name", "State"), motion.get("type", "clip"), motion.get("asset_id", ""), state.get("speed", 1.0), "Yes" if state.get("loop", True) else "No", _json_text(motion.get("parameters", {})))
+            for column, value in enumerate(values): self.states.setItem(target, column, QTableWidgetItem(str(value)))
+            self.entry_state.addItem(str(state.get("id") or ""))
+        self.entry_state.setCurrentText(str(machine.get("entry_state") or ""))
+
+    def _sync_layer(self, row: int) -> None:
+        if not 0 <= row < len(self._layers): return
+        layer = self._layers[row]
+        if row < self.layers_table.rowCount():
+            layer.update({"id": _table_text(self.layers_table, row, 0) or f"layer_{row}", "name": _table_text(self.layers_table, row, 1) or f"Layer {row + 1}", "weight": _safe_float(_table_text(self.layers_table, row, 2), 1.0), "blend_mode": _table_text(self.layers_table, row, 3) or "override", "mask_asset_id": _table_text(self.layers_table, row, 4)})
+        machine = layer.setdefault("state_machine", {}); states = []
+        for index in range(self.states.rowCount()):
+            motion_asset = _table_text(self.states, index, 3); motion = None
+            if motion_asset or _table_text(self.states, index, 2): motion = {"type": _table_text(self.states, index, 2) or "clip", "asset_id": motion_asset, "parameters": _json_value(_table_text(self.states, index, 6)) or {}}
+            states.append({"id": _table_text(self.states, index, 0), "name": _table_text(self.states, index, 1), "motion": motion, "speed": _safe_float(_table_text(self.states, index, 4), 1.0), "loop": _table_text(self.states, index, 5).casefold() in {"yes", "true", "1", "on"}})
+        machine["states"] = states; machine["entry_state"] = self.entry_state.currentText(); machine.setdefault("transitions", [])
+
+    def _switch_layer(self, current_row: int, _current_column: int, previous_row: int, _previous_column: int) -> None:
+        if self._loading or current_row < 0: return
+        self._sync_layer(previous_row); self._loading = True; self._current_layer = current_row; self._load_layer(current_row); self._loading = False; self._update_summary()
+
+    def _add_layer(self) -> None:
+        self._sync_layer(self._current_layer); index = len(self._layers); layer_id = f"layer_{index + 1}"
+        self._layers.append({"id": layer_id, "name": f"Layer {index + 1}", "weight": 1.0, "blend_mode": "override", "mask_asset_id": "", "state_machine": {"entry_state": "entry", "states": [{"id": "entry", "name": "Entry", "motion": None, "speed": 1.0, "loop": True}], "transitions": []}})
+        self.load_settings({"layers": self._layers}); self.layers_table.selectRow(index); self.changed.emit()
+
+    def _remove_layer(self) -> None:
+        row = self.layers_table.currentRow()
+        if row < 0 or len(self._layers) <= 1: return
+        self._layers.pop(row); self.load_settings({"layers": self._layers}); self.changed.emit()
+
+    def _add_state(self) -> None:
+        index = self.states.rowCount(); state_id = f"state_{index + 1}"; self.states.insertRow(index)
+        for column, value in enumerate((state_id, f"State {index + 1}", "clip", "", 1.0, "Yes", "{}")): self.states.setItem(index, column, QTableWidgetItem(str(value)))
+        self._states_edited()
+
+    def _remove_state(self) -> None:
+        row = self.states.currentRow()
+        if row >= 0: self.states.removeRow(row); self._states_edited()
+
+    def _choose_motion(self) -> None:
+        row = self.states.currentRow()
+        if row < 0: return
+        from tech_connector.ui.game_engine.asset_picker import AssetPickerDialog
+        kind = _table_text(self.states, row, 2).casefold(); allowed = ("tc.blend_space",) if kind == "blend_space" else ("tc.animation_clip", "tc.blend_space")
+        picker = AssetPickerDialog(self.project_root, self.database, allowed_types=allowed, current_asset_id=_table_text(self.states, row, 3), title="Choose State Motion", parent=self)
+        if picker.exec() == QDialog.Accepted:
+            self.states.item(row, 3).setText(picker.selected_asset_id)
+
+    def _layer_edited(self, *_args) -> None:
+        if not self._loading: self._sync_layer(self._current_layer); self._update_summary(); self.changed.emit()
+
+    def _states_edited(self, *_args) -> None:
+        if self._loading: return
+        selected = self.entry_state.currentText(); self._loading = True; self.entry_state.clear(); self.entry_state.addItems([_table_text(self.states, row, 0) for row in range(self.states.rowCount())]); self.entry_state.setCurrentText(selected); self._loading = False
+        self._sync_layer(self._current_layer); self._update_summary(); self.changed.emit()
+
+    def _entry_edited(self, *_args) -> None:
+        if not self._loading: self._sync_layer(self._current_layer); self.changed.emit()
+
+    def _update_summary(self) -> None:
+        states = sum(len(dict(layer.get("state_machine") or {}).get("states") or []) for layer in self._layers); self.summary.setText(f"{len(self._layers)} layer(s) - {states} state(s) - supports clips and Blend Spaces")
+
+
+class AnimationControllerPreviewCanvas(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); self.state_name = ""; self.normalized_time = 0.0; self.root_motion: dict[str, Any] = {}; self.setMinimumHeight(260)
+
+    def set_preview(self, state_name: str, normalized_time: float, root_motion: dict[str, Any]) -> None:
+        self.state_name = str(state_name); self.normalized_time = float(normalized_time); self.root_motion = dict(root_motion or {}); self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing, True); painter.fillRect(self.rect(), QColor("#071018"))
+        center = QPointF(self.width() * .5, self.height() * .55); phase = math.sin(self.normalized_time * math.tau)
+        painter.setPen(QPen(QColor("#70d6ff"), 4)); painter.drawLine(center + QPointF(0, -75), center + QPointF(0, 0)); painter.drawEllipse(center + QPointF(-13, -102), 13, 13)
+        painter.drawLine(center + QPointF(0, -55), center + QPointF(-32 - phase * 8, -18)); painter.drawLine(center + QPointF(0, -55), center + QPointF(32 + phase * 8, -18)); painter.drawLine(center, center + QPointF(-24 + phase * 10, 55)); painter.drawLine(center, center + QPointF(24 - phase * 10, 55))
+        mode = str(self.root_motion.get("mode") or "in_place"); distance = 0.0 if mode in {"in_place", "ignore"} else 70.0 * self.normalized_time
+        painter.setPen(QPen(QColor("#f5bd50"), 3)); painter.drawLine(center + QPointF(-35, 78), center + QPointF(-35 + distance, 78)); painter.drawText(12, 22, f"State: {self.state_name or 'None'} | Root Motion: {mode} | t={self.normalized_time:.2f}")
+
+
+class AnimationControllerDebuggerWidget(QWidget):
+    """Deterministic editor simulation with live state, trace, pose, and root-motion feedback."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); self._values: dict[str, Any] = {}; self._state = ""; self._time = 0.0
+        root = QVBoxLayout(self); controls = QHBoxLayout(); self.layer = QComboBox(self); self.play = QPushButton("Play"); self.play.setCheckable(True); step = QPushButton("Step"); reset = QPushButton("Reset")
+        controls.addWidget(QLabel("Layer")); controls.addWidget(self.layer); controls.addWidget(self.play); controls.addWidget(step); controls.addWidget(reset); controls.addStretch(1); root.addLayout(controls)
+        self.canvas = AnimationControllerPreviewCanvas(self); root.addWidget(self.canvas, 1)
+        self.parameters = QTableWidget(0, 3, self); self.parameters.setHorizontalHeaderLabels(["Parameter", "Preview Value", "Type"]); self.parameters.setMaximumHeight(150); root.addWidget(self.parameters)
+        self.current = QLabel("No active state", self); root.addWidget(self.current); self.trace = QListWidget(self); self.trace.setMaximumHeight(120); root.addWidget(self.trace)
+        self.timer = QTimer(self); self.timer.setInterval(100); self.timer.timeout.connect(self._tick); self.play.toggled.connect(lambda enabled: self.timer.start() if enabled else self.timer.stop()); step.clicked.connect(self._tick); reset.clicked.connect(self.reset); self.layer.currentTextChanged.connect(lambda _value: self.reset()); self.parameters.itemChanged.connect(lambda _item: self._evaluate())
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._values = deepcopy(values or {}); self.layer.blockSignals(True); self.layer.clear()
+        for layer in self._values.get("layers") or []: self.layer.addItem(str(layer.get("name") or layer.get("id") or "Layer"), str(layer.get("id") or "base"))
+        self.layer.blockSignals(False); self.parameters.blockSignals(True); self.parameters.setRowCount(0)
+        for name, raw in dict(self._values.get("parameters") or {}).items():
+            spec = dict(raw) if isinstance(raw, dict) else {"default": raw}; row = self.parameters.rowCount(); self.parameters.insertRow(row)
+            for column, value in enumerate((name, _json_text(spec.get("default")), spec.get("type", _value_type(spec.get("default"))))): self.parameters.setItem(row, column, QTableWidgetItem(str(value)))
+            self.parameters.item(row, 0).setFlags(self.parameters.item(row, 0).flags() & ~Qt.ItemIsEditable); self.parameters.item(row, 2).setFlags(self.parameters.item(row, 2).flags() & ~Qt.ItemIsEditable)
+        self.parameters.blockSignals(False); self.reset()
+
+    def reset(self) -> None:
+        self._state = ""; self._time = 0.0; self.trace.clear(); self._evaluate()
+
+    def preview_state(self) -> dict[str, Any]:
+        return {"state": self._state, "normalized_time": self._time, "trace_count": self.trace.count()}
+
+    def _parameter_values(self) -> dict[str, Any]:
+        return {_table_text(self.parameters, row, 0): _json_value(_table_text(self.parameters, row, 1)) for row in range(self.parameters.rowCount())}
+
+    def _tick(self) -> None:
+        self._time = (self._time + 0.1) % 1.0; self._evaluate()
+
+    def _evaluate(self) -> None:
+        result = evaluate_animation_controller(self._values, parameter_values=self._parameter_values(), layer_id=str(self.layer.currentData() or ""), current_state=self._state, normalized_time=self._time)
+        if result["transitioned"]:
+            self.trace.insertItem(0, f"{result['previous_state']} -> {result['current_state']} ({result['transition_id'] or 'transition'})"); self._time = 0.0
+        self._state = str(result["current_state"] or ""); self.current.setText(f"ACTIVE: {self._state or 'None'} - t={self._time:.2f} - motion={result['motion'] or 'None'}")
+        self.canvas.set_preview(self._state, self._time, dict(result.get("root_motion") or {}))
+
+
+class AnimationControllerParametersEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self)
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Name", "Type", "Default", "Replicated"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Parameter"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        self._loading = False; add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for name, raw in dict(values.get("parameters") or {}).items():
+            descriptor = dict(raw) if isinstance(raw, dict) else {"default": raw}
+            self._append(str(name), str(descriptor.get("type") or _value_type(descriptor.get("default"))), descriptor.get("default"), bool(descriptor.get("replicated", False)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"parameters": {_table_text(self.table, row, 0): {"type": _table_text(self.table, row, 1) or "float", "default": _json_value(_table_text(self.table, row, 2)), "replicated": _table_text(self.table, row, 3).casefold() in {"yes", "true", "1", "on"}} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)}}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0) for row in range(self.table.rowCount())]
+        return ["Animation parameter names must be unique."] if len(names) != len(set(names)) else []
+
+    def _append(self, name: str, kind: str, default: Any, replicated: bool) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, kind, _json_text(default), "Yes" if replicated else "No")): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"parameter_{self.table.rowCount() + 1}", "float", 0.0, False); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationControllerTransitionsEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self)
+        self.table = QTableWidget(0, 7, self); self.table.setHorizontalHeaderLabels(["Layer", "From", "To", "Condition JSON", "Blend s", "Exit Time", "Interrupt"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Transition"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        self._layers: list[dict[str, Any]] = []; self._loading = False; add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._layers = deepcopy(list(values.get("layers") or [])); self._loading = True; self.table.setRowCount(0)
+        for layer in self._layers:
+            machine = dict(layer.get("state_machine") or {})
+            for transition in machine.get("transitions") or []:
+                row = dict(transition); self._append(str(layer.get("id") or "base"), str(row.get("from") or row.get("source") or ""), str(row.get("to") or row.get("target") or ""), row.get("conditions") or row.get("condition") or [], float(row.get("blend_seconds", row.get("duration", 0.2))), row.get("exit_time", ""), str(row.get("interrupt") or "none"), transition_id=str(row.get("id") or ""))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        layers = deepcopy(self._layers) or [{"id": "base", "name": "Base Layer", "state_machine": {"entry_state": "", "states": [], "transitions": []}}]
+        by_id = {str(layer.get("id") or "base"): layer for layer in layers}
+        for layer in layers: layer.setdefault("state_machine", {})["transitions"] = []
+        for row in range(self.table.rowCount()):
+            layer_id = _table_text(self.table, row, 0) or "base"; layer = by_id.setdefault(layer_id, {"id": layer_id, "name": layer_id, "state_machine": {"states": [], "transitions": []}})
+            item = self.table.item(row, 0)
+            transition_id = str(item.data(Qt.UserRole) or "") if item else ""
+            machine = layer.setdefault("state_machine", {}); machine.setdefault("transitions", []).append({"id": transition_id or f"transition_{uuid.uuid4().hex[:10]}", "from": _table_text(self.table, row, 1), "to": _table_text(self.table, row, 2), "conditions": _json_value(_table_text(self.table, row, 3)) or [], "blend_seconds": _safe_float(_table_text(self.table, row, 4), 0.2), "exit_time": _json_value(_table_text(self.table, row, 5)), "interrupt": _table_text(self.table, row, 6) or "none"})
+        return {"layers": list(by_id.values())}
+
+    def apply_to(self, values: dict[str, Any]) -> None:
+        """Apply only transition edits to the latest layer/state authoring from the State Machine page."""
+        authored_layers = deepcopy(list(values.get("layers") or self._layers))
+        edited = self.settings()["layers"]
+        transitions_by_id = {
+            str(layer.get("id") or "base"): deepcopy(dict(layer.get("state_machine") or {}).get("transitions") or [])
+            for layer in edited
+        }
+        for layer in authored_layers:
+            layer_id = str(layer.get("id") or "base")
+            layer.setdefault("state_machine", {})["transitions"] = transitions_by_id.get(layer_id, [])
+        values["layers"] = authored_layers
+
+    def validation_issues(self) -> list[str]:
+        return [
+            f"Transition row {row + 1} needs a numeric blend duration."
+            for row in range(self.table.rowCount())
+            if not _is_float(_table_text(self.table, row, 4))
+        ]
+
+    def _append(self, layer: str, source: str, target: str, condition: Any, blend: float, exit_time: Any, interrupt: str, *, transition_id: str = "") -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((layer, source, target, _json_text(condition), blend, _json_text(exit_time), interrupt)): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+        self.table.item(row, 0).setData(Qt.UserRole, transition_id or f"transition_{uuid.uuid4().hex[:10]}")
+    def _add(self) -> None: self._append("base", "", "", [], 0.2, "", "none"); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class EffectTimelineEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); form = QFormLayout()
+        self.duration = QDoubleSpinBox(self); self.duration.setRange(0.01, 36000.0); self.duration.setDecimals(3)
+        self.loop = QCheckBox("Loop the system")
+        self.warmup = QDoubleSpinBox(self); self.warmup.setRange(0.0, 3600.0); self.warmup.setDecimals(3)
+        self.fixed_step = QDoubleSpinBox(self); self.fixed_step.setRange(0.0001, 1.0); self.fixed_step.setDecimals(6)
+        form.addRow("Duration", self.duration); form.addRow("Playback", self.loop); form.addRow("Warmup Seconds", self.warmup); form.addRow("Warmup Step", self.fixed_step); root.addLayout(form)
+        self.emitters = QTableWidget(0, 4, self); self.emitters.setHorizontalHeaderLabels(["Emitter", "Enabled", "Spawn Rate", "Lifetime"]); root.addWidget(self.emitters, 1)
+        self._values: dict[str, Any] = {}; self._loading = False
+        for widget in (self.duration, self.warmup, self.fixed_step): widget.valueChanged.connect(self._edited)
+        self.loop.toggled.connect(self._edited); self.emitters.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._values = deepcopy(values); self._loading = True; self.duration.setValue(float(values.get("duration", 5.0))); self.loop.setChecked(bool(values.get("loop", False)))
+        warmup = dict(values.get("warmup") or {}); self.warmup.setValue(float(warmup.get("seconds", 0.0))); self.fixed_step.setValue(float(warmup.get("step_seconds", 1.0 / 30.0))); self.emitters.setRowCount(0)
+        for emitter in values.get("emitters") or []:
+            row = self.emitters.rowCount(); self.emitters.insertRow(row)
+            for column, value in enumerate((emitter.get("name", "Emitter"), "Yes" if emitter.get("enabled", True) else "No", emitter.get("spawn_rate", 0.0), emitter.get("lifetime", 1.0))):
+                item = QTableWidgetItem(str(value)); item.setFlags(item.flags() & ~Qt.ItemIsEditable); self.emitters.setItem(row, column, item)
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"duration": self.duration.value(), "loop": self.loop.isChecked(), "warmup": {"seconds": self.warmup.value(), "step_seconds": self.fixed_step.value()}}
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class EffectScalabilityEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self)
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Quality", "Spawn Scale", "Capacity Scale", "Disabled Emitter IDs"]); root.addWidget(self.table, 1)
+        self._loading = False; self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for quality, override in dict(values.get("quality_overrides") or {}).items():
+            row = self.table.rowCount(); self.table.insertRow(row); data = dict(override)
+            for column, value in enumerate((quality, data.get("spawn_scale", 1.0), data.get("capacity_scale", 1.0), ",".join(str(item) for item in data.get("disabled_emitters") or []))): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"quality_overrides": {_table_text(self.table, row, 0): {"spawn_scale": _safe_float(_table_text(self.table, row, 1), 1.0), "capacity_scale": _safe_float(_table_text(self.table, row, 2), 1.0), "disabled_emitters": [item.strip() for item in _table_text(self.table, row, 3).split(",") if item.strip()]} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)}}
+
+    def validation_issues(self) -> list[str]:
+        issues = []
+        for row in range(self.table.rowCount()):
+            quality = _table_text(self.table, row, 0) or f"Row {row + 1}"
+            spawn_text = _table_text(self.table, row, 1); capacity_text = _table_text(self.table, row, 2)
+            if not _is_float(spawn_text) or not _is_float(capacity_text):
+                issues.append(f"{quality} scalability values must be numeric.")
+            elif float(spawn_text) <= 0 or float(capacity_text) <= 0:
+                issues.append(f"{quality} scalability values must be greater than zero.")
+        return issues
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class TextureChannelEditorWidget(QWidget):
+    """Channel interpretation and normal/alpha transforms applied before cook."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False
+        self.swizzles = []
+        for channel in "RGBA":
+            control = QComboBox(self); control.addItems(["R", "G", "B", "A", "0", "1"])
+            form.addRow(f"Output {channel}", control); self.swizzles.append(control)
+            control.currentTextChanged.connect(self._edited)
+        self.alpha = QComboBox(self); self.alpha.addItems(["straight", "premultiplied", "opaque", "coverage"])
+        self.flip_green = QCheckBox("Flip green channel for DirectX-style normal maps", self)
+        form.addRow("Alpha Interpretation", self.alpha); form.addRow("Normal Convention", self.flip_green)
+        self.alpha.currentTextChanged.connect(self._edited); self.flip_green.toggled.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        channels = dict(values.get("channels") or {}); swizzle = str(channels.get("swizzle") or "RGBA").upper()
+        self._loading = True
+        for index, control in enumerate(self.swizzles): control.setCurrentText(swizzle[index] if index < len(swizzle) else "RGBA"[index])
+        self.alpha.setCurrentText(str(channels.get("alpha_mode") or "straight")); self.flip_green.setChecked(bool(channels.get("flip_green", False))); self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"channels": {"swizzle": "".join(control.currentText() for control in self.swizzles), "alpha_mode": self.alpha.currentText(), "flip_green": self.flip_green.isChecked()}}
+
+    def validation_issues(self) -> list[str]:
+        return []
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class TextureMipEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False
+        self.filter = QComboBox(self); self.filter.addItems(["kaiser", "lanczos", "box", "nearest"])
+        self.address = QComboBox(self); self.address.addItems(["wrap", "clamp", "mirror", "border"])
+        self.lod_bias = QDoubleSpinBox(self); self.lod_bias.setRange(-8.0, 16.0); self.lod_bias.setDecimals(2)
+        self.sharpen = QDoubleSpinBox(self); self.sharpen.setRange(0.0, 10.0); self.sharpen.setDecimals(2)
+        self.preserve_coverage = QCheckBox("Preserve alpha-test coverage", self)
+        self.alpha_reference = QDoubleSpinBox(self); self.alpha_reference.setRange(0.0, 1.0); self.alpha_reference.setDecimals(3); self.alpha_reference.setValue(0.5)
+        for label, widget in (("Downsample Filter", self.filter), ("Address Mode", self.address), ("LOD Bias", self.lod_bias), ("Sharpen", self.sharpen), ("Alpha Coverage", self.preserve_coverage), ("Alpha Reference", self.alpha_reference)): form.addRow(label, widget)
+        for widget in (self.filter, self.address): widget.currentTextChanged.connect(self._edited)
+        for widget in (self.lod_bias, self.sharpen, self.alpha_reference): widget.valueChanged.connect(self._edited)
+        self.preserve_coverage.toggled.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        settings = dict(values.get("mip_settings") or {}); self._loading = True
+        self.filter.setCurrentText(str(settings.get("filter") or "kaiser")); self.address.setCurrentText(str(settings.get("address_mode") or "wrap")); self.lod_bias.setValue(float(settings.get("lod_bias", 0.0))); self.sharpen.setValue(float(settings.get("sharpen", 0.0))); self.preserve_coverage.setChecked(bool(settings.get("preserve_alpha_coverage", False))); self.alpha_reference.setValue(float(settings.get("alpha_reference", 0.5))); self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"mip_settings": {"filter": self.filter.currentText(), "address_mode": self.address.currentText(), "lod_bias": self.lod_bias.value(), "sharpen": self.sharpen.value(), "preserve_alpha_coverage": self.preserve_coverage.isChecked(), "alpha_reference": self.alpha_reference.value()}}
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class TexturePlatformEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False
+        root.addWidget(QLabel("Optional platform overrides; Automatic inherits the shared import settings."))
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Platform", "Format", "Max Size", "Quality"]); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Platform"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for platform, override in dict(values.get("platform_overrides") or {}).items():
+            data = dict(override); self._append(str(platform), str(data.get("format") or "auto"), int(data.get("max_size", 0)), str(data.get("quality") or "normal"))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"platform_overrides": {_table_text(self.table, row, 0): {"format": _table_text(self.table, row, 1) or "auto", "max_size": _safe_int(_table_text(self.table, row, 2)), "quality": _table_text(self.table, row, 3) or "normal"} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)}}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).casefold() for row in range(self.table.rowCount())]
+        issues = ["Texture platform overrides must use unique platform names."] if len(names) != len(set(names)) else []
+        issues.extend(f"Texture platform row {row + 1} needs a whole-number maximum size." for row in range(self.table.rowCount()) if not _is_int(_table_text(self.table, row, 2)))
+        return issues
+
+    def _append(self, platform: str, texture_format: str, max_size: int, quality: str) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((platform, texture_format, max_size, quality)): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append("windows", "auto", 0, "normal"); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class InputActionsEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False; self._actions: dict[str, dict[str, Any]] = {}
+        self.table = QTableWidget(0, 6, self); self.table.setHorizontalHeaderLabels(["Action", "Value Type", "Trigger", "Threshold", "Dead Zone", "Sensitivity"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Action"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._actions = deepcopy(dict(values.get("actions") or {})); self._loading = True; self.table.setRowCount(0)
+        for name, raw in self._actions.items():
+            data = dict(raw) if isinstance(raw, dict) else {}; self._append(str(name), str(data.get("value_type") or "button"), str(data.get("trigger") or "pressed"), float(data.get("threshold", 0.5)), float(data.get("dead_zone", 0.1)), float(data.get("sensitivity", 1.0)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        result = {}
+        for row in range(self.table.rowCount()):
+            name = _table_text(self.table, row, 0)
+            name_item = self.table.item(row, 0)
+            original_name = str(name_item.data(Qt.UserRole) or name) if name_item else name
+            original = deepcopy(self._actions.get(original_name, {}))
+            original.update({"value_type": _table_text(self.table, row, 1) or "button", "trigger": _table_text(self.table, row, 2) or "pressed", "threshold": _safe_float(_table_text(self.table, row, 3), 0.5), "dead_zone": _safe_float(_table_text(self.table, row, 4), 0.1), "sensitivity": _safe_float(_table_text(self.table, row, 5), 1.0)}); result[name] = original
+        return {"actions": result}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).strip() for row in range(self.table.rowCount())]
+        issues = []
+        if any(not name for name in names): issues.append("Every input action needs a name.")
+        if len({name.casefold() for name in names}) != len(names): issues.append("Input action names must be unique.")
+        for row in range(self.table.rowCount()):
+            if not all(_is_float(_table_text(self.table, row, column)) for column in (3, 4, 5)): issues.append(f"Input action row {row + 1} has an invalid numeric setting.")
+        return issues
+
+    def _append(self, name: str, kind: str, trigger: str, threshold: float, dead_zone: float, sensitivity: float) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, kind, trigger, threshold, dead_zone, sensitivity)): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+        self.table.item(row, 0).setData(Qt.UserRole, name)
+    def _add(self) -> None: self._append(f"Action{self.table.rowCount() + 1}", "button", "pressed", 0.5, 0.1, 1.0); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class InputContextsEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Context", "Priority", "Enabled", "Exclusive"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Context"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for raw in values.get("contexts") or []:
+            data = {"id": raw, "priority": 0} if isinstance(raw, str) else dict(raw); self._append(str(data.get("id") or data.get("name") or "Gameplay"), int(data.get("priority", 0)), bool(data.get("enabled", True)), bool(data.get("exclusive", False)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"contexts": [{"id": _table_text(self.table, row, 0), "priority": _safe_int(_table_text(self.table, row, 1)), "enabled": _table_bool(self.table, row, 2), "exclusive": _table_bool(self.table, row, 3)} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)]}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).strip() for row in range(self.table.rowCount())]
+        issues = ["Input context names must be unique."] if len({name.casefold() for name in names}) != len(names) else []
+        issues.extend(f"Input context row {row + 1} needs a whole-number priority." for row in range(self.table.rowCount()) if not _is_int(_table_text(self.table, row, 1)))
+        return issues
+
+    def _append(self, name: str, priority: int, enabled: bool, exclusive: bool) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, priority, "Yes" if enabled else "No", "Yes" if exclusive else "No")): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"Context{self.table.rowCount() + 1}", self.table.rowCount(), True, False); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class InputLiveDebugWidget(QWidget):
+    """Local action-value probe; it intentionally does not mutate the Input Map."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); form = QFormLayout()
+        self.action = QComboBox(self); self.device = QComboBox(self); self.device.addItems(["keyboard_mouse", "gamepad", "touch"])
+        self.value = QSlider(Qt.Horizontal, self); self.value.setRange(-1000, 1000)
+        form.addRow("Action", self.action); form.addRow("Device", self.device); form.addRow("Simulated Value", self.value); root.addLayout(form)
+        self.readout = QLabel("Select an action to inspect its normalized value and trigger state."); self.readout.setWordWrap(True); root.addWidget(self.readout); root.addStretch(1)
+        self.action.currentTextChanged.connect(self._refresh); self.device.currentTextChanged.connect(self._refresh); self.value.valueChanged.connect(self._refresh)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        current = self.action.currentText(); self.action.clear(); self.action.addItems(sorted(str(name) for name in dict(values.get("actions") or {}))); self.action.setCurrentText(current); self._refresh()
+
+    def _refresh(self, *_args) -> None:
+        value = self.value.value() / 1000.0; state = "Triggered" if abs(value) >= 0.5 else ("Actuated" if abs(value) > 0.1 else "Idle")
+        self.readout.setText(f"{self.action.currentText() or 'No Action'} • {self.device.currentText()} • value {value:+.3f} • {state}\nThis probe mirrors runtime normalization without changing the authored binding.")
+
+
+class PhysicsPhysicalAnimationEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False
+        self.enabled = QCheckBox("Drive simulated bodies toward animation", self)
+        self.blend = QDoubleSpinBox(self); self.blend.setRange(0.0, 1.0); self.blend.setDecimals(3)
+        self.strength = QDoubleSpinBox(self); self.strength.setRange(0.0, 100000.0)
+        self.damping = QDoubleSpinBox(self); self.damping.setRange(0.0, 10000.0)
+        self.max_force = QDoubleSpinBox(self); self.max_force.setRange(0.0, 1.0e9)
+        self.recovery = QDoubleSpinBox(self); self.recovery.setRange(0.0, 60.0); self.recovery.setDecimals(3)
+        for label, widget in (("Enabled", self.enabled), ("Simulation Blend", self.blend), ("Drive Strength", self.strength), ("Drive Damping", self.damping), ("Maximum Force", self.max_force), ("Recovery Seconds", self.recovery)): form.addRow(label, widget)
+        self.enabled.toggled.connect(self._edited)
+        for widget in (self.blend, self.strength, self.damping, self.max_force, self.recovery): widget.valueChanged.connect(self._edited)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        data = dict(values.get("physical_animation") or {}); self._loading = True
+        self.enabled.setChecked(bool(data.get("enabled", True))); self.blend.setValue(float(data.get("blend", 0.0))); self.strength.setValue(float(data.get("strength", 1000.0))); self.damping.setValue(float(data.get("damping", 100.0))); self.max_force.setValue(float(data.get("max_force", 0.0))); self.recovery.setValue(float(data.get("recovery_seconds", 0.35))); self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        return {"physical_animation": {"enabled": self.enabled.isChecked(), "blend": self.blend.value(), "strength": self.strength.value(), "damping": self.damping.value(), "max_force": self.max_force.value(), "recovery_seconds": self.recovery.value()}}
+
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class PhysicsSolverProfilesEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); form = QFormLayout(); self._loading = False
+        self.iterations = QSpinBox(self); self.iterations.setRange(1, 128); self.substeps = QSpinBox(self); self.substeps.setRange(1, 32)
+        self.projection = QCheckBox("Enable constraint projection", self); self.sleep = QDoubleSpinBox(self); self.sleep.setRange(0.0, 1000.0); self.sleep.setDecimals(4)
+        form.addRow("Solver Iterations", self.iterations); form.addRow("Substeps", self.substeps); form.addRow("Stability", self.projection); form.addRow("Sleep Threshold", self.sleep); root.addLayout(form)
+        root.addWidget(QLabel("Named profiles override body drive and blend values at runtime."))
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Profile", "Blend", "Strength Scale", "Damping Scale"]); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Profile"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        for widget in (self.iterations, self.substeps, self.sleep): widget.valueChanged.connect(self._edited)
+        self.projection.toggled.connect(self._edited); self.table.itemChanged.connect(self._edited); add.clicked.connect(self._add); remove.clicked.connect(self._remove)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        solver = dict(values.get("solver") or {}); self._loading = True; self.iterations.setValue(int(solver.get("iterations", 8))); self.substeps.setValue(int(solver.get("substeps", 2))); self.projection.setChecked(bool(solver.get("projection", True))); self.sleep.setValue(float(solver.get("sleep_threshold", 0.01))); self.table.setRowCount(0)
+        for name, raw in dict(values.get("profiles") or {}).items():
+            data = dict(raw); self._append(str(name), float(data.get("blend", 1.0)), float(data.get("strength_scale", 1.0)), float(data.get("damping_scale", 1.0)))
+        self._loading = False
+
+    def settings(self) -> dict[str, Any]:
+        profiles = {_table_text(self.table, row, 0): {"blend": _safe_float(_table_text(self.table, row, 1), 1.0), "strength_scale": _safe_float(_table_text(self.table, row, 2), 1.0), "damping_scale": _safe_float(_table_text(self.table, row, 3), 1.0)} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)}
+        return {"solver": {"iterations": self.iterations.value(), "substeps": self.substeps.value(), "projection": self.projection.isChecked(), "sleep_threshold": self.sleep.value()}, "profiles": profiles}
+
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).casefold() for row in range(self.table.rowCount())]
+        return ["Physics profile names must be unique."] if len(names) != len(set(names)) else []
+
+    def _append(self, name: str, blend: float, strength: float, damping: float) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, blend, strength, damping)): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"Profile{self.table.rowCount() + 1}", 1.0, 1.0, 1.0); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationClipTimelineEditorWidget(QWidget):
+    changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); form = QFormLayout(); self._loading = False; self._tracks: list[dict[str, Any]] = []
+        self.duration = QDoubleSpinBox(self); self.duration.setRange(0.001, 86400.0); self.duration.setDecimals(4)
+        self.sample_rate = QDoubleSpinBox(self); self.sample_rate.setRange(1.0, 960.0); self.sample_rate.setDecimals(3)
+        self.loop = QCheckBox("Loop during playback", self); self.frame = QSlider(Qt.Horizontal, self); self.frame.setRange(0, 1000)
+        form.addRow("Duration Seconds", self.duration); form.addRow("Sample Rate", self.sample_rate); form.addRow("Playback", self.loop); form.addRow("Scrub", self.frame); root.addLayout(form)
+        self.table = QTableWidget(0, 5, self); self.table.setHorizontalHeaderLabels(["Track", "Target", "Property", "Keys", "Enabled"]); root.addWidget(self.table, 1)
+        self.readout = QLabel("Frame 0"); root.addWidget(self.readout)
+        for widget in (self.duration, self.sample_rate): widget.valueChanged.connect(self._edited)
+        self.loop.toggled.connect(self._edited); self.table.itemChanged.connect(self._edited); self.frame.valueChanged.connect(self._scrub)
+
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._tracks = deepcopy(list(values.get("tracks") or [])); self._loading = True; self.duration.setValue(float(values.get("duration_seconds", 1.0))); self.sample_rate.setValue(float(values.get("sample_rate", 30.0))); self.loop.setChecked(bool(values.get("loop", True))); self.table.setRowCount(0)
+        for index, raw in enumerate(self._tracks):
+            track = dict(raw); keys = list(track.get("keys") or track.get("samples") or ()); self._append(str(track.get("id") or f"track_{index}"), str(track.get("target") or track.get("bone") or ""), str(track.get("property") or "transform"), len(keys), bool(track.get("enabled", True)), index)
+        self._loading = False; self._scrub()
+
+    def settings(self) -> dict[str, Any]:
+        tracks = []
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0); source_index = int(item.data(Qt.UserRole)) if item and item.data(Qt.UserRole) is not None else -1
+            track = deepcopy(self._tracks[source_index]) if 0 <= source_index < len(self._tracks) else {}
+            track.update({"id": _table_text(self.table, row, 0), "target": _table_text(self.table, row, 1), "property": _table_text(self.table, row, 2) or "transform", "enabled": _table_bool(self.table, row, 4)}); tracks.append(track)
+        return {"duration_seconds": self.duration.value(), "sample_rate": self.sample_rate.value(), "loop": self.loop.isChecked(), "tracks": tracks}
+
+    def validation_issues(self) -> list[str]:
+        return [item.message for item in validate_animation_clip(self.settings()) if item.severity == "error"]
+
+    def _append(self, name: str, target: str, prop: str, key_count: int, enabled: bool, source_index: int = -1) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, target, prop, key_count, "Yes" if enabled else "No")):
+            item = QTableWidgetItem(str(value));
+            if column == 3: item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row, column, item)
+        self.table.item(row, 0).setData(Qt.UserRole, source_index)
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+    def _scrub(self, *_args) -> None:
+        seconds = self.duration.value() * self.frame.value() / 1000.0; self.readout.setText(f"{seconds:.3f} s • frame {round(seconds * self.sample_rate.value())}")
+
+
+class AnimationClipCurvesEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False
+        self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Curve", "Target", "Type", "Keys JSON"]); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Curve"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls)
+        add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for index, raw in enumerate(values.get("curves") or []):
+            data = dict(raw); self._append(str(data.get("name") or f"Curve{index + 1}"), str(data.get("target") or ""), str(data.get("type") or "float"), data.get("keys") or [])
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"curves": [{"name": _table_text(self.table, row, 0), "target": _table_text(self.table, row, 1), "type": _table_text(self.table, row, 2) or "float", "keys": _json_value(_table_text(self.table, row, 3)) or []} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)]}
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).casefold() for row in range(self.table.rowCount())]
+        return ["Animation curve names must be unique."] if len(names) != len(set(names)) else []
+    def _append(self, name: str, target: str, kind: str, keys: Any) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, target, kind, _json_text(keys))): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"Curve{self.table.rowCount() + 1}", "", "float", []); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationClipEventsEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False; self.duration = 1.0
+        self.events = QTableWidget(0, 4, self); self.events.setHorizontalHeaderLabels(["Time", "Event", "Type", "Payload JSON"]); root.addWidget(QLabel("Events")); root.addWidget(self.events, 1)
+        event_actions = QHBoxLayout(); add_event = QPushButton("+ Event"); remove_event = QPushButton("Delete Event"); event_actions.addWidget(add_event); event_actions.addWidget(remove_event); event_actions.addStretch(1); root.addLayout(event_actions)
+        self.markers = QTableWidget(0, 2, self); self.markers.setHorizontalHeaderLabels(["Time", "Sync Marker"]); root.addWidget(QLabel("Sync Markers")); root.addWidget(self.markers, 1)
+        marker_actions = QHBoxLayout(); add_marker = QPushButton("+ Marker"); remove_marker = QPushButton("Delete Marker"); marker_actions.addWidget(add_marker); marker_actions.addWidget(remove_marker); marker_actions.addStretch(1); root.addLayout(marker_actions)
+        add_event.clicked.connect(lambda: self._append_event(0.0, "Event", "gameplay", {})); remove_event.clicked.connect(lambda: self._remove(self.events)); add_marker.clicked.connect(lambda: self._append_marker(0.0, "Footstep")); remove_marker.clicked.connect(lambda: self._remove(self.markers)); self.events.itemChanged.connect(self._edited); self.markers.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self.duration = float(values.get("duration_seconds", 1.0)); self._loading = True; self.events.setRowCount(0); self.markers.setRowCount(0)
+        for raw in values.get("events") or []:
+            data = dict(raw); self._append_event(float(data.get("time", 0.0)), str(data.get("name") or data.get("event") or "Event"), str(data.get("type") or "gameplay"), data.get("payload") or {})
+        for raw in values.get("sync_markers") or []:
+            data = dict(raw); self._append_marker(float(data.get("time", 0.0)), str(data.get("name") or "Marker"))
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"events": [{"time": _safe_float(_table_text(self.events, row, 0)), "name": _table_text(self.events, row, 1), "type": _table_text(self.events, row, 2) or "gameplay", "payload": _json_value(_table_text(self.events, row, 3)) or {}} for row in range(self.events.rowCount())], "sync_markers": [{"time": _safe_float(_table_text(self.markers, row, 0)), "name": _table_text(self.markers, row, 1)} for row in range(self.markers.rowCount())]}
+    def validation_issues(self) -> list[str]:
+        issues = []
+        for table, label in ((self.events, "event"), (self.markers, "sync marker")):
+            for row in range(table.rowCount()):
+                text = _table_text(table, row, 0)
+                if not _is_float(text) or not 0.0 <= _safe_float(text) <= self.duration: issues.append(f"Animation {label} row {row + 1} must lie within the clip duration.")
+        return issues
+    def _append_event(self, time_value: float, name: str, kind: str, payload: Any) -> None:
+        row = self.events.rowCount(); self.events.insertRow(row)
+        for column, value in enumerate((time_value, name, kind, _json_text(payload))): self.events.setItem(row, column, QTableWidgetItem(str(value)))
+    def _append_marker(self, time_value: float, name: str) -> None:
+        row = self.markers.rowCount(); self.markers.insertRow(row)
+        for column, value in enumerate((time_value, name)): self.markers.setItem(row, column, QTableWidgetItem(str(value)))
+    def _remove(self, table: QTableWidget) -> None:
+        rows = sorted({item.row() for item in table.selectedItems()}, reverse=True)
+        for row in rows: table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationRootMotionEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False
+        self.mode = QComboBox(self); self.mode.addItems(["preserve", "extract", "consume", "ignore"]); self.root_bone = QLineEdit(self); self.lock_height = QCheckBox("Lock vertical translation", self); self.normalize_scale = QCheckBox("Normalize root scale", self)
+        self.additive = QCheckBox("Author as additive animation", self); self.base_pose = QComboBox(self); self.base_pose.addItems(["reference_pose", "first_frame", "clip"]); self.base_clip = QLineEdit(self); self.space = QComboBox(self); self.space.addItems(["local", "mesh"])
+        for label, widget in (("Root Motion", self.mode), ("Root Bone", self.root_bone), ("Height", self.lock_height), ("Scale", self.normalize_scale), ("Additive", self.additive), ("Base Pose", self.base_pose), ("Base Clip Asset", self.base_clip), ("Additive Space", self.space)): form.addRow(label, widget)
+        for widget in (self.mode, self.base_pose, self.space): widget.currentTextChanged.connect(self._edited)
+        for widget in (self.root_bone, self.base_clip): widget.textChanged.connect(self._edited)
+        for widget in (self.lock_height, self.normalize_scale, self.additive): widget.toggled.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        root = values.get("root_motion"); root = {"mode": root} if isinstance(root, str) else dict(root or {}); additive = dict(values.get("additive") or {}); self._loading = True
+        self.mode.setCurrentText(str(root.get("mode") or "preserve")); self.root_bone.setText(str(root.get("root_bone") or "root")); self.lock_height.setChecked(bool(root.get("lock_height", False))); self.normalize_scale.setChecked(bool(root.get("normalize_scale", True))); self.additive.setChecked(bool(additive.get("enabled", False))); self.base_pose.setCurrentText(str(additive.get("base_pose") or "reference_pose")); self.base_clip.setText(str(additive.get("base_clip_id") or "")); self.space.setCurrentText(str(additive.get("space") or "local")); self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"root_motion": {"mode": self.mode.currentText(), "root_bone": self.root_bone.text().strip() or "root", "lock_height": self.lock_height.isChecked(), "normalize_scale": self.normalize_scale.isChecked()}, "additive": {"enabled": self.additive.isChecked(), "base_pose": self.base_pose.currentText(), "base_clip_id": self.base_clip.text().strip(), "space": self.space.currentText()}}
+    def validation_issues(self) -> list[str]:
+        return ["Additive clip mode requires a base Animation Clip asset."] if self.additive.isChecked() and self.base_pose.currentText() == "clip" and not self.base_clip.text().strip() else []
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class AnimationCompressionEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False
+        self.preset = QComboBox(self); self.preset.addItems(["lossless", "cinematic", "balanced", "runtime", "mobile"]); self.error = QDoubleSpinBox(self); self.error.setRange(0.0, 10.0); self.error.setDecimals(6); self.rotation = QComboBox(self); self.rotation.addItems(["variable", "quat_96", "quat_48", "full"]); self.translation = QComboBox(self); self.translation.addItems(["variable", "vector_96", "vector_48", "full"]); self.scale = QComboBox(self); self.scale.addItems(["variable", "uniform", "full", "strip"])
+        for label, widget in (("Preset", self.preset), ("Error Threshold", self.error), ("Rotation", self.rotation), ("Translation", self.translation), ("Scale", self.scale)): form.addRow(label, widget)
+        for widget in (self.preset, self.rotation, self.translation, self.scale): widget.currentTextChanged.connect(self._edited)
+        self.error.valueChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        data = dict(values.get("compression") or {}); self._loading = True; self.preset.setCurrentText(str(data.get("preset") or "balanced")); self.error.setValue(float(data.get("error_threshold", 0.001))); self.rotation.setCurrentText(str(data.get("rotation_format") or "variable")); self.translation.setCurrentText(str(data.get("translation_format") or "variable")); self.scale.setCurrentText(str(data.get("scale_format") or "variable")); self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"compression": {"preset": self.preset.currentText(), "error_threshold": self.error.value(), "rotation_format": self.rotation.currentText(), "translation_format": self.translation.currentText(), "scale_format": self.scale.currentText()}}
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkeletonHierarchyEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False
+        self.table = QTableWidget(0, 6, self); self.table.setHorizontalHeaderLabels(["Bone", "Parent", "Role", "Importance", "Reference Pose JSON", "Always Evaluate"]); root.addWidget(self.table, 1)
+        controls = QHBoxLayout(); add = QPushButton("+ Bone"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls); add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        preserve = set(str(name) for name in values.get("preserve_bones") or ()); self._loading = True; self.table.setRowCount(0)
+        for index, raw in enumerate(values.get("bones") or []):
+            data = dict(raw); name = str(data.get("name") or data.get("id") or f"bone_{index}"); self._append(name, str(data.get("parent") or data.get("parent_id") or ""), str(data.get("role") or data.get("semantic_role") or ""), float(data.get("importance", 1.0)), data.get("reference_pose") or data.get("transform") or {}, name in preserve)
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        bones = []; preserve = []
+        for row in range(self.table.rowCount()):
+            name = _table_text(self.table, row, 0); bones.append({"name": name, "parent": _table_text(self.table, row, 1), "role": _table_text(self.table, row, 2), "importance": _safe_float(_table_text(self.table, row, 3), 1.0), "reference_pose": _json_value(_table_text(self.table, row, 4)) or {}})
+            if _table_bool(self.table, row, 5): preserve.append(name)
+        return {"bones": bones, "preserve_bones": preserve}
+    def validation_issues(self) -> list[str]:
+        return [item.message for item in validate_skeleton_properties(self.settings()) if item.severity == "error" and item.code not in {"missing_socket_bone", "unknown_retarget_bone"}]
+    def _append(self, name: str, parent: str, role: str, importance: float, pose: Any, preserve: bool) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, parent, role, importance, _json_text(pose), "Yes" if preserve else "No")): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"bone_{self.table.rowCount()}", "", "", 1.0, {}, False); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkeletonSocketsEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False
+        self.table = QTableWidget(0, 5, self); self.table.setHorizontalHeaderLabels(["Socket", "Bone", "Translation", "Rotation", "Scale"]); root.addWidget(self.table, 1); controls = QHBoxLayout(); add = QPushButton("+ Socket"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls); add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for raw in values.get("sockets") or []:
+            data = dict(raw); transform = dict(data.get("transform") or {}); self._append(str(data.get("name") or "Socket"), str(data.get("bone") or data.get("parent_bone") or ""), transform.get("translation", [0, 0, 0]), transform.get("rotation", [0, 0, 0]), transform.get("scale", [1, 1, 1]))
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"sockets": [{"name": _table_text(self.table, row, 0), "bone": _table_text(self.table, row, 1), "transform": {"translation": _parse_vector(_table_text(self.table, row, 2), (0, 0, 0)), "rotation": _parse_vector(_table_text(self.table, row, 3), (0, 0, 0)), "scale": _parse_vector(_table_text(self.table, row, 4), (1, 1, 1))}} for row in range(self.table.rowCount())]}
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).casefold() for row in range(self.table.rowCount())]
+        return ["Skeleton socket names must be present and unique."] if any(not name for name in names) or len(names) != len(set(names)) else []
+    def _append(self, name: str, bone: str, translation: Any, rotation: Any, scale: Any) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, bone, ",".join(map(str, translation)), ",".join(map(str, rotation)), ",".join(map(str, scale)))): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"Socket{self.table.rowCount() + 1}", "", (0, 0, 0), (0, 0, 0), (1, 1, 1)); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkeletonRetargetPoseEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False; self.table = QTableWidget(0, 3, self); self.table.setHorizontalHeaderLabels(["Bone", "Translation Offset", "Rotation Offset"]); root.addWidget(self.table, 1); controls = QHBoxLayout(); add = QPushButton("+ Pose Offset"); remove = QPushButton("Delete"); controls.addWidget(add); controls.addWidget(remove); controls.addStretch(1); root.addLayout(controls); add.clicked.connect(self._add); remove.clicked.connect(self._remove); self.table.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for bone, raw in dict(values.get("retarget_pose") or {}).items():
+            data = dict(raw); self._append(str(bone), data.get("translation", [0, 0, 0]), data.get("rotation", [0, 0, 0]))
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"retarget_pose": {_table_text(self.table, row, 0): {"translation": _parse_vector(_table_text(self.table, row, 1), (0, 0, 0)), "rotation": _parse_vector(_table_text(self.table, row, 2), (0, 0, 0))} for row in range(self.table.rowCount()) if _table_text(self.table, row, 0)}}
+    def _append(self, bone: str, translation: Any, rotation: Any) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((bone, ",".join(map(str, translation)), ",".join(map(str, rotation)))): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append("root", (0, 0, 0), (0, 0, 0)); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkinDeformerStackEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); root = QVBoxLayout(self); self._loading = False; self.table = QTableWidget(0, 4, self); self.table.setHorizontalHeaderLabels(["Deformer", "Type", "Enabled", "Settings JSON"]); root.addWidget(self.table, 1); controls = QHBoxLayout(); add = QPushButton("+ Deformer"); remove = QPushButton("Delete"); up = QPushButton("Move Up"); controls.addWidget(add); controls.addWidget(remove); controls.addWidget(up); controls.addStretch(1); root.addLayout(controls); add.clicked.connect(self._add); remove.clicked.connect(self._remove); up.clicked.connect(self._up); self.table.itemChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        self._loading = True; self.table.setRowCount(0)
+        for index, raw in enumerate(values.get("deformers") or []):
+            data = dict(raw); self._append(str(data.get("name") or f"Deformer{index + 1}"), str(data.get("type") or "delta_mush"), bool(data.get("enabled", True)), data.get("settings") or {})
+        self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"deformers": [{"name": _table_text(self.table, row, 0), "type": _table_text(self.table, row, 1) or "delta_mush", "enabled": _table_bool(self.table, row, 2), "settings": _json_value(_table_text(self.table, row, 3)) or {}} for row in range(self.table.rowCount())]}
+    def validation_issues(self) -> list[str]:
+        names = [_table_text(self.table, row, 0).casefold() for row in range(self.table.rowCount())]; return ["Skin deformer names must be unique."] if len(names) != len(set(names)) else []
+    def _append(self, name: str, kind: str, enabled: bool, settings: Any) -> None:
+        row = self.table.rowCount(); self.table.insertRow(row)
+        for column, value in enumerate((name, kind, "Yes" if enabled else "No", _json_text(settings))): self.table.setItem(row, column, QTableWidgetItem(str(value)))
+    def _add(self) -> None: self._append(f"Deformer{self.table.rowCount() + 1}", "delta_mush", True, {"iterations": 10}); self.changed.emit()
+    def _remove(self) -> None:
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        for row in rows: self.table.removeRow(row)
+        if rows: self.changed.emit()
+    def _up(self) -> None:
+        row = self.table.currentRow()
+        if row <= 0: return
+        values = [_table_text(self.table, row, column) for column in range(4)]
+        previous = [_table_text(self.table, row - 1, column) for column in range(4)]
+        for column in range(4): self.table.item(row - 1, column).setText(values[column]); self.table.item(row, column).setText(previous[column])
+        self.table.setCurrentCell(row - 1, 0); self.changed.emit()
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkinTransferEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False; self.source = QLineEdit(self); self.mode = QComboBox(self); self.mode.addItems(["topology", "closest_point", "uv", "cage"]); self.distance = QDoubleSpinBox(self); self.distance.setRange(0.0, 1.0e6); self.distance.setDecimals(6); self.normal_weight = QDoubleSpinBox(self); self.normal_weight.setRange(0.0, 1.0); self.unmatched = QComboBox(self); self.unmatched.addItems(["keep", "nearest", "root", "fail"])
+        for label, widget in (("Source Skin Binding", self.source), ("Correspondence", self.mode), ("Maximum Distance", self.distance), ("Normal Weight", self.normal_weight), ("Unmatched Vertices", self.unmatched)): form.addRow(label, widget)
+        self.source.textChanged.connect(self._edited); self.mode.currentTextChanged.connect(self._edited); self.distance.valueChanged.connect(self._edited); self.normal_weight.valueChanged.connect(self._edited); self.unmatched.currentTextChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        data = dict(values.get("transfer") or {}); self._loading = True; self.source.setText(str(data.get("source_skin_binding_id") or "")); self.mode.setCurrentText(str(data.get("mode") or "topology")); self.distance.setValue(float(data.get("maximum_distance", 0.01))); self.normal_weight.setValue(float(data.get("normal_weight", 0.5))); self.unmatched.setCurrentText(str(data.get("unmatched_policy") or "keep")); self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"transfer": {"source_skin_binding_id": self.source.text().strip(), "mode": self.mode.currentText(), "maximum_distance": self.distance.value(), "normal_weight": self.normal_weight.value(), "unmatched_policy": self.unmatched.currentText()}}
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+class SkinExportEditorWidget(QWidget):
+    changed = Signal()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent); form = QFormLayout(self); self._loading = False; self.format = QComboBox(self); self.format.addItems(["tcskin", "fbx", "usd", "gltf", "json"]); self.max_influences = QSpinBox(self); self.max_influences.setRange(1, 32); self.bake = QCheckBox("Bake deformer stack into exported weights", self); self.include_names = QCheckBox("Include joint names", self); self.destination = QLineEdit(self)
+        for label, widget in (("Format", self.format), ("Maximum Influences", self.max_influences), ("Deformers", self.bake), ("Joint Metadata", self.include_names), ("Destination", self.destination)): form.addRow(label, widget)
+        self.format.currentTextChanged.connect(self._edited); self.max_influences.valueChanged.connect(self._edited); self.bake.toggled.connect(self._edited); self.include_names.toggled.connect(self._edited); self.destination.textChanged.connect(self._edited)
+    def load_settings(self, values: dict[str, Any]) -> None:
+        data = dict(values.get("export") or {}); self._loading = True; self.format.setCurrentText(str(data.get("format") or "tcskin")); self.max_influences.setValue(int(data.get("max_influences", values.get("max_influences", 4)))); self.bake.setChecked(bool(data.get("bake_deformers", False))); self.include_names.setChecked(bool(data.get("include_joint_names", True))); self.destination.setText(str(data.get("destination") or "")); self._loading = False
+    def settings(self) -> dict[str, Any]:
+        return {"export": {"format": self.format.currentText(), "max_influences": self.max_influences.value(), "bake_deformers": self.bake.isChecked(), "include_joint_names": self.include_names.isChecked(), "destination": self.destination.text().strip()}}
+    def validation_issues(self) -> list[str]:
+        return ["Choose an export destination before using a package-specific format."] if self.format.currentText() != "tcskin" and not self.destination.text().strip() else []
+    def _edited(self, *_args) -> None:
+        if not self._loading: self.changed.emit()
+
+
+def _json_value(text: str) -> Any:
+    value = str(text).strip()
+    if not value: return None
+    try: return json.loads(value)
+    except Exception: return value
+
+
+def _json_text(value: Any) -> str:
+    if value is None: return ""
+    if isinstance(value, str): return value
+    return json.dumps(value, separators=(",", ":"))
+
+
+def _is_int(value: Any) -> bool:
+    try:
+        int(str(value).strip())
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    return int(str(value).strip()) if _is_int(value) else int(default)
+
+
+def _is_float(value: Any) -> bool:
+    try:
+        float(str(value).strip())
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    return float(str(value).strip()) if _is_float(value) else float(default)
+
+
+def _value_type(value: Any) -> str:
+    if isinstance(value, bool): return "bool"
+    if isinstance(value, int): return "int"
+    if isinstance(value, float): return "float"
+    if isinstance(value, (list, tuple)) and len(value) in {2, 3, 4}: return f"vector{len(value)}"
+    return "string"
 
 
 def _graph_has_cycle(node_ids: set[str], connections: list[dict[str, str]]) -> bool:

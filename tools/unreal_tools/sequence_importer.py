@@ -2,6 +2,11 @@ import json
 import os
 import unreal
 
+from unreal_tools.sequence_import_contract import (
+    cinematic_payload_from_manifest, finish_import_result, new_import_result,
+    normalize_sequence_manifest, validate_sequence_manifest,
+)
+
 script_dir = os.path.dirname(__file__)
 tools_dir = os.path.dirname(script_dir)
 art_source_dir = tools_dir.replace("tools", "ArtSource").replace("\\", "/")
@@ -193,7 +198,9 @@ def add_shot_sequence_section_to_shot_track(shot_track, shot_sequence, start_fra
     return existing_section
 
 
-def add_anim_to_level_sequence(animation_path, anim_track, anim_section=None, start_frame=0):
+def add_anim_to_level_sequence(
+    animation_path, anim_track, anim_section=None, start_frame=0, root_motion=None,
+):
     """
     Adds an animation to a track in the level sequence without shifting animation keyframe timing.
     Places the animation so its first keyframe starts exactly at start_frame.
@@ -205,7 +212,10 @@ def add_anim_to_level_sequence(animation_path, anim_track, anim_section=None, st
     :return: The end frame of the animation.
     """
     animation_asset = unreal.load_asset(animation_path)
-    animation_asset.set_editor_property("enable_root_motion", True)
+    if not animation_asset:
+        raise RuntimeError(f"Imported animation could not be loaded: {animation_path}")
+    if root_motion is not None:
+        animation_asset.set_editor_property("enable_root_motion", bool(root_motion))
     num_frames = animation_asset.get_editor_property('number_of_sampled_frames')
     params = unreal.MovieSceneSkeletalAnimationParams()
     params.set_editor_property('animation', animation_asset)
@@ -218,7 +228,7 @@ def add_anim_to_level_sequence(animation_path, anim_track, anim_section=None, st
     return start_frame + num_frames
 
 
-def add_anim_track_to_possessable(possessable, animation_asset_path=None):
+def add_anim_track_to_possessable(possessable, animation_asset_path=None, root_motion=None):
     """
     Adds an animation track and section to the possessable, ensuring no duplicates.
 
@@ -243,7 +253,10 @@ def add_anim_track_to_possessable(possessable, animation_asset_path=None):
         existing_anim_section = existing_anim_track.add_section()
 
     if animation_asset_path:
-        add_anim_to_level_sequence(animation_asset_path, existing_anim_track, anim_section=existing_anim_section)
+        add_anim_to_level_sequence(
+            animation_asset_path, existing_anim_track,
+            anim_section=existing_anim_section, root_motion=root_motion,
+        )
 
 
 def add_blueprint_mesh_components_to_level_sequence(blueprint_path, sequence_path, actor, control_rig=True):
@@ -404,6 +417,8 @@ def add_camera_anim_to_level_sequence(shot_sequence, camera_actor, world, export
                                                               import_options,
                                                               export_path
                                                               )
+    if not success:
+        raise RuntimeError(f"Camera FBX import failed: {export_path}")
 
 
     camera_cut_track = None
@@ -772,6 +787,49 @@ def get_top_level_mesh_component(actor):
     return mesh_components[0] if mesh_components else None
 
 
+def resolve_skeleton_path(skeleton_identifier):
+    """Resolve an unambiguous Skeleton package path or raise an actionable error."""
+    identifier = str(skeleton_identifier or "").strip()
+    if not identifier:
+        raise ValueError("Target skeleton is empty.")
+
+    if identifier.startswith("/"):
+        package_path = identifier.split(".", 1)[0]
+        asset = unreal.EditorAssetLibrary.load_asset(package_path)
+        if not asset:
+            raise ValueError(f"Skeleton could not be loaded: {identifier}")
+        if not _is_skeleton_asset(asset):
+            raise ValueError(f"Target asset is not a Skeleton: {identifier}")
+        return package_path
+
+    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    skeleton_class = unreal.TopLevelAssetPath("/Script/Engine", "Skeleton")
+    matches = [
+        str(asset.package_name)
+        for asset in asset_registry.get_assets_by_class(skeleton_class)
+        if str(asset.asset_name).casefold() == identifier.casefold()
+        and "Identity" not in str(asset.package_name)
+    ]
+    if not matches:
+        raise ValueError(f"Skeleton was not found: {identifier}")
+    if len(matches) > 1:
+        raise ValueError(
+            f"Skeleton name '{identifier}' is ambiguous; use a full asset path. "
+            f"Matches: {', '.join(sorted(matches))}"
+        )
+    return matches[0]
+
+
+def _is_skeleton_asset(asset):
+    skeleton_type = getattr(unreal, "Skeleton", None)
+    if skeleton_type is not None and isinstance(asset, skeleton_type):
+        return True
+    try:
+        return str(asset.get_class().get_name()) == "Skeleton"
+    except Exception:
+        return asset.__class__.__name__ == "Skeleton"
+
+
 def get_skeleton_path_by_name(skeleton_name):
     """
     Retrieves the asset path of a skeleton based on its name using Unreal's Asset Registry.
@@ -779,17 +837,11 @@ def get_skeleton_path_by_name(skeleton_name):
     :param skeleton_name: Name of the skeleton asset (e.g., "SK_Mannequin").
     :return: The asset path of the skeleton (e.g., "/Game/Characters/Hero/Hero_Skeleton") or None if not found.
     """
-    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
-
-    skeleton_class = unreal.TopLevelAssetPath("/Script/Engine", "Skeleton")
-
-    skeleton_assets = asset_registry.get_assets_by_class(skeleton_class)
-
-    for skeleton in skeleton_assets:
-        if skeleton.asset_name == skeleton_name and "Identity" not in str(skeleton.package_name):
-            return str(skeleton.package_name)
-
-    return None
+    try:
+        return resolve_skeleton_path(skeleton_name)
+    except ValueError as exc:
+        unreal.log_error(str(exc))
+        return None
 
 
 def extract_shot_number_from_path(export_path):
@@ -815,40 +867,259 @@ def import_gameplay_animations_from_json(anim_dict_path):
     :param anim_dict_path: Exported Dict with the data to import
     :return:
     """
-    anim_dict = read_dict_from_file(anim_dict_path)
-    if not anim_dict:
+    payload = read_dict_from_file(anim_dict_path)
+    if not payload:
         unreal.log_error(f"Failed to read animation dictionary from {anim_dict_path}")
-        return []
+        manifest = normalize_sequence_manifest({}, mode="gameplay")
+        result = new_import_result(manifest)
+        result["failed"].append({"id": "manifest", "error": "Animation manifest could not be read."})
+        return finish_import_result(result)
 
-    for anim_path in anim_dict:
-        anim_name = os.path.basename(anim_path).split('.')[0]
-        existing_path = find_uasset_path(anim_name)
-        if not existing_path:
-            if art_source_dir in anim_path:
-                import_dir = os.path.dirname(anim_path).replace(art_source_dir, content_dir).replace('Exports/', '')
+    manifest = normalize_sequence_manifest(payload, mode="gameplay")
+    result = new_import_result(manifest)
+    issues = validate_sequence_manifest(manifest)
+    result["failed"].extend({
+        "id": issue["path"], "code": issue["code"], "error": issue["message"],
+    } for issue in issues if issue["severity"] == "error")
+    if result["failed"]:
+        return finish_import_result(result)
+
+    for entry in manifest["entries"]:
+        if not entry["enabled"]:
+            result["skipped"].append({"id": entry["id"], "name": entry["name"], "reason": "disabled"})
+            continue
+        checked_out_path = ""
+        try:
+            skeleton_path = resolve_skeleton_path(entry["target_skeleton"])
+            import_dir = entry["destination_path"]
+            if manifest["source_host"] == "legacy" and import_dir == "/Game/Animations" and art_source_dir in entry["source_file"]:
+                import_dir = os.path.dirname(entry["source_file"]).replace(art_source_dir, content_dir).replace("Exports/", "")
+            destination_name = entry["destination_name"]
+            target_path = f"{import_dir.rstrip('/')}/{destination_name}"
+            exists = unreal.EditorAssetLibrary.does_asset_exist(target_path)
+            policy = manifest["conflict_policy"]
+            if exists and entry["source_hash"] and _asset_metadata(target_path, "TechConnector.SourceHash") == entry["source_hash"]:
+                result["skipped"].append({
+                    "id": entry["id"], "name": entry["name"], "reason": "unchanged",
+                    "asset_path": target_path, "source_hash": entry["source_hash"],
+                })
+                continue
+            if exists and policy == "skip":
+                result["skipped"].append({"id": entry["id"], "name": entry["name"], "reason": "asset_exists", "asset_path": target_path})
+                continue
+            if exists and policy == "fail":
+                raise RuntimeError(f"Destination asset already exists: {target_path}")
+            if exists and policy == "version":
+                destination_name = _next_versioned_name(import_dir, destination_name)
+                target_path = f"{import_dir.rstrip('/')}/{destination_name}"
+                exists = False
+            if _prepare_source_control_write(
+                target_path, exists=exists, policy=manifest["source_control_policy"],
+            ):
+                checked_out_path = target_path
+            asset_path = import_animation(
+                entry["source_file"], skeleton_path, import_dir, destination_name,
+                replace_existing=policy == "update",
+            )
+            _write_import_provenance(asset_path, entry, manifest)
+            if not exists:
+                _mark_new_asset_or_rollback(asset_path, policy=manifest["source_control_policy"])
+            bucket = "updated" if exists else "imported"
+            result[bucket].append({
+                "id": entry["id"], "name": entry["name"], "asset_path": asset_path,
+                "skeleton_path": skeleton_path,
+            })
+        except Exception as exc:
+            if checked_out_path:
+                _revert_unchanged_source_control(checkout_path=checked_out_path)
+            unreal.log_error(f"Sequence import failed for {entry['name']}: {exc}")
+            result["failed"].append({"id": entry["id"], "name": entry["name"], "error": str(exc)})
+
+    return finish_import_result(result)
+
+
+def preflight_sequence_import_from_json(anim_dict_path, mode="gameplay", destination_path="/Game/Animations"):
+    """Resolve an import job without creating or modifying Unreal assets."""
+    payload = read_dict_from_file(anim_dict_path)
+    manifest = normalize_sequence_manifest(payload, mode=mode, destination_path=destination_path)
+    issues = validate_sequence_manifest(manifest)
+    source_control = _source_control_status(manifest["source_control_policy"])
+    if source_control.get("error"):
+        issues = tuple(issues) + ({
+            "severity": "error", "code": "source_control_unavailable",
+            "message": source_control["error"], "path": "source_control",
+        },)
+    issues_by_entry = {}
+    global_issues = []
+    for issue in issues:
+        path = str(issue.get("path") or "")
+        if path.startswith("entries["):
+            try:
+                index = int(path.split("[", 1)[1].split("]", 1)[0])
+            except (ValueError, IndexError):
+                global_issues.append(issue)
             else:
-                import_dir = "/Game/Animations"
+                issues_by_entry.setdefault(index, []).append(issue)
         else:
-            import_dir = os.path.dirname(existing_path)
-            
-        anim_data = anim_dict[anim_path]
-        if not isinstance(anim_data, list) or len(anim_data) < 4:
-            unreal.log_error(f"Invalid animation data format for {anim_path}: {anim_data}")
-            continue
-            
-        skeleton_name = anim_data[3]
-        skeleton_path = get_skeleton_path_by_name(skeleton_name)
-        
-        if not skeleton_path:
-            unreal.log_error(f"Failed to find skeleton '{skeleton_name}' for {anim_name}. Skipping import.")
-            continue
-            
-        import_animation(anim_path, skeleton_path, import_dir, anim_name)
+            global_issues.append(issue)
 
-    return anim_dict.keys()
+    rows = []
+    for index, entry in enumerate(manifest["entries"]):
+        entry_issues = list(issues_by_entry.get(index, ()))
+        skeleton_path = ""
+        if entry["enabled"] and entry["kind"] == "animation" and not entry_issues:
+            try:
+                skeleton_path = resolve_skeleton_path(entry["target_skeleton"])
+            except ValueError as exc:
+                entry_issues.append({"severity": "error", "code": "unresolved_skeleton", "message": str(exc)})
+        if entry["enabled"] and not os.path.isfile(entry["source_file"]):
+            entry_issues.append({
+                "severity": "error", "code": "missing_source_file",
+                "message": f"Source FBX does not exist: {entry['source_file']}",
+            })
+        target_path = f"{entry['destination_path'].rstrip('/')}/{entry['destination_name']}"
+        exists = unreal.EditorAssetLibrary.does_asset_exist(target_path)
+        unchanged = bool(
+            exists and entry["source_hash"]
+            and _asset_metadata(target_path, "TechConnector.SourceHash") == entry["source_hash"]
+        )
+        if not entry["enabled"]:
+            action = "skip_disabled"
+        elif entry_issues:
+            action = "blocked"
+        elif unchanged:
+            action = "skip_unchanged"
+        elif exists and manifest["conflict_policy"] == "skip":
+            action = "skip_existing"
+        elif exists and manifest["conflict_policy"] == "fail":
+            action = "blocked"
+            entry_issues.append({
+                "severity": "error", "code": "asset_conflict",
+                "message": f"Destination asset already exists: {target_path}",
+            })
+        elif exists and manifest["conflict_policy"] == "version":
+            versioned_name = _next_versioned_name(entry["destination_path"], entry["destination_name"])
+            target_path = f"{entry['destination_path'].rstrip('/')}/{versioned_name}"
+            action = "create_version"
+        elif exists:
+            action = "update"
+        else:
+            action = "create"
+        rows.append({
+            "id": entry["id"], "name": entry["name"], "kind": entry["kind"],
+            "enabled": entry["enabled"], "source_file": entry["source_file"],
+            "source_hash": entry["source_hash"], "skeleton_path": skeleton_path,
+            "asset_path": target_path, "exists": exists, "unchanged": unchanged,
+            "action": action, "issues": entry_issues,
+        })
+    errors = global_issues + [
+        issue for row in rows for issue in row["issues"] if issue.get("severity") == "error"
+    ]
+    return {
+        "schema": "tech_connector.sequence_import_preflight.v1",
+        "job_id": manifest["job_id"], "mode": manifest["mode"],
+        "can_import": not errors and any(row["enabled"] for row in rows),
+        "conflict_policy": manifest["conflict_policy"], "entries": rows,
+        "source_control": source_control, "issues": global_issues, "error_count": len(errors),
+    }
 
 
-def import_animation(anim_path, skeleton_path, destination_path, destination_name):
+def _asset_metadata(asset_path, key):
+    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
+    getter = getattr(unreal.EditorAssetLibrary, "get_metadata_tag", None)
+    if not asset or not callable(getter):
+        return ""
+    try:
+        return str(getter(asset, key) or "")
+    except Exception:
+        return ""
+
+
+def _write_import_provenance(asset_path, entry, manifest):
+    asset = unreal.EditorAssetLibrary.load_asset(asset_path)
+    setter = getattr(unreal.EditorAssetLibrary, "set_metadata_tag", None)
+    if not asset or not callable(setter):
+        return
+    values = {
+        "TechConnector.EntryId": entry["id"],
+        "TechConnector.SourceFile": entry["source_file"],
+        "TechConnector.SourceHash": entry["source_hash"],
+        "TechConnector.JobId": manifest["job_id"],
+        "TechConnector.SourceHost": manifest["source_host"],
+    }
+    for key, value in values.items():
+        if value:
+            setter(asset, key, str(value))
+    unreal.EditorAssetLibrary.save_asset(asset_path, only_if_is_dirty=False)
+
+
+def _source_control_status(policy):
+    normalized = str(policy or "auto").lower()
+    if normalized == "off":
+        return {"policy": normalized, "enabled": False, "available": False, "provider": "None"}
+    source_control = getattr(unreal, "SourceControl", None)
+    if source_control is None:
+        error = "Unreal SourceControl API is unavailable." if normalized == "required" else ""
+        return {"policy": normalized, "enabled": False, "available": False, "provider": "None", "error": error}
+    enabled = bool(source_control.is_enabled())
+    available = bool(source_control.is_available()) if enabled else False
+    provider = str(source_control.current_provider()) if enabled else "None"
+    error = ""
+    if normalized == "required" and not enabled:
+        error = "Source control is required but is not enabled in Unreal."
+    elif enabled and not available:
+        error = f"Source control provider '{provider}' is enabled but unavailable."
+    return {
+        "policy": normalized, "enabled": enabled, "available": available,
+        "provider": provider, "error": error,
+    }
+
+
+def _prepare_source_control_write(asset_path, *, exists, policy):
+    status = _source_control_status(policy)
+    if status.get("error"):
+        raise RuntimeError(status["error"])
+    if not status["enabled"] or not exists:
+        return False
+    source_control = unreal.SourceControl
+    if not source_control.check_out_file(asset_path, silent=True):
+        detail = str(source_control.last_error_msg() or "Checkout failed.")
+        raise RuntimeError(f"Could not check out {asset_path}: {detail}")
+    return True
+
+
+def _mark_source_control_add(asset_path, *, policy):
+    status = _source_control_status(policy)
+    if status.get("error"):
+        raise RuntimeError(status["error"])
+    if not status["enabled"]:
+        return False
+    source_control = unreal.SourceControl
+    if not source_control.check_out_or_add_file(asset_path, silent=True):
+        detail = str(source_control.last_error_msg() or "Mark for add failed.")
+        raise RuntimeError(f"Could not mark {asset_path} for add: {detail}")
+    return True
+
+
+def _mark_new_asset_or_rollback(asset_path, *, policy):
+    try:
+        return _mark_source_control_add(asset_path, policy=policy)
+    except Exception:
+        unreal.EditorAssetLibrary.delete_asset(asset_path)
+        raise
+
+
+def _revert_unchanged_source_control(*, checkout_path):
+    source_control = getattr(unreal, "SourceControl", None)
+    if source_control is None or not source_control.is_enabled():
+        return False
+    try:
+        return bool(source_control.revert_unchanged_files([checkout_path], silent=True))
+    except Exception:
+        return False
+
+
+def import_animation(anim_path, skeleton_path, destination_path, destination_name, replace_existing=True):
     """
     Imports an animation asset into Unreal Engine, optionally reimporting if it already exists.
 
@@ -858,25 +1129,24 @@ def import_animation(anim_path, skeleton_path, destination_path, destination_nam
     :param destination_name: Name for the imported animation asset.
     :return: The path to the imported animation asset.
     """
-    if not os.path.exists(anim_path):
-        unreal.log_error(f"FBX file does not exist on disk: {anim_path}")
-        return None
+    from unreal_tools.animation_import_adapter import import_animation_verified
 
-    unreal.SystemLibrary.execute_console_command(None, "Interchange.FeatureFlags.Import.FBX 0")
+    result = import_animation_verified(
+        anim_path, skeleton_path, destination_path, destination_name,
+        replace_existing=replace_existing,
+    )
+    if not result.get("ok") or not result.get("asset_path"):
+        raise RuntimeError(f"Animation import produced no verified asset for {anim_path}")
+    return str(result["asset_path"])
 
-    task = unreal.AssetImportTask()
-    task.set_editor_property('automated', True)
-    task.set_editor_property('filename', anim_path)
-    task.set_editor_property('destination_path', destination_path)
-    task.set_editor_property('destination_name', destination_name)
-    task.set_editor_property('replace_existing', True)
-    task.set_editor_property('save', True)
 
-    fbx_options = build_import_options(skeleton_path)
-    task.set_editor_property('options', fbx_options)
-
-    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
-    return f"{destination_path}/{destination_name}"
+def _next_versioned_name(destination_path, destination_name):
+    stem = str(destination_name)
+    for version in range(1, 10000):
+        candidate = f"{stem}_v{version:03d}"
+        if not unreal.EditorAssetLibrary.does_asset_exist(f"{destination_path.rstrip('/')}/{candidate}"):
+            return candidate
+    raise RuntimeError(f"Could not allocate a versioned destination for {destination_name}")
 
 
 def build_import_options(skeleton_path):
@@ -1327,17 +1597,20 @@ def update_asset_registry_and_save(asset_directory, asset_path):
     unreal.EditorAssetLibrary.save_asset(asset_path)
 
 
-def set_frame_rate(sequence, fps):
+def set_frame_rate(sequence, fps, numerator=None, denominator=None):
     """
     Sets the start and end time for the given Level Sequence directly.
 
     :param sequence: The LevelSequence asset to modify.
     :param fps: Frame Rate from Export data
     """
-    display_rate = unreal.FrameRate(numerator=fps, denominator=1)
+    if numerator is None:
+        common_rates = ((23.976, 24000, 1001), (29.97, 30000, 1001), (59.94, 60000, 1001))
+        matched = next((item for item in common_rates if abs(float(fps) - item[0]) < 0.002), None)
+        numerator, denominator = (matched[1], matched[2]) if matched else (int(round(float(fps))), 1)
+    display_rate = unreal.FrameRate(numerator=int(numerator), denominator=max(1, int(denominator or 1)))
     sequence.set_display_rate(display_rate)
-
-    sequence.set_tick_resolution(display_rate)
+    sequence.set_tick_resolution(unreal.FrameRate(numerator=max(24000, int(numerator)), denominator=1))
 
 
 def create_level_sequence(sequence_name, destination_path="/Game/Cinematics/"):
@@ -1380,17 +1653,99 @@ def create_cinematic_sequence_from_json(anim_dict_path, destination_path="/Game/
             unreal.EditorLevelLibrary.load_level('/Game/ThirdPerson/Maps/ThirdPersonMap')
 
     if not os.path.exists(anim_dict_path):
-        print('FILE DOES NOT EXIST')
-        return
+        raise FileNotFoundError(f"Sequence manifest does not exist: {anim_dict_path}")
 
     anim_dict = read_dict_from_file(anim_dict_path)
+    manifest = normalize_sequence_manifest(
+        anim_dict, mode="cinematic", destination_path=destination_path,
+    )
+    result = new_import_result(manifest)
+    issues = validate_sequence_manifest(manifest)
+    result["failed"].extend({
+        "id": issue["path"], "code": issue["code"], "error": issue["message"],
+    } for issue in issues if issue["severity"] == "error")
+    if result["failed"]:
+        return finish_import_result(result)
     sequence_name = os.path.basename(anim_dict_path).split('.')[0]
-    sequence_path = create_cinematic_sequence(anim_dict, sequence_name, destination_path=destination_path)
+    assembly_payload = (
+        cinematic_payload_from_manifest(manifest)
+        if anim_dict.get("schema") else anim_dict
+    )
+    try:
+        sequence_path = create_cinematic_sequence(
+            assembly_payload, sequence_name, destination_path=destination_path,
+            source_control_policy=manifest["source_control_policy"],
+        )
+        result["sequence_path"] = sequence_path
+        result["imported"].append({"id": "master_sequence", "asset_path": sequence_path})
+        result["updated"].extend({
+            "id": entry["id"], "name": entry["name"], "status": "assembled",
+        } for entry in manifest["entries"] if entry["enabled"])
+    except CinematicEntryImportError as exc:
+        unreal.log_error(f"Cinematic entry import failed: {exc}")
+        completed = set(exc.completed_entry_ids)
+        result["updated"].extend({
+            "id": entry["id"], "name": entry["name"], "status": "assembled",
+        } for entry in manifest["entries"] if entry["id"] in completed)
+        result["failed"].append({"id": exc.entry_id, "name": exc.entry_name, "error": str(exc.original_error)})
+        result["skipped"].extend({
+            "id": entry["id"], "name": entry["name"], "reason": "not_attempted",
+        } for entry in manifest["entries"] if entry["enabled"] and entry["id"] not in completed and entry["id"] != exc.entry_id)
+    except Exception as exc:
+        unreal.log_error(f"Cinematic sequence import failed: {exc}")
+        result["failed"].append({"id": "master_sequence", "error": str(exc)})
+    return finish_import_result(result)
 
-    return sequence_path
+
+class CinematicEntryImportError(RuntimeError):
+    def __init__(self, entry_id, entry_name, original_error, completed_entry_ids=()):
+        super().__init__(f"{entry_name}: {original_error}")
+        self.entry_id = str(entry_id or entry_name)
+        self.entry_name = str(entry_name or entry_id)
+        self.original_error = original_error
+        self.completed_entry_ids = tuple(str(value) for value in completed_entry_ids)
 
 
-def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/Cinematics"):
+def retry_failed_cinematic_sequence_from_json(
+    anim_dict_path, previous_result, destination_path="/Game/Cinematics/", from_cmd=False,
+):
+    """Retry only cinematic entries explicitly reported as failed."""
+    payload = read_dict_from_file(anim_dict_path)
+    manifest = normalize_sequence_manifest(payload, mode="cinematic", destination_path=destination_path)
+    failed_ids = {
+        str(row.get("id") or "") for row in (previous_result or {}).get("failed") or ()
+        if str(row.get("id") or "") not in {"", "master_sequence"}
+    }
+    if not failed_ids:
+        result = new_import_result(manifest)
+        result["skipped"].append({"id": "retry", "reason": "no_failed_entries"})
+        return finish_import_result(result)
+    retry_manifest = dict(manifest)
+    retry_manifest["entries"] = [
+        dict(entry, enabled=entry["id"] in failed_ids) for entry in manifest["entries"]
+    ]
+    result = new_import_result(retry_manifest)
+    sequence_name = os.path.basename(anim_dict_path).split(".")[0]
+    try:
+        sequence_path = create_cinematic_sequence(
+            cinematic_payload_from_manifest(retry_manifest), sequence_name,
+            destination_path=destination_path,
+            source_control_policy=retry_manifest["source_control_policy"],
+        )
+        result["sequence_path"] = sequence_path
+        result["updated"].extend({
+            "id": entry["id"], "name": entry["name"], "status": "retried",
+        } for entry in retry_manifest["entries"] if entry["enabled"])
+    except CinematicEntryImportError as exc:
+        result["failed"].append({"id": exc.entry_id, "name": exc.entry_name, "error": str(exc.original_error)})
+    except Exception as exc:
+        result["failed"].append({"id": "master_sequence", "error": str(exc)})
+    return finish_import_result(result)
+
+
+def create_cinematic_sequence(
+    anim_dict, sequence_name, destination_path="/Game/Cinematics", source_control_policy="auto",
+):
     """
     Creates a master cinematic sequence and sub-sequences for each shot. Imports animations and adds actors accordingly.
 
@@ -1404,21 +1759,38 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
     current_asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
     sequence_dir = f"{destination_path}/{sequence_name}"
     sequence_path = f"{destination_path}/{sequence_name}/{sequence_name}"
-    master_sequence = create_level_sequence(sequence_name, sequence_dir)[0]
+    master_sequence, master_pre_existing = create_level_sequence(sequence_name, sequence_dir)
+    _prepare_source_control_write(
+        sequence_path, exists=master_pre_existing, policy=source_control_policy,
+    )
 
     shot_track = add_shot_track_to_master_sequence(master_sequence)
     unreal.EditorAssetLibrary.save_asset(sequence_path)
     update_asset_registry_and_save(sequence_dir, sequence_path)
+    if not master_pre_existing:
+        _mark_new_asset_or_rollback(sequence_path, policy=source_control_policy)
     facial_control_rig_dict = dict()
+    shot_sequence = None
+    shot_sequence_path = ""
+    current_entry = None
+    completed_entry_ids = []
     try:
         for shot_name, animations in anim_dict.items():
             shot_sequence_name = f"_{shot_name}"
             shot_sequence_dir = f"{sequence_dir}/{shot_sequence_name}"
-            shot_sequence = create_level_sequence(shot_sequence_name, destination_path=shot_sequence_dir)[0]
+            shot_sequence, shot_pre_existing = create_level_sequence(
+                shot_sequence_name, destination_path=shot_sequence_dir,
+            )
             shot_sequence_path = f"{sequence_dir}/{shot_sequence_name}/{shot_sequence_name}"
+            _prepare_source_control_write(
+                shot_sequence_path, exists=shot_pre_existing, policy=source_control_policy,
+            )
             update_asset_registry_and_save(shot_sequence_dir, shot_sequence_path)
+            if not shot_pre_existing:
+                _mark_new_asset_or_rollback(shot_sequence_path, policy=source_control_policy)
 
             for i, animation in enumerate(animations):
+                current_entry = animation
                 start_frame = animation["start_frame"]
                 end_frame = animation["end_frame"]
                 offset = start_frame
@@ -1427,22 +1799,29 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                 skeleton = animation["skeleton"]
                 blueprint = animation["blueprint"]
                 fps = animation['fps']
+                rate_numerator = animation.get("frame_rate_numerator")
+                rate_denominator = animation.get("frame_rate_denominator")
+                root_motion = animation.get("root_motion")
                 if i == 0:
-                    set_frame_rate(master_sequence, fps)
+                    set_frame_rate(master_sequence, fps, rate_numerator, rate_denominator)
                     update_asset_registry_and_save(sequence_dir, sequence_path)
                     set_sequence_range(shot_sequence, start_frame - offset, end_frame - offset)
                     add_shot_sequence_section_to_shot_track(shot_track, shot_sequence, start_frame, end_frame)
-                    set_frame_rate(shot_sequence, fps)
+                    set_frame_rate(shot_sequence, fps, rate_numerator, rate_denominator)
 
                 if namespace == "CAM":
-                    camera_name = animation["nodes"][0]
+                    camera_nodes = animation.get("nodes") or []
+                    if not camera_nodes:
+                        raise ValueError(f"Camera entry in shot '{shot_name}' has no camera node.")
+                    camera_name = camera_nodes[0]
                     camera_actor, camera_component = find_camera_component_in_scene()
                     if not camera_actor:
                         camera_actor, camera_possessable, camera_component = add_camera_actor_to_level_sequence(shot_sequence, camera_actor,
                                                                                             camera_name=camera_name)
                     add_camera_anim_to_level_sequence(shot_sequence, camera_actor, world, export_path, [start_frame, end_frame])
                 else:
-                    skeleton_path = get_skeleton_path_by_name(skeleton)
+                    skeleton_path = resolve_skeleton_path(skeleton)
+                    animation_asset_path = None
                     if not blueprint:
 
                         blueprints = get_blueprints_using_skeleton(skeleton_path, current_asset_registry, mesh_string=namespace.split("_")[0])
@@ -1482,7 +1861,8 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                                                                                      control_rig=facial_control_rig)
                     else:
                         skeletal_meshes = find_skeletal_meshes_using_skeleton(skeleton_path)
-
+                        if not skeletal_meshes:
+                            raise ValueError(f"No Skeletal Mesh uses skeleton: {skeleton_path}")
                         skeletal_mesh = skeletal_meshes[0]
                         skeletal_mesh_path = find_uasset_path(skeletal_mesh.get_name())
                         actor, possessable = add_actor_to_level_sequence(shot_sequence_path, skeletal_mesh_path, actor=actor, namespace=namespace)
@@ -1490,14 +1870,26 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
 
                     if "FacialSliders" not in export_path:
                         root, ext = os.path.splitext(export_path)
+                        animation_name = os.path.basename(export_path.replace(ext, ""))
+                        animation_target = f"{shot_sequence_dir}/{animation_name}"
+                        animation_pre_existing = unreal.EditorAssetLibrary.does_asset_exist(animation_target)
+                        _prepare_source_control_write(
+                            animation_target, exists=animation_pre_existing,
+                            policy=source_control_policy,
+                        )
                         animation_asset_path = import_animation(export_path, skeleton_path, shot_sequence_dir,
-                                                            os.path.basename(export_path.replace(ext, "")))
+                                                            animation_name)
 
                         update_asset_registry_and_save(shot_sequence_dir, animation_asset_path)
+                        if not animation_pre_existing:
+                            _mark_new_asset_or_rollback(animation_asset_path, policy=source_control_policy)
 
                     if actor and possessable:
                         if isinstance(actor, unreal.SkeletalMeshActor):
-                            add_anim_track_to_possessable(possessable, animation_asset_path)
+                            if animation_asset_path:
+                                add_anim_track_to_possessable(
+                                    possessable, animation_asset_path, root_motion=root_motion,
+                                )
                         else:
                             top_mesh = get_top_level_mesh_component(actor)
                             top_mesh_name = top_mesh.get_name()
@@ -1531,7 +1923,8 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                                                         sections = track.get_sections()
                                                         section = sections[0] if sections else track.add_section()
                                                         add_anim_to_level_sequence(animation_asset_path, track,
-                                                                                   anim_section=section)
+                                                                                   anim_section=section,
+                                                                                   root_motion=root_motion)
                                                         anim_imported = True
                                                         break
                                     else:
@@ -1552,20 +1945,31 @@ def create_cinematic_sequence(anim_dict, sequence_name, destination_path="/Game/
                                                             import_filename=export_path)
 
                                                         if not success:
-                                                            unreal.log_error("FBX Import to Control Rig failed.")
+                                                            raise RuntimeError("FBX Import to Control Rig failed.")
                                                         break
+                completed_entry_ids.append(str(animation.get("id") or animation.get("export_path") or ""))
             update_asset_registry_and_save(shot_sequence_dir, shot_sequence_path)
-    except:
+    except Exception as exc:
+        unreal.log_error(f"Failed to assemble cinematic sequence '{sequence_name}': {exc}")
         unreal.SystemLibrary.collect_garbage()
+        if current_entry is not None:
+            raise CinematicEntryImportError(
+                current_entry.get("id") or current_entry.get("export_path"),
+                current_entry.get("name") or os.path.basename(current_entry.get("export_path") or "Cinematic entry"),
+                exc, completed_entry_ids,
+            ) from exc
+        raise
     finally:
         update_asset_registry_and_save(sequence_dir, sequence_path)
-        unreal.LevelSequenceEditorBlueprintLibrary.close_level_sequence()
-        current_world = unreal.EditorLevelLibrary.get_editor_world()
-        current_level_path = current_world.get_path_name()
-        unreal.EditorLevelLibrary.save_current_level()
-        unreal.EditorLevelLibrary.load_level(current_level_path)
-        shot_sequence = load_level_sequence(shot_sequence_path)
-        unreal.LevelSequenceEditorBlueprintLibrary.open_level_sequence(shot_sequence)
+        if shot_sequence_path:
+            unreal.LevelSequenceEditorBlueprintLibrary.close_level_sequence()
+            current_world = unreal.EditorLevelLibrary.get_editor_world()
+            current_level_path = current_world.get_path_name()
+            unreal.EditorLevelLibrary.save_current_level()
+            unreal.EditorLevelLibrary.load_level(current_level_path)
+            shot_sequence = load_level_sequence(shot_sequence_path)
+            if shot_sequence:
+                unreal.LevelSequenceEditorBlueprintLibrary.open_level_sequence(shot_sequence)
 
     return sequence_path
 

@@ -317,7 +317,11 @@ def qualify_content_production(
     return receipt | {"report": str(report)}
 
 
-def validate_content_production_qualification(source_root: str | Path, receipt: Mapping[str, Any] | None, *, max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS) -> dict[str, Any]:
+def validate_content_production_qualification(
+    source_root: str | Path, receipt: Mapping[str, Any] | None, *,
+    max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+    source_fingerprint: str | None = None,
+) -> dict[str, Any]:
     row = dict(receipt or {}); gates: list[str] = []
     if row.get("schema") != CONTENT_PRODUCTION_QUALIFICATION_SCHEMA: gates.append("schema")
     if row.get("status") != "passed": gates.append("status")
@@ -325,7 +329,10 @@ def validate_content_production_qualification(source_root: str | Path, receipt: 
     if not all(dict(row.get("interchange_checks") or {}).values()): gates.append("interchange")
     verified = _timestamp(row.get("verified_at")); now = datetime.now(timezone.utc).timestamp()
     if verified <= 0.0 or now - verified > max(0.0, float(max_age_seconds)): gates.append("freshness")
-    expected = playable_project_source_fingerprint(source_root)
+    expected = (
+        playable_project_source_fingerprint(source_root)
+        if source_fingerprint is None else source_fingerprint
+    )
     if str(row.get("source_fingerprint") or "") != expected: gates.append("source_fingerprint")
     return {"valid": not gates, "gates": sorted(set(gates)), "age_seconds": max(0.0, now - verified) if verified > 0 else None,
             "source_fingerprint": expected}

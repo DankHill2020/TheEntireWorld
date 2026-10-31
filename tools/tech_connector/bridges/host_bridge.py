@@ -86,7 +86,7 @@ def call_python_function_via_execute(
     }
     paths_repr = repr(list(sys_paths or []))
     code = f"""
-import sys, importlib, traceback
+import sys, importlib, json, traceback
 for p in {paths_repr}:
     if p not in sys.path:
         sys.path.append(p)
@@ -97,7 +97,9 @@ try:
     module = importlib.import_module(module_path)
     func = getattr(module, func_name)
     result = func(*payload.get("args", []), **payload.get("kwargs", {{}}))
-    print(result)
+    # Emit a machine-readable value.  Python's repr is not valid JSON for
+    # booleans/None and left runtime callers with an opaque ``result`` string.
+    print(json.dumps(result, default=str))
 except Exception:
     traceback.print_exc()
 """

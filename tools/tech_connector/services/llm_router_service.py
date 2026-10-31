@@ -27,7 +27,7 @@ from reasoning_runtime.models import (
 
 
 _CLOUD_DEFAULT_MODELS = {
-    "openai": "gpt-5.6-sol",
+    "openai": "gpt-6.1-sol",
     "anthropic": "claude-sonnet-5",
     "gemini": "gemini-2.5-flash",
     "x": "grok-4.5",
@@ -59,7 +59,7 @@ def lock_llm_provider_for_prompt(function):
                 settings.get("model")
                 or settings.get("cloud_provider_model")
                 or settings.get("general_model")
-                or "qwen3:4b-instruct"
+                or "qwen3.5:4b"
             )
             route = resolve_llm_provider_route(selected, settings)
         with locked_model_provider_route(route) as calls:
@@ -135,25 +135,29 @@ def resolve_llm_provider_route(
     settings = settings or {}
     from tech_connector.services.ollama_service import resolve_ollama_model_name
 
-    local_model = str(requested_model or settings.get("general_model") or "qwen3:4b-instruct")
-    local_model = resolve_ollama_model_name(local_model)
+    requested_provider, requested_name = _provider_from_model(requested_model or "")
+    raw_local_model = str(
+        requested_model
+        if requested_model and not requested_provider
+        else settings.get("general_model") or "qwen3.5:4b"
+    ).removeprefix("ollama:").strip()
     fallback_local_model = str(
         settings.get("ollama_model")
         or settings.get("fallback_general_model")
         or settings.get("fast_general_model")
         or settings.get("router_fast_llm_model")
-        or "qwen3:4b-instruct"
-    )
-    fallback_local_model = resolve_ollama_model_name(
-        fallback_local_model.removeprefix("ollama:").strip()
-    )
-    if _provider_from_model(fallback_local_model)[0]:
-        fallback_local_model = "qwen3:4b-instruct"
+        or "qwen3.5:4b"
+    ).removeprefix("ollama:").strip()
+    if _provider_from_model(fallback_local_model)[0]: fallback_local_model = "qwen3.5:4b"
     if (
         settings.get("model_source_mode") == "local_only"
         or settings.get("local_only") is True
     ):
-        return LLMProviderRoute("ollama", local_model)
+        return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
+    if requested_model and not requested_provider:
+        # An explicit unprefixed model is local. A saved cloud default must not
+        # silently replace qwen/other Ollama selections or benchmark labels.
+        return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
 
     credentials = {
         "openai": _credential(settings, "openai_api_key", "OPENAI_API_KEY"),
@@ -169,9 +173,8 @@ def resolve_llm_provider_route(
         ),
         "x": _credential(settings, "xai_api_key", "XAI_API_KEY"),
     }
-    requested_provider, requested_name = _provider_from_model(requested_model or "")
     if requested_model and requested_model.startswith("ollama:"):
-        return LLMProviderRoute("ollama", local_model)
+        return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
 
     target_provider = requested_provider
     target_name = requested_name
@@ -181,14 +184,16 @@ def resolve_llm_provider_route(
         if c_provider:
             target_provider, target_name = c_provider, c_name
         else:
-            return LLMProviderRoute("ollama", local_model)
+            return LLMProviderRoute("ollama", resolve_ollama_model_name(raw_local_model))
 
     if (
         target_provider == "openai"
         and bool(settings.get("auto_select_openai_model_by_depth", True))
         and (
             not target_name
-            or str(target_name).lower().startswith(("gpt-5.6", "gpt-5.3-codex"))
+            or str(target_name).lower().startswith(
+                ("gpt-6", "gpt-5.6", "gpt-5.3-codex")
+            )
         )
     ):
         from tech_connector.services.code_prompt_profile_service import (
@@ -199,9 +204,7 @@ def resolve_llm_provider_route(
             str(settings.get("code_prompt_depth") or "balanced")
         )
 
-    target_account_provider = (
-        "google" if target_provider == "gemini" else target_provider
-    )
+    target_account_provider = "google" if target_provider == "gemini" else target_provider
     if target_account_provider:
         import tech_connector.services.authenticated_provider_service as auth_svc
 
@@ -221,7 +224,6 @@ def resolve_llm_provider_route(
             True,
             "api_key",
         )
-
     configured_providers = [
         name for name, credential in credentials.items() if credential
     ]
@@ -245,13 +247,13 @@ def resolve_llm_provider_route(
             acc_provider
         ) and not credentials.get(target_provider):
             print(
-                f"\n[WARNING] Cloud model '{local_model}' was requested, but '{target_provider}' "
+                f"\n[WARNING] Cloud model '{requested_model}' was requested, but '{target_provider}' "
                 f"is not connected via account login or optional API key. Falling back to local Ollama.\n",
                 file=sys.stderr,
                 flush=True,
             )
 
-    return LLMProviderRoute("ollama", fallback_local_model)
+    return LLMProviderRoute("ollama", resolve_ollama_model_name(fallback_local_model))
 
 
 def generate_llm_response(
@@ -462,6 +464,10 @@ def generate_llm_response(
                 system,
                 response_format,
                 timeout,
+                reasoning_effort=(
+                    effective_options.get("reasoning_effort")
+                    if account_provider == "openai" else None
+                ),
             )
         elif route.provider == "openai":
             value = _query_openai(
@@ -488,7 +494,7 @@ def generate_llm_response(
         call_event["status"] = "failed"
         call_event["error_type"] = type(e).__name__
         if allow_cloud_fallback:
-            local_fallback_model = settings.get("fallback_general_model", "qwen3:4b-instruct")
+            local_fallback_model = settings.get("fallback_general_model", "qwen3.5:4b")
             print(
                 f"[LLMRouter] Explicit cloud fallback enabled after {route.provider} "
                 f"failure: {e}",
@@ -622,6 +628,14 @@ def _query_ollama(
     effective_options = dict(options or {})
     effective_options.setdefault("num_ctx", 4096)
     think = effective_options.pop("think", None)
+    # Reasoning-capable local models (notably Qwen 3/3.5) may spend the entire
+    # bounded generation budget in Ollama's separate ``thinking`` field.  The
+    # caller then receives an empty response even though the server reports
+    # generated tokens.  Structured stages need the schema payload, not hidden
+    # reasoning, so make non-thinking generation the safe default.  Callers can
+    # still opt into thinking explicitly for unstructured reasoning stages.
+    if think is None and response_format:
+        think = False
 
     resolved_model = resolve_ollama_model_name(model)
 
@@ -629,7 +643,7 @@ def _query_ollama(
         "model": resolved_model,
         "prompt": prompt,
         "stream": True,
-        "keep_alive": os.environ.get("AI_STUDIO_OLLAMA_KEEP_ALIVE", "15m"),
+        "keep_alive": os.environ.get("AI_STUDIO_OLLAMA_KEEP_ALIVE", "30m"),
         "options": effective_options,
     }
     if system:
@@ -891,11 +905,13 @@ def _query_openai(
     if safety_identifier:
         payload_dict["safety_identifier"] = safety_identifier
 
-    # Retain compatibility for older non-reasoning models. GPT-5-family
+    # Retain compatibility for older non-reasoning models. GPT-5/6-family
     # Responses requests are controlled through reasoning rather than sampling.
     if (
         "temperature" in effective_options
-        and not str(model or "").lower().startswith(("gpt-5", "o1", "o3", "o4"))
+        and not str(model or "").lower().startswith(
+            ("gpt-5", "gpt-6", "o1", "o3", "o4")
+        )
     ):
         payload_dict["temperature"] = float(effective_options["temperature"])
 

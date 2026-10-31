@@ -30,14 +30,14 @@ from PySide6.QtWidgets import (
 from tech_connector.services.settings_service import load_settings, save_settings
 
 DEFAULTS = {
-    "semantic_intent_model": "qwen3:4b-instruct",
-    "fast_general_model": "qwen3:4b-instruct",
-    "visual_media_model": "qwen3:4b-instruct",
-    "fast_code_model": "qwen2.5-coder:7b",
+    "semantic_intent_model": "qwen3.5:4b",
+    "fast_general_model": "qwen3.5:4b",
+    "visual_media_model": "qwen3.5:4b",
+    "fast_code_model": "qwen3.5:4b",
     "embedding_model": "nomic-embed-text:latest",
-    "fallback_general_model": "qwen3:4b-instruct",
-    "fallback_semantic_intent_model": "qwen3:4b-instruct",
-    "fallback_code_model": "qwen2.5-coder:7b",
+    "fallback_general_model": "qwen3.5:4b",
+    "fallback_semantic_intent_model": "qwen3.5:4b",
+    "fallback_code_model": "qwen3.5:4b",
     "custom_model_mappings": {},
     "custom_provider_function_bindings": {},
     "github_ingest_provider_type": "default",
@@ -362,11 +362,11 @@ class CustomizationPanel(QDialog):
 
         # Inputs
         self.model_intent = QLineEdit()
-        self.model_intent.setToolTip("Ollama model class for semantic intent understanding (e.g. qwen3:4b-instruct)")
+        self.model_intent.setToolTip("Fast local intent model (recommended: qwen3.5:4b)")
         form.addRow("Semantic/Intent Model:", self.model_intent)
 
         self.model_general = QLineEdit()
-        self.model_general.setToolTip("Ollama model class for general reasoning/answers (e.g. qwen3:4b-instruct)")
+        self.model_general.setToolTip("Fast local general model (recommended: qwen3.5:4b)")
         form.addRow("Fast General Model:", self.model_general)
 
         self.model_visual = QLineEdit()
@@ -374,7 +374,7 @@ class CustomizationPanel(QDialog):
         form.addRow("Visual Media Model:", self.model_visual)
 
         self.model_code = QLineEdit()
-        self.model_code.setToolTip("Ollama model class for code generation & edit queries (e.g. qwen2.5-coder:7b)")
+        self.model_code.setToolTip("Fast local code model (recommended: qwen3.5:4b; deep: qwen3.5:9b)")
         form.addRow("Fast Code Model:", self.model_code)
 
         self.model_embed = QLineEdit()
@@ -400,7 +400,7 @@ class CustomizationPanel(QDialog):
             '  "visual_media": "llava:latest",\n'
             '  "image": "llava:latest",\n'
             '  "video": "llava:latest",\n'
-            '  "general": "qwen3:4b-instruct"\n'
+            '  "general": "qwen3.5:4b"\n'
             '}'
         )
         self.custom_mappings.setMaximumHeight(100)
@@ -441,7 +441,7 @@ class CustomizationPanel(QDialog):
                 "{\n"
                 '  "visual_media": "llava:latest",\n'
                 '  "image": "llava:latest",\n'
-                '  "code": "qwen2.5-coder:7b"\n'
+                '  "code": "qwen3.5:4b"\n'
                 "}\n\n"
                 "Tip: keep image/video/camera roles on a non-coder or vision-capable model."
             ),
@@ -774,9 +774,9 @@ class CustomizationPanel(QDialog):
         from tech_connector.services.authenticated_provider_service import (
             begin_provider_login,
         )
-        url = begin_provider_login(provider_id)
+        result = begin_provider_login(provider_id)
         if hasattr(self, "console_label"):
-            self.console_label.setText(f"Status: Opened official login portal for {provider_id.upper()}")
+            self.console_label.setText(f"Status: {result}")
 
     def setup_services_tab(self):
         layout = QVBoxLayout(self.tab_services)

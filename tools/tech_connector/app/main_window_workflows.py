@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any, Callable
 
 from tech_connector.path_bootstrap import ensure_tools_root_on_path
 
@@ -56,6 +57,53 @@ from tech_connector.ui.pipeline_node_view import pipeline_tool_query_rank
 
 
 from .main_window_workflow_authoring_mixin import MainWindowWorkflowAuthoringMixin
+
+
+def _add_builder_step_deferred(owner, symbol):
+    """Bulk-add when supported, with compatibility for lightweight adapters."""
+    import inspect
+
+    add_step = owner.add_builder_step
+    try:
+        supports_deferred = "defer_updates" in inspect.signature(add_step).parameters
+    except (TypeError, ValueError):
+        supports_deferred = False
+    if supports_deferred:
+        return add_step(custom_sym=symbol, defer_updates=True)
+    return add_step(custom_sym=symbol)
+
+
+class PipelineBridgeRunWorker(QThread):
+    """Execute one bridge call without blocking the Qt event loop."""
+
+    progress = Signal(str)
+    completed = Signal(bool, object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        executor: Callable[..., tuple[bool, Any]],
+        host: str,
+        source: str,
+        *,
+        timeout_seconds: float = 120.0,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.executor = executor
+        self.host = str(host)
+        self.source = str(source)
+        self.timeout_seconds = max(0.1, min(3600.0, float(timeout_seconds)))
+
+    def run(self) -> None:
+        try:
+            self.progress.emit(f"Dispatching pipeline to {self.host}…")
+            ok, raw = self.executor(
+                self.host, self.source, timeout=self.timeout_seconds,
+            )
+            self.completed.emit(bool(ok), raw)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class MainWindowWorkflowsMixin(MainWindowWorkflowAuthoringMixin):
@@ -778,6 +826,68 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             if hasattr(self, "append"):
                 self.append(f"\n[Notification Outputs Failed] {exc}\n")
 
+    def _set_pipeline_run_controls(self, enabled: bool) -> None:
+        for name in ("wf_test_btn", "wf_graph_run_btn"):
+            control = getattr(self, name, None)
+            if control is not None:
+                control.setEnabled(bool(enabled))
+
+    def _pipeline_bridge_run_completed(self, ok: bool, raw: object) -> None:
+        context = dict(getattr(self, "_pipeline_bridge_run_context", {}) or {})
+        host = str(context.get("host") or "DCC")
+        func_name = str(context.get("func_name") or "pipeline")
+        envelope = self._parse_pipeline_bridge_output(raw)
+        self._last_workflow_result = envelope.get("result")
+        self._last_workflow_envelope = envelope
+        self._last_test_output += "\nRaw bridge output:\n" + str(raw) + "\n\nEnvelope:\n" + str(envelope)
+        succeeded = bool(ok and envelope.get("ok"))
+        self.wf_test_status.setText(
+            f"Pipeline completed in {host} bridge."
+            if succeeded else f"Pipeline failed in {host} bridge. See Test Log."
+        )
+        self.wf_test_status.setStyleSheet("color: #5bd000;" if succeeded else "color: #e05252;")
+        if hasattr(self, "append"):
+            self.append(f"\n[Pipeline Bridge Run: {host}] ok={ok} result={self._last_workflow_result!r}\n")
+        self._notify_pipeline_output(
+            f"Tech Connector Pipeline: {func_name}", self._last_test_output,
+            status="ok" if succeeded else "failed", source=f"{host} bridge",
+        )
+        self._finish_pipeline_bridge_run("workflow_run_completed", succeeded=succeeded)
+
+    def _pipeline_bridge_run_failed(self, message: str) -> None:
+        context = dict(getattr(self, "_pipeline_bridge_run_context", {}) or {})
+        host = str(context.get("host") or "DCC")
+        func_name = str(context.get("func_name") or "pipeline")
+        self._last_test_output += "\nBridge execution exception:\n" + str(message)
+        self.wf_test_status.setText(f"Bridge run failed: {message}")
+        self.wf_test_status.setStyleSheet("color: #e05252;")
+        self._notify_pipeline_output(
+            f"Tech Connector Pipeline Failed: {func_name}", self._last_test_output,
+            status="exception", source=f"{host} bridge",
+        )
+        self._finish_pipeline_bridge_run("workflow_run_failed", succeeded=False)
+
+    def _finish_pipeline_bridge_run(self, lifecycle_reason: str, *, succeeded: bool = False) -> None:
+        self._workflow_run_in_flight = False
+        self._set_pipeline_run_controls(True)
+        try:
+            lifecycle = getattr(self, "_interaction_lifecycle", None)
+            if lifecycle is not None:
+                if succeeded:
+                    lifecycle.complete_current()
+                else:
+                    lifecycle.cancel_current(reason=lifecycle_reason)
+        except Exception:
+            pass
+
+    def _pipeline_bridge_worker_finished(self) -> None:
+        worker = getattr(self, "_pipeline_bridge_worker", None)
+        if worker is not None:
+            worker.deleteLater()
+        self._pipeline_bridge_worker = None
+        if getattr(self, "_workflow_run_in_flight", False):
+            self._finish_pipeline_bridge_run("workflow_worker_stopped", succeeded=False)
+
     def run_selected_workflow(self):
         if getattr(self, "_workflow_run_in_flight", False):
             self.wf_test_status.setText("Pipeline run is already active.")
@@ -805,16 +915,21 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         selected_meta = self._selected_pipeline_code_and_meta()
         if selected_meta is None:
             selected_meta = self._current_pipeline_code_and_meta()
+        if selected_meta is None:
+            self.wf_test_status.setText("No pipeline is selected or ready to run.")
+            self.wf_test_status.setStyleSheet("color: #e05252;")
+            self._finish_pipeline_bridge_run("workflow_missing_selection", succeeded=False)
+            return
         code, func_name, slots, host, project_root, label = selected_meta
         if not code.strip():
             self.wf_test_status.setText("No pipeline code to run. Save/compile or add nodes first.")
             self.wf_test_status.setStyleSheet("color: #e05252;")
-            self._workflow_run_in_flight = False
+            self._finish_pipeline_bridge_run("workflow_missing_code", succeeded=False)
             return
         if not func_name:
             self.wf_test_status.setText("Could not determine pipeline function name.")
             self.wf_test_status.setStyleSheet("color: #e05252;")
-            self._workflow_run_in_flight = False
+            self._finish_pipeline_bridge_run("workflow_missing_function", succeeded=False)
             return
         runtime_source = self._pipeline_runtime_source(code, func_name, slots, project_root)
         self._last_test_output = f"Host: {host}\nFunction: {func_name}\nSource: {label}\nProject: {project_root}\n"
@@ -838,7 +953,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                             f"Resume cross-DCC pipeline: {func_name}",
                         )
                 finally:
-                    self._workflow_run_in_flight = False
+                    self._finish_pipeline_bridge_run("workflow_bridge_missing", succeeded=False)
                 return
         if host and host not in {"local", "cross_dcc", "unknown"}:
             port = self._pipeline_bridge_port(host)
@@ -856,52 +971,23 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                             f"Run pipeline: {func_name}",
                         )
                 finally:
-                    self._workflow_run_in_flight = False
+                    self._finish_pipeline_bridge_run("workflow_bridge_missing", succeeded=False)
                 return
             self.wf_test_status.setText(f"Running pipeline in {host} bridge...")
             self.wf_test_status.setStyleSheet("color: #4aa3ff;")
-            try:
-                ok, raw = self._execute_pipeline_via_bridge(host, runtime_source, timeout=120.0)
-                envelope = self._parse_pipeline_bridge_output(raw)
-                self._last_workflow_result = envelope.get("result")
-                self._last_workflow_envelope = envelope
-                self._last_test_output += "\nRaw bridge output:\n" + str(raw) + "\n\nEnvelope:\n" + str(envelope)
-                if ok and envelope.get("ok"):
-                    self.wf_test_status.setText(f"Pipeline completed in {host} bridge.")
-                    self.wf_test_status.setStyleSheet("color: #5bd000;")
-                else:
-                    self.wf_test_status.setText(f"Pipeline failed in {host} bridge. See Test Log.")
-                    self.wf_test_status.setStyleSheet("color: #e05252;")
-                if hasattr(self, "append"):
-                    self.append(f"\n[Pipeline Bridge Run: {host}] ok={ok} result={self._last_workflow_result!r}\n")
-                self._notify_pipeline_output(
-                    f"Tech Connector Pipeline: {func_name}",
-                    self._last_test_output,
-                    status="ok" if ok and envelope.get("ok") else "failed",
-                    source=f"{host} bridge",
-                )
-                try:
-                    getattr(self, "_interaction_lifecycle", None).cancel_current(reason="workflow_run_completed")
-                except Exception:
-                    pass
-                self._workflow_run_in_flight = False
-                return
-            except Exception as exc:
-                self._last_test_output += "\nBridge execution exception:\n" + str(exc)
-                self.wf_test_status.setText(f"Bridge run failed: {exc}")
-                self.wf_test_status.setStyleSheet("color: #e05252;")
-                self._notify_pipeline_output(
-                    f"Tech Connector Pipeline Failed: {func_name}",
-                    self._last_test_output,
-                    status="exception",
-                    source=f"{host} bridge",
-                )
-                try:
-                    getattr(self, "_interaction_lifecycle", None).cancel_current(reason="workflow_run_failed")
-                except Exception:
-                    pass
-                self._workflow_run_in_flight = False
-                return
+            self._pipeline_bridge_run_context = {"host": host, "func_name": func_name}
+            self._set_pipeline_run_controls(False)
+            worker = PipelineBridgeRunWorker(
+                self._execute_pipeline_via_bridge, host, runtime_source,
+                timeout_seconds=120.0, parent=self,
+            )
+            worker.progress.connect(self.wf_test_status.setText)
+            worker.completed.connect(self._pipeline_bridge_run_completed)
+            worker.failed.connect(self._pipeline_bridge_run_failed)
+            worker.finished.connect(self._pipeline_bridge_worker_finished)
+            self._pipeline_bridge_worker = worker
+            worker.start()
+            return
         runner_path = self._write_workflow_runner_script(str(project_root), "", func_name, slots)
         runner_path.write_text(runtime_source, encoding="utf-8")
         command = self._quote_workflow_command([*self._workflow_python_launcher(), "-u", str(runner_path)])
@@ -915,14 +1001,10 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
             status="sent_to_terminal" if sent else "terminal_unavailable",
             source="local fallback",
         )
-        try:
-            lifecycle = getattr(self, "_interaction_lifecycle", None)
-            if lifecycle is not None:
-                current = lifecycle.current_operation()
-                if current:
-                    current.status = "running_external"
-        except Exception:
-            pass
+        self._finish_pipeline_bridge_run(
+            "workflow_command_dispatched" if sent else "workflow_terminal_unavailable",
+            succeeded=bool(sent),
+        )
 
     def run_selected_workflow_test(self):
         selected = self.workflows_list.selectedItems()
@@ -973,6 +1055,10 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         self.wf_pipeline_current_key = manifest_path_str
 
         selected_capabilities = data.get("selected_capabilities", [])
+        saved_steps = [
+            step for step in (data.get("steps") or [])
+            if isinstance(step, dict)
+        ]
         slots = data.get("slots", {})
         links = data.get("links", [])
         host = data.get("host", "maya")
@@ -1005,8 +1091,92 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
         self._ensure_pipeline_symbols_available_nonblocking()
 
-        for cap in selected_capabilities:
-            self.add_builder_step(custom_sym=cap)
+        if saved_steps:
+            for saved_step in saved_steps:
+                symbol = saved_step.get("symbol") or saved_step
+                step_data = _add_builder_step_deferred(self, symbol)
+                if not step_data:
+                    continue
+                step_data["params"] = list(
+                    saved_step.get("params") or symbol.get("params") or []
+                )
+                step_data["outputs"] = list(
+                    saved_step.get("outputs") or symbol.get("outputs") or []
+                )
+                step_data["literal_values"] = dict(
+                    saved_step.get("literal_values") or {}
+                )
+                step_data["literal_value_provenance"] = dict(
+                    saved_step.get("literal_value_provenance") or {}
+                )
+                step_data["literal_value_details"] = dict(
+                    saved_step.get("literal_value_details") or {}
+                )
+                step_data["unresolved_inputs"] = list(
+                    saved_step.get("unresolved_inputs") or []
+                )
+                step_data["operation_contract"] = dict(
+                    saved_step.get("operation_contract") or {}
+                )
+        else:
+            for cap in selected_capabilities:
+                _add_builder_step_deferred(self, cap)
+
+        # The current composer is graph-backed. Restore its typed literals and
+        # links directly instead of passing through the retired table widgets.
+        if self.wf_builder_steps and all(
+            step.get("table") is None for step in self.wf_builder_steps
+        ):
+            import ast
+
+            for step_index, step in enumerate(self.wf_builder_steps, start=1):
+                if not saved_steps:
+                    for param in step.get("params") or []:
+                        param_name = str(param.get("name") or "")
+                        slot_key = f"step{step_index}_{param_name}"
+                        if not param_name or slot_key not in slots:
+                            continue
+                        value = slots[slot_key]
+                        if isinstance(value, str):
+                            try:
+                                value = ast.literal_eval(value)
+                            except (SyntaxError, ValueError):
+                                pass
+                        step.setdefault("literal_values", {})[param_name] = value
+
+                view = getattr(self, "wf_node_view", None)
+                if view and hasattr(view, "refresh_node_literals"):
+                    view.refresh_node_literals(step, emit_signal=False)
+
+            data_links = list(data.get("data_links") or [])
+            if not data_links:
+                for link in links:
+                    source = str(link.get("from") or "")
+                    target = str(link.get("to") or "")
+                    source_match = re.fullmatch(r"step(\d+)\.(.+)", source)
+                    target_match = re.fullmatch(r"step(\d+)\.(.+)", target)
+                    if source_match and target_match:
+                        data_links.append({
+                            "from_step": int(source_match.group(1)),
+                            "from_output": source_match.group(2),
+                            "to_step": int(target_match.group(1)),
+                            "to_input": target_match.group(2),
+                        })
+            flow_links = list(data.get("flow_links") or [])
+            if not flow_links:
+                flow_links = [
+                    {"from_step": index, "to_step": index + 1}
+                    for index in range(1, len(self.wf_builder_steps))
+                ]
+            self._apply_workflow_intent_links(
+                self.wf_builder_steps,
+                {"data_links": data_links, "flow_links": flow_links},
+            )
+            self.update_builder_code_preview(force=True)
+            for step_idx in range(1, len(self.wf_builder_steps) + 1):
+                self._refresh_builder_output_consumers(step_idx)
+            self.wf_stack.setCurrentIndex(1)
+            return
 
         for idx, step in enumerate(self.wf_builder_steps, start=1):
             params_table = step["table"]
@@ -1630,12 +1800,19 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
 
             added_steps = []
             for planned_step in plan.get("steps") or []:
-                step_data = self.add_builder_step(custom_sym=planned_step.get("symbol") or {})
+                step_data = _add_builder_step_deferred(
+                    self,
+                    planned_step.get("symbol") or {}
+                )
                 if not step_data:
                     continue
                 step_data["params"] = planned_step.get("params") or step_data.get("params") or []
                 step_data["outputs"] = planned_step.get("outputs") or step_data.get("outputs") or []
                 step_data["literal_values"] = planned_step.get("literal_values") or {}
+                step_data["literal_value_provenance"] = planned_step.get("literal_value_provenance") or {}
+                step_data["literal_value_details"] = planned_step.get("literal_value_details") or {}
+                step_data["unresolved_inputs"] = planned_step.get("unresolved_inputs") or []
+                step_data["operation_contract"] = planned_step.get("operation_contract") or {}
                 added_steps.append(step_data)
 
             self._apply_workflow_intent_links(added_steps, plan)
@@ -1655,9 +1832,15 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                         p_name = p.get("name")
                         if not p_name or p_name.startswith("*"):
                             continue
-                        has_link = any(l.to_step == step_id and l.to_input == p_name and l.kind == "data" for l in view.links)
-                        has_literal = p_name in literals and str(literals[p_name]).strip() != ""
-                        if not has_link and not has_literal:
+                        if "default" in p and p.get("default") is not None:
+                            continue
+                        has_value = view._param_has_value_or_link(
+                            step_id,
+                            step,
+                            p_name,
+                            required=bool(p.get("required")),
+                        )
+                        if not has_value:
                             unconnected_details.append(f"- Step {idx} ({symbol.get('name')}): Param '{p_name}' is unconnected")
             
             if unconnected_details:
@@ -1696,7 +1879,7 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         view.links.clear()
         for step in steps:
             if hasattr(view, "refresh_node_literals"):
-                view.refresh_node_literals(step)
+                view.refresh_node_literals(step, emit_signal=False)
 
         def step_id(step_index):
             idx = int(step_index or 0) - 1
@@ -2440,14 +2623,17 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                 seen.add(name)
         return errors
 
-    def add_builder_step(self, custom_sym=None):
+    def add_builder_step(self, custom_sym=None, *, defer_updates: bool = False):
         try:
-            return self._add_builder_step_impl(custom_sym)
+            return self._add_builder_step_impl(
+                custom_sym,
+                defer_updates=defer_updates,
+            )
         except Exception as exc:
             self._report_workflow_error("Add Node failed", exc)
             return None
 
-    def _add_builder_step_impl(self, custom_sym=None):
+    def _add_builder_step_impl(self, custom_sym=None, *, defer_updates: bool = False):
         """Add a function/capability as a node in the pipeline graph.
 
         This intentionally bypasses the old Visual Steps / table-card builder.
@@ -2517,13 +2703,19 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
         }
 
         self.wf_builder_steps.append(step_data)
-        self._sync_builder_step_to_graph(step_data)
-        self.update_builder_code_preview()
+        self._sync_builder_step_to_graph(
+            step_data,
+            emit_signals=not defer_updates,
+            push_undo=not defer_updates,
+        )
+        if not defer_updates and getattr(self, "wf_node_view", None) is None:
+            self.update_builder_code_preview()
 
-        try:
-            self._report_workflow_builder_event(f"Added node: {sym.get('name', 'unnamed')}")
-        except Exception:
-            pass
+        if not defer_updates:
+            try:
+                self._report_workflow_builder_event(f"Added node: {sym.get('name', 'unnamed')}")
+            except Exception:
+                pass
         return step_data
 
     def update_step_connections_list(self, step_num, conn_list):
@@ -2671,13 +2863,19 @@ print("__AI_STUDIO_PIPELINE_JSON_END__")
                 )
                 self._last_workflow_generated_code = composed_code
                 if hasattr(self, "wf_builder_code_edit"):
+                    if self.wf_builder_code_edit.toPlainText() == composed_code:
+                        self._workflow_python_manually_edited = False
+                        self._set_pipeline_python_warning("")
+                        return
                     cursor = self.wf_builder_code_edit.textCursor()
                     self._updating_workflow_python_from_graph = True
-                    self.wf_builder_code_edit.blockSignals(True)
-                    self.wf_builder_code_edit.setPlainText(composed_code)
-                    self.wf_builder_code_edit.setTextCursor(cursor)
-                    self.wf_builder_code_edit.blockSignals(False)
-                    self._updating_workflow_python_from_graph = False
+                    previous_signal_state = self.wf_builder_code_edit.blockSignals(True)
+                    try:
+                        self.wf_builder_code_edit.setPlainText(composed_code)
+                        self.wf_builder_code_edit.setTextCursor(cursor)
+                    finally:
+                        self.wf_builder_code_edit.blockSignals(previous_signal_state)
+                        self._updating_workflow_python_from_graph = False
                     self._workflow_python_manually_edited = False
                     self._set_pipeline_python_warning("")
                 return

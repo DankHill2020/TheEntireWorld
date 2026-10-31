@@ -28,7 +28,81 @@ Garden is the authoritative asset and level authoring surface. Kingdom consumes
 the same saved level and presents runtime state. A renderer limitation may keep
 the runtime in a separate process, but it must not create a second asset model.
 
-## Current audit
+## Current audit (2026-10-01)
+
+This section is the authoritative implementation snapshot. The detailed tables
+below remain the capability-depth backlog: an older row marked `Missing` means
+the complete editor/runtime workflow described by that row is still missing,
+not necessarily that no registry descriptor or partial service exists.
+
+### Registry and workspace snapshot
+
+- The built-in registry contains **64 asset types**: **22 runtime-ready**,
+  **32 authoring-preview**, and **10 experimental**.
+
+The 2026-10-17 UI Document authoring slice raises the registry to **65 types**:
+**22 runtime-ready**, **33 authoring-preview**, and **10 experimental**. It adds
+a validated widget hierarchy, anchor layout preview, asset reference checks,
+dedicated editor controls, Python operations, and a cooked preview artifact.
+Packaged player UI rendering and full UI/2D parity remain open.
+- The engine workspace now has a project Content Browser, World Outliner,
+  actor/component Details, prefab apply/revert, Sequence Editor, world-production
+  tools, console, profiler, launch-readiness, and build/deploy panels.
+- The first playable-project tranche is implemented through the public Python
+  API and the same New Game dialog: a lit/collidable Level, active camera,
+  skinned starter mannequin, editable skeleton and skin binding, IK/Control Rig,
+  locomotion controller, input map, physics scene, player prefab, Ruleset, and
+  Build Profile are created and validated as one dependency-closed operation.
+- Starter variants currently include playable sandbox, third-person exploration
+  and combat, first-person shooter, side-scroller, fighting, top-down action, and
+  an 8-bit pixel platformer. Only variants backed by qualification evidence may
+  be promoted from Preview to Production.
+- Six explicit, Python-callable quality profiles cover cinematic 4K, high 1440p,
+  balanced 1080p, performance 900p, low-spec 720p, and pixel-perfect 320 × 180.
+  Visual style, project scalability, and renderer upscaling quality remain
+  separate contracts.
+- Play-state UX distinguishes Edit, Simulate, Paused, and standalone Play;
+  Pause/Step are enabled only where supported, and Stop, Eject, and Reset have
+  separate commands. Unsupported controls are not presented as functional.
+- The viewport/selection tranche now supports Ctrl/Shift multi-selection in the
+  viewport and outliner, multi-highlight, group focus/transform/duplicate/delete,
+  cycle-safe parenting, folders, hide/isolate/show-all, persistent actor locks,
+  ordered component stacks, camera piloting, nine persistent camera bookmarks,
+  and selection-preserving level undo/redo. Workspace Undo/Redo routes to the
+  focused level or dedicated asset/graph editor; Content Browser operations keep
+  their recoverable operation history. The saved-Level Python API exposes the
+  same actor query, transform, visibility, isolation, lock, duplicate/delete,
+  folder, parenting, component-order, and camera-bookmark operations without
+  requiring widget automation.
+- The Content Browser lifecycle baseline now distinguishes source files,
+  imported assets, authored assets, level-local instances, and current cooked
+  artifacts. It includes persistent static/dynamic collections, structured and
+  negated search, a recoverable cancel/retry import queue, thumbnail state
+  badges, asset revision history, opt-in Perforce status/history/changelists and
+  confirmed edit/add/revert/sync actions, project-wide redirect and legacy-
+  reference repair, and matching headless Python operations. Imports copy in
+  cancellable chunks on a worker and atomically publish only complete files.
+- Content Browser scale qualification now emits a repeatable receipt for a
+  deterministic 50,000-document inventory, compiled advanced-query latency,
+  database inventory latency, throughput, and lifecycle capability evidence.
+- The first high-value asset-editor depth pass replaces guidance-only pages with
+  saveable and validated controls for material parameters/static switches,
+  static and skeletal mesh geometry/material slots, animation-controller
+  parameters/transitions, and effect timelines/scalability. These use the same
+  serialized properties and import settings exposed to Python and cooking.
+- The second depth pass adds texture channel transforms, mip policy and
+  per-platform compression overrides; separates input actions, contexts and
+  bindings with a non-destructive live value probe; and adds physical-animation
+  drive and solver-profile authoring to Physics Assets. Invalid authored values
+  block save, while the Python input API audits a candidate transaction before
+  it is persisted.
+- The character-production depth pass adds complete Animation Clip pages for
+  tracks, curves, events, sync markers, root motion, additive setup and
+  compression; Skeleton hierarchy, socket and retarget-pose authoring; and Skin
+  Binding deformer stacks, transfer policy and export policy. Skeletons now have
+  cycle-safe validation and a dedicated runtime cooker. Cross-page validation
+  runs before save, and equivalent transactional Python operations reject bad
+  hierarchy or binding changes before touching the asset.
 
 ### Strong foundations already present
 
@@ -44,20 +118,49 @@ the runtime in a separate process, but it must not create a second asset model.
   physics, animation, rigging, simulation, procedural generation, and player
   packaging have meaningful implementation behind them.
 
-### Product gaps
+### Current launch gaps
 
-- `asset_type` is currently an arbitrary string, not a registered type with a
-  factory, icon, importer, editor, inspector, thumbnailer, compiler, and loader.
-- Stable IDs are derived from type plus source path, so a move/rename changes
-  identity instead of preserving references.
-- There is no project-wide Assets browser, asset creation menu, import queue,
-  reimport inspector, dependency/reference viewer, redirect system, or consistent
-  double-click editor routing.
-- Major reusable systems are embedded in `.tcscene` metadata: runtime simulation,
-  gameplay experience, character/world intelligence, procedural workspaces,
-  deformation maps, and parts of material/FX authoring.
-- A scene instance, source file, editable asset, and cooked runtime artifact are
-  not visibly distinguished.
+- Core editor interactions still need end-to-end qualification: multi-selection,
+  grouped transforms, component reordering, camera piloting/bookmarks, isolate/
+  hide/lock, cross-editor transactions, saved layouts, recent assets, and command
+  search must all behave consistently on real projects.
+- Content Browser qualification still needs physical representative-project UI
+  evidence for thumbnail decode, incremental refresh, redirected depots, and
+  multi-user Perforce failure/conflict paths. Synthetic 50k-query evidence is a
+  repeatable regression gate, not a substitute for hardware/project testing.
+- Cooperative mid-file cancellation is implemented for the built-in file-copy
+  importer. Future decoding/transcoding importers must call the same cancellation
+  checkpoints inside their own expensive phases before they qualify.
+- The 32 authoring-preview and 10 experimental asset types need type-specific
+  editor/runtime qualification; registry presence and a visible editor page are
+  not parity evidence.
+- Cooking/building still needs resumable orchestration, cancellation, exact
+  asset-linked failure reporting, size/cost reports, and broader platform proof.
+- UI/2D, localization, accessibility, media-playlist, geometry/VDB cache,
+  addressable/DLC, replay/benchmark, and automation-test workflows need broader
+  first-class coverage.
+- Native runtime launch gates remain open for broad GPU backends, shader/pipeline
+  caches, streaming stress, job scheduling, network prediction, save migration,
+  and golden scenes across supported hardware.
+
+### Execution order
+
+1. **Implemented; qualification continues:** default playable project, template,
+   quality, and explicit runtime-state UX.
+2. **Implemented baseline; qualification continues:** viewport selection,
+   hierarchy, component ordering, camera navigation, and transaction routing.
+3. **Implemented baseline; qualification continues:** Content Browser lifecycle,
+   reference safety, collections, search, import queue, revision/VCS views, and
+   explicit content/cook states.
+4. **In progress:** deepen the highest-value asset editors; the first mesh,
+   material, animation-controller, and effect-system authoring controls are now
+   joined by texture, input-map, Physics Asset, Animation Clip, Skeleton, and
+   Skin Binding controls. They are saveable, validated, undoable, cook-backed,
+   and Python-backed. Viewport manipulation, richer bulk editing, and measured
+   per-platform proof remain.
+5. Make cook/package/build guided, resumable, and diagnostically precise.
+6. Add the missing first-class asset workflows.
+7. Close native runtime and hardware qualification gates.
 
 ## Canonical model
 
@@ -131,8 +234,8 @@ Status meanings:
 |---|---|---|---|
 | Static mesh | Partial FBX/native mesh | Mesh editor: LODs, UVs, normals, materials, collision, metrics | P0 |
 | Skeletal mesh | Embedded/partial | Skeletal mesh editor with skin, morphs, LOD and bounds | P0 |
-| Skeleton / rig | Embedded rig graph | Skeleton hierarchy, sockets, retarget pose, validation | P0 |
-| Skin binding / deformer stack | `.tcskin` + embedded | Weight/deformer editor and portable bake policy | P0 |
+| Skeleton / rig | First-class hierarchy, sockets, retarget pose, validation and runtime cook | Add viewport bone/socket gizmos and compatibility diff | P0 |
+| Skin binding / deformer stack | First-class weights, deformers, transfer/export policy and compact GPU cook | Add viewport heat-map painting and executed package exporters | P0 |
 | Morph target / pose | Partial | Pose/morph library, sculpt/import, animation curves | P1 |
 | Collision geometry | Partial cooker | Collision editor, auto-generation, complexity and debug preview | P0 |
 | Terrain / landscape / height field | Partial procedural heightfield | Sculpt/paint, layers, holes, LOD, collision and streaming | P1 |
@@ -146,7 +249,7 @@ Status meanings:
 
 | Asset types | Current | Required editor or workflow | Priority |
 |---|---|---|---|
-| Texture 2D | Partial | Import inspector, channels, color space, mip/compression preview | P0 |
+| Texture 2D | First depth pass: import, channels, mip policy and platform compression overrides | Add decoded mip/channel comparison and measured platform memory | P0 |
 | Cube, array, 3D/volume texture | Partial GPU support | Slice/face preview and platform format settings | P1 |
 | Sprite, sprite atlas, flipbook | Missing | Slice/pack editor, pivots, borders and animation preview | P1 |
 | Render target | Runtime concept only | Size/format/lifetime editor and live preview | P1 |
@@ -165,7 +268,7 @@ Status meanings:
 
 | Asset types | Current | Required editor or workflow | Priority |
 |---|---|---|---|
-| Animation clip / sequence | Partial takes | Timeline editor, events, curves, compression and root motion | P0 |
+| Animation clip / sequence | First-class timeline, tracks, curves, events, markers, root motion, additive setup and compression | Add skeletal viewport playback, key manipulation and measured compression comparison | P0 |
 | Animation controller / state machine | Missing as asset | Graph, transition preview, parameters and debugger | P0 |
 | Blend tree / blend space | Partial runtime concepts | 1D/2D interactive blend editor | P1 |
 | Montage / animation layers | Partial | Sections, slots, sync markers and additive setup | P1 |
@@ -173,7 +276,7 @@ Status meanings:
 | Pose library | Partial | Thumbnail grid, capture/apply/blend | P1 |
 | IK rig / retarget profile | Partial rig services | Source/target mapping and live comparison | P1 |
 | Control rig / procedural rig graph | Embedded | Dedicated graph + viewport + hierarchy editor | P1 |
-| Physics asset / ragdoll | Partial joints/collision | Body and constraint editing with simulate mode | P1 |
+| Physics asset / ragdoll | Bodies, constraints, collision, physical-animation drives and solver profiles | Add interactive ragdoll simulate mode and per-body viewport gizmos | P1 |
 | Character definition | Embedded character world | Mesh, skeleton, controller, abilities, camera and AI bundle | P1 |
 | Facial rig / phoneme set | Partial blendshape support | Pose mapping, curves, audio/lipsync preview | P2 |
 
@@ -217,7 +320,7 @@ Status meanings:
 | Data asset / custom resource | First-class schema-driven resource with inheritance, validation, cook and bundles | Add generated form controls and bulk multi-edit | P1 |
 | Struct, enum, data table | First-class typed assets with inherited schemas and row validation | Add CSV round-trip UI and reference-safe field migration wizard | P1 |
 | Curve/table asset | Embedded values | Curve editor and CSV import/export | P1 |
-| Input action / input map | Missing | Device bindings, rebinding, contexts and live input debug | P0 |
+| Input action / input map | First-class actions, contexts, bindings, conflict audit and local value probe | Connect live probe to runtime device events and user rebinding persistence | P0 |
 | Game mode / ruleset / character definition | First-class ruleset and character definition with guided project assignment | Add controller/state/session asset split and live possession debugger | P1 |
 | Ability, effect, attribute set | Partial gameplay concepts | Data/graph editors and network prediction flags | P2 |
 | AI behavior tree / state tree | Partial intelligence services | Graph debugger, breakpoints and live agent selection | P1 |
@@ -231,7 +334,7 @@ Status meanings:
 
 | Asset types | Current | Required editor or workflow | Priority |
 |---|---|---|---|
-| UI document / widget prefab | Missing | Canvas, hierarchy, anchors, responsive preview and events | P1 |
+| UI document / widget prefab | Authoring preview; player rendering missing | Canvas, hierarchy, anchors, responsive preview and events | P1 |
 | UI theme / style sheet | Missing | Token/theme editor with state preview | P1 |
 | Font / font family | Missing | Glyph coverage, fallback, shaping and atlas settings | P1 |
 | Tile set / tile map | Missing | Tile rules, terrain painting, collision and navigation | P2 |

@@ -234,7 +234,7 @@ class MainWindowUiMixin:
             ("Planning", as_mcphost_model(AI_MODELS["plan"])),
             ("Code 7B", as_mcphost_model(AI_MODELS["code"])),
             ("DCC", as_mcphost_model(AI_MODELS["dcc"])),
-            ("Mechanical 3B", "ollama:qwen2.5-coder:3b"),
+            ("Qwen 3.5 4B local", "ollama:qwen3.5:4b"),
             ("Fallback Gen", as_mcphost_model(FALLBACK_GENERAL_MODEL)),
             ("Fallback Code", as_mcphost_model(FALLBACK_CODE_MODEL)),
             ("Default", DEFAULT_MODEL),
@@ -580,14 +580,31 @@ class MainWindowUiMixin:
         self.project_directories_label.setWordWrap(True)
         project_setup_layout.addWidget(self.project_directories_label)
 
+        self.project_scope_label = QLabel("1 indexed folder • Tech Connector included")
+        self.project_scope_label.setStyleSheet("color: #89a6bd; font-size: 10px;")
+        self.project_scope_label.setWordWrap(True)
+        project_setup_layout.addWidget(self.project_scope_label)
+
         project_actions = QHBoxLayout()
-        load_project_btn = QPushButton("Load Project")
+        load_project_btn = QPushButton("Set Primary")
         load_project_btn.clicked.connect(self.load_project)
+        load_project_btn.setToolTip("Choose the primary project used for saves, builds, and relative paths.")
         project_actions.addWidget(load_project_btn)
-        update_project_btn = QPushButton("Update Project")
-        update_project_btn.clicked.connect(self.refresh_project_tree_fast)
-        project_actions.addWidget(update_project_btn)
+        add_project_folder_btn = QPushButton("+ Add Folder")
+        add_project_folder_btn.clicked.connect(self.add_project_folder)
+        add_project_folder_btn.setToolTip("Add another folder or drive to project search and AI context.")
+        project_actions.addWidget(add_project_folder_btn)
         project_setup_layout.addLayout(project_actions)
+
+        project_scope_actions = QHBoxLayout()
+        update_project_btn = QPushButton("Refresh")
+        update_project_btn.clicked.connect(self.refresh_project_tree_fast)
+        project_scope_actions.addWidget(update_project_btn)
+        remove_project_folder_btn = QPushButton("Remove Folder")
+        remove_project_folder_btn.clicked.connect(self.remove_project_folder)
+        remove_project_folder_btn.setToolTip("Remove a secondary folder from this project. Files are not deleted.")
+        project_scope_actions.addWidget(remove_project_folder_btn)
+        project_setup_layout.addLayout(project_scope_actions)
 
         self.recent_project_box = QComboBox()
         self.recent_project_box.setToolTip("Recent projects")
@@ -1631,9 +1648,6 @@ class MainWindowUiMixin:
 
         try:
             self.wf_node_view.graphChanged.connect(self._handle_pipeline_graph_changed)
-            self.wf_node_view.linkCreated.connect(self._handle_pipeline_graph_changed)
-            self.wf_node_view.linkDeleted.connect(self._handle_pipeline_graph_changed)
-            self.wf_node_view.orderChanged.connect(lambda *_: self._handle_pipeline_graph_changed())
             self.wf_node_view.literalChanged.connect(self._handle_pipeline_attribute_literal_changed)
             self.wf_node_view.nodeDeleted.connect(self._handle_pipeline_node_deleted)
             self.wf_node_view.toolNodeRequested.connect(lambda symbol: self.add_builder_step(custom_sym=symbol))
@@ -1939,7 +1953,7 @@ class MainWindowUiMixin:
                 current_model = str(self.model_box.currentData() or "")
                 current_name = current_model.partition(":")[2].lower()
                 if not current_name or current_name.startswith(
-                    ("gpt-5.6", "gpt-5.3-codex")
+                    ("gpt-6", "gpt-5.6", "gpt-5.3-codex")
                 ):
                     preferred_model = "openai:" + preferred_openai_model(profile.depth)
                     preferred_index = self.model_box.findData(preferred_model)
@@ -2299,6 +2313,16 @@ class MainWindowUiMixin:
         if tabs is None:
             return
 
+        existing = self._find_workspace_tab(tab_name)
+        if existing is not None:
+            # A restored/reattached tab can outlive its Python cache attribute.
+            # Rebind it so cross-workspace features (Garden -> Kingdom) do not
+            # incorrectly treat the visible editor as disconnected.
+            if getattr(self, cache_name, None) is None:
+                setattr(self, cache_name, existing)
+            self._ensure_visible_workspace_tab(tab_name)
+            return
+
         if self._ensure_visible_workspace_tab(tab_name):
             return
 
@@ -2389,6 +2413,10 @@ class MainWindowUiMixin:
         hierarchy_layout.addWidget(QLabel("WORLD OUTLINER"))
         self.kingdom_world_outliner = QTreeWidget(hierarchy_panel)
         self.kingdom_world_outliner.setHeaderLabels(["Actor", "Type"])
+        self.kingdom_world_outliner.setAccessibleName("Kingdom runtime world outliner")
+        self.kingdom_world_outliner.setAccessibleDescription(
+            "Actors synchronized from Garden. Select an actor to inspect its runtime details."
+        )
         self.kingdom_world_outliner.setMinimumWidth(210)
         hierarchy_layout.addWidget(self.kingdom_world_outliner, 1)
         workspace.addWidget(hierarchy_panel)
@@ -2400,6 +2428,73 @@ class MainWindowUiMixin:
         viewport_toolbar = QHBoxLayout()
         viewport_toolbar.setContentsMargins(8, 5, 8, 5)
         viewport_toolbar.addWidget(QLabel("RUNTIME PREVIEW"))
+        from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profile_groups
+
+        viewport_toolbar.addWidget(QLabel("Lighting:"))
+        self.kingdom_lighting_combo = QComboBox(viewport_panel)
+        self.kingdom_lighting_combo.setAccessibleName("Kingdom lighting profile")
+        for category, profiles in lighting_profile_groups():
+            for profile in profiles:
+                self.kingdom_lighting_combo.addItem(
+                    f"{category} — {profile.display_name}", profile.profile_id
+                )
+                self.kingdom_lighting_combo.setItemData(
+                    self.kingdom_lighting_combo.count() - 1, profile.description, Qt.ToolTipRole
+                )
+        self._kingdom_lighting_profile = str(
+            self.settings.get("kingdom_lighting_profile") or "daylight"
+        )
+        selected_profile = self.kingdom_lighting_combo.findData(self._kingdom_lighting_profile)
+        self.kingdom_lighting_combo.setCurrentIndex(max(0, selected_profile))
+        self._kingdom_lighting_display_name = self.kingdom_lighting_combo.currentText().split(" — ", 1)[-1]
+        self.kingdom_lighting_combo.currentIndexChanged.connect(
+            lambda _index: self._set_kingdom_lighting_profile(
+                str(self.kingdom_lighting_combo.currentData() or "daylight")
+            )
+        )
+        viewport_toolbar.addWidget(self.kingdom_lighting_combo)
+
+        self.kingdom_view_mode_combo = QComboBox(viewport_panel)
+        self.kingdom_view_mode_combo.setAccessibleName("Kingdom viewport shading mode")
+        for label, mode in (("Lit", "lit"), ("Unlit", "unlit"), ("Lighting Only", "lighting_only")):
+            self.kingdom_view_mode_combo.addItem(label, mode)
+        saved_view_mode = str(self.settings.get("kingdom_view_mode") or "lit")
+        if saved_view_mode not in {"lit", "unlit", "lighting_only"}:
+            saved_view_mode = "lit"
+        self.kingdom_view_mode_combo.setCurrentIndex(
+            max(0, self.kingdom_view_mode_combo.findData(saved_view_mode))
+        )
+        self.kingdom_view_mode_combo.setToolTip("Change the editor visualization without modifying the level.")
+        self.kingdom_view_mode_combo.currentIndexChanged.connect(
+            lambda _index: self._set_kingdom_view_mode(
+                str(self.kingdom_view_mode_combo.currentData() or "lit")
+            )
+        )
+        viewport_toolbar.addWidget(self.kingdom_view_mode_combo)
+
+        self.kingdom_exposure_combo = QComboBox(viewport_panel)
+        self.kingdom_exposure_combo.setAccessibleName("Kingdom viewport exposure")
+        for label, multiplier in (("½×", 0.5), ("1×", 1.0), ("1½×", 1.5), ("2×", 2.0)):
+            self.kingdom_exposure_combo.addItem(f"Exposure {label}", multiplier)
+        saved_exposure = float(self.settings.get("kingdom_viewport_exposure", 1.0) or 1.0)
+        exposure_index = self.kingdom_exposure_combo.findData(saved_exposure)
+        self.kingdom_exposure_combo.setCurrentIndex(exposure_index if exposure_index >= 0 else 1)
+        self.kingdom_exposure_combo.currentIndexChanged.connect(
+            lambda _index: self._set_kingdom_viewport_exposure(
+                float(self.kingdom_exposure_combo.currentData() or 1.0)
+            )
+        )
+        viewport_toolbar.addWidget(self.kingdom_exposure_combo)
+
+        self.kingdom_grid_toggle = QCheckBox("Grid", viewport_panel)
+        self.kingdom_grid_toggle.setChecked(bool(self.settings.get("kingdom_show_grid", True)))
+        self.kingdom_grid_toggle.toggled.connect(self._set_kingdom_grid_visible)
+        viewport_toolbar.addWidget(self.kingdom_grid_toggle)
+
+        frame_level_btn = QPushButton("Frame", viewport_panel)
+        frame_level_btn.setToolTip("Frame the complete level in the runtime camera.")
+        frame_level_btn.clicked.connect(self._frame_kingdom_level)
+        viewport_toolbar.addWidget(frame_level_btn)
         viewport_toolbar.addStretch(1)
         self.kingdom_viewport_status = QLabel("Waiting for a Garden level")
         self.kingdom_viewport_status.setStyleSheet("color:#7fd7ff; font-size:10px;")
@@ -2409,7 +2504,23 @@ class MainWindowUiMixin:
             from tech_connector.ui.three_d_gpu_viewport import ThreeDGpuViewport
 
             self.kingdom_runtime_viewport = ThreeDGpuViewport(viewport_panel)
+            self.kingdom_runtime_viewport.setAccessibleName("Kingdom runtime level preview")
+            self.kingdom_runtime_viewport.setAccessibleDescription(
+                "Interactive rendered preview of the level synchronized from Garden."
+            )
             self.kingdom_runtime_viewport.setMinimumSize(440, 300)
+            self.kingdom_runtime_viewport.set_lighting_profile(
+                self._kingdom_lighting_profile
+            )
+            self.kingdom_runtime_viewport.set_viewport_mode(saved_view_mode)
+            self.kingdom_runtime_viewport.set_viewport_exposure(saved_exposure)
+            self.kingdom_runtime_viewport.set_grid_visible(self.kingdom_grid_toggle.isChecked())
+            backend_failed = getattr(self.kingdom_runtime_viewport, "backend_failed", None)
+            if backend_failed is not None and hasattr(backend_failed, "connect"):
+                backend_failed.connect(self._show_kingdom_preview_failure)
+            last_error = str(getattr(self.kingdom_runtime_viewport, "last_error", "") or "")
+            if last_error:
+                self._show_kingdom_preview_failure(last_error)
             viewport_layout.addWidget(self.kingdom_runtime_viewport, 1)
         except Exception as exc:
             self.kingdom_runtime_viewport = None
@@ -2522,6 +2633,7 @@ class MainWindowUiMixin:
             router.register(editor_id, "Assets", self._open_asset_in_assets_inspector)
         self.asset_editor_router = router
         browser.assetActivated.connect(self._open_asset_from_browser)
+        browser.assetPlacementRequested.connect(self._place_asset_from_browser)
         browser.statusMessage.connect(self._show_asset_browser_status)
         self.asset_browser = browser
         return browser
@@ -2550,6 +2662,23 @@ class MainWindowUiMixin:
             return
         receipt = router.open(source, descriptor, _asset_id)
         self._show_asset_browser_status(receipt.message)
+
+    def _place_asset_from_browser(self, path: str, type_id: str, asset_id: str = "") -> bool:
+        self.open_garden_workspace_tab()
+        viewer = self._garden_viewer_widget()
+        place = getattr(viewer, "place_asset_from_browser", None)
+        if not callable(place):
+            self._show_asset_browser_status("Garden is not ready to place this asset yet.")
+            return False
+        placed = bool(place({
+            "path": str(path or ""),
+            "type_id": str(type_id or ""),
+            "asset_id": str(asset_id or ""),
+            "name": Path(str(path or "Asset")).name,
+        }))
+        if placed:
+            self._show_asset_browser_status(f"Placed {Path(path).name} in the current Garden level.")
+        return placed
 
     def _open_asset_in_garden(self, path: str, descriptor, asset_id: str) -> bool:
         self.open_garden_workspace_tab()
@@ -2622,9 +2751,7 @@ class MainWindowUiMixin:
                 "tc.simulation_profile", "tc.audio_clip", "tc.behavior", "tc.gameplay_graph",
             }
             if viewer is not None and type_id in placeable and hasattr(viewer, "place_asset_from_browser"):
-                viewer.place_asset_from_browser(
-                    {"path": path, "type_id": type_id, "asset_id": asset_id, "name": Path(path).name}
-                )
+                self._place_asset_from_browser(path, type_id, asset_id)
             else:
                 self._open_asset_in_garden(path, descriptor, asset_id)
 
@@ -2651,12 +2778,143 @@ class MainWindowUiMixin:
             return None
         return getattr(garden_tab, "garden_viewer", garden_tab)
 
+    def _remember_garden_level(self, path: str) -> bool:
+        """Keep the last real Garden level available across tab and app restarts."""
+        scene = str(Path(path).expanduser().resolve()) if path else ""
+        if not scene or not Path(scene).is_file():
+            return False
+        self.settings["last_tc_player_scene"] = scene
+        service = getattr(self, "service", None)
+        save_settings = getattr(service, "save_settings", None)
+        if callable(save_settings):
+            try:
+                save_settings(self.settings)
+            except TypeError:
+                save_settings()
+        return True
+
+    def _restore_last_garden_level(self) -> bool:
+        viewer = self._garden_viewer_widget()
+        if viewer is None or str(getattr(viewer, "_federated_scene_path", "") or ""):
+            return False
+        path = str(self.settings.get("last_tc_player_scene") or "")
+        if not path or not Path(path).is_file():
+            return False
+        loader = getattr(viewer, "load_federated_scene_file", None)
+        if not callable(loader):
+            return False
+        loaded, _message = loader(path, interactive=False)
+        return bool(loaded)
+
+    def _show_kingdom_preview_failure(self, message: str) -> None:
+        self._kingdom_preview_error = str(message or "Runtime preview failed to initialize.")
+        status = getattr(self, "kingdom_viewport_status", None)
+        if status is not None:
+            status.setText(f"Preview unavailable: {self._kingdom_preview_error}")
+
+    def _set_kingdom_lighting_profile(self, profile_id: str, *, persist: bool = True) -> str:
+        from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profile
+
+        profile = lighting_profile(profile_id)
+        self._kingdom_lighting_profile = profile.profile_id
+        self._kingdom_lighting_display_name = profile.display_name
+        settings = getattr(self, "settings", None)
+        if isinstance(settings, dict):
+            settings["kingdom_lighting_profile"] = profile.profile_id
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        apply_profile = getattr(preview, "set_lighting_profile", None)
+        if callable(apply_profile):
+            apply_profile(profile.profile_id)
+        combo = getattr(self, "kingdom_lighting_combo", None)
+        if combo is not None and combo.currentData() != profile.profile_id:
+            index = combo.findData(profile.profile_id)
+            if index >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(index)
+                combo.blockSignals(False)
+        if persist:
+            save_settings = getattr(getattr(self, "service", None), "save_settings", None)
+            if callable(save_settings):
+                try:
+                    save_settings(settings)
+                except TypeError:
+                    save_settings()
+        self._update_kingdom_level_context()
+        return profile.profile_id
+
+    def _store_kingdom_viewport_setting(self, key: str, value) -> None:
+        settings = getattr(self, "settings", None)
+        if isinstance(settings, dict):
+            settings[key] = value
+        save_settings = getattr(getattr(self, "service", None), "save_settings", None)
+        if callable(save_settings):
+            try:
+                save_settings(settings)
+            except TypeError:
+                save_settings()
+
+    def _set_kingdom_view_mode(self, mode: str) -> str:
+        normalized = str(mode or "lit")
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        setter = getattr(preview, "set_viewport_mode", None)
+        if callable(setter):
+            normalized = str(setter(normalized))
+        self._store_kingdom_viewport_setting("kingdom_view_mode", normalized)
+        return normalized
+
+    def _set_kingdom_viewport_exposure(self, multiplier: float) -> float:
+        value = max(0.1, min(8.0, float(multiplier)))
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        setter = getattr(preview, "set_viewport_exposure", None)
+        if callable(setter):
+            value = float(setter(value))
+        self._store_kingdom_viewport_setting("kingdom_viewport_exposure", value)
+        return value
+
+    def _set_kingdom_grid_visible(self, visible: bool) -> bool:
+        enabled = bool(visible)
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        setter = getattr(preview, "set_grid_visible", None)
+        if callable(setter):
+            enabled = bool(setter(enabled))
+        self._store_kingdom_viewport_setting("kingdom_show_grid", enabled)
+        return enabled
+
+    def _frame_kingdom_level(self) -> bool:
+        viewer = self._garden_viewer_widget()
+        preview = getattr(self, "kingdom_runtime_viewport", None)
+        frame_scene = getattr(preview, "frame_scene", None)
+        if viewer is None or not callable(frame_scene):
+            return False
+        camera = getattr(viewer, "viewport_camera", None)
+        framed = bool(frame_scene(
+            viewer.mesh,
+            fov_degrees=float(getattr(camera, "fov_degrees", 45.0)),
+            aspect_ratio=float(getattr(camera, "aspect_ratio", 0.0)),
+        ))
+        if framed:
+            self._update_kingdom_level_context()
+        return framed
+
+    def _garden_level_changed(self, path: str) -> None:
+        self._remember_garden_level(path)
+        self._sync_kingdom_preview_from_garden()
+
     def _update_kingdom_level_context(self) -> None:
         viewer = self._garden_viewer_widget()
         level_label = getattr(self, "kingdom_level_label", None)
         status_label = getattr(self, "kingdom_viewport_status", None)
         outliner = getattr(self, "kingdom_world_outliner", None)
+        try:
+            from shiboken6 import isValid
+            if level_label is not None and not isValid(level_label): level_label = None
+            if status_label is not None and not isValid(status_label): status_label = None
+            if outliner is not None and not isValid(outliner): outliner = None
+        except ImportError:
+            pass
         if viewer is None:
+            self._kingdom_outliner_signature = None
+            self._kingdom_effects_signature = None
             if level_label is not None:
                 level_label.setText("Level: No Garden level connected — choose ‘Edit Level in Garden’ to begin")
             return
@@ -2666,17 +2924,50 @@ class MainWindowUiMixin:
         if level_label is not None:
             level_label.setText(f"Level: {level_name}{'  •  Unsaved changes' if dirty else '  •  Synced'}")
         if outliner is not None:
-            outliner.clear()
             proxies = list(getattr(getattr(viewer, "mesh", None), "scene_proxy_objects", []) or [])
+            rows = []
             for index, proxy in enumerate(proxies):
                 getter = proxy.get if hasattr(proxy, "get") else lambda key, default=None: getattr(proxy, key, default)
                 name = str(getter("name") or getter("object_name") or getter("path") or f"Actor {index + 1}")
                 kind = str(getter("type") or getter("object_type") or getter("provider_id") or "Scene object")
-                outliner.addTopLevelItem(QTreeWidgetItem([name, kind]))
-            if not proxies:
-                outliner.addTopLevelItem(QTreeWidgetItem(["No compiled actors yet", "Open or create assets in Garden"]))
+                rows.append((name, kind))
+            if not rows:
+                rows.append(("No compiled actors yet", "Open or create assets in Garden"))
+            signature = tuple(rows)
+            if signature != getattr(self, "_kingdom_outliner_signature", None):
+                outliner.clear()
+                for name, kind in rows:
+                    outliner.addTopLevelItem(QTreeWidgetItem([name, kind]))
+                self._kingdom_outliner_signature = signature
         if status_label is not None:
-            status_label.setText("Previewing the Garden scene" if path else "Unsaved Garden scene")
+            preview_error = str(getattr(self, "_kingdom_preview_error", "") or "")
+            mesh = getattr(viewer, "mesh", None)
+            vertices = getattr(mesh, "vertices", ()) or ()
+            faces = getattr(mesh, "faces", ()) or ()
+            if preview_error:
+                status_label.setText(f"Preview unavailable: {preview_error}")
+            elif not vertices or not faces:
+                status_label.setText("No renderable geometry yet — add or connect scene meshes in Garden")
+            else:
+                actor_count = len(list(getattr(mesh, "scene_proxy_objects", []) or []))
+                source = "Garden scene" if path else "unsaved Garden scene"
+                from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profile
+                selected_lighting = lighting_profile(
+                    str(getattr(self, "_kingdom_lighting_profile", "") or "daylight")
+                )
+                lighting_name = selected_lighting.display_name
+                lighting_model = str(selected_lighting.rendering.get("lighting_model") or "physically_based")
+                renderer_name = {"unlit": "Unlit", "toon": "Stylized"}.get(lighting_model, "PBR")
+                geometry = getattr(getattr(self, "kingdom_runtime_viewport", None), "geometry", None)
+                upload_ms = max(
+                    float(getattr(geometry, "last_static_upload_ms", 0.0) or 0.0),
+                    float(getattr(geometry, "last_position_upload_ms", 0.0) or 0.0),
+                )
+                upload_text = f" · upload {upload_ms:.1f} ms" if upload_ms > 0.0 else ""
+                status_label.setText(
+                    f"Previewing {source} · {lighting_name} · {renderer_name} · "
+                    f"{actor_count} actors · {len(faces):,} triangles{upload_text}"
+                )
 
     def _sync_kingdom_preview_from_garden(self) -> bool:
         viewer = self._garden_viewer_widget()
@@ -2686,20 +2977,65 @@ class MainWindowUiMixin:
             return False
         if preview is not None:
             try:
+                self._kingdom_preview_error = ""
+                mesh = viewer.mesh
+                topology_signature = str(getattr(viewer, "_last_scene_topology_signature", "") or "")
                 preview.set_scene(
-                    viewer.mesh,
+                    mesh,
                     dict(getattr(viewer, "_dcc_deformation_bindings", {}) or {}),
-                    topology_signature=str(getattr(viewer, "_last_scene_topology_signature", "") or ""),
+                    topology_signature=topology_signature,
+                    geometry_revision=int(getattr(viewer, "_paint_geometry_revision", 0)),
                 )
                 camera = getattr(viewer, "viewport_camera", None)
                 if camera is not None:
                     preview.set_camera(camera.eye, camera.target, camera.fov_degrees, camera.aspect_ratio)
+                lighting_profile = str(
+                    getattr(self, "_kingdom_lighting_profile", "")
+                    or (getattr(self, "settings", {}) or {}).get("kingdom_lighting_profile")
+                    or getattr(viewer, "viewport_lighting_profile", "")
+                    or "daylight"
+                )
+                set_lighting_profile = getattr(preview, "set_lighting_profile", None)
+                if callable(set_lighting_profile):
+                    set_lighting_profile(lighting_profile)
+                vertices = getattr(mesh, "vertices", ()) or ()
+                faces = getattr(mesh, "faces", ()) or ()
+                level_signature = (
+                    id(mesh),
+                    str(getattr(viewer, "_federated_scene_path", "") or ""),
+                    topology_signature or f"{len(vertices)}:{len(faces)}",
+                )
+                if level_signature != getattr(self, "_kingdom_framed_scene_signature", None):
+                    frame_scene = getattr(preview, "frame_scene", None)
+                    framed = bool(frame_scene(
+                        mesh,
+                        fov_degrees=float(getattr(camera, "fov_degrees", 45.0)),
+                        aspect_ratio=float(getattr(camera, "aspect_ratio", 0.0)),
+                    )) if callable(frame_scene) else False
+                    if framed:
+                        self._kingdom_framed_scene_signature = level_signature
                 world = getattr(viewer, "simulation_world", None)
                 if world is not None:
-                    preview.update_effects(world)
+                    system = getattr(world, "effect_system", None)
+                    emitter_signature = tuple(
+                        (
+                            str(getattr(emitter, "emitter_id", "")),
+                            repr(dict(getattr(emitter, "renderer", {}) or {})),
+                        )
+                        for emitter in list(getattr(system, "emitters", []) or [])
+                    )
+                    effects_signature = (
+                        id(world), id(system), float(getattr(world, "time_seconds", 0.0)),
+                        int(getattr(viewer, "simulation_frame", 0)),
+                        len(getattr(world, "particles", ()) or ()), emitter_signature,
+                    )
+                    if effects_signature != getattr(self, "_kingdom_effects_signature", None):
+                        preview.update_effects(world)
+                        self._kingdom_effects_signature = effects_signature
+                else:
+                    self._kingdom_effects_signature = None
             except Exception as exc:
-                if getattr(self, "kingdom_viewport_status", None) is not None:
-                    self.kingdom_viewport_status.setText(f"Preview fallback: {exc}")
+                self._kingdom_preview_error = str(exc)
         self._update_kingdom_level_context()
         return True
 
@@ -2710,13 +3046,16 @@ class MainWindowUiMixin:
             viewer = self._garden_viewer_widget()
         if viewer is None:
             return ""
+        # Keep Kingdom useful even when the user is not ready to name/save a
+        # newly authored level yet. Playing still correctly requires a file.
+        self._sync_kingdom_preview_from_garden()
         path = str(getattr(viewer, "_federated_scene_path", "") or "")
         saved = viewer._save_federated_scene_to_path(path) if path else viewer.save_federated_scene_dialog()
         if not saved:
             self._set_kingdom_session_state("ready", "Level was not saved; playtest was not changed.")
             return ""
         path = str(getattr(viewer, "_federated_scene_path", "") or "")
-        self.settings["last_tc_player_scene"] = path
+        self._remember_garden_level(path)
         self._sync_kingdom_preview_from_garden()
         self._set_kingdom_session_state("ready", "Garden changes saved and synchronized.")
         garden_status = getattr(self, "garden_sync_status", None)
@@ -2788,13 +3127,18 @@ class MainWindowUiMixin:
         workspace.garden_viewer = workspace.viewport
         workspace.viewport.invert_orbit_x = bool(self.settings.get("garden_invert_orbit_x", False))
         workspace.viewport.invert_orbit_y = bool(self.settings.get("garden_invert_orbit_y", False))
+        workspace.levelChanged.connect(self._garden_level_changed)
         workspace.playRequested.connect(lambda path: (self.open_the_kingdom_workspace_tab(), self.play_tc_scene_path(path)))
+        workspace.stopRequested.connect(self.stop_tc_play_in_editor)
+        workspace.resetRequested.connect(self.restart_tc_play_in_editor)
+        workspace.ejectRequested.connect(self.open_garden_workspace_tab)
         workspace.statusMessage.connect(self._show_asset_browser_status)
         self.garden_edit_mode_btn = workspace.edit_action
         self.garden_simulate_mode_btn = workspace.simulate_action
         self.garden_play_mode_btn = workspace.play_action
         self.garden_sync_status = workspace.status_label
         self.engine_workspace = workspace
+        QTimer.singleShot(0, self._restore_last_garden_level)
         return workspace
 
     def _set_garden_workspace_mode(self, mode: str) -> bool:
@@ -2839,6 +3183,18 @@ class MainWindowUiMixin:
             "_the_kingdom_workspace_tab",
             self._build_the_kingdom_workspace_tab,
         )
+        last_level = str(self.settings.get("last_tc_player_scene") or "")
+        if self._garden_viewer_widget() is None and last_level and Path(last_level).is_file():
+            self.open_garden_workspace_tab()
+            self._restore_last_garden_level()
+            self._show_workspace_tab(
+                "The Kingdom (Game Engine Runtime Suite)",
+                "_the_kingdom_workspace_tab",
+                self._build_the_kingdom_workspace_tab,
+            )
+        # Activating an existing tab must refresh too; previously only the
+        # first construction queued a refresh, leaving a black stale preview.
+        QTimer.singleShot(0, self._sync_kingdom_preview_from_garden)
 
     def open_ophanim_workspace_tab(self):
         self._show_workspace_tab(

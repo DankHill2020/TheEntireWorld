@@ -95,6 +95,13 @@ def new_binding(
     }
 
 
+def new_sequence_folder(name: str, *, parent_id: str = "") -> dict[str, Any]:
+    return {
+        "id": f"folder_{uuid.uuid4().hex[:12]}", "name": str(name or "Folder"),
+        "parent_id": str(parent_id), "color": "#526779", "expanded": True,
+    }
+
+
 def new_track(
     track_type: str, name: str = "", *, binding_id: str = "", parent_id: str = "",
 ) -> dict[str, Any]:
@@ -177,6 +184,27 @@ def add_channel_key(
     return key
 
 
+def transform_channel_keys(
+    channel: Mapping[str, Any], *, frame_offset: float = 0.0, value_offset: float = 0.0,
+    frame_scale: float = 1.0, value_scale: float = 1.0, pivot_frame: float = 0.0,
+    pivot_value: float = 0.0, snap_interval: float = 0.0,
+) -> dict[str, Any]:
+    """Move, scale, and optionally snap all numeric keys in a channel."""
+    result = deepcopy(dict(channel)); transformed = []
+    for raw in result.get("keys") or ():
+        key = deepcopy(dict(raw))
+        frame = pivot_frame + (float(key.get("frame") or 0.0) - pivot_frame) * float(frame_scale) + float(frame_offset)
+        if snap_interval > 0.0:
+            frame = round(frame / snap_interval) * snap_interval
+        key["frame"] = frame
+        if isinstance(key.get("value"), (int, float)) and not isinstance(key.get("value"), bool):
+            key["value"] = pivot_value + (float(key["value"]) - pivot_value) * float(value_scale) + float(value_offset)
+        transformed.append(key)
+    transformed.sort(key=lambda item: float(item.get("frame") or 0.0))
+    result["keys"] = transformed
+    return result
+
+
 def validate_sequence(values: Mapping[str, Any] | None) -> tuple[SequenceIssue, ...]:
     data = dict(values or {})
     issues: list[SequenceIssue] = []
@@ -202,6 +230,16 @@ def validate_sequence(values: Mapping[str, Any] | None) -> tuple[SequenceIssue, 
             issues.append(SequenceIssue("error", "unresolved_skeletal_attachment", "Bone or socket bindings require a skeleton, parent binding, or bound object.", path))
         if binding.get("component_path") and not (parent_id or binding.get("object_id")):
             issues.append(SequenceIssue("error", "unresolved_component", "Component bindings require a parent binding or bound object.", path))
+    folders = [dict(item) for item in data.get("folders") or () if isinstance(item, Mapping)]
+    folder_ids = {str(item.get("id") or "") for item in folders}
+    if "" in folder_ids or len(folder_ids) != len(folders):
+        issues.append(SequenceIssue("error", "invalid_folders", "Folder IDs must be present and unique.", "folders"))
+    for index, folder in enumerate(folders):
+        parent_id = str(folder.get("parent_id") or "")
+        if parent_id and parent_id not in folder_ids:
+            issues.append(SequenceIssue("error", "missing_parent_folder", f"Folder references missing parent '{parent_id}'.", f"folders[{index}]"))
+    if _has_parent_cycle({str(item.get("id") or ""): str(item.get("parent_id") or "") for item in folders}):
+        issues.append(SequenceIssue("error", "recursive_folder_hierarchy", "Sequence folders cannot contain a parent cycle.", "folders"))
     tracks = [dict(item) for item in data.get("tracks") or () if isinstance(item, Mapping)]
     track_ids = {str(item.get("id") or "") for item in tracks}
     if "" in track_ids or len(track_ids) != len(tracks):
@@ -219,8 +257,8 @@ def validate_sequence(values: Mapping[str, Any] | None) -> tuple[SequenceIssue, 
         if definition.get("binding") and not binding_id:
             issues.append(SequenceIssue("warning", "unbound_track", f"{definition.get('label', kind)} track is not bound to an object, component, or bone.", path))
         parent_id = str(track.get("parent_id") or "")
-        if parent_id and parent_id not in track_ids:
-            issues.append(SequenceIssue("error", "missing_parent_track", f"Track references missing parent '{parent_id}'.", path))
+        if parent_id and parent_id not in track_ids | folder_ids:
+            issues.append(SequenceIssue("error", "missing_parent_track", f"Track references missing track or folder '{parent_id}'.", path))
         rows: dict[int, list[tuple[int, int, str]]] = {}
         for section_index, raw_section in enumerate(track.get("sections") or ()):
             section = dict(raw_section) if isinstance(raw_section, Mapping) else {}
@@ -258,6 +296,10 @@ def validate_sequence(values: Mapping[str, Any] | None) -> tuple[SequenceIssue, 
                 if section_start < other_end and other_start < section_end and kind in {"camera_cut", "sub_sequence"}:
                     issues.append(SequenceIssue("warning", "overlapping_sections", f"'{section.get('name')}' overlaps '{other_name}' on row {row}.", section_path))
             rows[row].append((section_start, section_end, str(section.get("name") or section_id)))
+    track_parents = {str(item.get("id") or ""): str(item.get("parent_id") or "") for item in tracks
+                     if str(item.get("parent_id") or "") in track_ids}
+    if _has_parent_cycle(track_parents):
+        issues.append(SequenceIssue("error", "recursive_track_hierarchy", "Sequence tracks cannot contain a parent cycle.", "tracks"))
     render = dict(data.get("render_settings") or {})
     resolution = list(render.get("resolution") or ())
     if len(resolution) != 2 or any(int(value) <= 0 for value in resolution):
@@ -321,10 +363,26 @@ def evaluate_channel(channel: Mapping[str, Any], frame: float) -> Any:
     for first, second in zip(keys, keys[1:]):
         start, end = float(first.get("frame") or 0.0), float(second.get("frame") or 0.0)
         if start <= target <= end:
-            if str(first.get("interpolation") or "linear").casefold() in {"constant", "step"}: return deepcopy(first.get("value"))
+            interpolation = str(first.get("interpolation") or "linear").casefold()
+            if interpolation in {"constant", "step"}: return deepcopy(first.get("value"))
             a, b = first.get("value"), second.get("value")
             if isinstance(a, (int, float)) and isinstance(b, (int, float)):
                 alpha = (target - start) / max(1.0e-9, end - start)
+                if interpolation in {"ease", "smooth", "auto"}:
+                    alpha = alpha * alpha * (3.0 - 2.0 * alpha)
+                elif interpolation == "ease_in":
+                    alpha = alpha * alpha
+                elif interpolation == "ease_out":
+                    alpha = 1.0 - (1.0 - alpha) * (1.0 - alpha)
+                elif interpolation in {"bezier", "cubic", "user"}:
+                    duration = max(1.0e-9, end - start)
+                    m0 = float(first.get("out_tangent") or 0.0) * duration
+                    m1 = float(second.get("in_tangent") or 0.0) * duration
+                    h00 = 2 * alpha ** 3 - 3 * alpha ** 2 + 1
+                    h10 = alpha ** 3 - 2 * alpha ** 2 + alpha
+                    h01 = -2 * alpha ** 3 + 3 * alpha ** 2
+                    h11 = alpha ** 3 - alpha ** 2
+                    return h00 * float(a) + h10 * m0 + h01 * float(b) + h11 * m1
                 return float(a) + (float(b) - float(a)) * alpha
             return deepcopy(first.get("value"))
     return deepcopy(keys[-1].get("value"))
@@ -499,6 +557,10 @@ class SequenceAssetService:
         values = self.properties(asset_id); binding = new_binding(name, **target)
         values.setdefault("bindings", []).append(binding); self.update(asset_id, values); return deepcopy(binding)
 
+    def add_folder(self, asset_id: str, name: str, *, parent_id: str = "") -> dict[str, Any]:
+        values = self.properties(asset_id); folder = new_sequence_folder(name, parent_id=parent_id)
+        values.setdefault("folders", []).append(folder); self.update(asset_id, values); return deepcopy(folder)
+
     def add_track(
         self, asset_id: str, track_type: str, name: str = "", *, binding_id: str = "", parent_id: str = "",
     ) -> dict[str, Any]:
@@ -519,12 +581,26 @@ class SequenceAssetService:
     def add_key(
         self, asset_id: str, track_id: str, section_id: str, channel_name: str,
         frame: float, value: Any, *, interpolation: str = "linear",
+        in_tangent: float = 0.0, out_tangent: float = 0.0,
     ) -> dict[str, Any]:
         values = self.properties(asset_id); track = _find_track(values, track_id)
         section = next((item for item in track.get("sections") or () if str(item.get("id") or "") == str(section_id)), None)
         if section is None: raise KeyError(f"Sequence section is unavailable: {section_id}")
-        key = add_channel_key(section, channel_name, frame, value, interpolation=interpolation)
+        key = add_channel_key(section, channel_name, frame, value, interpolation=interpolation,
+                              in_tangent=in_tangent, out_tangent=out_tangent)
         self.update(asset_id, values); return deepcopy(key)
+
+    def transform_keys(
+        self, asset_id: str, track_id: str, section_id: str, channel_name: str, **transform: float,
+    ) -> dict[str, Any]:
+        values = self.properties(asset_id); track = _find_track(values, track_id)
+        section = next((item for item in track.get("sections") or () if str(item.get("id") or "") == str(section_id)), None)
+        if section is None: raise KeyError(f"Sequence section is unavailable: {section_id}")
+        channels = list(section.get("channels") or ())
+        index = next((i for i, item in enumerate(channels) if str(item.get("id") or item.get("name") or "") == str(channel_name)), -1)
+        if index < 0: raise KeyError(f"Sequence channel is unavailable: {channel_name}")
+        channels[index] = transform_channel_keys(channels[index], **transform); section["channels"] = channels
+        self.update(asset_id, values); return deepcopy(channels[index])
 
     def remove_track(self, asset_id: str, track_id: str) -> bool:
         values = self.properties(asset_id); before = len(values.get("tracks") or ())
@@ -569,6 +645,15 @@ def _find_track(values: Mapping[str, Any], track_id: str) -> dict[str, Any]:
     track = next((item for item in values.get("tracks") or () if str(item.get("id") or "") == str(track_id)), None)
     if track is None: raise KeyError(f"Sequence track is unavailable: {track_id}")
     return track
+
+
+def _has_parent_cycle(parents: Mapping[str, str]) -> bool:
+    for identifier in parents:
+        seen: set[str] = set(); current = identifier
+        while current in parents and parents[current]:
+            if current in seen: return True
+            seen.add(current); current = parents[current]
+    return False
 
 
 def _value_type(value: Any) -> str:

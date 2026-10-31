@@ -873,7 +873,7 @@ def _repair_explicit_path_policy_semantics(
                     )
                 )
         replacement_body = ast.parse(
-            f"""root = Path({project_root_name}).resolve()
+            f"""root = Path({project_root_name}).absolute().resolve()
 candidate = Path({requested_name})
 if not candidate.is_absolute():
     candidate = root / candidate

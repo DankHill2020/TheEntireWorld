@@ -111,6 +111,7 @@ def run_benchmark(args: argparse.Namespace) -> BenchmarkReport:
     cases = _selected_cases(args.case)
     agents = [args.agent] if args.agent != "both" else ["tech", "codex"]
     codex_models = args.codex_model or ["default"]
+    tech_proof_model = str(getattr(args, "tech_proof_model", "") or "")
     records: list[dict[str, Any]] = []
 
     for case in cases:
@@ -134,6 +135,7 @@ def run_benchmark(args: argparse.Namespace) -> BenchmarkReport:
                             workspace,
                             attempt_dir,
                             model=model,
+                            proof_model=tech_proof_model,
                             repetition=repetition,
                             timeout_seconds=args.tech_timeout,
                             llm_timeout_seconds=args.llm_timeout,
@@ -183,6 +185,7 @@ def run_benchmark(args: argparse.Namespace) -> BenchmarkReport:
             "codex_api_key_present": bool(os.environ.get("CODEX_API_KEY")),
             "case_ids": [case.case_id for case in cases],
             "repetitions": args.repeat,
+            "tech_proof_model": tech_proof_model,
         },
         runs=records,
         summary=aggregate_runs(records),
@@ -206,6 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case", action="append", default=[], help="Case ID; repeat to select multiple cases.")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--tech-model", default="ollama:qwen2.5-coder:7b")
+    parser.add_argument(
+        "--tech-proof-model",
+        default="",
+        help="Experimental local-only model for disposable behavior proof; leaves the main model unchanged.",
+    )
     parser.add_argument("--codex-model", action="append", default=[], help="Codex model; repeat for a model matrix. Default uses the CLI default.")
     parser.add_argument(
         "--codex-executable",

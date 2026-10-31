@@ -8,6 +8,7 @@ def import_animation_verified(
     skeleton_path,
     destination_path,
     destination_name="",
+    replace_existing=True,
 ):
     """Import animation-only FBX data and verify the final Asset Registry path."""
     import unreal
@@ -19,7 +20,7 @@ def import_animation_verified(
         destination_path=str(destination_path),
         subject="animation",
         skeleton_path=str(skeleton_path),
-        replace_existing=True,
+        replace_existing=bool(replace_existing),
         save=True,
     )
     imported_paths = list(result.get("imported_paths") or [])

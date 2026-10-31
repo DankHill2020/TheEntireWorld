@@ -291,6 +291,41 @@ class LayerStack:
         painter.end()
         return result
 
+    def composite_region(self, rect: QRectF) -> tuple[QImage, QRectF]:
+        """Composite only a dirty canvas region for interactive painting."""
+        bounds = QRectF(0.0, 0.0, float(self.width), float(self.height)).intersected(QRectF(rect)).toAlignedRect()
+        if bounds.isEmpty():
+            return QImage(), QRectF()
+        result = QImage(bounds.size(), QImage.Format_ARGB32_Premultiplied)
+        result.fill(QColor(15, 15, 20, 255))
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.Antialiasing)
+        for layer in self.layers:
+            if not layer.visible or layer.image.isNull():
+                continue
+            painter.setOpacity(layer.opacity)
+            layer_region = layer.image.copy(bounds)
+            if layer.mask is not None and layer.mask_enabled and not layer.mask.isNull():
+                mask_painter = QPainter(layer_region)
+                mask_painter.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+                mask_painter.drawImage(0, 0, layer.mask.copy(bounds))
+                mask_painter.end()
+            if layer.blend_mode == "Multiply":
+                painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+            elif layer.blend_mode == "Screen":
+                painter.setCompositionMode(QPainter.CompositionMode_Screen)
+            elif layer.blend_mode == "Overlay":
+                painter.setCompositionMode(QPainter.CompositionMode_Overlay)
+            elif layer.blend_mode in {"Add", "Additive"}:
+                painter.setCompositionMode(QPainter.CompositionMode_Plus)
+            elif layer.blend_mode == "Difference":
+                painter.setCompositionMode(QPainter.CompositionMode_Difference)
+            else:
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            painter.drawImage(0, 0, layer_region)
+        painter.end()
+        return result, QRectF(bounds)
+
     def save_snapshot(self):
         snapshot = [l.copy() for l in self.layers]
         if self.history_index < len(self.history) - 1:
@@ -535,6 +570,7 @@ class ImageViewerGraphicsView(QGraphicsView):
     """GPU-Accelerated 60 FPS viewport for zooming, panning, interactive brushes, 2D Grid, and Perspective Overlays."""
 
     color_hovered = Signal(int, int, QColor)
+    draw_stroke_updated = Signal(object, QPointF, QPointF, str)  # incremental path, start, end, tool_name
     draw_stroke_finished = Signal(object, QPointF, QPointF, str)  # path, start, end, tool_name
 
     def __init__(self, parent=None):
@@ -556,10 +592,13 @@ class ImageViewerGraphicsView(QGraphicsView):
 
         self.zoom_level = 1.0
         self.is_panning = False
+        self._space_pan_held = False
         self.is_drawing = False
         self.pan_start = QPointF()
         self.draw_start = QPointF()
         self.current_path = QPainterPath()
+        self._draw_last_point = QPointF()
+        self._stroke_has_live_updates = False
 
         # O Key + Drag Opacity State
         self.is_o_held = False
@@ -1528,7 +1567,7 @@ class ImageViewerGraphicsView(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             return
         elif event.button() == Qt.LeftButton:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             item = self.scene.itemAt(scene_pos, self.transform())
             if isinstance(item, VanishingPointHandleItem):
                 super().mousePressEvent(event)
@@ -1614,29 +1653,38 @@ class ImageViewerGraphicsView(QGraphicsView):
         return curr
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_pan_held = True
+            self.setCursor(Qt.OpenHandCursor)
+            return
         if event.key() == Qt.Key_O and not event.isAutoRepeat():
             self.is_o_held = True
             self.show_hud_toast("💧 Opacity Adjust Mode: Drag Left-Click Horizontally to Change Layer Opacity")
             return
         elif event.key() == Qt.Key_B and not event.isAutoRepeat():
-            self.is_b_held = True
-            self.show_hud_toast("🖌 Brush Size Adjust Mode: Drag Left-Click Horizontally to Change Brush Radius")
+            editor = self._find_editor()
+            if editor is not None and hasattr(editor, "_set_active_tool"):
+                editor._set_active_tool("brush")
+                self.show_hud_toast("Tool: Paint Brush (B)")
             return
         elif event.key() == Qt.Key_T and not event.isAutoRepeat():
             self.is_t_held = True
             self.show_hud_toast("🔤 Text Font Size Mode: Drag Left-Click Horizontally to Change Text Font Size")
             return
         elif event.key() == Qt.Key_M and not event.isAutoRepeat():
-            self.value_check_mode = not self.value_check_mode
-            status = "ON (Monochrome Contrast Preview)" if self.value_check_mode else "OFF"
-            self.show_hud_toast(f"🌗 Value Check Mode: {status}")
-            curr = self._find_editor()
-            if curr:
-                curr.update_composited_view()
+            editor = self._find_editor()
+            if editor is not None and hasattr(editor, "_set_active_tool"):
+                editor._set_active_tool("rect_select")
+                self.show_hud_toast("Tool: Rectangular Marquee (M)")
             return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_pan_held = False
+            if not self.is_panning:
+                self.setCursor(Qt.ArrowCursor)
+            return
         if event.key() == Qt.Key_O and not event.isAutoRepeat():
             self.is_o_held = False
             return
@@ -1675,7 +1723,7 @@ class ImageViewerGraphicsView(QGraphicsView):
 
         # â”€â”€ Golden Ratio & Rule of Thirds Overlay interaction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if event.button() == Qt.LeftButton and self.show_golden_ratio_overlay:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             pix_rect = self.pixmap_item.boundingRect()
             img_w = pix_rect.width() if not pix_rect.isEmpty() else 1280.0
             img_h = pix_rect.height() if not pix_rect.isEmpty() else 720.0
@@ -1708,13 +1756,16 @@ class ImageViewerGraphicsView(QGraphicsView):
                     return
 
 
-        if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and event.modifiers() & Qt.ShiftModifier):
+        if event.button() == Qt.MiddleButton or (
+            event.button() == Qt.LeftButton
+            and (event.modifiers() & Qt.ShiftModifier or self._space_pan_held)
+        ):
             self.is_panning = True
             self.pan_start = event.position()
             self.setCursor(Qt.ClosedHandCursor)
             return
         elif event.button() == Qt.LeftButton:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             item = self.scene.itemAt(scene_pos, self.transform())
             if isinstance(item, VanishingPointHandleItem):
                 super().mousePressEvent(event)
@@ -1724,6 +1775,16 @@ class ImageViewerGraphicsView(QGraphicsView):
             self.draw_start = scene_pos
             self.current_path = QPainterPath()
             self.current_path.moveTo(self.draw_start)
+            self._draw_last_point = QPointF(scene_pos)
+            self._stroke_has_live_updates = False
+            curr = self._find_editor()
+            if curr is not None and getattr(curr, "active_tool", "") in {"brush", "eraser"}:
+                point_path = QPainterPath()
+                point_path.moveTo(scene_pos)
+                point_path.lineTo(scene_pos + QPointF(0.5, 0.0))
+                self.draw_stroke_updated.emit(point_path, scene_pos, scene_pos, "brush-live-segment")
+                self._stroke_has_live_updates = True
+                self.selection_item.setPath(QPainterPath())
 
         super().mousePressEvent(event)
 
@@ -1763,7 +1824,7 @@ class ImageViewerGraphicsView(QGraphicsView):
 
         # â”€â”€ Golden Ratio & Rule of Thirds Overlay drag / rotate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if self._golden_drag_mode == "move" and self._golden_drag_origin is not None:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             delta = scene_pos - self._golden_drag_origin
             new_pos = self._golden_drag_start_pos + delta
             if self.golden_overlay_constrained:
@@ -1780,7 +1841,7 @@ class ImageViewerGraphicsView(QGraphicsView):
 
         if self._golden_drag_mode == "rotate" and self._golden_drag_origin is not None:
             import math as _math
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             cx, cy = self.golden_overlay_pos.x(), self.golden_overlay_pos.y()
             a0 = _math.degrees(_math.atan2(self._golden_drag_origin.y() - cy, self._golden_drag_origin.x() - cx))
             a1 = _math.degrees(_math.atan2(scene_pos.y() - cy, scene_pos.x() - cx))
@@ -1796,7 +1857,7 @@ class ImageViewerGraphicsView(QGraphicsView):
             self.verticalScrollBar().setValue(int(self.verticalScrollBar().value() - delta.y()))
             return
 
-        scene_pos = self.mapToScene(event.pos())
+        scene_pos = self.mapToScene(event.position().toPoint())
         pixmap = self.pixmap_item.pixmap()
         if not pixmap.isNull() and 0 <= scene_pos.x() < pixmap.width() and 0 <= scene_pos.y() < pixmap.height():
             image = pixmap.toImage()
@@ -1813,7 +1874,19 @@ class ImageViewerGraphicsView(QGraphicsView):
                 scene_pos = self.snap_point_to_perspective(scene_pos, self.draw_start)
 
             self.current_path.lineTo(scene_pos)
-            self.selection_item.setPath(self.current_path)
+            curr = self._find_editor()
+            if curr is not None and getattr(curr, "active_tool", "") in {"brush", "eraser"}:
+                previous = self._draw_last_point
+                if math.hypot(scene_pos.x() - previous.x(), scene_pos.y() - previous.y()) >= 0.25:
+                    segment = QPainterPath()
+                    segment.moveTo(previous)
+                    segment.lineTo(scene_pos)
+                    self.draw_stroke_updated.emit(segment, previous, scene_pos, "brush-live-segment")
+                    self._draw_last_point = QPointF(scene_pos)
+                    self._stroke_has_live_updates = True
+                self.selection_item.setPath(QPainterPath())
+            else:
+                self.selection_item.setPath(self.current_path)
 
         super().mouseMoveEvent(event)
 
@@ -1842,16 +1915,29 @@ class ImageViewerGraphicsView(QGraphicsView):
 
         if self.is_panning:
             self.is_panning = False
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.OpenHandCursor if self._space_pan_held else Qt.ArrowCursor)
             return
         elif self.is_drawing:
             self.is_drawing = False
-            draw_end = self.mapToScene(event.pos())
+            draw_end = self.mapToScene(event.position().toPoint())
             if self.snap_to_grid and self.grid_size > 0:
                 snapped_x = round(draw_end.x() / self.grid_size) * self.grid_size
                 snapped_y = round(draw_end.y() / self.grid_size) * self.grid_size
                 draw_end = QPointF(snapped_x, snapped_y)
             if self.snap_to_perspective:
                 draw_end = self.snap_point_to_perspective(draw_end, self.draw_start)
-            self.draw_stroke_finished.emit(QPainterPath(self.current_path), self.draw_start, draw_end, "brush")
+            curr = self._find_editor()
+            if curr is not None and getattr(curr, "active_tool", "") in {"brush", "eraser"}:
+                previous = self._draw_last_point
+                if math.hypot(draw_end.x() - previous.x(), draw_end.y() - previous.y()) >= 0.25:
+                    segment = QPainterPath()
+                    segment.moveTo(previous)
+                    segment.lineTo(draw_end)
+                    self.draw_stroke_updated.emit(segment, previous, draw_end, "brush-live-segment")
+                    self._draw_last_point = QPointF(draw_end)
+                    self._stroke_has_live_updates = True
+                self.draw_stroke_finished.emit(QPainterPath(), self.draw_start, draw_end, "brush-live-finalize")
+                self.selection_item.setPath(QPainterPath())
+            else:
+                self.draw_stroke_finished.emit(QPainterPath(self.current_path), self.draw_start, draw_end, "brush")
         super().mouseReleaseEvent(event)

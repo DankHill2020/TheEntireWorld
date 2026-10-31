@@ -90,7 +90,13 @@ class WindowsDpapiCredentialStore:
             protected = path.read_bytes()
         except FileNotFoundError:
             return ""
-        return self._unprotect(protected).decode("utf-8")
+        try:
+            return self._unprotect(protected).decode("utf-8")
+        except (OSError, UnicodeDecodeError, ValueError):
+            # A credential can become unreadable after a Windows account,
+            # profile, or DPAPI state change. Fail closed and let the provider
+            # appear disconnected rather than preventing the app from opening.
+            return ""
 
     def save(self, key: str, value: str) -> None:
         text = str(value or "")

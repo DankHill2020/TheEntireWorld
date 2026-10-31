@@ -11,6 +11,7 @@ from maya import cmds, mel
 from maya.api import OpenMaya
 
 from maya_tools.Rigging.mocap import hik_mapping
+from maya_tools.Rigging.mocap.control_identity import is_animator_control_identity
 
 
 def _leaf(node: str) -> str:
@@ -98,6 +99,16 @@ def _driven_joint(control: str) -> str | None:
         driven = cmds.listConnections(
             constraint, source=False, destination=True, type="joint"
         ) or []
+        if not driven:
+            # Older rigs may blend an IK joint's authored and constrained
+            # channels through a pre-existing pairBlend node. Follow that
+            # connection instead of treating the animator control as absent.
+            for blend in set(cmds.listConnections(
+                constraint, source=False, destination=True, type="pairBlend"
+            ) or []):
+                driven.extend(cmds.listConnections(
+                    blend, source=False, destination=True, type="joint"
+                ) or [])
         if driven:
             return driven[0]
     return None
@@ -157,6 +168,11 @@ def _referenced_rig_joint_map(rig_namespace: str) -> dict[str, str]:
     return result
 
 
+def _is_animator_control(node: str) -> bool:
+    """Accept named controls or explicitly marked controls, never internal IK nodes."""
+    return is_animator_control_identity(node, cmds.listSets(object=node) or ())
+
+
 def _world_pose(node: str, frame: float) -> dict[str, list[float]]:
     cmds.currentTime(frame, edit=True)
     return {
@@ -205,20 +221,25 @@ def discover_create_rig_bindings(
     solved_namespace: str,
     allowed_bones: set[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Discover FK/direct controls from graph connections, not control-name tables."""
+    """Discover controls by their joint-driving graph, including non-``_ctrl`` rigs."""
 
     source = _source_joint_map(solved_namespace)
     bindings = []
     for control in _referenced_rig_transforms(rig_namespace):
-        if not _bare(control).endswith("_ctrl") or _bare(control).endswith("_switch_ctrl"):
+        if not _is_animator_control(control):
             continue
         driven = _driven_joint(control)
         if not driven:
             continue
         driven_name = _bare(driven)
-        if driven_name.endswith("_ik") or driven_name.endswith("_driver"):
+        if driven_name.endswith("_driver"):
             continue
-        source_name = driven_name[:-3] if driven_name.endswith("_fk") else driven_name
+        if driven_name.endswith(("_ik_Tip", "_fk_Tip")):
+            source_name = driven_name[:-7] + "_Tip"
+        elif driven_name.endswith(("_fk", "_ik")):
+            source_name = driven_name[:-3]
+        else:
+            source_name = driven_name
         if allowed_bones is not None and source_name not in allowed_bones:
             continue
         solved_joint = source.get(source_name)
@@ -239,6 +260,7 @@ def discover_create_rig_bindings(
 
 def _preflight_bake_controls(controls: list[str]) -> dict[str, Any]:
     conflicts = []
+    channel_modes = {}
     for control in controls:
         incoming_constraints = []
         for constraint_type in (
@@ -257,7 +279,14 @@ def _preflight_bake_controls(controls: list[str]) -> dict[str, Any]:
             )
             if cmds.getAttr(f"{control}.{attribute}", lock=True)
         ]
-        if incoming_constraints or key_count or locked:
+        locked_translations = [name for name in locked if name.startswith("translate")]
+        locked_rotations = [name for name in locked if name.startswith("rotate")]
+        rotation_only = len(locked_translations) == 3 and not locked_rotations
+        channel_modes[control] = "rotate" if rotation_only else "translate_rotate"
+        invalid_locks = locked_rotations or (
+            locked_translations if len(locked_translations) not in (0, 3) else []
+        )
+        if incoming_constraints or key_count or invalid_locks:
             conflicts.append({
                 "control": control,
                 "incoming_constraints": sorted(set(incoming_constraints)),
@@ -269,7 +298,149 @@ def _preflight_bake_controls(controls: list[str]) -> dict[str, Any]:
             "Destination animator controls are already driven or locked: "
             + json.dumps(conflicts[:10])
         )
-    return {"control_count": len(controls), "conflicts": []}
+    return {"control_count": len(controls), "conflicts": [], "channel_modes": channel_modes}
+
+
+def _select_fk_and_spine_targets(rig_namespace: str) -> dict[str, Any]:
+    """Put known rig variants in a single-target pose-solve mode.
+
+    Current create-rig limbs use ``ikFkBlend=0`` for FK. The older Juice rig
+    connects ``IkFk`` directly to FK weights and therefore needs 1 instead.
+    Its deform spine also blends an IK joint with a ribbon joint at equal
+    weight; that blend can flip 180 degrees during a control bake. Selecting
+    its IK target is a scene-local reference edit, not a change to the rig file.
+    """
+    fk_switches = []
+    for switch in _referenced_rig_transforms(rig_namespace):
+        if not _bare(switch).endswith("_switch_ctrl"):
+            continue
+        for attribute, value in (("ikFkBlend", 0.0), ("IkFk", 1.0)):
+            plug = f"{switch}.{attribute}"
+            if cmds.objExists(plug):
+                if not cmds.getAttr(plug, settable=True):
+                    raise RuntimeError(f"Cannot select FK on locked or driven switch: {plug}")
+                cmds.setAttr(plug, value)
+                fk_switches.append({"control": switch, "attribute": attribute, "value": value})
+                break
+
+    spine_overrides = []
+    for bone, joint in _referenced_rig_joint_map(rig_namespace).items():
+        if not bone.startswith("spine"):
+            continue
+        for constraint in set(cmds.listConnections(
+            joint, source=True, destination=False, type="parentConstraint"
+        ) or []):
+            targets = cmds.parentConstraint(constraint, query=True, targetList=True) or []
+            weights = cmds.parentConstraint(constraint, query=True, weightAliasList=True) or []
+            if not any(_bare(target).endswith("_ik") for target in targets):
+                continue
+            for target, alias in zip(targets, weights):
+                if not _bare(target).endswith("_ribbon"):
+                    continue
+                plug = f"{constraint}.{alias}"
+                if not cmds.getAttr(plug, settable=True):
+                    raise RuntimeError(f"Cannot select IK spine target on driven weight: {plug}")
+                cmds.setAttr(plug, 0.0)
+                spine_overrides.append({"bone": bone, "constraint": constraint, "weight": alias, "value": 0.0})
+    return {"fk_switches": fk_switches, "spine_overrides": spine_overrides}
+
+
+def _solve_offset_delta(columns: list[list[float]], delta: list[float]) -> list[float]:
+    """Invert the measured world-position response to three offset channels."""
+    rows = [[float(columns[col][row]) for col in range(3)] + [float(delta[row])]
+            for row in range(3)]
+    for pivot in range(3):
+        selected = max(range(pivot, 3), key=lambda row: abs(rows[row][pivot]))
+        if abs(rows[selected][pivot]) < 1e-8:
+            raise RuntimeError("Ribbon constraint offset has a singular translation response")
+        rows[pivot], rows[selected] = rows[selected], rows[pivot]
+        scale = rows[pivot][pivot]
+        rows[pivot] = [value / scale for value in rows[pivot]]
+        for row in range(3):
+            if row != pivot:
+                factor = rows[row][pivot]
+                rows[row] = [value - factor * other
+                             for value, other in zip(rows[row], rows[pivot])]
+    return [rows[row][3] for row in range(3)]
+
+
+def _calibrate_single_ribbon_spines(
+    bindings: list[dict[str, str]], rig_joints: dict[str, str],
+    start: float, end: float,
+) -> list[dict[str, Any]]:
+    """Correct a static ribbon rest offset without changing animator keys.
+
+    Legacy rigs may drive a mapped deform spine joint from one ribbon target
+    whose authored rest position differs from the characterized FBX. Measure
+    the constraint's own offset response in a *referenced animation scene* and
+    retain the edit only if start/middle/end poses agree after calibration.
+    """
+    corrections = []
+    for item in bindings:
+        bone = item["source_bone"]
+        if not bone.startswith("spine") or bone not in rig_joints:
+            continue
+        rig_joint = rig_joints[bone]
+        source_joint = item["source_joint"]
+        constraints = set(cmds.listConnections(
+            rig_joint, source=True, destination=False, type="parentConstraint"
+        ) or [])
+        ribbon = []
+        for constraint in constraints:
+            targets = cmds.parentConstraint(constraint, query=True, targetList=True) or []
+            if len(targets) == 1 and _bare(targets[0]).endswith("_ribbon"):
+                ribbon.append(constraint)
+        if not ribbon:
+            continue
+        if len(ribbon) != 1:
+            raise RuntimeError(f"Ambiguous ribbon constraints on {bone}: {ribbon}")
+        constraint = ribbon[0]
+        plug = f"{constraint}.target[0].targetOffsetTranslate"
+        if not cmds.getAttr(plug, settable=True):
+            raise RuntimeError(f"Cannot calibrate driven ribbon offset: {plug}")
+        cmds.currentTime(start, edit=True)
+        source_t = cmds.xform(source_joint, query=True, worldSpace=True, translation=True)
+        before_t = cmds.xform(rig_joint, query=True, worldSpace=True, translation=True)
+        before_error = _vector_error(source_t, before_t)
+        if before_error <= 0.5:
+            continue
+        if _world_rotation_error(source_joint, rig_joint) > 2.0:
+            raise RuntimeError(f"Ribbon {bone} has a rotation mismatch, not a static rest offset")
+        old_offset = list(cmds.getAttr(plug)[0])
+        columns = []
+        try:
+            for axis in range(3):
+                trial = old_offset.copy()
+                trial[axis] += 1.0
+                cmds.setAttr(plug, *trial, type="double3")
+                measured = cmds.xform(rig_joint, query=True, worldSpace=True, translation=True)
+                columns.append([a - b for a, b in zip(measured, before_t)])
+            cmds.setAttr(plug, *old_offset, type="double3")
+            delta = _solve_offset_delta(
+                columns, [a - b for a, b in zip(source_t, before_t)]
+            )
+            new_offset = [value + change for value, change in zip(old_offset, delta)]
+            cmds.setAttr(plug, *new_offset, type="double3")
+            sample_errors = []
+            for frame in (start, (start + end) / 2.0, end):
+                cmds.currentTime(frame, edit=True)
+                target_t = cmds.xform(source_joint, query=True, worldSpace=True, translation=True)
+                actual_t = cmds.xform(rig_joint, query=True, worldSpace=True, translation=True)
+                sample_errors.append(_vector_error(target_t, actual_t))
+            if max(sample_errors) > 0.5:
+                raise RuntimeError(
+                    f"Ribbon {bone} does not have a stable rest offset: {sample_errors}"
+                )
+            corrections.append({
+                "bone": bone, "constraint": constraint,
+                "before_error": before_error,
+                "after_sample_errors": sample_errors,
+                "old_offset": old_offset, "new_offset": new_offset,
+            })
+        except Exception:
+            cmds.setAttr(plug, *old_offset, type="double3")
+            raise
+    return corrections
 
 
 def bake_solved_skeleton_to_create_rig_controls(
@@ -283,11 +454,7 @@ def bake_solved_skeleton_to_create_rig_controls(
 ) -> dict[str, Any]:
     if int(sample_subdivisions) < 1:
         raise ValueError("sample_subdivisions must be at least 1")
-    for switch in _referenced_rig_transforms(rig_namespace):
-        if not _bare(switch).endswith("_switch_ctrl"):
-            continue
-        if cmds.objExists(f"{switch}.ikFkBlend"):
-            cmds.setAttr(f"{switch}.ikFkBlend", 0.0)
+    rig_modes = _select_fk_and_spine_targets(rig_namespace)
 
     source = _source_joint_map(solved_namespace)
     profile = hik_mapping.load_profile(str(Path(mapping_profile).expanduser().resolve()))
@@ -328,11 +495,33 @@ def bake_solved_skeleton_to_create_rig_controls(
     )
     bound = {item["source_bone"] for item in bindings}
     missing = sorted(required.difference(bound))
-    if missing:
-        raise RuntimeError("Control binding discovery missed required bones: " + ", ".join(missing))
+    # Some rigs leave the reference/root joint unconnected to animator controls.
+    # That is safe only when its deform pose already matches the solved source
+    # throughout the take; never silently omit an animated required bone.
+    rig_joints = _referenced_rig_joint_map(rig_namespace)
+    static_required_bones = []
+    unresolved = []
+    for bone in missing:
+        solved_joint, rig_joint = source.get(bone), rig_joints.get(bone)
+        if not solved_joint or not rig_joint:
+            unresolved.append(bone)
+            continue
+        samples = [start + (end - start) * index / 20.0 for index in range(21)]
+        if all(
+            _vector_error(_world_pose(solved_joint, frame)["translation"],
+                          _world_pose(rig_joint, frame)["translation"]) <= 0.5
+            and _world_rotation_error(solved_joint, rig_joint) <= 2.0
+            for frame in samples
+        ):
+            static_required_bones.append(bone)
+        else:
+            unresolved.append(bone)
+    if unresolved:
+        raise RuntimeError("Control binding discovery missed required bones: " + ", ".join(unresolved))
 
     controls = [item["control"] for item in bindings]
     preflight = _preflight_bake_controls(controls)
+    channel_modes = preflight["channel_modes"]
     pair_blends_before = set(cmds.ls(type="pairBlend", long=True) or [])
     constraints = []
     solve_targets = []
@@ -375,9 +564,11 @@ def bake_solved_skeleton_to_create_rig_controls(
             )
 
     for item in direct_data:
-        constraints.extend(cmds.parentConstraint(item["source_joint"], item["control"], maintainOffset=False) or [])
+        constraint = cmds.orientConstraint if channel_modes[item["control"]] == "rotate" else cmds.parentConstraint
+        constraints.extend(constraint(item["source_joint"], item["control"], maintainOffset=False) or [])
     for item, target, _ in solve_data:
-        constraints.extend(cmds.parentConstraint(target, item["control"], maintainOffset=False) or [])
+        constraint = cmds.orientConstraint if channel_modes[item["control"]] == "rotate" else cmds.parentConstraint
+        constraints.extend(constraint(target, item["control"], maintainOffset=False) or [])
     cmds.bakeResults(
         controls,
         time=(start, end),
@@ -401,13 +592,20 @@ def bake_solved_skeleton_to_create_rig_controls(
     for boundary in (start, end):
         cmds.currentTime(boundary, edit=True)
         for item, target in endpoint_data:
-            target_matrix = cmds.xform(target, query=True, worldSpace=True, matrix=True)
-            cmds.xform(item["control"], worldSpace=True, matrix=target_matrix)
-            cmds.setKeyframe(
-                item["control"],
-                attribute=("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"),
-                time=boundary,
-            )
+            if channel_modes[item["control"]] == "rotate":
+                target_rotation = cmds.xform(
+                    target, query=True, worldSpace=True, rotation=True
+                )
+                cmds.xform(item["control"], worldSpace=True, rotation=target_rotation)
+                attributes = ("rotateX", "rotateY", "rotateZ")
+            else:
+                target_matrix = cmds.xform(target, query=True, worldSpace=True, matrix=True)
+                cmds.xform(item["control"], worldSpace=True, matrix=target_matrix)
+                attributes = (
+                    "translateX", "translateY", "translateZ",
+                    "rotateX", "rotateY", "rotateZ",
+                )
+            cmds.setKeyframe(item["control"], attribute=attributes, time=boundary)
     if solve_targets:
         cmds.delete(solve_targets)
     undeleted_constraints = [node for node in constraints if cmds.objExists(node)]
@@ -428,11 +626,13 @@ def bake_solved_skeleton_to_create_rig_controls(
     unkeyed = [control for control, count in key_counts.items() if count == 0]
     if unkeyed:
         raise RuntimeError("Baked controls have no keys: " + ", ".join(unkeyed[:10]))
-    rig_joints = _referenced_rig_joint_map(rig_namespace)
+    ribbon_calibrations = _calibrate_single_ribbon_spines(
+        bindings, rig_joints, start, end
+    )
     binding_by_bone = {item["source_bone"]: item for item in bindings}
     sample_frames = [start + (end - start) * index / 20.0 for index in range(21)]
     pose_checks = []
-    for bone in sorted(required):
+    for bone in sorted(bound):
         source_joint = source.get(bone)
         rig_joint = rig_joints.get(bone)
         if not source_joint or not rig_joint:
@@ -499,11 +699,14 @@ def bake_solved_skeleton_to_create_rig_controls(
         "source_key_time_count": len(source_key_times),
         "validation_sample_count": len(sample_frames),
         "binding_count": len(bindings),
+        "static_required_bones": static_required_bones,
         "direct_constraint_count": len(direct_data),
         "offset_solve_count": len(solve_data),
         "controls": controls,
         "key_counts": key_counts,
         "control_preflight": preflight,
+        "rig_modes": rig_modes,
+        "ribbon_calibrations": ribbon_calibrations,
         "mapping_profile": str(Path(mapping_profile).expanduser().resolve()),
         "mapping_validation": mapping_report,
         "pose_checks": pose_checks,
@@ -634,7 +837,8 @@ def publish_referenced_animation_source(
     referenced_controls = [
         node
         for node in referenced_nodes
-        if cmds.objExists(node) and cmds.nodeType(node) == "transform" and _bare(node).endswith("_ctrl")
+        if cmds.objExists(node) and cmds.nodeType(node) == "transform"
+        and _is_animator_control(node)
     ]
     if not referenced_controls:
         raise RuntimeError("Published rig reference reopened without animator controls")

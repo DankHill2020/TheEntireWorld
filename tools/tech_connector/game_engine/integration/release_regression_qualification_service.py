@@ -100,6 +100,7 @@ def validate_release_regression_qualification(
     receipt: Mapping[str, Any] | None,
     *,
     max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+    source_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     row = dict(receipt or {})
     gates: list[str] = []
@@ -117,7 +118,10 @@ def validate_release_regression_qualification(
     now = datetime.now(timezone.utc).timestamp()
     if verified_at <= 0.0 or now - verified_at > max(0.0, float(max_age_seconds)):
         gates.append("freshness")
-    expected = playable_project_source_fingerprint(source_root)
+    expected = (
+        playable_project_source_fingerprint(source_root)
+        if source_fingerprint is None else source_fingerprint
+    )
     if str(row.get("source_fingerprint") or "") != expected:
         gates.append("source_fingerprint")
     return {

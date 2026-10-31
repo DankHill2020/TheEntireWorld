@@ -1,4 +1,4 @@
-"""Current-session Maya FBX animation export for bridge operations."""
+"""Current-session Maya FBX export for static and animated bridge operations."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ def export_fbx(
     end_frame: int = 120,
     selected_only: bool = True,
     nodes: Iterable[str] | None = None,
+    bake_animation: bool = True,
 ) -> dict[str, Any]:
     import maya.cmds as cmds
     import maya.mel as mel
@@ -29,10 +30,11 @@ def export_fbx(
         selected_only = True
     start, end = int(start_frame), max(int(start_frame), int(end_frame))
     mel.eval("FBXResetExport")
-    mel.eval("FBXExportBakeComplexAnimation -v true")
-    mel.eval(f"FBXExportBakeComplexStart -v {start}")
-    mel.eval(f"FBXExportBakeComplexEnd -v {end}")
-    mel.eval("FBXExportBakeComplexStep -v 1")
+    mel.eval(f"FBXExportBakeComplexAnimation -v {'true' if bake_animation else 'false'}")
+    if bake_animation:
+        mel.eval(f"FBXExportBakeComplexStart -v {start}")
+        mel.eval(f"FBXExportBakeComplexEnd -v {end}")
+        mel.eval("FBXExportBakeComplexStep -v 1")
     escaped = str(target).replace("\\", "/").replace('"', '\\"')
     mel.eval(f'FBXExport -f "{escaped}"' + (" -s" if selected_only else ""))
     if not target.is_file():
@@ -43,6 +45,7 @@ def export_fbx(
         "start_frame": start,
         "end_frame": end,
         "selected_only": bool(selected_only),
+        "bake_animation": bool(bake_animation),
         "nodes": export_nodes,
     }
 

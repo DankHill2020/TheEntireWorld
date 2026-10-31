@@ -205,6 +205,7 @@ BUILTIN_ASSET_TYPES = (
     _type("tc.build_profile", "Build Profile", "Build", (".build.tcasset",), creatable=True, editor="build_profile", preview="data", loader="none", cooker="build", hot_reload="restart_required", color="#b6bec8"),
     _type("tc.video", "Video", "Media", (".mp4", ".mov", ".webm", ".mkv", ".avi", ".gif", ".apng"), importable=True, editor="media", preview="video", loader="media", cooker="media", hot_reload="hot_swap", color="#ff9db0"),
     _type("tc.font", "Font", "UI", (".ttf", ".otf", ".woff", ".woff2"), importable=True, editor="font", preview="font", loader="font", cooker="font", hot_reload="hot_swap", color="#e4d3ff"),
+    _type("tc.ui_document", "UI Document", "UI", (".uidoc.tcasset",), creatable=True, editor="ui_document", preview="ui", loader="none", cooker="ui_layout_preview", hot_reload="restart_required", color="#c7b3ff", standard_editor="UI Document Editor", suite="Kingdom", maturity="authoring_preview", python_api="editor.ui", bake_modes=("layout_preview",)),
 )
 
 

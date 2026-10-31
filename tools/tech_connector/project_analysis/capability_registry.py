@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 DB_PATH = Path(__file__).with_name("project_analysis.db")
+_BATCH_CONNECTION: sqlite3.Connection | None = None
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -91,6 +92,31 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+def begin_capability_batch() -> None:
+    """Reuse one registry connection for a bulk symbol-index operation."""
+    global _BATCH_CONNECTION
+    if _BATCH_CONNECTION is None:
+        _BATCH_CONNECTION = _conn()
+
+
+def end_capability_batch() -> None:
+    """Commit and close the active bulk registry connection."""
+    global _BATCH_CONNECTION
+    connection = _BATCH_CONNECTION
+    _BATCH_CONNECTION = None
+    if connection is not None:
+        try:
+            connection.commit()
+        finally:
+            connection.close()
+
+
+def _write_connection() -> tuple[sqlite3.Connection, bool]:
+    if _BATCH_CONNECTION is not None:
+        return _BATCH_CONNECTION, False
+    return _conn(), True
+
+
 # ---------------------------------------------------------------------------
 # Inference helpers
 # ---------------------------------------------------------------------------
@@ -147,8 +173,8 @@ def register_capability(cap: Dict[str, Any]) -> int:
     Optional keys include structured inputs/outputs plus exact Unreal API calls,
     local calls, and runtime operation keys.
     """
-    conn = _conn()
-    with conn:
+    conn, owns_connection = _write_connection()
+    try:
         cur = conn.execute(
             """
             INSERT INTO capabilities(
@@ -188,7 +214,11 @@ def register_capability(cap: Dict[str, Any]) -> int:
             ),
         )
         row_id = cur.lastrowid
-    conn.close()
+        if owns_connection:
+            conn.commit()
+    finally:
+        if owns_connection:
+            conn.close()
     return row_id
 
 
@@ -225,13 +255,17 @@ def register_from_symbol(sym: Dict[str, Any]) -> Optional[int]:
     if qualified_name != name:
         # Remove the pre-v2 short-name row as each source symbol is reindexed.
         # This migrates safely without guessing an owner for untouched rows.
-        conn = _conn()
-        with conn:
+        conn, owns_connection = _write_connection()
+        try:
             conn.execute(
                 "DELETE FROM capabilities WHERE name = ? AND source_file = ?",
                 (name, str(sym.get("file") or "")),
             )
-        conn.close()
+            if owns_connection:
+                conn.commit()
+        finally:
+            if owns_connection:
+                conn.close()
     return register_capability({
         # Qualified names prevent methods with the same short name in separate
         # classes in one source file from overwriting each other.

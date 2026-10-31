@@ -42,6 +42,9 @@ def build_unreal_capability_inventory(project_root: str | None = None) -> dict[s
     unreal_tools_rows = _discover_unreal_tools_functions()
     base_unreal_api_count = _count_base_unreal_python_api(project_root)
     base_unreal_api_rows = _load_base_unreal_python_api(project_root)
+    base_unreal_api_provider = _base_unreal_python_api_provider_status(
+        project_root, base_unreal_api_count,
+    )
 
     plugin_by_function = {
         row["function"]: {
@@ -199,6 +202,7 @@ def build_unreal_capability_inventory(project_root: str | None = None) -> dict[s
             "operations": "tech_connector.services.unreal.unreal_operation_service.UNREAL_OPERATIONS",
             "capabilities": "tech_connector.services.unreal.capability_registry.UNREAL_CAPABILITIES",
             "wrapper_requirements": "tech_connector.services.unreal.cpp_domain_wrapper_requirements_service.DOMAIN_WRAPPER_REQUIREMENTS",
+            "base_unreal_python_api": base_unreal_api_provider,
         },
         "counts": {
             "plugin_functions": len(plugin_by_function),
@@ -238,6 +242,12 @@ def build_unreal_capability_inventory(project_root: str | None = None) -> dict[s
             "plugin_aliases_without_operation_or_capability": alias_without_entry,
             "retired_operations_without_cpp_requirement": retired_without_wrapper_requirement,
             "unreal_tools_placeholder_functions": unreal_tools_placeholders,
+            "base_unreal_python_api_provider": (
+                {} if base_unreal_api_provider["available"] else base_unreal_api_provider
+            ),
+        },
+        "lazy_provider_status": {
+            "unreal_python_api": base_unreal_api_provider,
         },
     }
 
@@ -435,6 +445,36 @@ def _count_base_unreal_python_api(project_root: str | None = None) -> int:
             conn.close()
     except sqlite3.Error:
         return 0
+
+
+def _base_unreal_python_api_provider_status(
+    project_root: str | None,
+    count: int,
+) -> dict[str, Any]:
+    try:
+        from tech_connector.bridges.unreal.unreal_intelligence import resolve_db_path
+
+        db_path = resolve_db_path(project_root)
+    except Exception as exc:
+        return {
+            "available": False,
+            "count": 0,
+            "database": "",
+            "reason": f"provider_import_failed: {exc}",
+        }
+    if not db_path.is_file() or db_path.stat().st_size <= 0:
+        return {
+            "available": False,
+            "count": 0,
+            "database": str(db_path),
+            "reason": "reflection_index_missing",
+        }
+    return {
+        "available": int(count) > 0,
+        "count": int(count),
+        "database": str(db_path),
+        "reason": "" if int(count) > 0 else "reflection_index_has_no_unreal_rows",
+    }
 
 
 def _load_base_unreal_python_api(project_root: str | None = None, *, limit: int = 0) -> dict[str, dict[str, Any]]:

@@ -805,26 +805,26 @@ def _validate_candidate_changes_in_disposable_workspace(
                             break
                 imported_roots = {
                     alias.name.split(".", 1)[0]
-                    for node in candidate_tree.body
+                    for node in ast.walk(candidate_tree)
                     if isinstance(node, ast.Import)
                     for alias in node.names
                 }
                 imported_roots.update(
                     str(node.module or "").split(".", 1)[0]
-                    for node in candidate_tree.body
+                    for node in ast.walk(candidate_tree)
                     if isinstance(node, ast.ImportFrom)
                     and node.level == 0
                     and node.module
                 )
                 imported_modules = {
                     alias.name
-                    for node in candidate_tree.body
+                    for node in ast.walk(candidate_tree)
                     if isinstance(node, ast.Import)
                     for alias in node.names
                 }
                 imported_modules.update(
                     str(node.module or "")
-                    for node in candidate_tree.body
+                    for node in ast.walk(candidate_tree)
                     if isinstance(node, ast.ImportFrom)
                     and node.level == 0
                     and node.module
@@ -838,6 +838,14 @@ def _validate_candidate_changes_in_disposable_workspace(
                         dependency_path.exists() or dependency_file.exists()
                     ) and imported_root not in copy_paths:
                         copy_paths.append(imported_root)
+                        if dependency_path.is_dir() and not (dependency_path / "__init__.py").exists():
+                            # A disposable namespace package can lose to a regular
+                            # package of the same name on the inherited PYTHONPATH.
+                            # Pin this copied project root as the import target.
+                            patch_files.append({
+                                "path": f"{imported_root}/__init__.py",
+                                "content": "",
+                            })
                     if imported_root in _HOST_RUNTIME_MODULES:
                         try:
                             host_available = (
@@ -1851,6 +1859,51 @@ def _ensure_python_from_import(
     return True, prefix + statement + suffix, ""
 
 
+def _ensure_python_plain_import(
+    source: str,
+    *,
+    module: str,
+    filename: str,
+) -> tuple[bool, str, str]:
+    """Insert one validated plain module import, without duplicating it."""
+
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", module):
+        return False, source, f"Invalid import module for {filename}: {module or '(missing)'}"
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as exc:
+        return False, source, f"Cannot ensure import; existing Python did not parse: {exc}"
+    if any(
+        isinstance(node, ast.Import)
+        and any(alias.name == module and alias.asname is None for alias in node.names)
+        for node in tree.body
+    ):
+        return True, source, ""
+    anchors: list[ast.AST] = [
+        node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    if anchors:
+        anchor = anchors[-1]
+    elif (
+        tree.body and isinstance(tree.body[0], ast.Expr)
+        and isinstance(tree.body[0].value, ast.Constant)
+        and isinstance(tree.body[0].value.value, str)
+    ):
+        anchor = tree.body[0]
+    else:
+        anchor = None
+    lines = source.splitlines(keepends=True)
+    offset = sum(len(line) for line in lines[: int(getattr(anchor, "end_lineno", 0) or 0)]) if anchor else 0
+    prefix = source[:offset]
+    suffix = source[offset:]
+    if prefix and not prefix.endswith(("\n", "\r")):
+        prefix += "\n"
+    statement = f"import {module}\n"
+    if anchor and not isinstance(anchor, (ast.Import, ast.ImportFrom)):
+        statement = "\n" + statement
+    return True, prefix + statement + suffix, ""
+
+
 def _resolve_model_changes(
     model_response: str,
     *,
@@ -1927,12 +1980,17 @@ def _resolve_model_changes(
                 continue
             module = str(change.get("target_symbol") or "").strip()
             symbol = str(change.get("new_content") or "").strip()
-            matched, after, error = _ensure_python_from_import(
-                current,
-                module=module,
-                symbol=symbol,
-                filename=str(p),
+            plain_import = re.fullmatch(
+                r"import\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)", symbol,
             )
+            if plain_import and (not module or module == plain_import.group(1)):
+                matched, after, error = _ensure_python_plain_import(
+                    current, module=plain_import.group(1), filename=str(p),
+                )
+            else:
+                matched, after, error = _ensure_python_from_import(
+                    current, module=module, symbol=symbol, filename=str(p),
+                )
             if not matched:
                 errors.append(error or f"Could not ensure import {module}.{symbol}: {path}")
                 continue

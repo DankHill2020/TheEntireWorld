@@ -293,6 +293,7 @@ from tech_connector.services.project_edit_agent_part_01 import (
 from tech_connector.services.project_edit_agent_part_02 import (
     _HOST_RUNTIME_MODULES,
     _edit_python_symbol_source,
+    _format_generated_long_statements,
     _generated_module_import_side_effects,
     _is_placeholder_callable,
     _remove_generated_top_level_calls,
@@ -308,6 +309,7 @@ from tech_connector.services.project_edit_agent_part_03 import (
     _tree_uses_identifier,
     _unresolved_generated_names,
     _verified_installed_qt_symbol,
+    resolve_project_edit_cross_file_symbols,
     resolve_project_edit_standard_library_symbols,
 )
 
@@ -351,7 +353,13 @@ def apply_project_edit_generated_class_repair(
         return generated_files, [
             f"Class repair contains placeholder methods: {', '.join(placeholders)}"
         ]
-    class_source = ast.unparse(class_node)
+    replacement_lines = textwrap.dedent(replacement).splitlines()
+    class_start = min(
+        [class_node.lineno, *(decorator.lineno for decorator in class_node.decorator_list)]
+    )
+    class_source = _format_generated_long_statements(
+        "\n".join(replacement_lines[class_start - 1:class_node.end_lineno])
+    ).strip()
     updated = list(generated_files)
     for index, (path_text, original, source) in enumerate(updated):
         if Path(path_text).resolve() != Path(path).resolve():
@@ -558,7 +566,9 @@ def apply_project_edit_generated_class_set_repair(
                 preimported[index] = (path_text, original, corrected)
                 break
             updated = preimported
-        class_source = ast.unparse(selected_classes[class_name])
+        class_source = _format_generated_long_statements(
+            ast.unparse(selected_classes[class_name])
+        ).strip()
         updated, errors = apply_project_edit_generated_class_repair(
             updated,
             path=path,
@@ -578,6 +588,10 @@ def apply_project_edit_generated_symbol_repair(
     replacement_response: str,
     forbidden_names: list[str] | None = None,
     approved_signature: str = "",
+    allow_return_annotation_repair: bool = False,
+    allow_parameter_annotation_repair: set[str] | None = None,
+    preserve_existing_parameter_annotations: bool = False,
+    preserve_existing_return_annotation: bool = False,
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
     """Parse and splice one model-repaired callable into a generated file."""
 
@@ -606,6 +620,7 @@ def apply_project_edit_generated_symbol_repair(
     ]
     is_disposable_test = Path(path).name.startswith("test_")
     existing_nested_names: set[str] = set()
+    current_definition: ast.AST | None = None
     for current_path, _original, current_source in generated_files:
         if str(Path(current_path).resolve()) != str(Path(path).resolve()):
             continue
@@ -613,7 +628,6 @@ def apply_project_edit_generated_symbol_repair(
             current_tree = ast.parse(current_source, filename=current_path)
         except SyntaxError:
             break
-        current_definition: ast.AST | None = None
         if "." in symbol:
             class_name, method_name = symbol.split(".", 1)
             class_node = next(
@@ -975,6 +989,7 @@ def apply_project_edit_generated_symbol_repair(
                 else []
             ),
         ]
+        restored_parameter_annotations = False
         for original_parameter, repaired_parameter in zip(
             original_parameters,
             repaired_parameters,
@@ -984,22 +999,63 @@ def apply_project_edit_generated_symbol_repair(
                 if original_parameter.annotation is not None
                 else ""
             )
+            explicitly_invalid_annotation = (
+                original_parameter.arg in (allow_parameter_annotation_repair or set())
+                and original_parameter.annotation is not None
+                and any(
+                    (
+                        isinstance(child, ast.Name)
+                        and child.id in {"Any", "object"}
+                    )
+                    or (
+                        isinstance(child, ast.Attribute)
+                        and child.attr == "Any"
+                    )
+                    for child in ast.walk(original_parameter.annotation)
+                )
+                and repaired_parameter.annotation is not None
+                and not any(
+                    (
+                        isinstance(child, ast.Name)
+                        and child.id in {"Any", "object"}
+                    )
+                    or (
+                        isinstance(child, ast.Attribute)
+                        and child.attr == "Any"
+                    )
+                    for child in ast.walk(repaired_parameter.annotation)
+                )
+            )
             if (
                 original_parameter.annotation is not None
                 and original_annotation_text not in {"Any", "object"}
-                and ast.dump(
-                    original_parameter.annotation,
-                    include_attributes=False,
-                )
-                != ast.dump(
-                    repaired_parameter.annotation,
-                    include_attributes=False,
+                and not explicitly_invalid_annotation
+                and (
+                    repaired_parameter.annotation is None
+                    or ast.dump(
+                        original_parameter.annotation,
+                        include_attributes=False,
+                    )
+                    != ast.dump(
+                        repaired_parameter.annotation,
+                        include_attributes=False,
+                    )
                 )
             ):
+                if preserve_existing_parameter_annotations:
+                    repaired_parameter.annotation = ast.parse(
+                        original_annotation_text, mode="eval"
+                    ).body
+                    restored_parameter_annotations = True
+                    continue
                 return generated_files, [
                     f"Repair changed the annotation for "
                     f"{symbol}.{original_parameter.arg}."
                 ]
+        if restored_parameter_annotations:
+            # The approved callable interface wins over incidental model edits.
+            # Salvage the behavioral repair without accepting a type change.
+            replacement = ast.unparse(repaired_definition)
         original_return = (
             ast.dump(original_definition.returns, include_attributes=False)
             if original_definition.returns is not None
@@ -1020,11 +1076,20 @@ def apply_project_edit_generated_symbol_repair(
             if repaired_definition.returns is not None
             else ""
         )
+        return_container_aliases = {
+            "Tuple": "tuple",
+            "List": "list",
+            "Dict": "dict",
+            "Set": "set",
+        }
+        original_container = original_return_text.split("[", 1)[0]
+        repaired_container = repaired_return_text.split("[", 1)[0]
         coarse_container_return = bool(
-            original_return_text.startswith(("tuple[", "list[", "dict[", "set["))
+            original_container in {"tuple", "list", "dict", "set"}
+            and "[" in original_return_text
             and any(token in original_return_text for token in ("object", "Any"))
-            and repaired_return_text.split("[", 1)[0]
-            == original_return_text.split("[", 1)[0]
+            and return_container_aliases.get(repaired_container, repaired_container)
+            == original_container
         )
         if (
             original_return
@@ -1032,8 +1097,15 @@ def apply_project_edit_generated_symbol_repair(
             and original_return != repaired_return
             and str(original or "").strip()
             and not coarse_container_return
+            and not allow_return_annotation_repair
         ):
-            return generated_files, [f"Repair changed the return annotation for {symbol}."]
+            if preserve_existing_return_annotation:
+                repaired_definition.returns = ast.parse(
+                    original_return_text, mode="eval"
+                ).body
+                replacement = ast.unparse(repaired_definition)
+            else:
+                return generated_files, [f"Repair changed the return annotation for {symbol}."]
         if [
             ast.dump(item, include_attributes=False)
             for item in original_definition.decorator_list
@@ -1053,6 +1125,11 @@ def apply_project_edit_generated_symbol_repair(
         if not matched:
             return generated_files, [error or f"Could not replace generated symbol {symbol}."]
         try:
+            formatted = _format_generated_long_statements(corrected)
+            if ast.dump(ast.parse(formatted), include_attributes=False) == ast.dump(
+                ast.parse(corrected), include_attributes=False
+            ):
+                corrected = formatted
             corrected_tree = ast.parse(corrected, filename=path_text)
             compile(corrected_tree, path_text, "exec")
         except (SyntaxError, ValueError) as exc:
@@ -1107,6 +1184,37 @@ def apply_project_edit_generated_symbol_repair(
             introduced_unresolved = sorted(
                 set(_unresolved_generated_names(corrected_tree)) - unresolved_before
             )
+        if introduced_unresolved and len(updated) > 1:
+            try:
+                candidate_paths = [
+                    Path(record[0]).resolve() for record in updated
+                ]
+                project_root = Path(os.path.commonpath([
+                    str(candidate.parent) for candidate in candidate_paths
+                ]))
+                while (project_root / "__init__.py").is_file():
+                    project_root = project_root.parent
+                cross_file_records, _cross_file_fixes = (
+                    resolve_project_edit_cross_file_symbols(
+                        [
+                            (record_path, record_original,
+                             corrected if record_index == index else record_source)
+                            for record_index, (
+                                record_path, record_original, record_source
+                            ) in enumerate(updated)
+                        ],
+                        project_root=str(project_root),
+                    )
+                )
+                corrected = cross_file_records[index][2]
+                corrected_tree = ast.parse(corrected, filename=path_text)
+                compile(corrected_tree, path_text, "exec")
+                introduced_unresolved = sorted(
+                    set(_unresolved_generated_names(corrected_tree))
+                    - unresolved_before
+                )
+            except (OSError, ValueError, SyntaxError):
+                pass
         if introduced_unresolved:
             return generated_files, [
                 "Repaired owner module introduces undefined names: "
@@ -2472,6 +2580,57 @@ def build_deterministic_project_edit_chunk_plan(
             for path in file_items
             if Path(path).name.casefold() in normalized_requirement_text
         ]
+        named_owner_mentioned = any(
+            item["owner"] != "<module>"
+            and re.search(
+                rf"\b{re.escape(item['owner'].rsplit('.', 1)[-1])}\b",
+                text,
+            )
+            for item in declarations
+        )
+        unscoped_input_immutability = bool(
+            re.search(
+                r"^\s*(?:do not|don't|never)\s+mutate\s+"
+                r"(?:the\s+)?(?:inputs?|input\s+(?:mappings?|records?|data)|"
+                r"arguments?)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            and not explicit_path
+            and not explicitly_mentioned_paths
+            and not named_owner_mentioned
+        )
+        unscoped_file_scope = bool(
+            re.match(
+                r"^\s*(?:modify|edit|change|touch)\s+only\s+"
+                r"(?:(?:those|these|the\s+(?:named|listed|specified|requested))\s+)?"
+                r"(?:files|modules|paths)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            and not explicit_path
+            and not explicitly_mentioned_paths
+            and not named_owner_mentioned
+        )
+        unscoped_host_independence = bool(
+            re.search(
+                r"\b(?:work|run|import|execute)\s+without\b"
+                r"[^.;]{0,80}\b(?:installed|running|available)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            and not explicit_path
+            and not explicitly_mentioned_paths
+            and not named_owner_mentioned
+        )
+        if (
+            unscoped_input_immutability
+            or unscoped_file_scope
+            or unscoped_host_independence
+        ):
+            # Unscoped package constraints belong to every relevant approved
+            # declaration, not just the first file that captured the clause.
+            requirement_paths = []
         if len(explicitly_mentioned_paths) > 1:
             requirement_paths = list(
                 dict.fromkeys(
@@ -2574,6 +2733,40 @@ def build_deterministic_project_edit_chunk_plan(
                     item["declaration_id"] for item in module_declarations
                 ]
             multi_owner_proven = len(owners) > 1
+        if not explicit_owner and unscoped_input_immutability:
+            owners = [
+                item["declaration_id"]
+                for item in file_declarations
+                if item["owner"] != "<module>"
+            ]
+            multi_owner_proven = len(owners) > 1
+        elif not explicit_owner and unscoped_file_scope:
+            owners = [
+                item["declaration_id"]
+                for item in file_declarations
+                if item["owner"] == "<module>"
+            ]
+            semantic_role = "structure"
+            multi_owner_proven = len(owners) > 1
+        elif not explicit_owner and unscoped_host_independence:
+            owners = [
+                item["declaration_id"]
+                for item in file_declarations
+                if item["owner"] != "<module>"
+            ]
+            semantic_role = "quality"
+            multi_owner_proven = len(owners) > 1
+        elif (
+            not explicit_owner
+            and not owners
+            and len(named_declaration_ids) == 1
+            and re.search(
+                r"^\s*(?:do not|don't|never)\s+mutate\s+",
+                text,
+                flags=re.IGNORECASE,
+            )
+        ):
+            owners = named_declaration_ids
         if (
             not explicit_owner
             and not owners

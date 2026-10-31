@@ -104,6 +104,117 @@ def classify_prompt_route(
     hosts = _detect_hosts(text)
     no_execute = _has_no_execute_guard(lower)
 
+    # A multi-step Painter request must not collapse to one registered DCC
+    # operation (or to code discovery). Its material step is delegated, so the
+    # pipeline planner can report that boundary before any host mutation.
+    if hosts == ["blender"]:
+        from tech_connector.game_engine.integration.dcc_operation_service import is_blender_process_export_prompt
+
+        blender_pipeline = is_blender_process_export_prompt(text)
+    else:
+        blender_pipeline = False
+    if blender_pipeline:
+        return _finalize_decision(PromptRouteDecision(
+            route="pipeline_graph",
+            provider="action_graph",
+            intent_category="workflow_pipeline",
+            host="blender",
+            confidence=0.95,
+            operation_mode="compose_pipeline",
+            mutation_scope="dcc_mutation",
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=True,
+            required_context=["dcc_bridge_status", "operation_catalogs", "workflow_graph"],
+            reasons=["Blender preparation and FBX export require an ordered, typed pipeline."],
+            rejected_routes=["dcc_execute", "target_discovery", "project_search"],
+        ), lower)
+    if hosts == ["substance_painter"]:
+        from tech_connector.game_engine.integration.dcc_operation_service import is_painter_multi_operation_prompt
+
+        painter_pipeline = is_painter_multi_operation_prompt(text)
+    else:
+        painter_pipeline = False
+    if painter_pipeline:
+        return _finalize_decision(PromptRouteDecision(
+            route="pipeline_graph",
+            provider="action_graph",
+            intent_category="workflow_pipeline",
+            host="substance_painter",
+            confidence=0.96,
+            operation_mode="compose_pipeline",
+            mutation_scope="dcc_mutation",
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=True,
+            required_context=["dcc_bridge_status", "operation_catalogs", "workflow_graph"],
+            reasons=["Ordered Painter operations require pipeline planning and delegation checks."],
+            rejected_routes=["dcc_execute", "target_discovery", "project_search"],
+        ), lower)
+
+    # This is one validated Maya operation despite its internal HIK, bake and
+    # save stages. Route only when every input/output role is explicit; an
+    # incomplete or cross-host request still goes through normal planning.
+    if (
+        hosts == ["maya"]
+        and not no_execute
+        and not _is_explicit_source_code_mutation(text, lower)
+        and re.search(r"\b(?:transfer|retarget|retargeting|bake|bring)\b", lower)
+        and re.search(r"\b(?:fbx|mocap|animation)\b", lower)
+        and re.search(r"\b(?:control\s*rig|animator\s*controls?|rig\s*controls?)\b", lower)
+    ):
+        from tech_connector.game_engine.integration.dcc_operation_service import (
+            MAYA_OPERATIONS,
+            build_dcc_operation_params,
+            dcc_prompt_to_operation,
+        )
+
+        transfer_key = dcc_prompt_to_operation(
+            "maya", text, problem_formulation={"action_mode": "execute", "deliverables": []}
+        )
+        if transfer_key == "animation.fbx_to_control_rig":
+            transfer = MAYA_OPERATIONS[transfer_key]
+            transfer_params = build_dcc_operation_params("maya", transfer_key, text)
+            if all(transfer_params.get(name) for name in transfer.required):
+                return _finalize_decision(PromptRouteDecision(
+                    route="dcc_execute",
+                    provider="dcc",
+                    intent_category="dcc_execution",
+                    host="maya",
+                    confidence=0.97,
+                    callable_name=transfer.function,
+                    target_identifier=transfer_key,
+                    keyword_args=transfer_params,
+                    mutation_scope="dcc_scene_mutation",
+                    requires_confirmation=True,
+                    requires_dcc_connection=True,
+                    required_context=["dcc_connection", "resolved_callable", "argument_validation"],
+                    model_tier="none_deterministic",
+                    reasons=["All selected FBX, rig, HumanIK and output file roles are explicit."],
+                    rejected_routes=["pipeline_graph", "project_search"],
+                ), lower)
+
+    # An explicit ordered function list is an execution contract, not a symbol
+    # lookup.  Route it before semantic code-search heuristics see dotted
+    # callable names such as ``maya.animation.export`` as project references.
+    # Requiring multiple recognized hosts keeps ordinary "Functions:" code
+    # questions on the project-search path.
+    if len(hosts) >= 2 and re.search(r"\bfunctions?\s*:", lower):
+        return _finalize_decision(PromptRouteDecision(
+            route="pipeline_graph",
+            provider="action_graph",
+            intent_category="workflow_pipeline",
+            host=hosts[0],
+            confidence=0.96,
+            operation_mode="compose_pipeline",
+            mutation_scope="dcc_mutation",
+            requires_confirmation=not no_execute,
+            requires_dcc_connection=True,
+            required_context=["dcc_bridge_status", "operation_catalogs", "workflow_graph"],
+            reasons=[
+                "Prompt supplies an ordered cross-host function contract for pipeline composition."
+            ],
+            rejected_routes=["project_search", "target_discovery", "dcc_execute"],
+        ), lower)
+
     if (
         _is_unreal_animation_blueprint_feature_request(lower)
         and not _is_explicit_pipeline_build_request(lower)

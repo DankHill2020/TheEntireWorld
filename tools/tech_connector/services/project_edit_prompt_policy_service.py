@@ -26,8 +26,20 @@ def _dedupe_lines(text: str) -> str:
     output: list[str] = []
     seen: set[str] = set()
     previous_blank = False
+    inside_fence = False
     for raw_line in str(text or "").splitlines():
         stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            output.append(raw_line)
+            inside_fence = not inside_fence
+            previous_blank = False
+            continue
+        if inside_fence:
+            # Source and JSON evidence are data, not repeatable instructions.
+            # Removing a repeated quote or bracket can corrupt the contract.
+            output.append(raw_line)
+            previous_blank = False
+            continue
         if not stripped:
             if output and not previous_blank:
                 output.append("")

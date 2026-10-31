@@ -27,7 +27,12 @@ PROVIDERS = {
         id="ollama",
         display_name="Local",
         env_vars=(),
-        example_models=("ollama:qwen2.5-coder:3b", "ollama:qwen3:4b-instruct"),
+        example_models=(
+            "ollama:qwen3.5:4b",
+            "ollama:qwen3.5:9b",
+            "ollama:qwen2.5-coder:7b",
+            "ollama:qwen3:4b-instruct",
+        ),
         setup_url="https://ollama.com/download",
         setup_kind="local",
         credential_hint="Install Ollama locally. No cloud login is required.",
@@ -38,10 +43,9 @@ PROVIDERS = {
         display_name="OpenAI",
         env_vars=("OPENAI_API_KEY",),
         example_models=(
-            "openai:gpt-5.6-sol",
-            "openai:gpt-5.6-terra",
-            "openai:gpt-5.6-luna",
-            "openai:gpt-5.3-codex",
+            "openai:gpt-6-astra",
+            "openai:gpt-6.1-sol",
+            "openai:gpt-6-luna",
         ),
         setup_url="https://platform.openai.com/api-keys",
         setup_kind="account_login_or_api_key",
@@ -125,13 +129,13 @@ def is_provider_model(model: str) -> bool:
     return prefix in PROVIDERS
 
 
-def provider_has_credentials(provider_id: str) -> bool:
+def provider_has_credentials(provider_id: str, *, probe_account: bool = True) -> bool:
     provider = PROVIDERS.get(provider_id)
     if not provider:
         return False
     if not provider.env_vars:
         return True
-    if provider.account_transport:
+    if provider.account_transport and probe_account:
         from tech_connector.services.authenticated_provider_service import (
             account_provider_is_connected,
         )

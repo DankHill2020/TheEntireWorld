@@ -37,7 +37,7 @@ class RequestPreparationWorker(QThread):
                 or settings.get("cloud_provider_model")
                 or settings.get("general_model")
                 or context.model
-                or "qwen3:4b-instruct"
+                or "qwen3.5:4b"
             )
             if selected.startswith("ollama:") or (
                 ":" not in selected
@@ -48,7 +48,7 @@ class RequestPreparationWorker(QThread):
                 prompt_provider_route = ModelProviderRoute(
                     "ollama",
                     selected.removeprefix("ollama:").strip()
-                    or "qwen3:4b-instruct",
+                    or "qwen3.5:4b",
                 )
             else:
                 from tech_connector.services.llm_router_service import (

@@ -64,9 +64,14 @@ def extract_python_code(text: str) -> str:
 
 def first_function_name(code: str) -> str:
     tree = ast.parse(code)
+    first_function = ""
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return node.name
+            first_function = first_function or node.name
+            if not node.name.startswith("_"):
+                return node.name
+    if first_function:
+        return first_function
     raise ValueError("Workflow code must define at least one function.")
 
 
@@ -169,6 +174,15 @@ def _selected_manifest_items(selected_items: Optional[list[dict]]) -> list[dict]
                 "outputs": item.get("outputs", []),
                 "return_annotation": item.get("return_annotation", ""),
                 "contract": item.get("contract", {}),
+                "host": item.get("host", ""),
+                "provider_id": item.get("provider_id", ""),
+                "package": item.get("package", ""),
+                "operation": item.get("operation", ""),
+                "pipeline_operation": item.get("pipeline_operation", ""),
+                "function_path": item.get("function_path", ""),
+                "module": item.get("module", ""),
+                "start_line": item.get("start_line") or item.get("line") or item.get("lineno") or 1,
+                "source_kind": item.get("source_kind", ""),
             }
         )
     return items
@@ -621,6 +635,12 @@ def _satisfy_required_dependencies(
     diagnostics: list[str] = []
     capability_gaps: list[dict[str, Any]] = []
     insertions = 0
+    # A pair of mutually dependent candidates can otherwise be moved in front
+    # of each other forever. Bound reordering independently of insertions so a
+    # cyclic prompt fails closed with missing-input gaps instead of hanging.
+    reorders = 0
+    max_reorders = max(8, 2 * len(steps) + max_insertions)
+    reorder_limit_reported = False
     index = 0
     while index < len(steps):
         step = steps[index]
@@ -654,9 +674,10 @@ def _satisfy_required_dependencies(
                     matched, _reason = _output_matches_param(output, param)
                     if matched:
                         later_direct_index = candidate_index
-            if later_direct_index is not None:
+            if later_direct_index is not None and reorders < max_reorders:
                 producer_step = steps.pop(later_direct_index)
                 steps.insert(index, producer_step)
+                reorders += 1
                 diagnostics.append(
                     f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` before `{symbol.get('name')}` for `{param_name}`."
                 )
@@ -678,7 +699,7 @@ def _satisfy_required_dependencies(
                         later_adapter_index = candidate_index
                         later_adapter = _utility_symbol("list_item", index=0)
                         later_adapter_reason = "adapted list output with Get List Item"
-            if later_adapter_index is not None and later_adapter:
+            if later_adapter_index is not None and later_adapter and reorders < max_reorders:
                 producer_step = steps.pop(later_adapter_index)
                 adapter_step = _step_for_symbol(
                     later_adapter,
@@ -689,6 +710,7 @@ def _satisfy_required_dependencies(
                 steps.insert(index, producer_step)
                 steps.insert(index + 1, adapter_step)
                 insertions += 1
+                reorders += 1
                 diagnostics.append(
                     f"Moved prerequisite `{producer_step.get('symbol', {}).get('name')}` and inserted adapter `{later_adapter.get('name')}` before `{symbol.get('name')}` for `{param_name}`."
                 )
@@ -697,6 +719,12 @@ def _satisfy_required_dependencies(
                 index = max(index - 1, 0)
                 restarted = True
                 break
+
+            if not reorder_limit_reported and reorders >= max_reorders:
+                diagnostics.append(
+                    "Stopped prerequisite reordering after a possible dependency cycle; unresolved inputs require review."
+                )
+                reorder_limit_reported = True
 
             used_names = {str(item.get("symbol", {}).get("name") or "") for item in steps}
             producer, output, reason = _find_producer_for_param(param, symbols, prompt, used_names)
@@ -864,10 +892,17 @@ def _resolve_scope_paths(prompt: str, roots: list[str]) -> list[Path]:
         raw = Path(token.lstrip("@"))
         if raw.is_absolute():
             candidates.append(raw)
-        for root_text in roots:
-            root = Path(root_text)
-            candidates.append(root / normalized)
-            candidates.extend(path for path in root.rglob(Path(normalized).name) if path.name.lower() == Path(normalized).name.lower())
+        else:
+            # An absolute asset/output path is not a project symbol scope.
+            # Recursively searching every project root for its basename made
+            # ordinary FBX/texture prompts block the UI for many seconds.
+            for root_text in roots:
+                root = Path(root_text)
+                candidates.append(root / normalized)
+                candidates.extend(
+                    path for path in root.rglob(Path(normalized).name)
+                    if path.name.lower() == Path(normalized).name.lower()
+                )
         for candidate in candidates:
             try:
                 candidate = candidate.resolve()
@@ -1138,6 +1173,74 @@ def resolve_workflow_intent(prompt: str, project_roots: list[str]) -> dict[str, 
         fallback_symbol_loader=fallback_dependency_loader,
     )
     diagnostics.extend(dependency_diagnostics)
+    try:
+        from tech_connector.services.pipeline_usage_context_service import (
+            infer_project_usage_context,
+        )
+
+        usage_context = infer_project_usage_context(steps, roots)
+        usage_links = list(usage_context.get("links") or [])
+        usage_values = list(usage_context.get("values") or [])
+    except Exception as exc:
+        usage_links = []
+        usage_values = []
+        diagnostics.append(f"Project call-site context could not be inspected: {exc}")
+    if usage_links:
+        # Real argument flow observed in project code outranks generic
+        # name/type inference for the same input.
+        by_target = {
+            (int(link.get("to_step") or 0), str(link.get("to_input") or "")): link
+            for link in data_links
+        }
+        for link in usage_links:
+            by_target[(int(link["to_step"]), str(link["to_input"]))] = link
+            target = steps[int(link["to_step"]) - 1]
+            target.setdefault("literal_value_details", {})[str(link["to_input"])] = {
+                "source": "project_call_site",
+                "missing": False,
+                "resolution": str(link.get("reason") or ""),
+                "evidence": dict(link.get("evidence") or {}),
+            }
+            target.setdefault("literal_value_provenance", {})[
+                str(link["to_input"])
+            ] = "project_call_site"
+        data_links = sorted(
+            by_target.values(),
+            key=lambda item: (int(item.get("to_step") or 0), str(item.get("to_input") or "")),
+        )
+        diagnostics.append(f"Resolved {len(usage_links)} data link(s) from observed project call sites.")
+    occupied_inputs = {
+        (int(link.get("to_step") or 0), str(link.get("to_input") or ""))
+        for link in data_links
+    }
+    applied_usage_values = 0
+    for observation in usage_values:
+        target_key = (
+            int(observation.get("to_step") or 0),
+            str(observation.get("to_input") or ""),
+        )
+        if target_key in occupied_inputs or not (0 < target_key[0] <= len(steps)):
+            continue
+        target = steps[target_key[0] - 1]
+        source = str(
+            (target.get("literal_value_provenance") or {}).get(target_key[1]) or ""
+        )
+        if source in {"user_prompt", "user_prompt_or_derived", "user_setting"}:
+            continue
+        target.setdefault("literal_values", {})[target_key[1]] = observation.get("value")
+        target.setdefault("literal_value_provenance", {})[target_key[1]] = "project_call_site"
+        target.setdefault("literal_value_details", {})[target_key[1]] = {
+            "source": "project_call_site",
+            "missing": False,
+            "resolution": str(observation.get("reason") or ""),
+            "evidence": dict(observation.get("evidence") or {}),
+            "evidence_count": int(observation.get("evidence_count") or 1),
+        }
+        applied_usage_values += 1
+    if applied_usage_values:
+        diagnostics.append(
+            f"Resolved {applied_usage_values} argument value(s) from observed project call sites."
+        )
     connected_steps = {link["from_step"] for link in data_links} | {link["to_step"] for link in data_links}
     explicit_names = set(requested_names)
     preserve_explicit_steps = bool(explicit_names) and all(

@@ -1,6 +1,6 @@
 # Tech Connector Licensing Launch Readiness
 
-Status date: 2026-09-28
+Status date: 2026-10-11
 
 This checklist covers the licensing and source-distribution launch boundary.
 It does not claim that every Tech Connector product feature is production-ready.
@@ -52,8 +52,10 @@ These cannot be completed safely in the public client repository:
 - Obtain counsel approval for `LICENSE.md`, `PRIVACY.md`, agreement acceptance, the Adjusted
   Project Profit definition, eligible-cost exclusions, audit/reporting language,
   governing law, remedies, privacy notice, and tax treatment.
-- Deploy the private account, organization, agreement, project, activation, and
-  entitlement service described in `LICENSING_BACKEND_API.md`.
+- Promote the deployed Render/Neon/Auth0 account, organization, agreement,
+  project, activation, and entitlement foundation from staging to production
+  only after the authenticated launch matrix, owner-admin claim, monitoring,
+  backup/restore, and recovery checks pass.
 - Deploy authenticated release/update delivery, require recorded agreement
   acceptance before issuing execution entitlements, and validate Community,
   annual, perpetual-major, Enterprise, and Custom grants end to end. Public
@@ -61,12 +63,15 @@ These cannot be completed safely in the public client repository:
 - Reverify `config/source_access.json` whenever the repository boundary changes;
   complete source belongs in the public monorepo, while signing, identity,
   billing, accounting, administration, and deployment systems remain private.
-- Store the production Ed25519 signing key in KMS/HSM, configure rotation and
-  revocation procedures, and publish only approved public verification keys.
+- Complete the production Ed25519 custody control. The no-paid-service launch
+  path may use the explicitly acknowledged backend software signer only with a
+  protected hosting secret, encrypted offline recovery copy, distinct staging
+  and production keys, reviewed public-key fingerprint, and a recovery/rotation
+  drill. Migrate to non-exportable KMS custody when funded.
 - Configure real HTTPS endpoints and run `release_gate.py --production`.
 - Provision the Authenticode certificate and complete a clean-machine signed
   installer/uninstaller test on supported Windows versions.
-- Keep the repository-root README, LICENSE, and GitHub workflow checks installed
+- Keep the repository-root README, LICENSE.md, and GitHub workflow checks installed
   in the public monorepo, without private services, signing material, production
   credentials, or security-sensitive deployment components.
 - Establish monitoring, backups, rate limits, abuse controls, incident response,
@@ -115,11 +120,14 @@ has an accountable owner and recorded completion evidence.
 
 ## P1 integration backlog
 
-- Build and test the self-service account portal: organization roles, license
-  selection, agreement history, GitHub identity/source grants, project terms,
-  and lost-device deactivation.
-- Add sandbox payment/webhook adapters and idempotency/replay test vectors in the
-  private backend; payment systems must never sign entitlements directly.
+- Finish authenticated production testing of the implemented self-service and
+  owner portals: organization roles, license selection, agreement history,
+  GitHub identity/source grants, project terms, named seats, case intake, and
+  lost-device deactivation.
+- Exercise the implemented manual-payment and optional Stripe adapters,
+  idempotency, replay protection, and catalog-bound fulfillment against the
+  approved production catalog; payment systems must never sign entitlements
+  directly.
 - Exercise the checked-in public-key overlap/removal and 30/60/90-day offline
   vectors, plus entitlement revocation and device replacement, against a
   deployed staging service.

@@ -3,7 +3,8 @@
 This repository includes the complete optional first-party tools collection for
 Tech Connector. It is one product bundle; the individual Maya, Blender,
 Houdini, 3ds Max, MotionBuilder, Substance Painter, Unreal, utility, plugin,
-and Qt directories are not separately licensed tool packs.
+Qt, external integration, and cross-DCC workflow directories are not
+separately licensed tool packs.
 
 The bundle can be installed beside Tech Connector Core, kept in an independent
 directory, or included in a combined installation. Add the bundle directory to
@@ -17,5 +18,5 @@ source-available license, but official execution, packaged updates, and support
 for this first-party bundle are controlled by the `official_tools_bundle`
 capability in the user's signed entitlement.
 
-The accompanying `tech_connector/LICENSE.md` controls use. Downloading or
-possessing these files does not create an activated entitlement.
+The accompanying root `LICENSE` controls use. Downloading or possessing these
+files does not create an activated entitlement.

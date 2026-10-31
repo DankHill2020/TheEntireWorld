@@ -11,12 +11,15 @@ from typing import Any
 from maya import cmds
 
 from maya_tools.Rigging import create_rig
+from maya_tools.Rigging import joint_placer
+from maya_tools.Rigging.undo_utils import undo_chunk
 from maya_tools.Rigging.mocap import setup_hik
 from tech_connector.services.dcc.rigging_workspace_service import (
     CharacterDefinition,
     RiggingOperationResult,
     auto_map_character,
     mirror_character_slots,
+    twist_driver_contract,
     validate_character_definition,
 )
 
@@ -26,17 +29,37 @@ HOST = "maya"
 
 def reload_dependencies() -> str:
     """Refresh the complete Maya rig stack for bridge-driven operations."""
-    global create_rig, setup_hik
+    global create_rig, joint_placer, setup_hik, twist_driver_contract
+
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    twist_driver_contract = contract.twist_driver_contract
 
     from maya_tools.Rigging import create_rig_core
     from maya_tools.Rigging import create_rig_modules
     from maya_tools.Rigging import enum_attrs
+    from maya_tools.Rigging import joint_placement_regression
     from maya_tools.Rigging import rig_template
     from maya_tools.Rigging import skinning_utils
+    from maya_tools.Rigging import unreal_skeletal_export
+    from maya_tools.Rigging import vehicle_rig
     from maya_tools.Utilities import dag, joints
 
     importlib.invalidate_caches()
-    for module in (enum_attrs, skinning_utils, joints, dag, rig_template, setup_hik, create_rig_core):
+    for module in (
+            enum_attrs,
+            skinning_utils,
+            joints,
+            dag,
+            rig_template,
+            vehicle_rig,
+            joint_placer,
+            joint_placement_regression,
+            unreal_skeletal_export,
+            setup_hik,
+            create_rig_core,
+    ):
         importlib.reload(module)
 
     modules_name = "maya_tools.Rigging.create_rig_modules"
@@ -84,6 +107,9 @@ def execute(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
     if handler is None:
         return _result(False, capability, f"Maya translation is not implemented: {capability}")
     try:
+        if str(capability).startswith(("rig.", "skin.", "retarget.")):
+            with undo_chunk("Tech Connector: {}".format(capability)):
+                return handler(dict(payload))
         return handler(dict(payload))
     except Exception as exc:
         return _result(False, capability, str(exc))
@@ -175,6 +201,55 @@ def _op_definition_export(payload: dict[str, Any]) -> dict[str, Any]:
 _op_retarget_create_definition = _op_definition_import
 _op_retarget_validate_definition = _op_definition_validate
 
+
+def _op_rig_place_joints(payload: dict[str, Any]) -> dict[str, Any]:
+    mesh = str(payload.get("mesh") or "")
+    if not mesh:
+        selected = cmds.ls(selection=True, long=True) or []
+        mesh = selected[0] if selected else ""
+    if not mesh:
+        raise ValueError("Maya joint placement requires a mesh or mesh selection.")
+    options = {
+        "solver": str(payload.get("solver") or "production"),
+        "template_path": str(payload.get("template_path") or joint_placer.DEFAULT_PLACEMENT_TEMPLATE),
+        "create_guides": bool(payload.get("create_guides", False)),
+        "joint_map": payload.get("joint_map"),
+    }
+    if bool(payload.get("preview", False)):
+        preview = joint_placer.preview_biped_joint_placement(mesh, **options)
+        return _result(
+            True, "rig.place_joints", "Previewed Maya joint placement.",
+            created_ids=list(preview.guides), data={"preview": vars(preview)},
+        )
+    result = joint_placer.build_basic_biped_skeleton(
+        mesh,
+        solver=options["solver"],
+        template_path=options["template_path"],
+        create_guides=options["create_guides"],
+        joint_map=options["joint_map"],
+        replace_existing=bool(payload.get("replace_existing", True)),
+        require_interior=bool(payload.get("require_interior", False)),
+        import_skin_weights=bool(payload.get("import_skin_weights", False)),
+    )
+    changed = [result.root_joint] + (
+        cmds.listRelatives(result.root_joint, allDescendents=True, type="joint", fullPath=True) or []
+    )
+    return _result(
+        True, "rig.place_joints", "Placed Maya character joints.",
+        changed_ids=changed, data={"placement": vars(result)},
+        warnings=list(result.anatomical_issues),
+    )
+
+
+def _op_rig_set_t_pose(payload: dict[str, Any]) -> dict[str, Any]:
+    definition = _definition(payload["definition"])
+    body, _face = _maya_maps(definition)
+    report = setup_hik.set_t_pose(joint_map=body)
+    changed = [joint for joint in definition.slots.values() if cmds.objExists(joint)]
+    return _result(
+        True, "rig.set_t_pose", "Set Maya character T-pose.",
+        changed_ids=changed, data={"report": report},
+    )
 
 def _op_rig_build_full(payload: dict[str, Any]) -> dict[str, Any]:
     definition = _definition(payload["definition"])
@@ -327,11 +402,23 @@ def _op_skin_surface_spatial_smooth_brush(payload: dict[str, Any]) -> dict[str, 
 
 
 def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = twist_driver_contract(
+        str(payload["start"]),
+        parent=str(payload.get("parent") or payload["start"]),
+        module=str(payload.get("module") or ""),
+        overrides=payload,
+    )
     result = create_rig.create_twist_driver(
         payload["start"], payload["end"],
         str(payload.get("parent") or ""), str(payload.get("surface") or ""),
+        constraint_settings=payload,
     )
-    return _result(True, "rig.create_twist", "Created Maya twist distribution.", data={"maya_result": result})
+    return _result(
+        True,
+        "rig.create_twist",
+        "Created Maya twist distribution.",
+        data={"maya_result": result, "constraint_settings": settings},
+    )
 
 
 def _op_rig_create_motion_path(payload: dict[str, Any]) -> dict[str, Any]:

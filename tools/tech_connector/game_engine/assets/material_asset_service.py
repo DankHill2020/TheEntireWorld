@@ -31,6 +31,14 @@ NODE_COSTS: dict[str, tuple[int, int]] = {
     "dot": (2, 0), "cross": (3, 0), "normalize": (4, 0), "fresnel": (5, 0),
     "power": (6, 0), "sine": (5, 0), "noise": (18, 0), "parallax": (24, 2),
     "static_switch": (0, 0), "material_function": (4, 0), "surface_output": (0, 0),
+    "shader_output": (0, 0), "attribute": (0, 0), "math": (2, 0), "vector_math": (3, 0),
+}
+
+PLATFORM_PREVIEW_FALLBACKS: dict[str, frozenset[str]] = {
+    "mobile": frozenset({"virtual_texture"}),
+    "android": frozenset({"virtual_texture"}),
+    "ios": frozenset({"virtual_texture"}),
+    "web": frozenset({"virtual_texture", "parallax"}),
 }
 
 
@@ -363,6 +371,23 @@ def analyze_material_graph(graph: Mapping[str, Any], *, platform: str = "desktop
         texture_samples += cost[1]
         if opcode == "static_switch": branches += 1
         if cost[0] >= 12: expensive.append(str(node.get("title") or opcode))
+        node_id = str(node.get("id") or "")
+        if opcode not in NODE_COSTS:
+            issues.append(MaterialIssue(
+                "warning", "unsupported_node", f"'{node.get('title') or opcode}' has no native cost model and uses portable fallback evaluation.",
+                node_id, "Replace it with a supported node or provide a backend implementation.",
+            ))
+        if opcode == "material_function" and not str(dict(node.get("parameters") or {}).get("function_asset_id") or ""):
+            issues.append(MaterialIssue(
+                "warning", "missing_function", "Material Function has no referenced Shader Graph.", node_id,
+                "Choose a reusable Shader Graph asset for this node.",
+            ))
+        if opcode in PLATFORM_PREVIEW_FALLBACKS.get(str(platform).casefold(), frozenset()):
+            issues.append(MaterialIssue(
+                "warning", "platform_preview_fallback",
+                f"'{node.get('title') or opcode}' uses portable fallback preview on {platform}.", node_id,
+                "Preview the target and replace this node if native parity is required.",
+            ))
     permutations = min(4096, 2 ** branches)
     stats = {
         "node_count": len(nodes), "connection_count": len(connections),

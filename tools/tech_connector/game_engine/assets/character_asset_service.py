@@ -163,6 +163,80 @@ def validate_skin_binding_properties(properties: Mapping[str, Any]) -> tuple[Cha
     return tuple(issues)
 
 
+def validate_skeleton_properties(properties: Mapping[str, Any]) -> tuple[CharacterAssetIssue, ...]:
+    values = dict(properties or {})
+    bones = [dict(item) for item in values.get("bones") or () if isinstance(item, Mapping)]
+    issues: list[CharacterAssetIssue] = []
+    names = [str(item.get("name") or item.get("id") or "").strip() for item in bones]
+    if not bones:
+        issues.append(CharacterAssetIssue("error", "missing_bones", "Skeleton needs at least one bone."))
+        return tuple(issues)
+    if any(not name for name in names):
+        issues.append(CharacterAssetIssue("error", "missing_bone_name", "Every Skeleton bone needs a stable name."))
+    if len(names) != len(set(names)):
+        issues.append(CharacterAssetIssue("error", "duplicate_bone", "Skeleton bone names must be unique."))
+    known = set(names)
+    parents = {name: str(bone.get("parent") or bone.get("parent_id") or "").strip() for name, bone in zip(names, bones) if name}
+    for name, parent in parents.items():
+        if parent == name:
+            issues.append(CharacterAssetIssue("error", "self_parent", f"Bone '{name}' cannot parent itself."))
+        elif parent and parent not in known:
+            issues.append(CharacterAssetIssue("error", "missing_parent", f"Bone '{name}' references missing parent '{parent}'."))
+    for name in parents:
+        visiting: set[str] = set()
+        cursor = name
+        while cursor and cursor in parents:
+            if cursor in visiting:
+                issues.append(CharacterAssetIssue("error", "hierarchy_cycle", f"Skeleton hierarchy contains a cycle at '{cursor}'."))
+                break
+            visiting.add(cursor); cursor = parents.get(cursor, "")
+    sockets = [dict(item) for item in values.get("sockets") or () if isinstance(item, Mapping)]
+    socket_names = [str(item.get("name") or "").strip() for item in sockets]
+    if any(not name for name in socket_names) or len(socket_names) != len(set(socket_names)):
+        issues.append(CharacterAssetIssue("error", "invalid_socket_name", "Skeleton socket names must be present and unique."))
+    for socket in sockets:
+        bone = str(socket.get("bone") or socket.get("parent_bone") or "").strip()
+        if bone not in known:
+            issues.append(CharacterAssetIssue("error", "missing_socket_bone", f"Socket '{socket.get('name', '')}' references missing bone '{bone}'."))
+    pose = dict(values.get("retarget_pose") or {})
+    pose_metadata = {"name", "forward_axis", "up_axis"}
+    unknown_pose_bones = sorted(set(str(name) for name in pose) - known - pose_metadata)
+    if unknown_pose_bones:
+        issues.append(CharacterAssetIssue("error", "unknown_retarget_bone", "Retarget pose references missing bones: " + ", ".join(unknown_pose_bones)))
+    unknown_preserved = sorted(set(str(name) for name in values.get("preserve_bones") or ()) - known)
+    if unknown_preserved:
+        issues.append(CharacterAssetIssue("error", "unknown_preserve_bone", "Always-evaluate list references missing bones: " + ", ".join(unknown_preserved)))
+    return tuple(issues)
+
+
+def compile_skeleton_payload(
+    properties: Mapping[str, Any], *, platform: str = "desktop", quality: str = "high",
+) -> bytes:
+    values = dict(properties or {})
+    errors = [item.message for item in validate_skeleton_properties(values) if item.severity == "error"]
+    if errors:
+        raise ValueError("Skeleton cannot be cooked: " + "; ".join(errors))
+    bones = [dict(item) for item in values.get("bones") or ()]
+    index_by_name = {str(item.get("name") or item.get("id")): index for index, item in enumerate(bones)}
+    runtime_bones = []
+    for bone in bones:
+        name = str(bone.get("name") or bone.get("id"))
+        parent = str(bone.get("parent") or bone.get("parent_id") or "")
+        runtime_bones.append({
+            "name": name, "parent_index": index_by_name.get(parent, -1),
+            "reference_pose": dict(bone.get("reference_pose") or bone.get("transform") or {}),
+            "role": str(bone.get("role") or bone.get("semantic_role") or ""),
+            "importance": float(bone.get("importance", 1.0)),
+        })
+    payload = {
+        "schema": "tech_connector.cooked_skeleton.v1", "platform": str(platform), "quality": str(quality),
+        "bones": runtime_bones, "sockets": list(values.get("sockets") or ()),
+        "retarget_pose": dict(values.get("retarget_pose") or {}),
+        "preserve_bones": list(dict.fromkeys(str(name) for name in values.get("preserve_bones") or ())),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def compile_skin_binding_payload(
     properties: Mapping[str, Any], *, platform: str = "desktop", quality: str = "high",
 ) -> bytes:
@@ -246,6 +320,6 @@ def compile_skeletal_mesh_plan(properties: Mapping[str, Any], *, platform: str =
 
 __all__ = [
     "CHARACTER_PERFORMANCE_PROFILES", "CharacterAssetIssue", "character_performance_profile",
-    "compile_skeletal_mesh_plan", "compile_skin_binding_payload", "generate_bone_lods",
-    "recommended_mesh_lods", "validate_character_lods", "validate_skin_binding_properties",
+    "compile_skeletal_mesh_plan", "compile_skeleton_payload", "compile_skin_binding_payload", "generate_bone_lods",
+    "recommended_mesh_lods", "validate_character_lods", "validate_skeleton_properties", "validate_skin_binding_properties",
 ]

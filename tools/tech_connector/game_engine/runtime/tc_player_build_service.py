@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -119,7 +120,8 @@ def compile_tcscene_for_runtime(
         entity["light"] = light
     assets = _runtime_assets(entities, runtime, blobs, graphs, rig_graph)
     warnings: list[str] = []
-    records = ["TCRUNTIME\t1"]
+    scene_key = hashlib.sha256(str(document.scene_id).encode("utf-8")).hexdigest()[:24]
+    records = ["TCRUNTIME\t1", f"SCENEID\t{scene_key}"]
     for asset in assets:
         records.append("\t".join((
             "ASSET", asset["id"], asset["type"], _encode(asset["source"]), asset["content_hash"],
@@ -132,9 +134,70 @@ def compile_tcscene_for_runtime(
         warnings,
     ))
     records.extend(_rig_animation_records(rig_graph, warnings))
+    records.extend(_motion_database_records(runtime.get("motion_database")))
     records.extend(_skin_binding_records(rig_graph, assets, warnings))
     records.extend(_physical_animation_records(entities, rig_graph, warnings))
     records.append("HUD\t" + _encode(str(runtime.get("hud_text") or document.name)))
+    input_bindings = dict(runtime.get("input_bindings") or {})
+    for action in ("move_right", "move_left", "move_forward", "move_backward", "jump", "crouch", "crawl"):
+        if action not in input_bindings:
+            continue
+        key = str(input_bindings[action]).upper()
+        if key != "SPACE" and (len(key) != 1 or not key.isascii() or not key.isalnum()):
+            raise ValueError(f"Unsupported keyboard binding for {action}: {key!r}")
+        records.append(f"INPUTBIND\t{action}\t{32 if key == 'SPACE' else ord(key)}")
+    gamepad_defaults = {
+        "jump": "SOUTH", "crouch": "EAST", "crawl": "WEST",
+        "ui_confirm": "SOUTH", "ui_cancel": "EAST", "ui_menu": "MENU",
+    }
+    gamepad_buttons = {"SOUTH", "EAST", "WEST", "NORTH", "LEFT_SHOULDER", "RIGHT_SHOULDER", "MENU"}
+    supplied_gamepad = runtime.get("gamepad_bindings") or {}
+    if not isinstance(supplied_gamepad, dict):
+        raise ValueError("gamepad_bindings must be an action-to-button object.")
+    unknown_gamepad = set(supplied_gamepad) - set(gamepad_defaults)
+    if unknown_gamepad:
+        raise ValueError(f"Unknown gamepad action: {sorted(unknown_gamepad)[0]!r}")
+    effective_gamepad = dict(gamepad_defaults)
+    for action, value in supplied_gamepad.items():
+        button = str(value).strip().upper()
+        if button not in gamepad_buttons:
+            raise ValueError(f"Unsupported gamepad button for {action}: {value!r}")
+        effective_gamepad[action] = button
+    for group in (("jump", "crouch", "crawl"), ("ui_confirm", "ui_cancel", "ui_menu")):
+        chosen = [effective_gamepad[action] for action in group]
+        if len(chosen) != len(set(chosen)):
+            raise ValueError(f"Gamepad bindings conflict in {', '.join(group)}.")
+    for action in gamepad_defaults:
+        if action in supplied_gamepad:
+            records.append(f"GAMEPADBIND\t{action}\t{effective_gamepad[action]}")
+    ui_document = runtime.get("ui_document")
+    if ui_document:
+        from ..assets.ui_document_asset_service import layout_ui_document
+
+        ui_layout = layout_ui_document(ui_document)
+        ui_sources = {str(item["id"]): item for item in ui_document["widgets"]}
+        packaged_textures = {asset["id"] for asset in assets if asset["type"] == "texture"}
+        records.append("UICANVAS\t" + "\t".join(_number(part) for part in ui_layout["viewport"]))
+        if any(ui_layout["safe_area"]):
+            records.append("UISAFEAREA\t" + "\t".join(_number(part) for part in ui_layout["safe_area"]))
+        for widget in ui_layout["widgets"]:
+            rect = widget["rect"]
+            source_widget = ui_sources[widget["id"]]
+            image_asset_id = str(widget["image_asset_id"])
+            if widget["type"] == "image" and image_asset_id not in packaged_textures:
+                raise ValueError(f"UI image {widget['id']!r} needs a packaged texture asset: {image_asset_id!r}")
+            records.append("\t".join((
+                "UIWIDGET", _encode(widget["id"]), _encode(widget["type"]),
+                *(_number(part) for part in rect), _encode(widget["text"]),
+                _encode(widget["accessible_name"]), _encode(widget["on_activate"]),
+                _encode(image_asset_id),
+                _encode(widget["parent_id"]),
+                *(_number(part) for part in source_widget["anchor"]),
+                *(_number(part) for part in source_widget["pivot"]),
+                *(_number(part) for part in source_widget["offset"]),
+                *(_number(part) for part in source_widget["size"]),
+                _number(source_widget.get("min_viewport_width", 0)),
+            )))
     records.append("SAVE\t" + _encode(str(runtime.get("save_slot") or "autosave")))
     rendering = dict(runtime.get("rendering") or {})
     profile_options: dict[str, Any] = {
@@ -248,6 +311,32 @@ def _physical_animation_records(
     return records
 
 
+def _motion_database_records(raw_database: Any) -> list[str]:
+    if not raw_database:
+        return []
+    frames = list(dict(raw_database).get("frames") or ())
+    if len(frames) > 1_000_000:
+        raise ValueError("Motion database exceeds the native frame limit.")
+    records: list[str] = []
+    for feature in frames:
+        clip_id = str(feature.get("clip_id") or "")
+        family = str(feature.get("family") or "")
+        frame = int(feature.get("frame", -1))
+        values = [*feature.get("velocity", ()), feature.get("pelvis_height")]
+        joints = dict(feature.get("joints") or {})
+        for joint in ("l_hand", "r_hand", "l_ankle", "r_ankle"):
+            values.extend(joints.get(joint) or ())
+        if (not clip_id or family not in {"stand", "crouch", "crawl", "start", "air", "land"}
+                or frame < 0 or frame > 10_000 or len(values) != 15
+                or not all(math.isfinite(float(value)) for value in values)):
+            raise ValueError(f"Invalid motion-search feature for {clip_id!r} frame {frame}.")
+        records.append("\t".join((
+            "MOTIONFRAME", _encode(clip_id), str(frame), family,
+            *(_real(value) for value in values),
+        )))
+    return records
+
+
 def _rig_animation_records(rig_graph: dict[str, Any], warnings: list[str]) -> list[str]:
     raw_joints = rig_graph.get("joints") or ()
     joint_rows = raw_joints.values() if isinstance(raw_joints, dict) else raw_joints
@@ -296,6 +385,17 @@ def _rig_animation_records(rig_graph: dict[str, Any], warnings: list[str]) -> li
             "ANIMATION", _encode(str(take_id)), _encode(str(take.get("name") or take_id)),
             _encode(skeleton_id), str(start), str(max(start, end)), _real(fps), _flag(take.get("loop", True)),
         )))
+        pose_cache = dict(take.get("pose_cache") or {})
+        if pose_cache:
+            source = str(pose_cache.get("source") or "")
+            joint_ids = [str(value) for value in pose_cache.get("joint_ids") or ()]
+            frames = int(pose_cache.get("frame_count", 0) or 0)
+            if not source or frames <= 0 or set(joint_ids) != set(joints) or len(joint_ids) != len(joints):
+                raise ValueError(f"Animation {take_id} has an invalid pose-cache joint map.")
+            records.append("\t".join((
+                "ANIMPOSE", _encode(take_id), stable_runtime_asset_id("pose_cache", source),
+                str(frames), str(len(joint_ids)), *(_encode(joint_id) for joint_id in joint_ids),
+            )))
         layers = dict(take.get("layers") or {})
         soloed = {name for name, layer in layers.items() if isinstance(layer, dict) and bool(layer.get("solo"))}
         for layer_name, raw_layer in layers.items():
@@ -391,13 +491,20 @@ def build_windows_player(
     output_directory: str | Path,
     *,
     player_executable: str | Path | None = None,
+    compiled_receipt: PlayerBuildReceipt | None = None,
 ) -> PlayerBuildReceipt:
     """Create a self-contained Windows player folder from a ``.tcscene``."""
 
     output = Path(output_directory).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     executable = _resolve_player_executable(player_executable)
-    compiled = compile_tcscene_for_runtime(scene_path, output / "Content" / "main.tcruntime")
+    compiled = compiled_receipt or compile_tcscene_for_runtime(scene_path, output / "Content" / "main.tcruntime")
+    expected_manifest = (output / "Content" / "main.tcruntime").resolve()
+    expected_scene = Path(scene_path).expanduser().resolve()
+    if compiled.scene.resolve() != expected_scene:
+        raise ValueError("A resumed package checkpoint belongs to a different source scene.")
+    if compiled.runtime_manifest.resolve() != expected_manifest or not compiled.runtime_manifest.is_file():
+        raise ValueError("A resumed package requires the compiled runtime manifest in the selected build output.")
     _collect_player_assets(compiled.runtime_manifest, output)
     asset_validation = validate_packaged_assets(compiled.runtime_manifest, output)
     target_executable = output / "TCPlayer.exe"
@@ -412,6 +519,8 @@ def build_windows_player(
     validation["assets"] = asset_validation
     build_info = {
         "schema": "tech_connector.windows_player_build.v1",
+        "target": "windows_pc",
+        "controller_backend": "XInput",
         "source_scene": str(compiled.scene),
         "runtime_manifest": "Content/main.tcruntime",
         "player": "TCPlayer.exe",
@@ -449,6 +558,30 @@ def runtime_platform_capabilities(platform_name: str | None = None) -> dict[str,
                 "headless_player": True,
                 "renderer": "Direct3D 11",
             },
+            "xbox_series_xs": {
+                "package_builder": False,
+                "windowed_player": False,
+                "headless_player": False,
+                "renderer": "none",
+                "requirements": [
+                    "GDKX project and Xbox-compatible platform services",
+                    "Xbox D3D12 renderer and shader pipeline",
+                    "console input, audio, storage, lifecycle, and packaging adapters",
+                    "Xbox development hardware and acceptance runs",
+                ],
+            },
+            "ps5": {
+                "package_builder": False,
+                "windowed_player": False,
+                "headless_player": False,
+                "renderer": "none",
+                "requirements": [
+                    "PlayStation partner SDK and project",
+                    "PS5 graphics and shader backend",
+                    "console input, audio, storage, lifecycle, and packaging adapters",
+                    "PS5 development hardware and acceptance runs",
+                ],
+            },
             "linux": {
                 "package_builder": False,
                 "windowed_player": False,
@@ -464,9 +597,32 @@ def runtime_platform_capabilities(platform_name: str | None = None) -> dict[str,
         },
         "limitations": [
             "Packaged graphical builds currently target Windows and Direct3D 11 only.",
+            "Xbox Series X|S and PS5 console packages are not implemented or qualified.",
             "Non-Windows native builds provide the headless runtime; Vulkan and Metal backends are not implemented.",
         ],
     }
+
+
+def build_player_for_target(
+    scene_path: str | Path,
+    output_directory: str | Path,
+    *,
+    target: str,
+    player_executable: str | Path | None = None,
+    compiled_receipt: PlayerBuildReceipt | None = None,
+) -> PlayerBuildReceipt:
+    """Build an explicitly selected platform, never relabeling a Windows binary as console-ready."""
+    normalized = target.strip().casefold().replace("-", "_")
+    if normalized in {"windows", "windows_pc", "pc"}:
+        return build_windows_player(
+            scene_path, output_directory, player_executable=player_executable,
+            compiled_receipt=compiled_receipt,
+        )
+    capabilities = runtime_platform_capabilities()["targets"]
+    if normalized in {"xbox_series_xs", "ps5"}:
+        missing = "; ".join(capabilities[normalized]["requirements"])
+        raise NotImplementedError(f"{normalized} console packaging is unavailable: {missing}")
+    raise ValueError(f"Unknown player target {target!r}; choose windows_pc, xbox_series_xs, or ps5.")
 
 
 def validate_player_package(output_directory: str | Path, *, frames: int = 2, timeout: float = 30.0) -> dict[str, Any]:
@@ -501,6 +657,68 @@ def validate_player_package(output_directory: str | Path, *, frames: int = 2, ti
         "frames": len(frame_profiles),
         "exit_code": completed.returncode,
         "profile": "Content/build-validation-profile.jsonl",
+        "profile_summary": {key: value for key, value in summary.items() if key != "frame_profiles"},
+    }
+
+
+def validate_windowed_player(
+    output_directory: str | Path, *, frames: int = 30, timeout: float = 60.0,
+    scripted_input: bool = False,
+) -> dict[str, Any]:
+    """Require a rendered D3D11 frame from the packaged Windows player."""
+    output = Path(output_directory).expanduser().resolve()
+    executable = output / "TCPlayer.exe"
+    manifest = output / "Content" / "main.tcruntime"
+    profile = output / "Content" / "windowed-validation-profile.jsonl"
+    screenshot = output / "Content" / "windowed-validation.bmp"
+    debug_snapshot = output / "Content" / "windowed-debug-snapshot.json"
+    if not executable.is_file() or not manifest.is_file():
+        raise FileNotFoundError("Windowed validation requires TCPlayer.exe and Content/main.tcruntime.")
+    if os.name != "nt":
+        raise RuntimeError("Windowed D3D11 validation requires a Windows host.")
+    frame_count = max(3, int(frames))
+    profile.unlink(missing_ok=True)
+    screenshot.unlink(missing_ok=True)
+    debug_snapshot.unlink(missing_ok=True)
+    arguments = [
+        str(executable), "--scene", str(manifest), "--renderer", "d3d11", "--require-renderer",
+        "--frames", str(frame_count), "--log", str(profile), "--screenshot", str(screenshot),
+        "--screenshot-frame", "2",
+        "--debug-snapshot", str(debug_snapshot),
+    ]
+    if scripted_input:
+        arguments.append("--scripted-input")
+    completed = subprocess.run(
+        arguments,
+        cwd=output, capture_output=True, text=True, timeout=max(1.0, float(timeout)), check=False,
+    )
+    if completed.returncode != 0:
+        diagnostic = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+        raise RuntimeError(f"Windowed D3D11 validation failed (exit {completed.returncode}).\n{diagnostic[-2000:]}")
+    summary = summarize_player_profile(profile)
+    rows = summary["frame_profiles"]
+    if len(rows) < frame_count or summary["diagnostics"]:
+        raise RuntimeError("Windowed player did not produce clean profiles for every requested frame.")
+    if not all("gpu_ms" in row and int(row.get("render_width", 0)) > 0 and int(row.get("render_height", 0)) > 0 for row in rows):
+        raise RuntimeError("Windowed player did not report an active GPU renderer on every frame.")
+    if not screenshot.is_file() or screenshot.stat().st_size <= 54:
+        raise RuntimeError("Windowed player did not capture a valid rendered BMP frame.")
+    with screenshot.open("rb") as stream:
+        if stream.read(2) != b"BM":
+            raise RuntimeError("Windowed player did not capture a valid rendered BMP frame.")
+    return {
+        "status": "passed", "renderer": "d3d11", "frames": len(rows),
+        "scripted_input": bool(scripted_input),
+        "ui_activations": [line for line in completed.stdout.splitlines() if line.startswith("TC_UI_ACTIVATED ")],
+        "input_bindings_used": [line for line in completed.stdout.splitlines() if line.startswith("TC_INPUT_BINDING_USED ")],
+        "debug_snapshot_written": "TC_DEBUG_SNAPSHOT_OK" in completed.stdout and debug_snapshot.is_file(),
+        "debug_snapshot": "Content/windowed-debug-snapshot.json",
+        "skinned_draws_min": min(
+            int(row.get("gpu_skinned_draws", 0)) + int(row.get("cpu_skinned_draws", 0))
+            for row in rows
+        ),
+        "profile": "Content/windowed-validation-profile.jsonl",
+        "screenshot": "Content/windowed-validation.bmp",
         "profile_summary": {key: value for key, value in summary.items() if key != "frame_profiles"},
     }
 
@@ -553,20 +771,34 @@ def validate_packaged_assets(manifest_path: str | Path, output_directory: str | 
     """Verify every copied content asset against the compiler's content hash."""
     manifest = Path(manifest_path)
     output = Path(output_directory).resolve()
+    asset_root = (output / "Content" / "Assets").resolve()
     verified: list[str] = []
+    seen_ids: set[str] = set()
     total_bytes = 0
     for line in manifest.read_text(encoding="utf-8").splitlines():
         row = line.split("\t")
-        if len(row) < 5 or row[0] != "ASSET":
+        if row[0] != "ASSET":
             continue
+        if len(row) != 5 or any(not value for value in row[1:]):
+            raise RuntimeError("Packaged asset has an incomplete ASSET receipt.")
+        if row[1] in seen_ids:
+            raise RuntimeError(f"Packaged asset has a duplicate id: {row[1]}")
+        seen_ids.add(row[1])
         source = _decode(row[3]).replace("\\", "/")
-        if not source.startswith("Content/Assets/"):
+        if source.startswith("builtin:"):
             continue
-        target = (output / Path(source)).resolve()
+        if source.startswith("Assets/"):
+            target = (manifest.parent / Path(source)).resolve()
+        elif source.startswith("Content/Assets/"):
+            # Accept receipts from packages created before paths became manifest-relative.
+            target = (output / Path(source)).resolve()
+        else:
+            raise RuntimeError(f"Packaged asset has an unsupported source path: {source}")
         try:
             target.relative_to(output)
+            target.relative_to(asset_root)
         except ValueError as exc:
-            raise RuntimeError(f"Packaged asset escapes the output directory: {source}") from exc
+            raise RuntimeError(f"Packaged asset escapes the content asset directory: {source}") from exc
         if not target.is_file():
             raise FileNotFoundError(f"Packaged asset is missing: {source}")
         actual_hash = _source_hash(str(target), {})
@@ -690,6 +922,16 @@ def _runtime_assets(
                 continue
             asset_id = stable_runtime_asset_id("rig_blob", source)
             rows.setdefault(asset_id, {"id": asset_id, "type": "rig_blob", "source": source, "content_hash": _source_hash(source, blobs)})
+    raw_animation = dict(rig_graph or {}).get("animation") or ()
+    animation_rows = raw_animation.values() if isinstance(raw_animation, dict) else raw_animation
+    for take in animation_rows:
+        if not isinstance(take, dict):
+            continue
+        source = str(dict(take.get("pose_cache") or {}).get("source") or "")
+        if source:
+            asset_id = stable_runtime_asset_id("pose_cache", source)
+            rows.setdefault(asset_id, {"id": asset_id, "type": "pose_cache", "source": source,
+                                       "content_hash": _source_hash(source, blobs)})
     return [rows[key] for key in sorted(rows)]
 
 
@@ -821,6 +1063,7 @@ def _entity_records(entity: dict[str, Any], assets: list[dict[str, str]], warnin
             str(max(0, int(collider.get("mask", 0xFFFFFFFF)))), _number(collider.get("friction", 0.5)),
             _number(collider.get("restitution", 0.2)),
             stable_runtime_asset_id("collision", collision_source) if collision_source else "",
+            _flag(collider.get("world_up", False)),
         )))
     particle = dict(entity.get("particle_physics") or {})
     if particle:
@@ -885,6 +1128,7 @@ def _graph_arguments(operation: str, instruction: dict[str, Any]) -> list[Any]:
             "target", "idle", "walk_forward", "walk_forward_right", "walk_right", "walk_backward_right",
             "walk_backward", "walk_backward_left", "walk_left", "walk_forward_left", "run", "jump", "land",
             "walk_threshold", "run_threshold", "blend_seconds",
+            "crouch_idle", "crouch_move", "crawl_idle", "crawl_move",
         ),
     }[operation]
     values = [binding_value(key) for key in keys]
@@ -909,7 +1153,7 @@ def _collect_player_assets(manifest: Path, output: Path) -> None:
         assets_directory.mkdir(parents=True, exist_ok=True)
         target = assets_directory / f"{row[1]}{source.suffix.lower()}"
         shutil.copy2(source, target)
-        row[3] = _encode(f"Content/Assets/{target.name}")
+        row[3] = _encode(f"Assets/{target.name}")
         lines[index] = "\t".join(row)
         changed = True
     if changed:
@@ -983,7 +1227,7 @@ def _flag(value: Any) -> str:
 
 __all__ = [
     "PlayInEditorSession", "PlayerBuildReceipt", "RUNTIME_MANIFEST_SCHEMA",
-    "SUPPORTED_RUNTIME_GRAPH_OPERATIONS", "build_windows_player", "compile_tcscene_for_runtime",
+    "SUPPORTED_RUNTIME_GRAPH_OPERATIONS", "build_player_for_target", "build_windows_player", "compile_tcscene_for_runtime",
     "launch_play_in_editor", "runtime_platform_capabilities", "stable_runtime_asset_id",
-    "summarize_player_profile", "validate_packaged_assets", "validate_player_package",
+    "summarize_player_profile", "validate_packaged_assets", "validate_player_package", "validate_windowed_player",
 ]

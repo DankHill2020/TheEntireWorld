@@ -174,6 +174,7 @@ def run_tech_connector(
     repetition: int,
     timeout_seconds: int,
     llm_timeout_seconds: int,
+    proof_model: str = "",
 ) -> AgentRun:
     """Run Tech Connector's production project-edit workflow in a subprocess.
 
@@ -184,6 +185,7 @@ def run_tech_connector(
     :param repetition: One-based repetition number.
     :param timeout_seconds: Whole-attempt timeout.
     :param llm_timeout_seconds: Per-model-call timeout.
+    :param proof_model: Optional local-only model for disposable behavior proof.
     :return: Captured agent attempt.
     """
 
@@ -195,6 +197,7 @@ def run_tech_connector(
                 "workspace": str(workspace),
                 "prompt": case.prompt,
                 "model": model,
+                "proof_model": proof_model,
                 "llm_timeout": llm_timeout_seconds,
                 "max_attempts": 5,
             },

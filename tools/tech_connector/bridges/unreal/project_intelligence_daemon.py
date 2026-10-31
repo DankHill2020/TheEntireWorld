@@ -193,7 +193,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "success": False,
-                    "error": "Tech Connector activation is required for this Unreal service.",
+                    "error": "A valid local Tech Connector bridge session is required.",
                     "code": "bridge_authorization_required",
                 },
                 status=403,
@@ -356,7 +356,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "success": False,
-                    "error": "Tech Connector activation is required for this Unreal service.",
+                    "error": "A valid local Tech Connector bridge session is required.",
                     "code": "bridge_authorization_required",
                 },
                 status=403,

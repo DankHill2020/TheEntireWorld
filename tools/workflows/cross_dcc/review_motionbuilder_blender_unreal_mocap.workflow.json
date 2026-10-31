@@ -1,0 +1,3906 @@
+{
+  "schema": "ai_studio.workflow.v1",
+  "source": "prompt_review_pack",
+  "naming": {
+    "function_suffix": "_git_ingest",
+    "original_function": "review_motionbuilder_blender_unreal_mocap"
+  },
+  "host": "cross_dcc",
+  "goal": "Create a MotionBuilder to Blender to Unreal mocap pipeline. Export the current take, clean animation in Blender, publish FBX to /Game/TechConnector/Review/Mocap using skeleton /Game/Characters/Mannequins/Meshes/SK_Mannequin, inspect compatibility, retarget if needed, and report saved animation assets.",
+  "module": "workflows.cross_dcc.review_motionbuilder_blender_unreal_mocap",
+  "function": "review_motionbuilder_blender_unreal_mocap",
+  "function_path": "workflows.cross_dcc.review_motionbuilder_blender_unreal_mocap.review_motionbuilder_blender_unreal_mocap",
+  "selected_capabilities": [
+    {
+      "name": "stage_01_motionbuilder_io_export_fbx",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\motionbuilder_tools\\io.py",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "motionbuilder",
+      "provider_id": "motionbuilder",
+      "package": "",
+      "operation": "io.export_fbx",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "motionbuilder_tools.io.export_fbx",
+      "module": "",
+      "start_line": 27,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_02_blender_io_import_fbx",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\blender_tools\\io.py",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "use_image_search",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "armatures",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "blender",
+      "provider_id": "blender",
+      "package": "",
+      "operation": "io.import_fbx",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "blender_tools.io.import_fbx",
+      "module": "",
+      "start_line": 9,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_03_blender_blender_clean_animation",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+      "params": [
+        {
+          "name": "armature",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "frame_range",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "cleanup",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "blender",
+      "provider_id": "blender",
+      "package": "",
+      "operation": "blender.clean_animation",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "ai_studio.blender.generated.blender_clean_animation",
+      "module": "",
+      "start_line": 2591,
+      "source_kind": "operation_implementation"
+    },
+    {
+      "name": "stage_04_blender_blender_export_fbx",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selection",
+          "annotation": "list[str]",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {
+            "axis_forward": "-Y",
+            "axis_up": "Z",
+            "apply_unit_scale": true,
+            "bake_animation": true
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "blender",
+      "provider_id": "blender",
+      "package": "",
+      "operation": "blender.export_fbx",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "ai_studio.blender.generated.blender_export_fbx",
+      "module": "",
+      "start_line": 2621,
+      "source_kind": "operation_implementation"
+    },
+    {
+      "name": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "module": "",
+      "start_line": 31,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_06_unreal_animation_inspect_imported_pipeline",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "compatibility_report",
+          "annotation": "Any"
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "animation.inspect_imported_pipeline",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.animation.inspect_imported_animation_pipeline",
+      "module": "",
+      "start_line": 253,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_07_unreal_animation_retarget_imported_if_needed",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+      "params": [
+        {
+          "name": "compatibility_report",
+          "annotation": "dict[str, Any]",
+          "required": true
+        },
+        {
+          "name": "source_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/Animations/Retargeted"
+        },
+        {
+          "name": "retargeter_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "retarget_report",
+          "annotation": "Any"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "animation.retarget_imported_if_needed",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.animation.retarget_imported_animations_if_needed",
+      "module": "",
+      "start_line": 348,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_08_unreal_animation_report_pipeline_assets",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_anim_blueprint_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pipeline_report",
+          "annotation": "Any"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "animation.report_pipeline_assets",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.animation.report_animation_pipeline_assets",
+      "module": "",
+      "start_line": 444,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unreal",
+      "provider_id": "unreal",
+      "package": "",
+      "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "module": "",
+      "start_line": 111,
+      "source_kind": "callable_definition"
+    }
+  ],
+  "slots": {
+    "step1_filepath": "${pipeline_workspace}/stage_01_motionbuilder_io_export_fbx.fbx",
+    "step1_selected_only": "False",
+    "step2_use_image_search": "True",
+    "step3_armature": "",
+    "step3_action": "",
+    "step3_frame_range": "[]",
+    "step3_cleanup": "[]",
+    "step4_output_path": "${pipeline_workspace}/stage_04_blender_blender_export_fbx.fbx",
+    "step4_settings": "{'axis_forward': '-Y', 'axis_up': 'Z', 'apply_unit_scale': True, 'bake_animation': True}",
+    "step5_destination_path": "/Game/TechConnector/Review/Mocap",
+    "step5_subject": "animation",
+    "step5_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+    "step5_replace_existing": "False",
+    "step5_save": "True",
+    "step6_target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+    "step6_target_skeletal_mesh_path": "",
+    "step7_source_skeletal_mesh_path": "",
+    "step7_target_skeletal_mesh_path": "",
+    "step7_output_path": "/Game/Animations/Retargeted",
+    "step7_retargeter_path": "",
+    "step8_target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+    "step8_target_anim_blueprint_path": "",
+    "step9_destination_path": "/Game/TechConnector/Review/Mocap"
+  },
+  "links": [
+    {
+      "from": "step1.fbx_path",
+      "to": "step2.filepath"
+    },
+    {
+      "from": "step2.objects",
+      "to": "step4.selection"
+    },
+    {
+      "from": "step4.fbx_path",
+      "to": "step5.source_file"
+    },
+    {
+      "from": "step5.imported_paths",
+      "to": "step6.imported_paths"
+    },
+    {
+      "from": "step6.compatibility_report",
+      "to": "step7.compatibility_report"
+    },
+    {
+      "from": "step5.imported_paths",
+      "to": "step8.imported_paths"
+    },
+    {
+      "from": "step7.animation_paths",
+      "to": "step8.animation_paths"
+    },
+    {
+      "from": "step5.imported_paths",
+      "to": "step9.imported_paths"
+    }
+  ],
+  "validation": {
+    "imports_checked_by_test": true,
+    "scene_objects_checked_at_runtime": true
+  },
+  "prompt_verified": true,
+  "nodes": [
+    {
+      "id": "step1",
+      "label": "stage_01_motionbuilder_io_export_fbx",
+      "name": "stage_01_motionbuilder_io_export_fbx",
+      "host": "motionbuilder",
+      "package": "motionbuilder",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "io.export_fbx",
+      "callable": "motionbuilder_tools.io.export_fbx",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": false,
+        "filepath": "${pipeline_workspace}/stage_01_motionbuilder_io_export_fbx.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "filepath": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "MotionBuilder Export FBX uses its registered default for `selected_only`: False.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "MotionBuilder Export FBX writes `filepath` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "motionbuilder.operations.io.export_fbx",
+        "host": "motionbuilder",
+        "operation": "io.export_fbx",
+        "label": "MotionBuilder Export FBX",
+        "callable": "motionbuilder_tools.io.export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "animation",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "motionbuilder_scene"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": false
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:motionbuilder",
+        "metadata": {
+          "description": "Export the active MotionBuilder scene/selection to FBX.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 60
+    },
+    {
+      "id": "step2",
+      "label": "stage_02_blender_io_import_fbx",
+      "name": "stage_02_blender_io_import_fbx",
+      "host": "blender",
+      "package": "blender",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "io.import_fbx",
+      "callable": "blender_tools.io.import_fbx",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "use_image_search",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "armatures",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "use_image_search": true,
+        "filepath": {
+          "from_action": "stage_01_motionbuilder_io_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "use_image_search": "operation_default",
+        "filepath": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "use_image_search": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.io.import_fbx",
+        "host": "blender",
+        "operation": "io.import_fbx",
+        "label": "Blender Import FBX",
+        "callable": "blender_tools.io.import_fbx",
+        "provider": "registered_operation",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path"
+        ],
+        "produces": [
+          "blender_scene",
+          "objects",
+          "meshes",
+          "armatures",
+          "animations"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "use_image_search": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object count is reported"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Import an FBX file into the Blender scene.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 360,
+      "y": 60
+    },
+    {
+      "id": "step3",
+      "label": "stage_03_blender_blender_clean_animation",
+      "name": "stage_03_blender_blender_clean_animation",
+      "host": "blender",
+      "package": "blender",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "blender.clean_animation",
+      "callable": "ai_studio.blender.generated.blender_clean_animation",
+      "params": [
+        {
+          "name": "armature",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "frame_range",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "cleanup",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "armature": "",
+        "action": "",
+        "frame_range": [],
+        "cleanup": []
+      },
+      "literal_value_provenance": {
+        "armature": "operation_default",
+        "action": "operation_default",
+        "frame_range": "operation_default",
+        "cleanup": "operation_default"
+      },
+      "literal_value_details": {
+        "armature": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `armature`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "action": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `action`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "frame_range": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `frame_range`: [].",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[Any]"
+        },
+        "cleanup": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[Any]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.blender.clean_animation",
+        "host": "blender",
+        "operation": "blender.clean_animation",
+        "label": "Blender Clean Animation",
+        "callable": "ai_studio.blender.generated.blender_clean_animation",
+        "provider": "registered_operation",
+        "role": "process",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "animations"
+        ],
+        "produces": [
+          "animations"
+        ],
+        "required": [],
+        "optional": {
+          "armature": "",
+          "action": "",
+          "frame_range": [],
+          "cleanup": []
+        },
+        "preconditions": [],
+        "validation": [
+          "processed actions and frame range are reported"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Clean a Blender mocap/action clip by trimming range, simplifying curves, and preserving root-motion/export metadata.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 660,
+      "y": 60
+    },
+    {
+      "id": "step4",
+      "label": "stage_04_blender_blender_export_fbx",
+      "name": "stage_04_blender_blender_export_fbx",
+      "host": "blender",
+      "package": "blender",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "blender.export_fbx",
+      "callable": "ai_studio.blender.generated.blender_export_fbx",
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selection",
+          "annotation": "list[str]",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {
+            "axis_forward": "-Y",
+            "axis_up": "Z",
+            "apply_unit_scale": true,
+            "bake_animation": true
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selection": {
+          "from_action": "stage_02_blender_io_import_fbx",
+          "result_path": "objects"
+        },
+        "settings": {
+          "axis_forward": "-Y",
+          "axis_up": "Z",
+          "apply_unit_scale": true,
+          "bake_animation": true
+        },
+        "output_path": "${pipeline_workspace}/stage_04_blender_blender_export_fbx.fbx"
+      },
+      "literal_value_provenance": {
+        "selection": "upstream_result_reference",
+        "settings": "operation_default",
+        "output_path": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "selection": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "settings": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        },
+        "output_path": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "Blender Export Unreal FBX writes `output_path` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.blender.export_fbx",
+        "host": "blender",
+        "operation": "blender.export_fbx",
+        "label": "Blender Export Unreal FBX",
+        "callable": "ai_studio.blender.generated.blender_export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "export_objects"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "output_path"
+        ],
+        "optional": {
+          "selection": "",
+          "settings": {
+            "axis_forward": "-Y",
+            "axis_up": "Z",
+            "apply_unit_scale": true,
+            "bake_animation": true
+          }
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Export a cleaned Blender animation/armature as Unreal-compatible FBX with recorded export settings.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 260
+    },
+    {
+      "id": "step5",
+      "label": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "name": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "/Game/TechConnector/Review/Mocap",
+        "subject": "animation",
+        "skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "replace_existing": false,
+        "save": true,
+        "source_file": {
+          "from_action": "stage_04_blender_blender_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_prompt",
+        "subject": "planned_value",
+        "skeleton_path": "operation_default",
+        "replace_existing": "operation_default",
+        "save": "operation_default",
+        "source_file": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "subject": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "skeleton_path": {
+          "source": "operation_default",
+          "resolution": "unreal_tools.asset_transfer_adapter.import_fbx_verified uses its registered default for `skeleton_path`: '/Game/Characters/Mannequins/Meshes/SK_Mannequin'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "replace_existing": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "save": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "label": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "provider": "unreal_tools",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path",
+          "destination_path"
+        ],
+        "produces": [
+          "asset_path",
+          "imported_paths",
+          "asset_count"
+        ],
+        "required": [
+          "source_file"
+        ],
+        "optional": {
+          "destination_path": "/Game/AIStudio/Imports",
+          "subject": "asset",
+          "skeleton_path": "",
+          "replace_existing": false,
+          "save": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object paths resolve in EditorAssetLibrary"
+        ],
+        "rollback": [
+          "unreal_tools.asset_transfer_adapter.rollback_imported_assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 31
+          },
+          "docstring": "Import an FBX with explicit UE 5.8 options and return asset readback."
+        },
+        "executable": true
+      },
+      "x": 360,
+      "y": 260
+    },
+    {
+      "id": "step6",
+      "label": "stage_06_unreal_animation_inspect_imported_pipeline",
+      "name": "stage_06_unreal_animation_inspect_imported_pipeline",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "animation.inspect_imported_pipeline",
+      "callable": "unreal_tools.animation.inspect_imported_animation_pipeline",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "compatibility_report",
+          "annotation": "Any"
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "target_skeletal_mesh_path": "",
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        }
+      },
+      "literal_value_provenance": {
+        "target_skeleton_path": "user_prompt",
+        "target_skeletal_mesh_path": "operation_default",
+        "imported_paths": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "target_skeleton_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Inspect Imported Unreal Animation Pipeline uses its registered default for `target_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.inspect_imported_pipeline",
+        "host": "unreal",
+        "operation": "animation.inspect_imported_pipeline",
+        "label": "Inspect Imported Unreal Animation Pipeline",
+        "callable": "unreal_tools.animation.inspect_imported_animation_pipeline",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 10,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "imported_paths",
+          "skeleton_path"
+        ],
+        "produces": [
+          "compatibility_report",
+          "animation_paths"
+        ],
+        "required": [
+          "imported_paths"
+        ],
+        "optional": {
+          "target_skeleton_path": "",
+          "target_skeletal_mesh_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "frame, duration, root motion, skeleton, and compatibility evidence are reported"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Inspect imported animation timing, root motion, Skeleton ownership, and target compatibility.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 660,
+      "y": 260
+    },
+    {
+      "id": "step7",
+      "label": "stage_07_unreal_animation_retarget_imported_if_needed",
+      "name": "stage_07_unreal_animation_retarget_imported_if_needed",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "animation.retarget_imported_if_needed",
+      "callable": "unreal_tools.animation.retarget_imported_animations_if_needed",
+      "params": [
+        {
+          "name": "compatibility_report",
+          "annotation": "dict[str, Any]",
+          "required": true
+        },
+        {
+          "name": "source_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/Animations/Retargeted"
+        },
+        {
+          "name": "retargeter_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "retarget_report",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "source_skeletal_mesh_path": "",
+        "target_skeletal_mesh_path": "",
+        "output_path": "/Game/Animations/Retargeted",
+        "retargeter_path": "",
+        "compatibility_report": {
+          "from_action": "stage_06_unreal_animation_inspect_imported_pipeline",
+          "result_path": "compatibility_report"
+        }
+      },
+      "literal_value_provenance": {
+        "source_skeletal_mesh_path": "operation_default",
+        "target_skeletal_mesh_path": "operation_default",
+        "output_path": "operation_default",
+        "retargeter_path": "operation_default",
+        "compatibility_report": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "source_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `source_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `target_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "output_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `output_path`: '/Game/Animations/Retargeted'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "retargeter_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `retargeter_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "compatibility_report": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.retarget_imported_if_needed",
+        "host": "unreal",
+        "operation": "animation.retarget_imported_if_needed",
+        "label": "Retarget Imported Unreal Animations When Needed",
+        "callable": "unreal_tools.animation.retarget_imported_animations_if_needed",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 20,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "compatibility_report"
+        ],
+        "produces": [
+          "animation_paths",
+          "retarget_report"
+        ],
+        "required": [
+          "compatibility_report"
+        ],
+        "optional": {
+          "source_skeletal_mesh_path": "",
+          "target_skeletal_mesh_path": "",
+          "output_path": "/Game/Animations/Retargeted",
+          "retargeter_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "compatible animations are preserved and incompatible animations are retargeted"
+        ],
+        "rollback": [
+          "delete only newly reported retargeted assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Preserve compatible AnimSequences and retarget only incompatible imports with structured readback.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 460
+    },
+    {
+      "id": "step8",
+      "label": "stage_08_unreal_animation_report_pipeline_assets",
+      "name": "stage_08_unreal_animation_report_pipeline_assets",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "animation.report_pipeline_assets",
+      "callable": "unreal_tools.animation.report_animation_pipeline_assets",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_anim_blueprint_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pipeline_report",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "target_anim_blueprint_path": "",
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "animation_paths": {
+          "from_action": "stage_07_unreal_animation_retarget_imported_if_needed",
+          "result_path": "animation_paths"
+        }
+      },
+      "literal_value_provenance": {
+        "target_skeleton_path": "user_prompt",
+        "target_anim_blueprint_path": "operation_default",
+        "imported_paths": "upstream_result_reference",
+        "animation_paths": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "target_skeleton_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_anim_blueprint_path": {
+          "source": "operation_default",
+          "resolution": "Report Final Unreal Animation Pipeline Assets uses its registered default for `target_anim_blueprint_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "animation_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.report_pipeline_assets",
+        "host": "unreal",
+        "operation": "animation.report_pipeline_assets",
+        "label": "Report Final Unreal Animation Pipeline Assets",
+        "callable": "unreal_tools.animation.report_animation_pipeline_assets",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 100,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "imported_paths",
+          "animation_paths",
+          "skeleton_path"
+        ],
+        "produces": [
+          "pipeline_report"
+        ],
+        "required": [
+          "imported_paths",
+          "animation_paths"
+        ],
+        "optional": {
+          "target_skeleton_path": "",
+          "target_anim_blueprint_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "final asset existence, save state, Skeleton, and AnimBlueprint evidence are returned"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Report final imported and retargeted asset existence, save state, and Skeleton ownership.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 360,
+      "y": 460
+    },
+    {
+      "id": "step9",
+      "label": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "name": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+      "host": "unreal",
+      "package": "unreal",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "destination_path": "/Game/TechConnector/Review/Mocap"
+      },
+      "literal_value_provenance": {
+        "imported_paths": "upstream_result_reference",
+        "destination_path": "user_prompt"
+      },
+      "literal_value_details": {
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "Registry validation inherits the explicit Unreal import destination so readback is scoped to the requested content folder.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.registry_readback",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "label": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "provider": "unreal_tools",
+        "role": "validate",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "imported_paths"
+        ],
+        "produces": [
+          "assets",
+          "asset_count"
+        ],
+        "required": [],
+        "optional": {
+          "imported_paths": [],
+          "destination_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "all requested paths resolve in Asset Registry"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 111
+          },
+          "docstring": "Prove imported packages resolve through the Asset Registry."
+        },
+        "executable": true
+      },
+      "x": 660,
+      "y": 460
+    }
+  ],
+  "steps": [
+    {
+      "step_index": 1,
+      "symbol": {
+        "name": "stage_01_motionbuilder_io_export_fbx",
+        "kind": "function",
+        "host": "motionbuilder",
+        "provider_id": "motionbuilder",
+        "pipeline_operation": "dcc_operation",
+        "operation": "io.export_fbx",
+        "function_path": "motionbuilder_tools.io.export_fbx",
+        "file_path": "C:\\depot\\tools\\motionbuilder_tools\\io.py",
+        "start_line": 27,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "filepath",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "selected_only",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "fbx_path",
+            "annotation": "str"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": false,
+        "filepath": "${pipeline_workspace}/stage_01_motionbuilder_io_export_fbx.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "filepath": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "MotionBuilder Export FBX uses its registered default for `selected_only`: False.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "MotionBuilder Export FBX writes `filepath` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "motionbuilder.operations.io.export_fbx",
+        "host": "motionbuilder",
+        "operation": "io.export_fbx",
+        "label": "MotionBuilder Export FBX",
+        "callable": "motionbuilder_tools.io.export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "animation",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "motionbuilder_scene"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": false
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:motionbuilder",
+        "metadata": {
+          "description": "Export the active MotionBuilder scene/selection to FBX.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 2,
+      "symbol": {
+        "name": "stage_02_blender_io_import_fbx",
+        "kind": "function",
+        "host": "blender",
+        "provider_id": "blender",
+        "pipeline_operation": "dcc_operation",
+        "operation": "io.import_fbx",
+        "function_path": "blender_tools.io.import_fbx",
+        "file_path": "C:\\depot\\tools\\blender_tools\\io.py",
+        "start_line": 9,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "filepath",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "use_image_search",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "blender_scene",
+            "annotation": "Any"
+          },
+          {
+            "name": "objects",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "meshes",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "armatures",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "animations",
+            "annotation": "Any"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "use_image_search",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "armatures",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "use_image_search": true,
+        "filepath": {
+          "from_action": "stage_01_motionbuilder_io_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "use_image_search": "operation_default",
+        "filepath": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "use_image_search": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "filepath": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.io.import_fbx",
+        "host": "blender",
+        "operation": "io.import_fbx",
+        "label": "Blender Import FBX",
+        "callable": "blender_tools.io.import_fbx",
+        "provider": "registered_operation",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path"
+        ],
+        "produces": [
+          "blender_scene",
+          "objects",
+          "meshes",
+          "armatures",
+          "animations"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "use_image_search": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object count is reported"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Import an FBX file into the Blender scene.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 3,
+      "symbol": {
+        "name": "stage_03_blender_blender_clean_animation",
+        "kind": "function",
+        "host": "blender",
+        "provider_id": "blender",
+        "pipeline_operation": "dcc_operation",
+        "operation": "blender.clean_animation",
+        "function_path": "ai_studio.blender.generated.blender_clean_animation",
+        "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+        "start_line": 2591,
+        "source_kind": "operation_implementation",
+        "params": [
+          {
+            "name": "armature",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "action",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "frame_range",
+            "annotation": "list[Any]",
+            "required": false,
+            "default": []
+          },
+          {
+            "name": "cleanup",
+            "annotation": "list[Any]",
+            "required": false,
+            "default": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "animations",
+            "annotation": "Any"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "armature",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "frame_range",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "cleanup",
+          "annotation": "list[Any]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animations",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "armature": "",
+        "action": "",
+        "frame_range": [],
+        "cleanup": []
+      },
+      "literal_value_provenance": {
+        "armature": "operation_default",
+        "action": "operation_default",
+        "frame_range": "operation_default",
+        "cleanup": "operation_default"
+      },
+      "literal_value_details": {
+        "armature": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `armature`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "action": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `action`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "frame_range": {
+          "source": "operation_default",
+          "resolution": "Blender Clean Animation uses its registered default for `frame_range`: [].",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[Any]"
+        },
+        "cleanup": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[Any]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.blender.clean_animation",
+        "host": "blender",
+        "operation": "blender.clean_animation",
+        "label": "Blender Clean Animation",
+        "callable": "ai_studio.blender.generated.blender_clean_animation",
+        "provider": "registered_operation",
+        "role": "process",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "animations"
+        ],
+        "produces": [
+          "animations"
+        ],
+        "required": [],
+        "optional": {
+          "armature": "",
+          "action": "",
+          "frame_range": [],
+          "cleanup": []
+        },
+        "preconditions": [],
+        "validation": [
+          "processed actions and frame range are reported"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Clean a Blender mocap/action clip by trimming range, simplifying curves, and preserving root-motion/export metadata.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 4,
+      "symbol": {
+        "name": "stage_04_blender_blender_export_fbx",
+        "kind": "function",
+        "host": "blender",
+        "provider_id": "blender",
+        "pipeline_operation": "dcc_operation",
+        "operation": "blender.export_fbx",
+        "function_path": "ai_studio.blender.generated.blender_export_fbx",
+        "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+        "start_line": 2621,
+        "source_kind": "operation_implementation",
+        "params": [
+          {
+            "name": "output_path",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "selection",
+            "annotation": "list[str]",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "settings",
+            "annotation": "dict[str, Any]",
+            "required": false,
+            "default": {
+              "axis_forward": "-Y",
+              "axis_up": "Z",
+              "apply_unit_scale": true,
+              "bake_animation": true
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "name": "fbx_path",
+            "annotation": "str"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selection",
+          "annotation": "list[str]",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "settings",
+          "annotation": "dict[str, Any]",
+          "required": false,
+          "default": {
+            "axis_forward": "-Y",
+            "axis_up": "Z",
+            "apply_unit_scale": true,
+            "bake_animation": true
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selection": {
+          "from_action": "stage_02_blender_io_import_fbx",
+          "result_path": "objects"
+        },
+        "settings": {
+          "axis_forward": "-Y",
+          "axis_up": "Z",
+          "apply_unit_scale": true,
+          "bake_animation": true
+        },
+        "output_path": "${pipeline_workspace}/stage_04_blender_blender_export_fbx.fbx"
+      },
+      "literal_value_provenance": {
+        "selection": "upstream_result_reference",
+        "settings": "operation_default",
+        "output_path": "generated_pipeline_workspace"
+      },
+      "literal_value_details": {
+        "selection": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "settings": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        },
+        "output_path": {
+          "source": "generated_pipeline_workspace",
+          "resolution": "Blender Export Unreal FBX writes `output_path` under the pipeline's disposable workspace.",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.blender.export_fbx",
+        "host": "blender",
+        "operation": "blender.export_fbx",
+        "label": "Blender Export Unreal FBX",
+        "callable": "ai_studio.blender.generated.blender_export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "export_objects"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "output_path"
+        ],
+        "optional": {
+          "selection": "",
+          "settings": {
+            "axis_forward": "-Y",
+            "axis_up": "Z",
+            "apply_unit_scale": true,
+            "bake_animation": true
+          }
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Export a cleaned Blender animation/armature as Unreal-compatible FBX with recorded export settings.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 5,
+      "symbol": {
+        "name": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "function_path": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "start_line": 31,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "source_file",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "destination_path",
+            "annotation": "str",
+            "required": false,
+            "default": "/Game/AIStudio/Imports"
+          },
+          {
+            "name": "subject",
+            "annotation": "str",
+            "required": false,
+            "default": "asset"
+          },
+          {
+            "name": "skeleton_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "replace_existing",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          },
+          {
+            "name": "save",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "asset_path",
+            "annotation": "str"
+          },
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "asset_count",
+            "annotation": "int"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "source_file",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/AIStudio/Imports"
+        },
+        {
+          "name": "subject",
+          "annotation": "str",
+          "required": false,
+          "default": "asset"
+        },
+        {
+          "name": "skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "replace_existing",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "save",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "asset_path",
+          "annotation": "str"
+        },
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "/Game/TechConnector/Review/Mocap",
+        "subject": "animation",
+        "skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "replace_existing": false,
+        "save": true,
+        "source_file": {
+          "from_action": "stage_04_blender_blender_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_prompt",
+        "subject": "planned_value",
+        "skeleton_path": "operation_default",
+        "replace_existing": "operation_default",
+        "save": "operation_default",
+        "source_file": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "subject": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "skeleton_path": {
+          "source": "operation_default",
+          "resolution": "unreal_tools.asset_transfer_adapter.import_fbx_verified uses its registered default for `skeleton_path`: '/Game/Characters/Mannequins/Meshes/SK_Mannequin'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "replace_existing": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "save": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "source_file": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "label": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "callable": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+        "provider": "unreal_tools",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path",
+          "destination_path"
+        ],
+        "produces": [
+          "asset_path",
+          "imported_paths",
+          "asset_count"
+        ],
+        "required": [
+          "source_file"
+        ],
+        "optional": {
+          "destination_path": "/Game/AIStudio/Imports",
+          "subject": "asset",
+          "skeleton_path": "",
+          "replace_existing": false,
+          "save": true
+        },
+        "preconditions": [],
+        "validation": [
+          "imported object paths resolve in EditorAssetLibrary"
+        ],
+        "rollback": [
+          "unreal_tools.asset_transfer_adapter.rollback_imported_assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 31
+          },
+          "docstring": "Import an FBX with explicit UE 5.8 options and return asset readback."
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 6,
+      "symbol": {
+        "name": "stage_06_unreal_animation_inspect_imported_pipeline",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "animation.inspect_imported_pipeline",
+        "function_path": "unreal_tools.animation.inspect_imported_animation_pipeline",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+        "start_line": 253,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]",
+            "required": true
+          },
+          {
+            "name": "target_skeleton_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "target_skeletal_mesh_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "compatibility_report",
+            "annotation": "Any"
+          },
+          {
+            "name": "animation_paths",
+            "annotation": "list[str]"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "compatibility_report",
+          "annotation": "Any"
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        }
+      ],
+      "literal_values": {
+        "target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "target_skeletal_mesh_path": "",
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        }
+      },
+      "literal_value_provenance": {
+        "target_skeleton_path": "user_prompt",
+        "target_skeletal_mesh_path": "operation_default",
+        "imported_paths": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "target_skeleton_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Inspect Imported Unreal Animation Pipeline uses its registered default for `target_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.inspect_imported_pipeline",
+        "host": "unreal",
+        "operation": "animation.inspect_imported_pipeline",
+        "label": "Inspect Imported Unreal Animation Pipeline",
+        "callable": "unreal_tools.animation.inspect_imported_animation_pipeline",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 10,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "imported_paths",
+          "skeleton_path"
+        ],
+        "produces": [
+          "compatibility_report",
+          "animation_paths"
+        ],
+        "required": [
+          "imported_paths"
+        ],
+        "optional": {
+          "target_skeleton_path": "",
+          "target_skeletal_mesh_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "frame, duration, root motion, skeleton, and compatibility evidence are reported"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Inspect imported animation timing, root motion, Skeleton ownership, and target compatibility.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 7,
+      "symbol": {
+        "name": "stage_07_unreal_animation_retarget_imported_if_needed",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "animation.retarget_imported_if_needed",
+        "function_path": "unreal_tools.animation.retarget_imported_animations_if_needed",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+        "start_line": 348,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "compatibility_report",
+            "annotation": "dict[str, Any]",
+            "required": true
+          },
+          {
+            "name": "source_skeletal_mesh_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "target_skeletal_mesh_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "output_path",
+            "annotation": "str",
+            "required": false,
+            "default": "/Game/Animations/Retargeted"
+          },
+          {
+            "name": "retargeter_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "animation_paths",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "retarget_report",
+            "annotation": "Any"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "compatibility_report",
+          "annotation": "dict[str, Any]",
+          "required": true
+        },
+        {
+          "name": "source_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_skeletal_mesh_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "output_path",
+          "annotation": "str",
+          "required": false,
+          "default": "/Game/Animations/Retargeted"
+        },
+        {
+          "name": "retargeter_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "retarget_report",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "source_skeletal_mesh_path": "",
+        "target_skeletal_mesh_path": "",
+        "output_path": "/Game/Animations/Retargeted",
+        "retargeter_path": "",
+        "compatibility_report": {
+          "from_action": "stage_06_unreal_animation_inspect_imported_pipeline",
+          "result_path": "compatibility_report"
+        }
+      },
+      "literal_value_provenance": {
+        "source_skeletal_mesh_path": "operation_default",
+        "target_skeletal_mesh_path": "operation_default",
+        "output_path": "operation_default",
+        "retargeter_path": "operation_default",
+        "compatibility_report": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "source_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `source_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_skeletal_mesh_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `target_skeletal_mesh_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "output_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `output_path`: '/Game/Animations/Retargeted'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "retargeter_path": {
+          "source": "operation_default",
+          "resolution": "Retarget Imported Unreal Animations When Needed uses its registered default for `retargeter_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "compatibility_report": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "dict[str, Any]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.retarget_imported_if_needed",
+        "host": "unreal",
+        "operation": "animation.retarget_imported_if_needed",
+        "label": "Retarget Imported Unreal Animations When Needed",
+        "callable": "unreal_tools.animation.retarget_imported_animations_if_needed",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 20,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "compatibility_report"
+        ],
+        "produces": [
+          "animation_paths",
+          "retarget_report"
+        ],
+        "required": [
+          "compatibility_report"
+        ],
+        "optional": {
+          "source_skeletal_mesh_path": "",
+          "target_skeletal_mesh_path": "",
+          "output_path": "/Game/Animations/Retargeted",
+          "retargeter_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "compatible animations are preserved and incompatible animations are retargeted"
+        ],
+        "rollback": [
+          "delete only newly reported retargeted assets"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Preserve compatible AnimSequences and retarget only incompatible imports with structured readback.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 8,
+      "symbol": {
+        "name": "stage_08_unreal_animation_report_pipeline_assets",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "animation.report_pipeline_assets",
+        "function_path": "unreal_tools.animation.report_animation_pipeline_assets",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\animation.py",
+        "start_line": 444,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]",
+            "required": true
+          },
+          {
+            "name": "animation_paths",
+            "annotation": "list[str]",
+            "required": true
+          },
+          {
+            "name": "target_skeleton_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          },
+          {
+            "name": "target_anim_blueprint_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "pipeline_report",
+            "annotation": "Any"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "animation_paths",
+          "annotation": "list[str]",
+          "required": true
+        },
+        {
+          "name": "target_skeleton_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        },
+        {
+          "name": "target_anim_blueprint_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pipeline_report",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "target_skeleton_path": "/Game/Characters/Mannequins/Meshes/SK_Mannequin",
+        "target_anim_blueprint_path": "",
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "animation_paths": {
+          "from_action": "stage_07_unreal_animation_retarget_imported_if_needed",
+          "result_path": "animation_paths"
+        }
+      },
+      "literal_value_provenance": {
+        "target_skeleton_path": "user_prompt",
+        "target_anim_blueprint_path": "operation_default",
+        "imported_paths": "upstream_result_reference",
+        "animation_paths": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "target_skeleton_path": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "target_anim_blueprint_path": {
+          "source": "operation_default",
+          "resolution": "Report Final Unreal Animation Pipeline Assets uses its registered default for `target_anim_blueprint_path`: ''.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "animation_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.operations.animation.report_pipeline_assets",
+        "host": "unreal",
+        "operation": "animation.report_pipeline_assets",
+        "label": "Report Final Unreal Animation Pipeline Assets",
+        "callable": "unreal_tools.animation.report_animation_pipeline_assets",
+        "provider": "registered_operation",
+        "role": "post_import",
+        "phase_order": 100,
+        "formats": [],
+        "subjects": [
+          "animation"
+        ],
+        "consumes": [
+          "imported_paths",
+          "animation_paths",
+          "skeleton_path"
+        ],
+        "produces": [
+          "pipeline_report"
+        ],
+        "required": [
+          "imported_paths",
+          "animation_paths"
+        ],
+        "optional": {
+          "target_skeleton_path": "",
+          "target_anim_blueprint_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "final asset existence, save state, Skeleton, and AnimBlueprint evidence are returned"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unreal",
+        "metadata": {
+          "description": "Report final imported and retargeted asset existence, save state, and Skeleton ownership.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 9,
+      "symbol": {
+        "name": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+        "kind": "function",
+        "host": "unreal",
+        "provider_id": "unreal",
+        "pipeline_operation": "dcc_operation",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "function_path": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "file_path": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "start_line": 111,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "imported_paths",
+            "annotation": "list[str]",
+            "required": false,
+            "default": []
+          },
+          {
+            "name": "destination_path",
+            "annotation": "str",
+            "required": false,
+            "default": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "assets",
+            "annotation": "list[dict[str, Any]]"
+          },
+          {
+            "name": "asset_count",
+            "annotation": "int"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "imported_paths",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "assets",
+          "annotation": "list[dict[str, Any]]"
+        },
+        {
+          "name": "asset_count",
+          "annotation": "int"
+        }
+      ],
+      "literal_values": {
+        "imported_paths": {
+          "from_action": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+          "result_path": "imported_paths"
+        },
+        "destination_path": "/Game/TechConnector/Review/Mocap"
+      },
+      "literal_value_provenance": {
+        "imported_paths": "upstream_result_reference",
+        "destination_path": "user_prompt"
+      },
+      "literal_value_details": {
+        "imported_paths": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "destination_path": {
+          "source": "user_prompt",
+          "resolution": "Registry validation inherits the explicit Unreal import destination so readback is scoped to the requested content folder.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unreal.unreal_tools_functions.unreal_tools.asset_transfer_adapter.registry_readback",
+        "host": "unreal",
+        "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "label": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "callable": "unreal_tools.asset_transfer_adapter.registry_readback",
+        "provider": "unreal_tools",
+        "role": "validate",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "imported_paths"
+        ],
+        "produces": [
+          "assets",
+          "asset_count"
+        ],
+        "required": [],
+        "optional": {
+          "imported_paths": [],
+          "destination_path": ""
+        },
+        "preconditions": [],
+        "validation": [
+          "all requested paths resolve in Asset Registry"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+        "metadata": {
+          "kind": "unreal_tools_function",
+          "name": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "module": "unreal_tools.asset_transfer_adapter",
+          "function": "unreal_tools.asset_transfer_adapter.registry_readback",
+          "location": "unreal_tools",
+          "source": "C:\\depot\\tools\\unreal_tools\\asset_transfer_adapter.py",
+          "implementation_state": "implemented",
+          "implementation_quality": {
+            "implemented": true,
+            "state": "implemented",
+            "reasons": [],
+            "line": 111
+          },
+          "docstring": "Prove imported packages resolve through the Asset Registry."
+        },
+        "executable": true
+      }
+    }
+  ],
+  "data_links": [
+    {
+      "from_step": 1,
+      "from_output": "fbx_path",
+      "to_step": 2,
+      "to_input": "filepath",
+      "reason": "Bind typed `fbx_path` output from the planned upstream action."
+    },
+    {
+      "from_step": 2,
+      "from_output": "objects",
+      "to_step": 4,
+      "to_input": "selection",
+      "reason": "Bind typed `objects` output from the planned upstream action."
+    },
+    {
+      "from_step": 4,
+      "from_output": "fbx_path",
+      "to_step": 5,
+      "to_input": "source_file",
+      "reason": "Bind typed `fbx_path` output from the planned upstream action."
+    },
+    {
+      "from_step": 5,
+      "from_output": "imported_paths",
+      "to_step": 6,
+      "to_input": "imported_paths",
+      "reason": "Bind typed `imported_paths` output from the planned upstream action."
+    },
+    {
+      "from_step": 6,
+      "from_output": "compatibility_report",
+      "to_step": 7,
+      "to_input": "compatibility_report",
+      "reason": "Bind typed `compatibility_report` output from the planned upstream action."
+    },
+    {
+      "from_step": 5,
+      "from_output": "imported_paths",
+      "to_step": 8,
+      "to_input": "imported_paths",
+      "reason": "Bind typed `imported_paths` output from the planned upstream action."
+    },
+    {
+      "from_step": 7,
+      "from_output": "animation_paths",
+      "to_step": 8,
+      "to_input": "animation_paths",
+      "reason": "Bind typed `animation_paths` output from the planned upstream action."
+    },
+    {
+      "from_step": 5,
+      "from_output": "imported_paths",
+      "to_step": 9,
+      "to_input": "imported_paths",
+      "reason": "Bind typed `imported_paths` output from the planned upstream action."
+    }
+  ],
+  "flow_links": [
+    {
+      "from_step": 1,
+      "to_step": 2,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 2,
+      "to_step": 3,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 3,
+      "to_step": 4,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 4,
+      "to_step": 5,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 5,
+      "to_step": 6,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 6,
+      "to_step": 7,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 7,
+      "to_step": 8,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 8,
+      "to_step": 9,
+      "reason": "Preserve the planned cross-DCC execution order."
+    }
+  ],
+  "prompt_flow_summary": {
+    "schema": "pipeline_prompt_flow_v1",
+    "route": "pipeline_graph",
+    "framework": "dynamic_typed_pipeline_v1",
+    "semantic_verification": {
+      "framework": "verified_pipeline_requirement_ledger_v1",
+      "ledger": {
+        "framework": "pipeline_requirement_ledger_v1",
+        "requirements": [
+          {
+            "id": "clause_1",
+            "requirement": "Create a MotionBuilder to Blender to Unreal mocap pipeline",
+            "role": "GOAL",
+            "action": "create",
+            "attaches_to": "goal_1",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 0.95,
+              "matched_terms": [
+                "blender",
+                "mocap",
+                "unreal"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Mocap\", \"subject\": \"animation\", \"skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_04_blender_blender_export_fbx\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_02_blender_io_import_fbx",
+                "operation": "io.import_fbx",
+                "score": 0.7,
+                "matched_terms": [
+                  "blender",
+                  "motionbuilder"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "blender import io.import_fbx blender_tools.io.import_fbx {\"use_image_search\": true, \"filepath\": {\"from_action\": \"stage_01_motionbuilder_io_export_fbx\", \"result_path\": \"fbx_path\"}} [\"blender_scene\", \"objects\", \"meshes\", \"armatures\", \"animations\"] [\"imported object count is reported\"]"
+              },
+              {
+                "stage": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+                "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+                "score": 0.7,
+                "matched_terms": [
+                  "mocap",
+                  "unreal"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal validate unreal_tools.asset_transfer_adapter.registry_readback unreal_tools.asset_transfer_adapter.registry_readback {\"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"destination_path\": \"/Game/TechConnector/Review/Mocap\"} [\"assets\", \"asset_count\"] [\"all requested paths resolve in Asset Registry\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_2",
+            "requirement": "Export the current take",
+            "role": "GOAL",
+            "action": "export",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_01_motionbuilder_io_export_fbx",
+              "operation": "io.export_fbx",
+              "score": 0.3333,
+              "matched_terms": [
+                "export"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "motionbuilder export io.export_fbx motionbuilder_tools.io.export_fbx {\"selected_only\": false, \"filepath\": \"${pipeline_workspace}/stage_01_motionbuilder_io_export_fbx.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_02_blender_io_import_fbx",
+                "operation": "io.import_fbx",
+                "score": 0.3333,
+                "matched_terms": [
+                  "export"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "blender import io.import_fbx blender_tools.io.import_fbx {\"use_image_search\": true, \"filepath\": {\"from_action\": \"stage_01_motionbuilder_io_export_fbx\", \"result_path\": \"fbx_path\"}} [\"blender_scene\", \"objects\", \"meshes\", \"armatures\", \"animations\"] [\"imported object count is reported\"]"
+              },
+              {
+                "stage": "stage_04_blender_blender_export_fbx",
+                "operation": "blender.export_fbx",
+                "score": 0.3333,
+                "matched_terms": [
+                  "export"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "blender export blender.export_fbx ai_studio.blender.generated.blender_export_fbx {\"selection\": {\"from_action\": \"stage_02_blender_io_import_fbx\", \"result_path\": \"objects\"}, \"settings\": {\"axis_forward\": \"-Y\", \"axis_up\": \"Z\", \"apply_unit_scale\": true, \"bake_animation\": true}, \"output_path\": \"${pipeline_workspace}/stage_04_blender_blender_export_fbx.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_3",
+            "requirement": "clean animation in Blender",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_03_blender_blender_clean_animation",
+              "operation": "blender.clean_animation",
+              "score": 1.2,
+              "matched_terms": [
+                "animation",
+                "blender",
+                "clean"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "blender process blender.clean_animation ai_studio.blender.generated.blender_clean_animation {\"armature\": \"\", \"action\": \"\", \"frame_range\": [], \"cleanup\": []} [\"animations\"] [\"processed actions and frame range are reported\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_04_blender_blender_export_fbx",
+                "operation": "blender.export_fbx",
+                "score": 1.0667,
+                "matched_terms": [
+                  "animation",
+                  "blender"
+                ],
+                "active_parameter_terms": [
+                  "animation"
+                ],
+                "evidence": "blender export blender.export_fbx ai_studio.blender.generated.blender_export_fbx {\"selection\": {\"from_action\": \"stage_02_blender_io_import_fbx\", \"result_path\": \"objects\"}, \"settings\": {\"axis_forward\": \"-Y\", \"axis_up\": \"Z\", \"apply_unit_scale\": true, \"bake_animation\": true}, \"output_path\": \"${pipeline_workspace}/stage_04_blender_blender_export_fbx.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+              },
+              {
+                "stage": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+                "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+                "score": 0.6667,
+                "matched_terms": [
+                  "animation",
+                  "blender"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Mocap\", \"subject\": \"animation\", \"skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_04_blender_blender_export_fbx\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_4",
+            "requirement": "publish FBX to /Game/TechConnector/Review/Mocap",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 0.8,
+              "matched_terms": [
+                "game",
+                "mocap",
+                "review",
+                "techconnector"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Mocap\", \"subject\": \"animation\", \"skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_04_blender_blender_export_fbx\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback",
+                "operation": "unreal_tools.asset_transfer_adapter.registry_readback",
+                "score": 0.8,
+                "matched_terms": [
+                  "game",
+                  "mocap",
+                  "review",
+                  "techconnector"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal validate unreal_tools.asset_transfer_adapter.registry_readback unreal_tools.asset_transfer_adapter.registry_readback {\"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"destination_path\": \"/Game/TechConnector/Review/Mocap\"} [\"assets\", \"asset_count\"] [\"all requested paths resolve in Asset Registry\"]"
+              },
+              {
+                "stage": "stage_06_unreal_animation_inspect_imported_pipeline",
+                "operation": "animation.inspect_imported_pipeline",
+                "score": 0.2,
+                "matched_terms": [
+                  "game"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.inspect_imported_pipeline unreal_tools.animation.inspect_imported_animation_pipeline {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_skeletal_mesh_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}} [\"compatibility_report\", \"animation_paths\"] [\"frame, duration, root motion, skeleton, and compatibility evidence are reported\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_5",
+            "requirement": "skeleton /Game/Characters/Mannequins/Meshes/SK_Mannequin",
+            "role": "MODIFIER",
+            "action": "modify",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+              "operation": "unreal_tools.asset_transfer_adapter.import_fbx_verified",
+              "score": 1.0,
+              "matched_terms": [
+                "characters",
+                "game",
+                "mannequin",
+                "mannequins",
+                "meshes",
+                "skeleton"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal import unreal_tools.asset_transfer_adapter.import_fbx_verified unreal_tools.asset_transfer_adapter.import_fbx_verified {\"destination_path\": \"/Game/TechConnector/Review/Mocap\", \"subject\": \"animation\", \"skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"replace_existing\": false, \"save\": true, \"source_file\": {\"from_action\": \"stage_04_blender_blender_export_fbx\", \"result_path\": \"fbx_path\"}} [\"asset_path\", \"imported_paths\", \"asset_count\"] [\"imported object paths resolve in EditorAssetLibrary\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_06_unreal_animation_inspect_imported_pipeline",
+                "operation": "animation.inspect_imported_pipeline",
+                "score": 1.0,
+                "matched_terms": [
+                  "characters",
+                  "game",
+                  "mannequin",
+                  "mannequins",
+                  "meshes",
+                  "skeleton"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.inspect_imported_pipeline unreal_tools.animation.inspect_imported_animation_pipeline {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_skeletal_mesh_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}} [\"compatibility_report\", \"animation_paths\"] [\"frame, duration, root motion, skeleton, and compatibility evidence are reported\"]"
+              },
+              {
+                "stage": "stage_08_unreal_animation_report_pipeline_assets",
+                "operation": "animation.report_pipeline_assets",
+                "score": 1.0,
+                "matched_terms": [
+                  "characters",
+                  "game",
+                  "mannequin",
+                  "mannequins",
+                  "meshes",
+                  "skeleton"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.report_pipeline_assets unreal_tools.animation.report_animation_pipeline_assets {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_anim_blueprint_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"animation_paths\": {\"from_action\": \"stage_07_unreal_animation_retarget_imported_if_needed\", \"result_path\": \"animation_paths\"}} [\"pipeline_report\"] [\"final asset existence, save state, Skeleton, and AnimBlueprint evidence are returned\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_6",
+            "requirement": "inspect compatibility",
+            "role": "GOAL",
+            "action": "find",
+            "attaches_to": "goal_3",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_06_unreal_animation_inspect_imported_pipeline",
+              "operation": "animation.inspect_imported_pipeline",
+              "score": 1.0,
+              "matched_terms": [
+                "compatibility",
+                "inspect"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal post_import animation.inspect_imported_pipeline unreal_tools.animation.inspect_imported_animation_pipeline {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_skeletal_mesh_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}} [\"compatibility_report\", \"animation_paths\"] [\"frame, duration, root motion, skeleton, and compatibility evidence are reported\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_07_unreal_animation_retarget_imported_if_needed",
+                "operation": "animation.retarget_imported_if_needed",
+                "score": 1.0,
+                "matched_terms": [
+                  "compatibility",
+                  "inspect"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.retarget_imported_if_needed unreal_tools.animation.retarget_imported_animations_if_needed {\"source_skeletal_mesh_path\": \"\", \"target_skeletal_mesh_path\": \"\", \"output_path\": \"/Game/Animations/Retargeted\", \"retargeter_path\": \"\", \"compatibility_report\": {\"from_action\": \"stage_06_unreal_animation_inspect_imported_pipeline\", \"result_path\": \"compatibility_report\"}} [\"animation_paths\", \"retarget_report\"] [\"compatible animations are preserved and incompatible animations are retargeted\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_7",
+            "requirement": "retarget if needed",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_3",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_07_unreal_animation_retarget_imported_if_needed",
+              "operation": "animation.retarget_imported_if_needed",
+              "score": 1.0,
+              "matched_terms": [
+                "needed",
+                "retarget"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal post_import animation.retarget_imported_if_needed unreal_tools.animation.retarget_imported_animations_if_needed {\"source_skeletal_mesh_path\": \"\", \"target_skeletal_mesh_path\": \"\", \"output_path\": \"/Game/Animations/Retargeted\", \"retargeter_path\": \"\", \"compatibility_report\": {\"from_action\": \"stage_06_unreal_animation_inspect_imported_pipeline\", \"result_path\": \"compatibility_report\"}} [\"animation_paths\", \"retarget_report\"] [\"compatible animations are preserved and incompatible animations are retargeted\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_08_unreal_animation_report_pipeline_assets",
+                "operation": "animation.report_pipeline_assets",
+                "score": 1.0,
+                "matched_terms": [
+                  "needed",
+                  "retarget"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.report_pipeline_assets unreal_tools.animation.report_animation_pipeline_assets {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_anim_blueprint_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"animation_paths\": {\"from_action\": \"stage_07_unreal_animation_retarget_imported_if_needed\", \"result_path\": \"animation_paths\"}} [\"pipeline_report\"] [\"final asset existence, save state, Skeleton, and AnimBlueprint evidence are returned\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_8",
+            "requirement": "report saved animation assets.",
+            "role": "OUTPUT_REQUEST",
+            "action": "report",
+            "attaches_to": "goal_3",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_08_unreal_animation_report_pipeline_assets",
+              "operation": "animation.report_pipeline_assets",
+              "score": 0.75,
+              "matched_terms": [
+                "animation",
+                "assets",
+                "report"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unreal post_import animation.report_pipeline_assets unreal_tools.animation.report_animation_pipeline_assets {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_anim_blueprint_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}, \"animation_paths\": {\"from_action\": \"stage_07_unreal_animation_retarget_imported_if_needed\", \"result_path\": \"animation_paths\"}} [\"pipeline_report\"] [\"final asset existence, save state, Skeleton, and AnimBlueprint evidence are returned\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_06_unreal_animation_inspect_imported_pipeline",
+                "operation": "animation.inspect_imported_pipeline",
+                "score": 0.5,
+                "matched_terms": [
+                  "animation",
+                  "report"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.inspect_imported_pipeline unreal_tools.animation.inspect_imported_animation_pipeline {\"target_skeleton_path\": \"/Game/Characters/Mannequins/Meshes/SK_Mannequin\", \"target_skeletal_mesh_path\": \"\", \"imported_paths\": {\"from_action\": \"stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified\", \"result_path\": \"imported_paths\"}} [\"compatibility_report\", \"animation_paths\"] [\"frame, duration, root motion, skeleton, and compatibility evidence are reported\"]"
+              },
+              {
+                "stage": "stage_07_unreal_animation_retarget_imported_if_needed",
+                "operation": "animation.retarget_imported_if_needed",
+                "score": 0.5,
+                "matched_terms": [
+                  "animation",
+                  "report"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unreal post_import animation.retarget_imported_if_needed unreal_tools.animation.retarget_imported_animations_if_needed {\"source_skeletal_mesh_path\": \"\", \"target_skeletal_mesh_path\": \"\", \"output_path\": \"/Game/Animations/Retargeted\", \"retargeter_path\": \"\", \"compatibility_report\": {\"from_action\": \"stage_06_unreal_animation_inspect_imported_pipeline\", \"result_path\": \"compatibility_report\"}} [\"animation_paths\", \"retarget_report\"] [\"compatible animations are preserved and incompatible animations are retargeted\"]"
+              }
+            ]
+          }
+        ],
+        "requirement_count": 8,
+        "evidence_found": 8,
+        "needs_semantic_check": 0,
+        "all_requirements_accounted_for": true
+      },
+      "semantic_verdict": {
+        "matches_request": false,
+        "reason": "",
+        "covered": [],
+        "missing": [],
+        "distorted": [],
+        "unsupported_claims": [
+          {
+            "plan_claim": "Export current take",
+            "reason": "Candidate does not explicitly define which 'take' is selected or exported; it assumes a generic export without filtering specific takes."
+          },
+          {
+            "plan_claim": "Report saved animation assets",
+            "reason": "Candidate step 'unreal:animation.report_pipeline_assets' claims to report evidence but lacks explicit parameters for generating a final summary report of the entire pipeline outcome."
+          }
+        ],
+        "confidence": 0.65,
+        "dismissed_missing": [
+          {
+            "request_fragment": "clean animation",
+            "reason": "Candidate step 'blender:blender.clean_animation' has empty parameters for armature, action, frame_range, and cleanup, failing to specify the target or criteria for cleaning.",
+            "required_capability": ""
+          },
+          {
+            "request_fragment": "inspect compatibility",
+            "reason": "Candidate step 'unreal:animation.inspect_imported_pipeline' lacks specific validation criteria for checking skeleton compatibility (e.g., bone count, hierarchy match) beyond generic path resolution.",
+            "required_capability": ""
+          },
+          {
+            "request_fragment": "retarget if needed",
+            "reason": "Candidate step 'unreal:animation.retarget_imported_if_needed' has empty parameters for source skeletal mesh, target skeletal mesh, and retargeter path, making the conditional logic impossible to execute.",
+            "required_capability": ""
+          }
+        ],
+        "framework": "prompt_plan_alignment_v1",
+        "status": "mismatch",
+        "elapsed_ms": 9321.571,
+        "model_role": "semantic_plan_critic",
+        "verifier_tier": "semantic_1_5b",
+        "model_attempts": {
+          "primary_ms": 9321.064,
+          "primary_raw": "{\"match\":false,\"missing\":[{\"text\":\"clean animation\",\"reason\":\"Candidate step 'blender:blender.clean_animation' has empty parameters for armature, action, frame_range, and cleanup, failing to specify the target or criteria for cleaning.\",\"capability\":\"\"},{\"text\":\"inspect compatibility\",\"reason\":\"Candidate step 'unreal:animation.inspect_imported_pipeline' lacks specific validation criteria for checking skeleton compatibility (e.g., bone count, hierarchy match) beyond generic path resolution.\",\"capability\":\"\"},{\"text\":\"retarget if needed\",\"reason\":\"Candidate step 'unreal:animation.retarget_imported_if_needed' has empty parameters for source skeletal mesh, target skeletal mesh, and retargeter path, making the conditional logic impossible to execute.\",\"capability\":\"\"}],\"wrong\":[],\"unsupported\":[{\"claim\":\"Export current take\",\"reason\":\"Candidate does not explicitly define which 'take' is selected or exported; it assumes a generic export without filtering specific takes.\"},{\"claim\":\"Report saved animation assets\",\"reason\":\"Candidate step 'unreal:animation.report_pipeline_assets' claims to report evidence but lacks explicit parameters for generating a final summary report of the entire pipeline outcome.\"}],\"confidence\":0.65}",
+          "fallback_ms": 0.0,
+          "fallback_raw": ""
+        }
+      },
+      "matches_request": false,
+      "verification_available": true
+    },
+    "timings": {
+      "context_build_ms": 11196.438,
+      "understanding_validation_ms": 0.519,
+      "route_classification_ms": 349.866,
+      "action_planning_ms": 17.477,
+      "plan_alignment_ms": 9325.24,
+      "workflow_materialization_ms": 2060.176,
+      "total_ms": 22961.986
+    },
+    "ui_materialization": {
+      "ok": true,
+      "node_count": 9,
+      "link_count": 16,
+      "execution_order": [
+        "stage_01_motionbuilder_io_export_fbx",
+        "stage_02_blender_io_import_fbx",
+        "stage_03_blender_blender_clean_animation",
+        "stage_04_blender_blender_export_fbx",
+        "stage_05_unreal_unreal_tools_asset_transfer_adapter_import_fbx_verified",
+        "stage_06_unreal_animation_inspect_imported_pipeline",
+        "stage_07_unreal_animation_retarget_imported_if_needed",
+        "stage_08_unreal_animation_report_pipeline_assets",
+        "stage_09_unreal_unreal_tools_asset_transfer_adapter_registry_readback"
+      ]
+    },
+    "python_round_trip_node_count": 9,
+    "understanding_false_negative_waived": false,
+    "semantic_verifier_false_negative_waived": false
+  },
+  "review_scenario": {
+    "category": "mocap_cleanup",
+    "file_types": [
+      "MotionBuilder take",
+      ".fbx animation",
+      ".blend scene",
+      "Unreal animation sequence"
+    ]
+  }
+}

@@ -177,7 +177,7 @@ def _event_journal_case() -> BenchmarkCase:
             "runtime/journal.py": '''"""Store recent runtime events."""\n\n\nclass EventJournal:\n    """Store events in a list."""\n\n    def __init__(self, capacity):\n        self.capacity = capacity\n        self.events = []\n\n    def append(self, topic, payload):\n        self.events.append((topic, payload))\n        return len(self.events)\n\n    def since(self, sequence, topic=None):\n        return self.events[sequence:]\n''',
         },
         allowed_paths=("runtime/journal.py",),
-        assertion_count=13,
+        assertion_count=14,
         evaluator_source=r'''from __future__ import annotations
 import importlib
 import json
@@ -206,6 +206,7 @@ check([journal.append("a", payload), journal.append("", 0), journal.append("a", 
 payload["items"].append(2)
 check(journal.since(0) == ((2, "", 0), (3, "a", False)), "bounded ordered snapshot")
 check(journal.since(1, "a") == ((3, "a", False),), "topic filter")
+check(journal.since(2) == ((3, "a", False),), "evicted cursor uses stable IDs")
 check(journal.since(3) == (), "strictly newer sequence")
 snapshot = journal.since(0)
 check(isinstance(snapshot, tuple) and all(isinstance(item, tuple) for item in snapshot), "immutable snapshot shape")
@@ -414,6 +415,236 @@ raise SystemExit(0 if passed == len(checks) else 1)
     )
 
 
+def _painter_export_manifest_case() -> BenchmarkCase:
+    """Build a Painter-shaped cross-file selection and export holdout.
+
+    :return: Painter export manifest benchmark case.
+    """
+
+    return BenchmarkCase(
+        case_id="holdout_painter_export_manifest",
+        title="Plan Substance Painter texture-set exports",
+        category="dcc_multi_file_workflow",
+        prompt=(
+            "Repair painter_pipeline/texture_sets.py and painter_pipeline/export_plan.py; modify "
+            "only those files. These pure-Python helpers consume a Substance Painter project "
+            "snapshot, so they must work without Painter installed. Implement "
+            "collect_export_sets(texture_sets, selected_names=None): texture_sets is an iterable "
+            "of mappings with name (string) and enabled (bool); return a tuple of enabled names "
+            "in project order, removing case-insensitive duplicates (first enabled spelling wins). "
+            "Names are stripped; reject blank names, path separators, and '.' or '..' with "
+            "ValueError. selected_names=None exports all enabled sets; an explicit iterable "
+            "of strings matches names case-insensitively while retaining project order, and an "
+            "empty selection exports nothing. An unknown or disabled selected name raises ValueError. "
+            "Implement build_export_manifest(texture_sets, output_dir, preset, "
+            "selected_names=None) in export_plan.py using collect_export_sets. Return a tuple of "
+            "dicts with exactly texture_set, output_path, and preset keys. output_dir accepts a "
+            "string or pathlib.Path and need not exist yet; output_path is exactly the native "
+            "string form of Path(output_dir) / f'<texture_set>.png'. preset is a nonblank string "
+            "copied into each row. Reject a blank output_dir or preset with ValueError. Do not "
+            "mutate inputs. Add useful type hints and project-style "
+            "public docstrings with :param and :return: fields."
+        ),
+        seed_files={
+            "painter_pipeline/__init__.py": _PACKAGE_INIT,
+            "painter_pipeline/texture_sets.py": '''"""Select exportable Painter texture sets."""\n\n\ndef collect_export_sets(texture_sets, selected_names=None):\n    """Return every texture set name."""\n\n    return tuple(item["name"] for item in texture_sets)\n''',
+            "painter_pipeline/export_plan.py": '''"""Plan Painter texture exports."""\n\n\ndef build_export_manifest(texture_sets, output_dir, preset, selected_names=None):\n    """Return an empty manifest."""\n\n    return ()\n''',
+        },
+        allowed_paths=("painter_pipeline/texture_sets.py", "painter_pipeline/export_plan.py"),
+        assertion_count=15,
+        evaluator_source=r'''from __future__ import annotations
+import copy
+import importlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+selection = importlib.import_module("painter_pipeline.texture_sets")
+export_plan = importlib.import_module("painter_pipeline.export_plan")
+collect = selection.collect_export_sets
+build = export_plan.build_export_manifest
+checks = []
+
+def check(condition, label):
+    checks.append((bool(condition), label))
+
+failed = object()
+
+def result(call):
+    try:
+        return call()
+    except Exception:
+        return failed
+
+def rejects(call, label):
+    try:
+        call()
+    except ValueError:
+        check(True, label)
+    except Exception:
+        check(False, label)
+    else:
+        check(False, label)
+
+sets = [
+    {"name": " Body ", "enabled": True},
+    {"name": "Wheels", "enabled": False},
+    {"name": "body", "enabled": True},
+    {"name": "Glass", "enabled": True},
+]
+original = copy.deepcopy(sets)
+check(result(lambda: collect(sets)) == ("Body", "Glass"), "enabled order, trim, and casefold dedup")
+check(result(lambda: collect(sets, ["glass", "BODY"])) == ("Body", "Glass"), "selected names retain project order")
+check(result(lambda: collect(sets, [])) == (), "explicit empty selection")
+rejects(lambda: collect(sets, ["Missing"]), "unknown selected set rejected")
+rejects(lambda: collect(sets, ["Wheels"]), "disabled selected set rejected")
+invalid_names = (" ", "../escape", "folder/name", "folder\\name", ".", "..")
+rejected = 0
+for name in invalid_names:
+    try:
+        collect([{"name": name, "enabled": True}])
+    except ValueError:
+        rejected += 1
+    except Exception:
+        pass
+check(rejected == len(invalid_names), "unsafe texture-set names rejected")
+check(sets == original, "selection does not mutate snapshot")
+output_dir = root / "exports"
+manifest = result(lambda: build(sets, output_dir, "PBR Metallic Roughness"))
+check(isinstance(manifest, tuple) and len(manifest) == 2, "manifest result shape")
+check(manifest == (
+    {"texture_set": "Body", "output_path": str(output_dir / "Body.png"), "preset": "PBR Metallic Roughness"},
+    {"texture_set": "Glass", "output_path": str(output_dir / "Glass.png"), "preset": "PBR Metallic Roughness"},
+), "manifest fields and destinations")
+check(result(lambda: build(sets, output_dir, "PBR", ["glass"])) == (
+    {"texture_set": "Glass", "output_path": str(output_dir / "Glass.png"), "preset": "PBR"},
+), "selection feeds export plan")
+rejects(lambda: build(sets, output_dir, "PBR", ["Wheels"]), "export rejects disabled selection")
+rejects(lambda: build(sets, "  ", "PBR"), "blank output directory rejected")
+rejects(lambda: build(sets, output_dir, "  "), "blank preset rejected")
+check(sets == original, "export does not mutate snapshot")
+functions = (collect, build)
+check(all(getattr(function, "__annotations__", {}) and ":param" in (function.__doc__ or "") and ":return:" in (function.__doc__ or "") for function in functions), "typed public documentation")
+passed = sum(ok for ok, _ in checks)
+print(json.dumps({"passed": passed, "total": len(checks), "failures": [label for ok, label in checks if not ok]}))
+raise SystemExit(0 if passed == len(checks) else 1)
+''',
+    )
+
+
+def _motionbuilder_take_export_case() -> BenchmarkCase:
+    """Exercise offline MotionBuilder take selection and FBX job planning."""
+
+    return BenchmarkCase(
+        case_id="holdout_motionbuilder_take_export",
+        title="Plan MotionBuilder take exports for downstream DCC import",
+        category="dcc_multi_file_workflow",
+        prompt=(
+            "Repair mobu_pipeline/takes.py and mobu_pipeline/export_plan.py; modify only "
+            "those files. These pure-Python helpers process a MotionBuilder take snapshot "
+            "and must work without MotionBuilder installed. Implement "
+            "collect_export_takes(takes, selected_names=None): each take is a mapping "
+            "with name, enabled, start_frame, and end_frame. Strip names, reject blank "
+            "names and names containing / or backslash with ValueError. Require frame "
+            "bounds to be integers excluding bool, with start_frame <= end_frame; "
+            "invalid bounds raise ValueError. Return a tuple of dicts with exactly "
+            "name, start_frame, and end_frame keys for enabled takes, in project order. "
+            "Deduplicate names case-insensitively; the first enabled spelling and frame "
+            "range wins. None selection includes all enabled takes; an explicit empty "
+            "selection returns an empty tuple. Match selected names case-insensitively "
+            "but retain project order. Unknown or disabled selections raise ValueError. "
+            "Implement plan_fbx_exports(takes, output_dir, selected_names=None) in "
+            "export_plan.py using collect_export_takes from takes.py. Reject blank "
+            "output_dir with ValueError; it may be a string or pathlib.Path and need "
+            "not exist. Return a tuple of dicts with exactly take, output_path, "
+            "start_frame, and end_frame keys; each output_path is the native string "
+            "form of Path(output_dir) / f'<take>.fbx'. Never mutate input snapshots. "
+            "Add useful type hints and public docstrings with :param and :return:."
+        ),
+        seed_files={
+            "mobu_pipeline/__init__.py": _PACKAGE_INIT,
+            "mobu_pipeline/takes.py": '''"""Select MotionBuilder takes from an offline snapshot."""\n\n\ndef collect_export_takes(takes, selected_names=None):\n    """Return all take names."""\n\n    return tuple(take["name"] for take in takes)\n''',
+            "mobu_pipeline/export_plan.py": '''"""Plan FBX exports from MotionBuilder takes."""\n\n\ndef plan_fbx_exports(takes, output_dir, selected_names=None):\n    """Return no export jobs."""\n\n    return ()\n''',
+        },
+        allowed_paths=("mobu_pipeline/takes.py", "mobu_pipeline/export_plan.py"),
+        assertion_count=15,
+        evaluator_source=r'''from __future__ import annotations
+import copy
+import importlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+collect = importlib.import_module("mobu_pipeline.takes").collect_export_takes
+plan = importlib.import_module("mobu_pipeline.export_plan").plan_fbx_exports
+checks = []
+failed = object()
+
+def check(condition, label):
+    checks.append((bool(condition), label))
+
+def result(call):
+    try:
+        return call()
+    except Exception:
+        return failed
+
+def rejects(call, label):
+    try:
+        call()
+    except ValueError:
+        check(True, label)
+    except Exception:
+        check(False, label)
+    else:
+        check(False, label)
+
+takes = [
+    {"name": " Walk ", "enabled": True, "start_frame": 1, "end_frame": 24},
+    {"name": "Idle", "enabled": False, "start_frame": 5, "end_frame": 20},
+    {"name": "walk", "enabled": True, "start_frame": 30, "end_frame": 40},
+    {"name": "Run", "enabled": True, "start_frame": 25, "end_frame": 48},
+]
+original = copy.deepcopy(takes)
+expected = (
+    {"name": "Walk", "start_frame": 1, "end_frame": 24},
+    {"name": "Run", "start_frame": 25, "end_frame": 48},
+)
+check(result(lambda: collect(takes)) == expected, "enabled ordered typed take records")
+check(result(lambda: collect(takes, ["run", "WALK"])) == expected, "selection retains project order")
+check(result(lambda: collect(takes, [])) == (), "explicit empty selection")
+rejects(lambda: collect(takes, ["Missing"]), "unknown selection rejected")
+rejects(lambda: collect(takes, ["Idle"]), "disabled selection rejected")
+invalid_names = (" ", "a/b", "a\\b")
+check(all(result(lambda name=name: collect([{"name": name, "enabled": True, "start_frame": 1, "end_frame": 2}])) is failed for name in invalid_names), "unsafe names rejected")
+invalid_bounds = ((True, 2), (1, False), (4, 3), (1.0, 2))
+check(all(result(lambda start=start, end=end: collect([{"name": "Take", "enabled": True, "start_frame": start, "end_frame": end}])) is failed for start, end in invalid_bounds), "invalid frame bounds rejected")
+check(takes == original, "selection does not mutate snapshot")
+output_dir = root / "exports"
+jobs = result(lambda: plan(takes, output_dir))
+check(isinstance(jobs, tuple) and len(jobs) == 2, "FBX job result shape")
+check(jobs == (
+    {"take": "Walk", "output_path": str(output_dir / "Walk.fbx"), "start_frame": 1, "end_frame": 24},
+    {"take": "Run", "output_path": str(output_dir / "Run.fbx"), "start_frame": 25, "end_frame": 48},
+), "FBX job fields and paths")
+check(result(lambda: plan(takes, output_dir, ["run"])) == (
+    {"take": "Run", "output_path": str(output_dir / "Run.fbx"), "start_frame": 25, "end_frame": 48},
+), "selection feeds FBX plan")
+rejects(lambda: plan(takes, output_dir, ["Idle"]), "FBX plan rejects disabled selection")
+rejects(lambda: plan(takes, "  "), "blank output directory rejected")
+check(takes == original, "FBX planning does not mutate snapshot")
+check(all(getattr(function, "__annotations__", {}) and ":param" in (function.__doc__ or "") and ":return:" in (function.__doc__ or "") for function in (collect, plan)), "typed public documentation")
+passed = sum(ok for ok, _ in checks)
+print(json.dumps({"passed": passed, "total": len(checks), "failures": [label for ok, label in checks if not ok]}))
+raise SystemExit(0 if passed == len(checks) else 1)
+''',
+    )
+
+
 def holdout_cases() -> tuple[BenchmarkCase, ...]:
     """Return diverse cases excluded from contract-specific generation paths.
 
@@ -426,4 +657,6 @@ def holdout_cases() -> tuple[BenchmarkCase, ...]:
         _event_journal_case(),
         _backoff_tracker_case(),
         _envelope_codec_case(),
+        _painter_export_manifest_case(),
+        _motionbuilder_take_export_case(),
     )

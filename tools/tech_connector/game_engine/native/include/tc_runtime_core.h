@@ -2,6 +2,7 @@
 #define TC_RUNTIME_CORE_H
 
 #include "tc_graph_runtime.h"
+#include "tc_gamepad_input.h"
 
 #include <cstdint>
 #include <array>
@@ -9,11 +10,16 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace tc::runtime {
 
 using EntityId = std::uint32_t;
+
+// Normalize save paths for Win32 file APIs, including temporary and backup
+// sidecars that may extend beyond MAX_PATH. Other platforms retain the path.
+std::filesystem::path save_io_path(const std::filesystem::path& path);
 
 struct WorldVector3 {
     double x{0.0};
@@ -89,6 +95,8 @@ struct Collider {
     ColliderShape shape{ColliderShape::box};
     double radius{0.5};
     double half_height{0.5};
+    WorldVector3 center_offset{};
+    bool world_up{false};
     std::uint32_t layer{1U};
     std::uint32_t mask{0xFFFFFFFFU};
     float friction{0.5F};
@@ -253,6 +261,7 @@ struct AnimationClip {
     double frame_rate{24.0};
     bool looping{true};
     std::vector<AnimationCurve> curves;
+    std::vector<std::vector<Matrix4>> pose_frames;
 };
 
 struct SkinBinding {
@@ -377,6 +386,25 @@ public:
     std::unordered_map<std::string, double> variables;
     std::vector<std::string> events;
     std::string hud_text{"TC Runtime"};
+    struct UiWidget {
+        std::string id, type, text, accessible_name, on_activate;
+        float x{}, y{}, width{}, height{};
+        std::string image_asset_id;
+        bool focused{false};
+        std::string parent_id;
+        float anchor_x{}, anchor_y{}, pivot_x{}, pivot_y{};
+        float offset_x{}, offset_y{}, layout_width{}, layout_height{};
+        float min_viewport_width{};
+        bool responsive_layout{false};
+    };
+    std::vector<UiWidget> ui_widgets;
+    float ui_canvas_width{1920.0F}, ui_canvas_height{1080.0F};
+    float ui_safe_left{}, ui_safe_top{}, ui_safe_right{}, ui_safe_bottom{};
+    std::unordered_map<std::string, int> input_bindings{{"move_right", 'D'}, {"move_left", 'A'},
+        {"move_forward", 'W'}, {"move_backward", 'S'}, {"jump", 32},
+        {"crouch", 'C'}, {"crawl", 'V'}};
+    GamepadBindings gamepad_bindings{};
+    std::string scene_id;
     std::string save_slot{"autosave"};
     RenderSettings render_settings;
     SimulationSettings simulation_settings;
@@ -388,12 +416,19 @@ private:
     std::unordered_map<std::string, EntityId> ids_by_name_;
 };
 
+struct UiRect { float x{}, y{}, width{}, height{}; bool visible{true}; };
+std::vector<UiRect> layout_ui_widgets(const World& world, float viewport_width, float viewport_height,
+                                      float ui_scale = 1.0F);
+
 class Runtime {
 public:
     bool load_manifest(const std::filesystem::path& path, std::string& error);
     void begin_play();
     void set_input_axis(float x, float y) noexcept;
     void set_jump_pressed(bool pressed) noexcept;
+    void set_stance_pressed(bool crouch, bool crawl) noexcept;
+    void set_camera_orbit(float yaw_degrees, float pitch_degrees) noexcept;
+    void set_success_trace_enabled(bool enabled) noexcept { success_trace_enabled_ = enabled; }
     void tick(float delta_seconds);
     bool save(const std::filesystem::path& path, std::string& error) const;
     bool load_save(const std::filesystem::path& path, std::string& error);
@@ -402,19 +437,32 @@ public:
     [[nodiscard]] const World& world() const noexcept;
     [[nodiscard]] const RuntimeProfile& profile() const noexcept;
     [[nodiscard]] const std::vector<std::string>& debug_trace() const noexcept;
+    [[nodiscard]] std::size_t debug_trace_start_index() const noexcept { return debug_trace_start_index_; }
     [[nodiscard]] const std::vector<PhysicsContact>& physics_contacts() const noexcept;
     [[nodiscard]] const std::vector<PhysicsJointDiagnostic>& physics_joint_diagnostics() const noexcept;
     [[nodiscard]] const std::string& active_animation_id() const noexcept { return active_animation_id_; }
     [[nodiscard]] const std::string& previous_animation_id() const noexcept { return previous_animation_id_; }
+    [[nodiscard]] std::uint64_t motion_match_searches() const noexcept { return motion_match_searches_; }
     [[nodiscard]] double animation_blend_alpha() const noexcept {
         return animation_blend_duration_seconds_ <= 0.0 ? 1.0 :
             std::clamp(animation_blend_elapsed_seconds_ / animation_blend_duration_seconds_, 0.0, 1.0);
     }
     [[nodiscard]] bool raycast(const WorldVector3& origin, const WorldVector3& direction,
                                double maximum_distance, PhysicsRayHit& hit,
-                               std::uint32_t layer_mask = 0xFFFFFFFFU) const;
+                               std::uint32_t layer_mask = 0xFFFFFFFFU,
+                               EntityId ignored_entity = 0U,
+                               bool ignore_triggers = false) const;
 
 private:
+    struct MotionFrame {
+        std::string clip_id;
+        std::string family;
+        std::size_t frame{0};
+        double velocity_x{0.0};
+        double velocity_z{0.0};
+        double pelvis_height{0.0};
+        std::array<WorldVector3, 4> joints{};
+    };
     void execute(const std::vector<GraphInstruction>& instructions, float delta_seconds);
     void simulate(double delta_seconds);
     void simulate_step(double step_seconds);
@@ -429,13 +477,28 @@ private:
     World world_;
     RuntimeProfile profile_;
     std::vector<std::string> debug_trace_;
+    std::size_t debug_trace_start_index_{0};
+    bool success_trace_enabled_{true};
     TcGraphVector2 input_axis_{};
     bool jump_pressed_{false};
+    bool crouch_pressed_{false};
+    bool crawl_pressed_{false};
     bool jump_was_pressed_{false};
     std::unordered_map<EntityId, double> character_ground_grace_seconds_;
     std::unordered_map<EntityId, double> character_jump_buffer_seconds_;
     std::unordered_map<EntityId, bool> character_was_grounded_;
     std::unordered_map<EntityId, double> character_land_seconds_;
+    std::unordered_map<EntityId, double> character_landing_grace_seconds_;
+    std::unordered_map<EntityId, double> character_jump_start_seconds_;
+    std::unordered_map<EntityId, std::pair<double, double>> character_standing_capsules_;
+    std::unordered_map<EntityId, int> character_effective_stance_;
+    std::unordered_map<EntityId, double> character_base_yaw_degrees_;
+    std::vector<MotionFrame> motion_frames_;
+    std::unordered_map<std::string, std::vector<std::size_t>> motion_frame_indices_by_family_;
+    std::unordered_map<std::string, std::vector<std::size_t>> motion_frame_index_by_clip_;
+    std::uint64_t motion_match_searches_{0};
+    double camera_orbit_yaw_degrees_{0.0};
+    double camera_orbit_pitch_degrees_{0.0};
     std::size_t broadphase_pairs_{0};
     std::size_t collision_contacts_{0};
     std::size_t solver_islands_{0};
@@ -454,6 +517,9 @@ private:
 
 std::string stable_asset_id(const std::string& type, const std::string& canonical_path);
 bool build_skin_matrix_palette(const World& world, const std::string& skin_id, std::vector<Matrix4>& palette, std::string& error);
+bool build_skin_matrix_palette_from_values(const World& world, const std::string& skin_id,
+                                           const std::vector<float>& inverse_bind_values,
+                                           std::vector<Matrix4>& palette, std::string& error);
 
 }  // namespace tc::runtime
 

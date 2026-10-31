@@ -1602,6 +1602,15 @@ class _ProjectEditGenerationPhase:
                     approval_id=self.approval_id,
                 )
             )
+        # Small approved edits can use a bounded read/search/propose loop.
+        # Unvalidated proposals fall through to the full synthesis workflow.
+        from tech_connector.services.project_edit_tool_loop_service import (
+            try_focused_edit,
+        )
+
+        focused_preview = try_focused_edit(self)
+        if focused_preview is not None:
+            raise _WorkflowReturn(focused_preview)
         self.artifact_file_stages = list(
             _deps.build_project_edit_artifact_file_stages(self.plan, self.manifest)
         )

@@ -880,7 +880,7 @@ class PipelineNodeItem(QGraphicsRectItem):
             port.setPos(0, y)
             self.input_ports[name] = port
             label = QGraphicsSimpleTextItem(self._literal_label_text(name, annotation), self)
-            label.setBrush(QColor("#d7dde5"))
+            label.setBrush(QColor("#ff9f1c") if self._input_is_missing(name) else QColor("#d7dde5"))
             label.setPos(13, y - 8)
             self.literal_labels[name] = label
 
@@ -899,6 +899,7 @@ class PipelineNodeItem(QGraphicsRectItem):
             label = QGraphicsSimpleTextItem("no data return", self)
             label.setBrush(QColor("#777777"))
             label.setPos(self.WIDTH - label.boundingRect().width() - 13, y0 - 8)
+        self._apply_visual_state()
 
     def set_validation_messages(self, messages: list[str] | None) -> None:
         self._validation_messages = [str(msg) for msg in (messages or []) if str(msg).strip()]
@@ -912,12 +913,17 @@ class PipelineNodeItem(QGraphicsRectItem):
         self._apply_visual_state()
 
     def _apply_visual_state(self) -> None:
-        if self.isSelected():
+        missing_required = any(
+            self._input_is_missing(str(param.get("name") or ""))
+            for param in self.graph_node.params or []
+            if isinstance(param, dict) and param.get("name")
+        )
+        if self._validation_messages or missing_required:
+            self.setPen(QPen(QColor("#ff9f1c"), 4))
+            self.setBrush(QColor("#161006" if self.isSelected() else "#120804"))
+        elif self.isSelected():
             self.setPen(QPen(QColor("#1e9bff"), 4))
             self.setBrush(QColor("#03131e"))
-        elif self._validation_messages:
-            self.setPen(QPen(QColor("#ff9f1c"), 4))
-            self.setBrush(QColor("#120804"))
         else:
             self.setPen(QPen(QColor("#5bd000"), 3))
             self.setBrush(QColor("#010507"))
@@ -931,13 +937,44 @@ class PipelineNodeItem(QGraphicsRectItem):
                 or connection.from_step
             )
             return f"{name}: <- {source_name}.{connection.from_output}"[:40]
-        literal = self.view.literal_value(self.graph_node.step_data, name)
-        display_value = (
-            literal
-            if literal is not None and literal != ""
-            else (annotation or "Any")
-        )
+        step_data = self.graph_node.step_data
+        literals = step_data.get("literal_values") or {}
+        param = next((row for row in self.graph_node.params if row.get("name") == name), {})
+        if self._input_is_missing(name):
+            return f"{name}: ! MISSING ({annotation or 'Any'})"[:40]
+        if name not in literals:
+            if "default" in param:
+                return f"{name}: <function default>"[:40]
+            return f"{name}: <optional / unset>"[:40]
+        literal = literals.get(name)
+        if literal in (None, "", [], {}):
+            display_value = "<automatic / empty>"
+        elif isinstance(literal, dict) and literal.get("$pipeline_context") in {
+            "dcc_export_scope_v1", "dcc_input_context_v1",
+        }:
+            display_value = f"<auto: {literal.get('label') or literal.get('scope') or literal.get('context_kind')}>"
+        elif isinstance(literal, (list, dict)):
+            try:
+                import json
+                display_value = json.dumps(literal, ensure_ascii=False)
+            except (TypeError, ValueError):
+                display_value = str(literal)
+        else:
+            display_value = literal
         return f"{name}: {display_value}"[:40]
+
+    def _input_is_missing(self, name: str) -> bool:
+        if self.view.input_connection(self.graph_node.step_id, name) is not None:
+            return False
+        step_data = self.graph_node.step_data
+        detail = dict((step_data.get("literal_value_details") or {}).get(name) or {})
+        if detail.get("missing"):
+            return True
+        param = next((row for row in self.graph_node.params if row.get("name") == name), {})
+        if not bool(param.get("required")):
+            return False
+        literals = step_data.get("literal_values") or {}
+        return name not in literals or literals.get(name) in (None, "", [], {})
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemSelectedHasChanged:
@@ -945,8 +982,10 @@ class PipelineNodeItem(QGraphicsRectItem):
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.graph_node.x = float(self.pos().x())
             self.graph_node.y = float(self.pos().y())
-            self.view.refresh_links()
-            self.view.orderChanged.emit(self.view.execution_order())
+            if not getattr(self.view, "_suspend_position_notifications", False) and not getattr(
+                self.view, "_restoring_undo", False
+            ):
+                self.view.schedule_node_geometry_refresh(self.graph_node.step_id)
         return super().itemChange(change, value)
 
     def paint(self, painter, option, widget=None):
@@ -1044,6 +1083,8 @@ class PipelineNodeItem(QGraphicsRectItem):
             return
         param = next((p for p in self.graph_node.params if (p.get("name") or "") == name), {})
         label.setText(self._literal_label_text(name, display_param_type(param)))
+        label.setBrush(QColor("#ff9f1c") if self._input_is_missing(name) else QColor("#d7dde5"))
+        self._apply_visual_state()
 
 
 class PipelineLinkItem(QGraphicsPathItem):
@@ -1126,6 +1167,7 @@ class PipelineNodeView(QGraphicsView):
         self.scene_obj = QGraphicsScene(self)
         self.setScene(self.scene_obj)
         self.setRenderHints(QPainter.Antialiasing)
+        self.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setSceneRect(0, 0, 3600, 2200)
@@ -1137,6 +1179,18 @@ class PipelineNodeView(QGraphicsView):
         self._undo_stack: list[dict[str, Any]] = []
         self._undo_limit = 80
         self._restoring_undo = False
+        self._suspend_position_notifications = False
+        self._pending_geometry_steps: set[str] = set()
+        self._last_emitted_execution_order: tuple[str, ...] = ()
+        self._geometry_refresh_timer = QTimer(self)
+        self._geometry_refresh_timer.setSingleShot(True)
+        self._geometry_refresh_timer.timeout.connect(self._flush_node_geometry_refresh)
+        self._order_refresh_timer = QTimer(self)
+        self._order_refresh_timer.setSingleShot(True)
+        self._order_refresh_timer.timeout.connect(self._emit_deferred_order_change)
+        self._graph_intelligence_timer = QTimer(self)
+        self._graph_intelligence_timer.setSingleShot(True)
+        self._graph_intelligence_timer.timeout.connect(self._refresh_graph_intelligence)
         self.pending_port: PipelinePortItem | None = None
         self.temp_link: TempLinkItem | None = None
         self._ctrl_middle_panning = False
@@ -1147,6 +1201,9 @@ class PipelineNodeView(QGraphicsView):
         self._tool_symbol_search_cache: list[dict[str, Any]] = []
         self._tool_symbol_search_cache_dirty = False
         self._tool_symbol_search_cache_build_scheduled = False
+        self._tool_symbol_search_build_source: list[dict[str, Any]] | None = None
+        self._tool_symbol_search_build_rows: list[dict[str, Any]] = []
+        self._tool_symbol_search_build_index = 0
         self.empty = QGraphicsSimpleTextItem(
             "Add nodes. Use yellow flow ports for execution order. Use green data outputs only when a node returns data."
         )
@@ -1158,6 +1215,9 @@ class PipelineNodeView(QGraphicsView):
         self.tool_symbols = [dict(symbol) for symbol in (symbols or []) if isinstance(symbol, dict)]
         self._tool_symbol_search_cache = []
         self._tool_symbol_search_cache_dirty = True
+        self._tool_symbol_search_build_source = None
+        self._tool_symbol_search_build_rows = []
+        self._tool_symbol_search_build_index = 0
         if len(self.tool_symbols) <= 500:
             self._prepare_tool_symbol_search_cache()
         else:
@@ -1167,7 +1227,52 @@ class PipelineNodeView(QGraphicsView):
         if not self._tool_symbol_search_cache_dirty or self._tool_symbol_search_cache_build_scheduled:
             return
         self._tool_symbol_search_cache_build_scheduled = True
-        QTimer.singleShot(0, self._prepare_tool_symbol_search_cache)
+        QTimer.singleShot(0, self._prepare_tool_symbol_search_cache_chunk)
+
+    def _prepare_tool_symbol_search_cache_chunk(self) -> None:
+        """Index a large tool inventory in small event-loop slices."""
+        if not self._tool_symbol_search_cache_dirty:
+            self._tool_symbol_search_cache_build_scheduled = False
+            self._tool_symbol_search_build_source = None
+            return
+        if self._tool_symbol_search_build_source is None:
+            self._tool_symbol_search_build_source = public_tool_symbols(self.tool_symbols)
+            self._tool_symbol_search_build_rows = []
+            self._tool_symbol_search_build_index = 0
+        source = self._tool_symbol_search_build_source
+        stop = min(len(source), self._tool_symbol_search_build_index + 200)
+        for symbol in source[self._tool_symbol_search_build_index:stop]:
+            if not is_studio_search_symbol(symbol):
+                continue
+            provider = provider_metadata(symbol)
+            category = tool_category(symbol, provider)
+            label = tool_menu_label(symbol)
+            self._tool_symbol_search_build_rows.append(
+                {
+                    "symbol": symbol,
+                    "provider": provider,
+                    "category": category,
+                    "label": label,
+                    "haystack": symbol_search_text(symbol),
+                    "name": str(symbol.get("name") or "").lower(),
+                    "label_lower": label.lower(),
+                    "path_lower": str(symbol.get("file_path") or "").lower(),
+                    "priority": int(provider.get("order") or 300),
+                }
+            )
+        self._tool_symbol_search_build_index = stop
+        if stop < len(source):
+            QTimer.singleShot(0, self._prepare_tool_symbol_search_cache_chunk)
+            return
+        self._tool_symbol_search_build_rows.sort(
+            key=lambda row: (row["priority"], row["label_lower"], row["path_lower"])
+        )
+        self._tool_symbol_search_cache = self._tool_symbol_search_build_rows
+        self._tool_symbol_search_cache_dirty = False
+        self._tool_symbol_search_cache_build_scheduled = False
+        self._tool_symbol_search_build_source = None
+        self._tool_symbol_search_build_rows = []
+        self._tool_symbol_search_build_index = 0
 
     def _prepare_tool_symbol_search_cache(self) -> None:
         if not self._tool_symbol_search_cache_dirty:
@@ -1745,6 +1850,54 @@ class PipelineNodeView(QGraphicsView):
             return []
         suggestions: list[dict[str, str]] = []
         matched_inputs = set()
+        # Registered usage patterns are grounded in known project call sites or
+        # authored integration contracts, so they take precedence over generic
+        # name/type matching.
+        for pattern in symbol.get("usage_patterns") or symbol.get("context_patterns") or []:
+            if not isinstance(pattern, dict):
+                continue
+            inputs = pattern.get("inputs") or {}
+            if not isinstance(inputs, dict):
+                continue
+            for input_name, binding in inputs.items():
+                source_name = ""
+                output_name = ""
+                if isinstance(binding, str) and binding.startswith("$"):
+                    source_name, _, output_name = binding[1:].partition(".")
+                elif isinstance(binding, dict):
+                    source_name = str(
+                        binding.get("node") or binding.get("function")
+                        or binding.get("from_node") or ""
+                    )
+                    output_name = str(
+                        binding.get("output") or binding.get("from_output") or ""
+                    )
+                if not source_name or not output_name:
+                    continue
+                for step_id in reversed(self.execution_order()):
+                    source_node = self.nodes.get(step_id)
+                    if not source_node:
+                        continue
+                    candidate_names = {
+                        str((source_node.symbol or {}).get("name") or ""),
+                        str((source_node.symbol or {}).get("function_path") or "").rsplit(".", 1)[-1],
+                    }
+                    if source_name not in candidate_names:
+                        continue
+                    if output_name not in {
+                        str(row.get("name") or "") for row in source_node.outputs or []
+                    }:
+                        continue
+                    suggestions.append({
+                        "from_step": step_id,
+                        "from_output": output_name,
+                        "from_label": f"{source_node.symbol.get('name', step_id)}.{output_name}",
+                        "to_input": str(input_name),
+                        "confidence": "high",
+                        "evidence": "Registered project usage passes this output into the argument.",
+                    })
+                    matched_inputs.add(str(input_name))
+                    break
         for param in params:
             if not isinstance(param, dict):
                 continue
@@ -1753,7 +1906,9 @@ class PipelineNodeView(QGraphicsView):
                 continue
             if input_name in matched_inputs:
                 continue
-            for step_id in self.execution_order():
+            # Prefer the closest earlier producer, matching normal pipeline
+            # data flow and avoiding a distant same-typed value by accident.
+            for step_id in reversed(self.execution_order()):
                 source_node = self.nodes.get(step_id)
                 if not source_node:
                     continue
@@ -2186,6 +2341,51 @@ class PipelineNodeView(QGraphicsView):
             connected[str(link.to_input)] = f"{source_name}.{link.from_output}"
         return connected
 
+    @staticmethod
+    def _annotations_compatible(source: str, target: str) -> bool:
+        source_l = str(source or "Any").lower().replace(" ", "")
+        target_l = str(target or "Any").lower().replace(" ", "")
+        if "any" in {source_l, target_l} or not source_l or not target_l:
+            return True
+        if source_l == target_l:
+            return True
+        if source_l.startswith("list") and target_l.startswith(("list", "iterable", "sequence")):
+            return True
+        return False
+
+    def connected_input_details(self, step_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        step_id = str((step_data or {}).get("graph_step_id") or "")
+        target_params = {
+            str(row.get("name") or ""): str(row.get("annotation") or "Any")
+            for row in (step_data or {}).get("params") or []
+            if isinstance(row, dict)
+        }
+        details = {}
+        for link in self.links:
+            if link.link_type != "data" or link.to_step != step_id or not link.to_input:
+                continue
+            source_node = self.nodes.get(link.from_step)
+            source_name = str(
+                ((source_node.symbol if source_node else {}) or {}).get("name")
+                or link.from_step
+            )
+            source_type = next(
+                (
+                    str(row.get("annotation") or "Any")
+                    for row in ((source_node.outputs if source_node else []) or [])
+                    if row.get("name") == link.from_output
+                ),
+                "Any",
+            )
+            target_type = target_params.get(str(link.to_input), "Any")
+            details[str(link.to_input)] = {
+                "source": f"{source_name}.{link.from_output}",
+                "source_type": source_type,
+                "target_type": target_type,
+                "compatible": self._annotations_compatible(source_type, target_type),
+            }
+        return details
+
     def disconnect_input(self, step_id: str, param_name: str) -> bool:
         matching = [
             link
@@ -2215,27 +2415,41 @@ class PipelineNodeView(QGraphicsView):
         return True
 
     def literal_value(self, step_data, param_name):
-        return ((step_data.get("literal_values") or {}).get(param_name) or "")
+        literals = step_data.get("literal_values") or {}
+        if param_name not in literals:
+            return ""
+        return literals[param_name]
 
     def set_literal_value(self, step_data, param_name, value):
         step_data.setdefault("literal_values", {})[param_name] = value
 
-    def _param_has_value_or_link(self, step_id: str, step_data: dict[str, Any], param_name: str) -> bool:
-        literal = self.literal_value(step_data, param_name)
-        if literal not in {"", None}:
-            return True
-        return any(
+    def _param_has_value_or_link(
+        self,
+        step_id: str,
+        step_data: dict[str, Any],
+        param_name: str,
+        *,
+        required: bool = False,
+    ) -> bool:
+        literals = step_data.get("literal_values") or {}
+        if any(
             link.link_type == "data" and link.to_step == step_id and link.to_input == param_name
             for link in self.links
-        )
+        ):
+            return True
+        if param_name not in literals:
+            return False
+        value = literals[param_name]
+        if required and value in (None, "", [], {}):
+            return False
+        return value is not None
 
     def _param_has_default(self, param: dict[str, Any]) -> bool:
         if not isinstance(param, dict):
             return False
         if "default" not in param:
             return False
-        default = param.get("default")
-        return default not in {"", None}
+        return param.get("default") is not None
 
     def validate_data_flow(self) -> list[dict[str, str]]:
         issues: list[dict[str, str]] = []
@@ -2252,7 +2466,12 @@ class PipelineNodeView(QGraphicsView):
                     continue
                 if self._param_has_default(param):
                     continue
-                if self._param_has_value_or_link(step_id, node.step_data, param_name):
+                if self._param_has_value_or_link(
+                    step_id,
+                    node.step_data,
+                    param_name,
+                    required=bool(param.get("required")),
+                ):
                     continue
                 issues.append({
                     "step_id": step_id,
@@ -2286,15 +2505,53 @@ class PipelineNodeView(QGraphicsView):
                         "input": link.to_input,
                         "message": f"Connection targets missing input: {link.to_input}.",
                     })
+                else:
+                    source_type = next(
+                        (
+                            str(row.get("annotation") or "Any")
+                            for row in source_node.outputs or []
+                            if row.get("name") == link.from_output
+                        ),
+                        "Any",
+                    )
+                    target_type = next(
+                        (
+                            str(row.get("annotation") or "Any")
+                            for row in target_node.params or []
+                            if row.get("name") == link.to_input
+                        ),
+                        "Any",
+                    )
+                    if not self._annotations_compatible(source_type, target_type):
+                        issues.append({
+                            "step_id": link.to_step,
+                            "node": str((target_node.symbol or {}).get("name") or link.to_step),
+                            "input": link.to_input,
+                            "message": (
+                                f"{link.to_input} expects {target_type}, but the connected "
+                                f"output provides {source_type}."
+                            ),
+                        })
         return issues
 
     def refresh_data_flow_warnings(self) -> list[dict[str, str]]:
         issues = self.validate_data_flow()
+        self._apply_node_readiness_issues(issues)
+        self._pending_graph_intelligence_issues = issues
+        self._graph_intelligence_timer.start(300)
+        return issues
+
+    def _apply_node_readiness_issues(self, issues: list[dict[str, str]]) -> None:
+        """Keep every node's orange/ready outline synchronized with its inputs."""
+
         by_step: dict[str, list[str]] = {}
         for issue in issues:
             by_step.setdefault(issue.get("step_id") or "", []).append(issue.get("message") or "Data-flow issue")
         for step_id, item in self.node_items.items():
             item.set_validation_messages(by_step.get(step_id, []))
+
+    def _refresh_graph_intelligence(self) -> None:
+        """Run advisory graph analysis only after interactive edits settle."""
         try:
             from tech_connector.services.pipeline_graph_intelligence_service import (
                 analyze_pipeline_graph,
@@ -2303,13 +2560,14 @@ class PipelineNodeView(QGraphicsView):
 
             self._last_graph_intelligence = analyze_pipeline_graph(
                 graph_snapshot_from_view(self),
-                issues,
+                list(getattr(self, "_pending_graph_intelligence_issues", []) or []),
             )
         except Exception:
             self._last_graph_intelligence = {}
-        return issues
 
     def graph_intelligence_report(self) -> dict[str, Any]:
+        if self._graph_intelligence_timer.isActive():
+            self._graph_intelligence_timer.stop()
         try:
             from tech_connector.services.pipeline_graph_intelligence_service import (
                 analyze_pipeline_graph,
@@ -2495,7 +2753,13 @@ class PipelineNodeView(QGraphicsView):
                     "source_action_id": spec["action"].get("id") or spec["action"].get("action_id"),
                     "prompt_materialized": True,
                 }
-                self.add_pipeline_step(step_data, spec["params"], spec["outputs"])
+                self.add_pipeline_step(
+                    step_data,
+                    spec["params"],
+                    spec["outputs"],
+                    emit_signals=False,
+                    push_undo=False,
+                )
                 step_ids[node_name] = str(step_data.get("graph_step_id") or "")
             for item in literal_specs:
                 node_name = str(item.get("node") or "")
@@ -2590,8 +2854,17 @@ class PipelineNodeView(QGraphicsView):
             "actions": actions,
         }, append=append)
 
-    def add_pipeline_step(self, step_data, params, outputs):
-        self._push_undo_state("add node")
+    def add_pipeline_step(
+        self,
+        step_data,
+        params,
+        outputs,
+        *,
+        emit_signals: bool = True,
+        push_undo: bool = True,
+    ):
+        if push_undo:
+            self._push_undo_state("add node")
         if self.empty:
             self.scene_obj.removeItem(self.empty)
             self.empty = None
@@ -2609,15 +2882,22 @@ class PipelineNodeView(QGraphicsView):
             90,
         )
         self.nodes[step_id] = graph_node
-        item = PipelineNodeItem(self, graph_node)
+        self._suspend_position_notifications = True
+        try:
+            item = PipelineNodeItem(self, graph_node)
+        finally:
+            self._suspend_position_notifications = False
         self.scene_obj.addItem(item)
         self.node_items[step_id] = item
         step_data["graph_step_id"] = step_id
         step_data["params"] = params
         step_data["outputs"] = data_outputs
-        self.statusMessage.emit(f"Added node: {symbol.get('name')} ({infer_package(symbol)})")
-        self.graphChanged.emit()
-        self.orderChanged.emit(self.execution_order())
+        if emit_signals:
+            self.statusMessage.emit(f"Added node: {symbol.get('name')} ({infer_package(symbol)})")
+            order = self.execution_order()
+            self._last_emitted_execution_order = tuple(order)
+            self.graphChanged.emit()
+            self.orderChanged.emit(order)
 
     def rebuild_node(self, step_data: dict[str, Any]):
         self._push_undo_state("rebuild node")
@@ -2659,14 +2939,16 @@ class PipelineNodeView(QGraphicsView):
         node.step_data["outputs"] = node.outputs
         self.rebuild_node(node.step_data)
 
-    def refresh_node_literals(self, step_data):
+    def refresh_node_literals(self, step_data, *, emit_signal: bool = True):
         step_id = step_data.get("graph_step_id") if isinstance(step_data, dict) else None
         item = self.node_items.get(step_id) if step_id else None
         if not item:
             return
         for name in list(getattr(item, "literal_labels", {}).keys()):
             item.refresh_literal_label(name)
-        self.graphChanged.emit()
+        self._apply_node_readiness_issues(self.validate_data_flow())
+        if emit_signal:
+            self.graphChanged.emit()
 
     def selected_node_ids(self):
         return [step_id for step_id, item in self.node_items.items() if item.isSelected()]
@@ -2990,11 +3272,43 @@ class PipelineNodeView(QGraphicsView):
         else:
             for item in self.link_items:
                 item.update_path()
+        if rebuild:
+            self._apply_node_readiness_issues(self.validate_data_flow())
+
+    def schedule_node_geometry_refresh(self, step_id: str) -> None:
+        """Keep dragging responsive by repainting only links touching moved nodes."""
+        if step_id:
+            self._pending_geometry_steps.add(str(step_id))
+        if not self._geometry_refresh_timer.isActive():
+            self._geometry_refresh_timer.start(16)
+        self._order_refresh_timer.start(140)
+
+    def _flush_node_geometry_refresh(self) -> None:
+        step_ids = set(self._pending_geometry_steps)
+        self._pending_geometry_steps.clear()
+        if not step_ids:
+            return
+        for item in self.link_items:
+            link = item.link
+            if link.from_step in step_ids or link.to_step in step_ids:
+                item.update_path()
+
+    def _emit_deferred_order_change(self) -> None:
+        self._flush_node_geometry_refresh()
+        order = self.execution_order()
+        order_key = tuple(order)
+        if order_key == self._last_emitted_execution_order:
+            return
+        self._last_emitted_execution_order = order_key
+        self.orderChanged.emit(order)
+        self.graphChanged.emit()
 
     def _position_order(self) -> list[str]:
         return [n.step_id for n in sorted(self.nodes.values(), key=lambda n: (n.x, n.y))]
 
     def execution_order(self):
+        import heapq
+
         base = self._position_order()
         base_index = {step_id: idx for idx, step_id in enumerate(base)}
         edges = [(l.from_step, l.to_step) for l in self.links if l.link_type == "flow"]
@@ -3006,16 +3320,20 @@ class PipelineNodeView(QGraphicsView):
             if src in incoming and dst in incoming and src != dst:
                 outgoing[src].append(dst)
                 incoming[dst] += 1
-        queue = sorted([s for s, count in incoming.items() if count == 0], key=lambda s: base_index.get(s, 0))
+        queue = [
+            (base_index.get(step_id, 0), step_id)
+            for step_id, count in incoming.items()
+            if count == 0
+        ]
+        heapq.heapify(queue)
         result = []
         while queue:
-            current = queue.pop(0)
+            _position, current = heapq.heappop(queue)
             result.append(current)
             for dst in sorted(outgoing.get(current, []), key=lambda s: base_index.get(s, 0)):
                 incoming[dst] -= 1
                 if incoming[dst] == 0:
-                    queue.append(dst)
-                    queue.sort(key=lambda s: base_index.get(s, 0))
+                    heapq.heappush(queue, (base_index.get(dst, 0), dst))
         if len(result) != len(base):
             self.statusMessage.emit("Flow cycle detected. Falling back to left-to-right node order.")
             return base

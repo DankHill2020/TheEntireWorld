@@ -27,7 +27,8 @@ def create_cinematic_sequence_from_json(anim_dict_path, destination_path="/Game/
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(__file__)
-    args_path = "C:/temp/sequence_args.json"
+    args_path = os.environ.get("TC_SEQUENCE_ARGS_PATH", "C:/temp/sequence_args.json")
+    result_path = os.environ.get("TC_SEQUENCE_RESULT_PATH", "")
 
     if not os.path.exists(args_path):
         raise ValueError("Missing sequence_args.json")
@@ -44,5 +45,15 @@ if __name__ == "__main__":
     unreal.log(f"Parsed anim_dict_path: {anim_dict_path}")
     unreal.log(f"Parsed destination_path: {destination_path}")
 
-    create_cinematic_sequence_from_json(anim_dict_path, destination_path)
+    previous_result = args.get("previous_result")
+    if previous_result:
+        from unreal_tools.sequence_importer import retry_failed_cinematic_sequence_from_json
+        result = retry_failed_cinematic_sequence_from_json(
+            anim_dict_path, previous_result, destination_path, from_cmd=True,
+        )
+    else:
+        result = create_cinematic_sequence_from_json(anim_dict_path, destination_path)
+    if result_path:
+        with open(result_path, "w", encoding="utf-8") as stream:
+            json.dump(result, stream, indent=2, default=str)
 

@@ -1,0 +1,27 @@
+{
+  "title": "Universal Base Characters",
+  "creator": "Quaternius",
+  "source_url": "https://quaternius.com/packs/universalbasecharacters.html",
+  "download_url": "https://quaternius.itch.io/universal-base-characters",
+  "downloaded_utc": "2026-10-07",
+  "license": "CC0 1.0 Universal",
+  "license_file": "LICENSE.txt",
+  "archive_variant": "Standard",
+  "included_files": [
+    {
+      "path": "Superhero_Female_FullBody.fbx",
+      "bytes": 1006508,
+      "sha256": "0727E7B236EEEA4115531E07AEB2BB7690C1A58155F743BBF54282944FB97EA9"
+    },
+    {
+      "path": "Superhero_Male_FullBody.fbx",
+      "bytes": 826876,
+      "sha256": "79344418D754A59730B79D1874752E9592143DB34ABE8ADF138FA9A92A4768E9"
+    },
+    {
+      "path": "LICENSE.txt",
+      "bytes": 806,
+      "sha256": "0F4BEAF0FE360A7732E58BBE3DBF60A2422367FBEA60CB9EA4ADD968F383268E"
+    }
+  ]
+}

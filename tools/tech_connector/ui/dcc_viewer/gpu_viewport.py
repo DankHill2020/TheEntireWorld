@@ -39,6 +39,49 @@ except Exception:  # pragma: no cover - exercised only in stripped runtime build
     np = None
 
 
+class DynamicEditorGridGeometry(QQuick3DGeometry):
+    """Small, single-buffer ground grid for editor orientation."""
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        extent = 10.0
+        divisions = 20
+        values: list[float] = []
+        for index in range(divisions + 1):
+            offset = -extent + (extent * 2.0 * index / divisions)
+            values.extend((-extent, 0.0, offset, extent, 0.0, offset))
+            values.extend((offset, 0.0, -extent, offset, 0.0, extent))
+        self.clear()
+        self.setStride(3 * 4)
+        self.setPrimitiveType(QQuick3DGeometry.PrimitiveType.Lines)
+        self.addAttribute(
+            QQuick3DGeometry.Attribute.Semantic.PositionSemantic,
+            0,
+            QQuick3DGeometry.Attribute.ComponentType.F32Type,
+        )
+        self.setVertexData(QByteArray(struct.pack(f"{len(values)}f", *values)))
+        self.setBounds(QVector3D(-extent, 0.0, -extent), QVector3D(extent, 0.0, extent))
+        self.update()
+
+
+def _mesh_scene_bounds(mesh: Any) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """Return finite render bounds without forcing a GPU upload."""
+    points = []
+    for vertex in list(getattr(mesh, "vertices", []) or []):
+        try:
+            point = (float(vertex.x), float(vertex.y), float(vertex.z))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if all(math.isfinite(component) for component in point):
+            points.append(point)
+    if not points:
+        return None
+    return (
+        tuple(min(point[axis] for point in points) for axis in range(3)),
+        tuple(max(point[axis] for point in points) for axis in range(3)),
+    )
+
+
 class DynamicSceneGeometry(QQuick3DGeometry):
     """Qt Quick 3D geometry backed by the viewer's static mesh cache."""
 
@@ -1076,6 +1119,7 @@ qmlRegisterType(RadialEffectTextureData, "TechConnector", 1, 0, "RadialEffectTex
 qmlRegisterType(DynamicSkinnedSceneGeometry, "TechConnector", 1, 0, "DynamicSkinnedSceneGeometry")
 qmlRegisterType(DynamicRgba32TextureData, "TechConnector", 1, 0, "DynamicRgba32TextureData")
 qmlRegisterType(DynamicProceduralTextureData, "TechConnector", 1, 0, "DynamicProceduralTextureData")
+qmlRegisterType(DynamicEditorGridGeometry, "TechConnector", 1, 0, "DynamicEditorGridGeometry")
 
 
 class ThreeDGpuViewport(QQuickWidget):
@@ -1105,6 +1149,16 @@ class ThreeDGpuViewport(QQuickWidget):
         self._effect_upload_ema_ms = 0.0
         self._camera_eye = (0.0, 1.2, 6.0)
         self._camera_target = (0.0, 0.0, 0.0)
+        self._last_camera_state: tuple[Any, ...] | None = None
+        self._pending_camera_state: tuple[Any, ...] | None = None
+        self._last_lighting_profile = ""
+        self._pending_lighting_profile = ""
+        self._viewport_mode = "lit"
+        self._viewport_exposure = 1.0
+        self._grid_visible = True
+        self._last_material_state: tuple[Any, ...] | None = None
+        self._last_scene_key: tuple[Any, ...] | None = None
+        self._pending_scene_key: tuple[Any, ...] | None = None
         self._last_error = ""
         self._pending_mesh: Any = None
         self._pending_topology_signature = ""
@@ -1112,21 +1166,29 @@ class ThreeDGpuViewport(QQuickWidget):
         self.statusChanged.connect(self._on_status_changed)
         qml_path = Path(__file__).resolve().parent / "qml" / "ThreeDMeshGpuViewport.qml"
         self.setSource(QUrl.fromLocalFile(str(qml_path)))
+        self._bind_qml_objects()
+        if self.geometry is None and self.status() == QQuickWidget.Status.Ready:
+            self._report_missing_geometry()
+        self.set_lighting_profile("daylight")
+
+    def _bind_qml_objects(self) -> None:
         root = self.rootObject()
-        if root is not None:
-            self.geometry = root.findChild(DynamicSceneGeometry, "sceneGeometry")
-            self.skin_geometry = root.findChild(DynamicSkinnedSceneGeometry, "skinGeometry")
-            self.skin_influence_texture = root.findChild(DynamicRgba32TextureData, "skinInfluenceTexture")
-            self.skin_matrix_texture = root.findChild(DynamicRgba32TextureData, "skinMatrixTexture")
-            self.procedural_texture = root.findChild(DynamicProceduralTextureData, "proceduralTexture")
-            self.effect_geometry = root.findChild(DynamicEffectGeometry, "effectGeometry")
-            self.effect_alpha_geometry = root.findChild(DynamicEffectGeometry, "effectAlphaGeometry")
-            self.effect_refractive_geometry = root.findChild(DynamicEffectGeometry, "effectRefractiveGeometry")
-            self.effect_mesh_geometry = root.findChild(DynamicEffectMeshGeometry, "effectMeshGeometry")
-            self.effect_mesh_instancing = root.findChild(DynamicEffectInstancing, "effectMeshInstancing")
-        if self.geometry is None and self.status() != QQuickWidget.Status.Error:
-            self._last_error = "Qt Quick 3D did not create the dynamic scene geometry."
-            self.backend_failed.emit(self._last_error)
+        if root is None:
+            return
+        self.geometry = root.findChild(DynamicSceneGeometry, "sceneGeometry")
+        self.skin_geometry = root.findChild(DynamicSkinnedSceneGeometry, "skinGeometry")
+        self.skin_influence_texture = root.findChild(DynamicRgba32TextureData, "skinInfluenceTexture")
+        self.skin_matrix_texture = root.findChild(DynamicRgba32TextureData, "skinMatrixTexture")
+        self.procedural_texture = root.findChild(DynamicProceduralTextureData, "proceduralTexture")
+        self.effect_geometry = root.findChild(DynamicEffectGeometry, "effectGeometry")
+        self.effect_alpha_geometry = root.findChild(DynamicEffectGeometry, "effectAlphaGeometry")
+        self.effect_refractive_geometry = root.findChild(DynamicEffectGeometry, "effectRefractiveGeometry")
+        self.effect_mesh_geometry = root.findChild(DynamicEffectMeshGeometry, "effectMeshGeometry")
+        self.effect_mesh_instancing = root.findChild(DynamicEffectInstancing, "effectMeshInstancing")
+
+    def _report_missing_geometry(self) -> None:
+        self._last_error = "Qt Quick 3D did not create the dynamic scene geometry."
+        self.backend_failed.emit(self._last_error)
 
     @property
     def ready(self) -> bool:
@@ -1137,16 +1199,32 @@ class ThreeDGpuViewport(QQuickWidget):
         return self._last_error
 
     def _on_status_changed(self, status: QQuickWidget.Status) -> None:
+        if status == QQuickWidget.Status.Ready:
+            self._bind_qml_objects()
+            if self.geometry is None:
+                self._report_missing_geometry()
+                return
+            self._last_error = ""
+            self._flush_pending_camera()
+            self._flush_pending_lighting_profile()
+            self._apply_viewport_options()
+            QTimer.singleShot(0, self._flush_pending_mesh)
+            return
         if status != QQuickWidget.Status.Error:
             return
         self._last_error = "; ".join(error.toString() for error in self.errors()) or "Qt Quick 3D failed to initialize."
         self.backend_failed.emit(self._last_error)
 
     def set_mesh(self, mesh: Any, *, topology_signature: str = "") -> None:
-        if self.geometry is None:
-            raise RuntimeError(self._last_error or "GPU geometry is unavailable.")
         self._pending_mesh = mesh
         self._pending_topology_signature = str(topology_signature or "")
+        if self.geometry is None:
+            self._bind_qml_objects()
+        if self.geometry is None and self.status() == QQuickWidget.Status.Error:
+            raise RuntimeError(self._last_error or "GPU geometry is unavailable.")
+        if self.geometry is None and self.status() == QQuickWidget.Status.Ready:
+            self._report_missing_geometry()
+            raise RuntimeError(self._last_error)
         if self.isVisible():
             self._flush_pending_mesh()
 
@@ -1159,8 +1237,10 @@ class ThreeDGpuViewport(QQuickWidget):
             return
         mesh = self._pending_mesh
         topology_signature = self._pending_topology_signature
+        scene_key = self._pending_scene_key
         self._pending_mesh = None
         self._pending_topology_signature = ""
+        self._pending_scene_key = None
         bindings = getattr(self, "_pending_deformation_bindings", {}) or {}
         self._pending_deformation_bindings = {}
         excluded: set[tuple[str, str]] = set()
@@ -1176,6 +1256,7 @@ class ThreeDGpuViewport(QQuickWidget):
             topology_signature=topology_signature,
             excluded_proxy_keys=excluded,
         )
+        self._last_scene_key = scene_key
         root = self.rootObject()
         if root is not None:
             root.setProperty("skinReady", False)
@@ -1206,8 +1287,38 @@ class ThreeDGpuViewport(QQuickWidget):
         deformation_bindings: dict[str, dict[str, Any]],
         *,
         topology_signature: str = "",
+        geometry_revision: int | None = None,
     ) -> None:
-        self._pending_deformation_bindings = dict(deformation_bindings or {})
+        bindings = dict(deformation_bindings or {})
+        binding_token = tuple(sorted(
+            (
+                str(provider),
+                id(binding),
+                int(binding.get("scene_revision", 0) or 0) if isinstance(binding, dict) else 0,
+            )
+            for provider, binding in bindings.items()
+        ))
+        scene_key = (
+            id(mesh),
+            str(topology_signature or ""),
+            int(geometry_revision) if geometry_revision is not None else None,
+            binding_token,
+        )
+        if geometry_revision is not None and scene_key in {self._last_scene_key, self._pending_scene_key}:
+            return
+        if (
+            geometry_revision is not None
+            and self.geometry is not None
+            and self._last_scene_key is not None
+            and self._last_scene_key[0] == id(mesh)
+            and self._last_scene_key[1] == str(topology_signature or "")
+            and self._last_scene_key[3] == binding_token
+            and self.update_positions(mesh)
+        ):
+            self._last_scene_key = scene_key
+            return
+        self._pending_deformation_bindings = bindings
+        self._pending_scene_key = scene_key
         self.set_mesh(mesh, topology_signature=topology_signature)
 
     def update_deformation_pose(
@@ -1241,15 +1352,63 @@ class ThreeDGpuViewport(QQuickWidget):
         fov_degrees: float,
         aspect_ratio: float = 0.0,
     ) -> None:
+        state = (
+            tuple(float(value) for value in eye[:3]),
+            tuple(float(value) for value in target[:3]),
+            max(5.0, min(150.0, float(fov_degrees))),
+            max(0.0, float(aspect_ratio or 0.0)),
+        )
+        self._camera_eye = state[0]
+        self._camera_target = state[1]
+        if state == self._last_camera_state:
+            return
+        self._pending_camera_state = state
+        ThreeDGpuViewport._flush_pending_camera(self)
+
+    def _flush_pending_camera(self) -> None:
+        state = self._pending_camera_state
+        if state is None:
+            return
         root = self.rootObject()
         if root is None:
             return
-        root.setProperty("cameraEye", QVector3D(*[float(value) for value in eye[:3]]))
-        root.setProperty("cameraTarget", QVector3D(*[float(value) for value in target[:3]]))
-        root.setProperty("cameraFov", max(5.0, min(150.0, float(fov_degrees))))
-        root.setProperty("cameraAspect", max(0.0, float(aspect_ratio or 0.0)))
-        self._camera_eye = tuple(float(value) for value in eye[:3])
-        self._camera_target = tuple(float(value) for value in target[:3])
+        root.setProperty("cameraEye", QVector3D(*state[0]))
+        root.setProperty("cameraTarget", QVector3D(*state[1]))
+        root.setProperty("cameraFov", state[2])
+        root.setProperty("cameraAspect", state[3])
+        self._last_camera_state = state
+        self._pending_camera_state = None
+
+    def frame_scene(
+        self,
+        mesh: Any,
+        *,
+        fov_degrees: float = 45.0,
+        aspect_ratio: float = 0.0,
+        padding: float = 1.2,
+    ) -> bool:
+        """Center and fit a mesh while preserving the current viewing direction."""
+        bounds = _mesh_scene_bounds(mesh)
+        if bounds is None:
+            return False
+        minimum, maximum = bounds
+        center = tuple((minimum[axis] + maximum[axis]) * 0.5 for axis in range(3))
+        half_extent = tuple((maximum[axis] - minimum[axis]) * 0.5 for axis in range(3))
+        radius = max(0.001, math.sqrt(sum(component * component for component in half_extent)))
+        direction = tuple(self._camera_eye[axis] - self._camera_target[axis] for axis in range(3))
+        length = math.sqrt(sum(component * component for component in direction))
+        if length <= 1.0e-6 or not math.isfinite(length):
+            direction = (0.0, 0.2, 1.0)
+            length = math.sqrt(1.04)
+        direction = tuple(component / length for component in direction)
+        vertical_half = math.radians(max(5.0, min(150.0, float(fov_degrees))) * 0.5)
+        aspect = max(0.01, float(aspect_ratio or (self.width() / max(1, self.height()))))
+        horizontal_half = math.atan(math.tan(vertical_half) * aspect)
+        limiting_half = max(math.radians(2.5), min(vertical_half, horizontal_half))
+        distance = max(0.1, radius * max(1.0, float(padding)) / math.sin(limiting_half))
+        eye = tuple(center[axis] + direction[axis] * distance for axis in range(3))
+        self.set_camera(eye, center, fov_degrees, aspect_ratio)
+        return True
 
     def update_effects(self, world: Any) -> bool:
         started = time.perf_counter()
@@ -1387,6 +1546,10 @@ class ThreeDGpuViewport(QQuickWidget):
         from tech_connector.game_engine.rendering.lighting_profile_service import lighting_profile
 
         profile = lighting_profile(profile_id)
+        profile_key = profile.profile_id
+        if profile_key == self._last_lighting_profile and not self._pending_lighting_profile:
+            return
+        self._pending_lighting_profile = profile_key
         rendering = dict(profile.rendering)
         sun = dict(profile.sun)
         root = self.rootObject()
@@ -1407,6 +1570,7 @@ class ThreeDGpuViewport(QQuickWidget):
         yaw = math.degrees(math.atan2(-direction[0], -direction[2]))
         intensity = max(0.0, float(sun.get("intensity", 4.0)))
         indirect = max(0.0, float(rendering.get("indirect_intensity", 1.0)))
+        root.setProperty("lightingModel", str(rendering.get("lighting_model") or "physically_based"))
         root.setProperty("sceneClearColor", color(rendering.get("sky_color"), (0.08, 0.18, 0.42)))
         root.setProperty("keyLightColor", color(sun.get("color"), (1.0, 0.95, 0.86)))
         root.setProperty("keyLightBrightness", intensity / 3.65)
@@ -1415,6 +1579,42 @@ class ThreeDGpuViewport(QQuickWidget):
         root.setProperty("fillLightColor", color(rendering.get("sky_color"), (0.66, 0.79, 1.0)))
         root.setProperty("fillLightBrightness", indirect * 0.38 if intensity > 0.0 else 0.0)
         root.setProperty("environmentExposure", max(0.0, min(16.0, float(rendering.get("exposure", 1.0)))))
+        self._last_lighting_profile = profile_key
+        self._pending_lighting_profile = ""
+
+    def _flush_pending_lighting_profile(self) -> None:
+        profile_id = self._pending_lighting_profile
+        if profile_id:
+            self.set_lighting_profile(profile_id)
+
+    def set_viewport_mode(self, mode: str) -> str:
+        """Switch editor-only visualization without changing scene assets."""
+        normalized = str(mode or "lit").strip().casefold().replace(" ", "_")
+        normalized = {"lighting": "lighting_only", "lightingonly": "lighting_only"}.get(normalized, normalized)
+        if normalized not in {"lit", "unlit", "lighting_only"}:
+            raise ValueError("Viewport mode must be lit, unlit, or lighting_only.")
+        self._viewport_mode = normalized
+        ThreeDGpuViewport._apply_viewport_options(self)
+        return normalized
+
+    def set_viewport_exposure(self, multiplier: float) -> float:
+        """Set fixed editor exposure without mutating level lighting."""
+        self._viewport_exposure = max(0.1, min(8.0, float(multiplier)))
+        ThreeDGpuViewport._apply_viewport_options(self)
+        return self._viewport_exposure
+
+    def set_grid_visible(self, visible: bool) -> bool:
+        self._grid_visible = bool(visible)
+        ThreeDGpuViewport._apply_viewport_options(self)
+        return self._grid_visible
+
+    def _apply_viewport_options(self) -> None:
+        root = self.rootObject()
+        if root is None:
+            return
+        root.setProperty("viewportMode", self._viewport_mode)
+        root.setProperty("viewportExposure", self._viewport_exposure)
+        root.setProperty("showEditorGrid", self._grid_visible)
 
     def set_material(
         self,
@@ -1443,6 +1643,16 @@ class ThreeDGpuViewport(QQuickWidget):
     ) -> None:
         root = self.rootObject()
         if root is None:
+            return
+        state = (
+            int(QColor(color).rgba()), float(roughness), float(metalness), str(base_color_texture),
+            str(normal_texture), str(roughness_texture), str(metalness_texture), str(emission_texture),
+            str(opacity_texture), int(QColor(emission_color).rgba()), str(environment_texture), float(exposure),
+            float(opacity), float(transmission), float(ior), float(thickness), float(clearcoat),
+            int(QColor(attenuation_color).rgba()), float(attenuation_distance),
+            repr(sorted(dict(texture_sources or {}).items())), repr(procedural_shader or {}),
+        )
+        if state == self._last_material_state:
             return
         root.setProperty("materialColor", QColor(color))
         root.setProperty("materialRoughness", max(0.0, min(1.0, float(roughness))))
@@ -1514,6 +1724,7 @@ class ThreeDGpuViewport(QQuickWidget):
                 property_name,
                 QUrl.fromLocalFile(str(texture_path)) if texture_path else QUrl(),
             )
+        self._last_material_state = state
 
     def set_media_timeline(
         self,

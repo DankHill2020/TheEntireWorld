@@ -297,6 +297,9 @@ _SCHEMAS: dict[str, tuple[AssetPropertyDescriptor, ...]] = {
         AssetPropertyDescriptor("performance_profile", "Performance Profile", "balanced", "Default platform skinning budget without changing source weights."),
         AssetPropertyDescriptor("platform_overrides", "Platform Overrides", {}, "Per-platform skin-weight profile selection."),
         AssetPropertyDescriptor("weight_profiles", "Skin Weight Profiles", {}, "Optional per-LOD or fallback weight sets."),
+        AssetPropertyDescriptor("deformers", "Deformer Stack", [], "Ordered non-destructive corrective, smoothing, delta-mush, and custom deformers."),
+        AssetPropertyDescriptor("transfer", "Weight Transfer", {}, "Source, topology correspondence, distance, normal, and unmatched-vertex policy."),
+        AssetPropertyDescriptor("export", "Export Policy", {}, "Portable export format, influence budget, deformer bake policy, and destination."),
     ),
     "tc.cloth": (
         AssetPropertyDescriptor("source_mesh_id", "Source Skeletal Mesh", "", "Skinned garment mesh. Imported bone weights remain authoritative."),
@@ -579,6 +582,10 @@ _SCHEMAS: dict[str, tuple[AssetPropertyDescriptor, ...]] = {
         AssetPropertyDescriptor("incremental", "Incremental Build", True, "Reuse unchanged cooked artifacts."),
         AssetPropertyDescriptor("output_directory", "Output Directory", "Build", "Project-relative package output directory."),
         AssetPropertyDescriptor("include_debug_symbols", "Debug Symbols", True, "Include symbols for crash diagnosis."),
+    ),
+    "tc.ui_document": (
+        AssetPropertyDescriptor("canvas", "Reference Canvas", {"size": [1920, 1080]}, "Reference width and height; anchors adapt widgets to other viewport sizes."),
+        AssetPropertyDescriptor("widgets", "Widget Hierarchy", [], "Panels, text, buttons, and images with IDs, parent IDs, anchors, pivots, offsets, sizes, and accessibility labels."),
     ),
     "tc.prefab": (
         AssetPropertyDescriptor("prefab_version", "Prefab Version", 2, "Serialized Prefab authoring format version."),

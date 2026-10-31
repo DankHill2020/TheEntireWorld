@@ -1,0 +1,1707 @@
+{
+  "schema": "ai_studio.workflow.v1",
+  "source": "prompt_review_pack",
+  "naming": {
+    "function_suffix": "_git_ingest",
+    "original_function": "review_blender_unity_vehicle_publish"
+  },
+  "host": "cross_dcc",
+  "goal": "Process the selected Blender vehicle meshes, generate LOD0 and LOD1, add collision, export FBX to C:/temp/tc_review_vehicle.fbx, import into Unity Assets/TechConnector/Vehicles.",
+  "module": "workflows.cross_dcc.review_blender_unity_vehicle_publish",
+  "function": "review_blender_unity_vehicle_publish",
+  "function_path": "workflows.cross_dcc.review_blender_unity_vehicle_publish.review_blender_unity_vehicle_publish",
+  "selected_capabilities": [
+    {
+      "name": "stage_01_blender_pipeline_process_meshes_for_transfer",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\blender_tools\\pipeline_transfer.py",
+      "params": [
+        {
+          "name": "objects",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "clean_names",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_transforms",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "lod_count",
+          "annotation": "int",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "ensure_material_slots",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "create_collision",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "export_objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "materials",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "collision",
+          "annotation": "Any"
+        },
+        {
+          "name": "lods",
+          "annotation": "Any"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "blender",
+      "provider_id": "blender",
+      "package": "",
+      "operation": "pipeline.process_meshes_for_transfer",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "blender_tools.pipeline_transfer.process_meshes_for_transfer",
+      "module": "",
+      "start_line": 8,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_02_blender_io_export_fbx",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\blender_tools\\io.py",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_unit_scale",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "axis_forward",
+          "annotation": "str",
+          "required": false,
+          "default": "-Z"
+        },
+        {
+          "name": "axis_up",
+          "annotation": "str",
+          "required": false,
+          "default": "Y"
+        },
+        {
+          "name": "object_names",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "blender",
+      "provider_id": "blender",
+      "package": "",
+      "operation": "io.export_fbx",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "blender_tools.io.export_fbx",
+      "module": "",
+      "start_line": 43,
+      "source_kind": "callable_definition"
+    },
+    {
+      "name": "stage_03_unity_assets_import_fbx",
+      "kind": "function",
+      "signature": "",
+      "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets/Models/TC_WorkflowAsset.fbx"
+        },
+        {
+          "name": "instantiate",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "gameobject_name",
+          "annotation": "str",
+          "required": false,
+          "default": "TC_WorkflowAsset"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "unity_asset_path",
+          "annotation": "str"
+        }
+      ],
+      "return_annotation": "dict[str, Any]",
+      "contract": {},
+      "host": "unity",
+      "provider_id": "unity",
+      "package": "",
+      "operation": "assets.import_fbx",
+      "pipeline_operation": "dcc_operation",
+      "function_path": "unity.command.assets.import_fbx",
+      "module": "",
+      "start_line": 695,
+      "source_kind": "operation_implementation"
+    }
+  ],
+  "slots": {
+    "step1_objects": "{'$pipeline_context': 'dcc_export_scope_v1', 'host': 'blender', 'scope': 'selected_or_scene_meshes', 'subject': 'static_mesh', 'label': 'Selected meshes, or scene meshes when nothing is selected'}",
+    "step1_clean_names": "False",
+    "step1_apply_transforms": "False",
+    "step1_lod_count": "2",
+    "step1_ensure_material_slots": "False",
+    "step1_create_collision": "True",
+    "step2_filepath": "C:/temp/tc_review_vehicle.fbx",
+    "step2_selected_only": "True",
+    "step2_apply_unit_scale": "True",
+    "step2_axis_forward": "-Z",
+    "step2_axis_up": "Y",
+    "step3_destination_path": "Assets/TechConnector/Vehicles/tc_review_vehicle.fbx",
+    "step3_instantiate": "True",
+    "step3_gameobject_name": "TC_WorkflowAsset"
+  },
+  "links": [
+    {
+      "from": "step1.export_objects",
+      "to": "step2.object_names"
+    },
+    {
+      "from": "step2.fbx_path",
+      "to": "step3.filepath"
+    }
+  ],
+  "validation": {
+    "imports_checked_by_test": true,
+    "scene_objects_checked_at_runtime": true
+  },
+  "prompt_verified": true,
+  "nodes": [
+    {
+      "id": "step1",
+      "label": "stage_01_blender_pipeline_process_meshes_for_transfer",
+      "name": "stage_01_blender_pipeline_process_meshes_for_transfer",
+      "host": "blender",
+      "package": "blender",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "pipeline.process_meshes_for_transfer",
+      "callable": "blender_tools.pipeline_transfer.process_meshes_for_transfer",
+      "params": [
+        {
+          "name": "objects",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "clean_names",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_transforms",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "lod_count",
+          "annotation": "int",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "ensure_material_slots",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "create_collision",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "export_objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "materials",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "collision",
+          "annotation": "Any"
+        },
+        {
+          "name": "lods",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "objects": {
+          "$pipeline_context": "dcc_export_scope_v1",
+          "host": "blender",
+          "scope": "selected_or_scene_meshes",
+          "subject": "static_mesh",
+          "label": "Selected meshes, or scene meshes when nothing is selected"
+        },
+        "clean_names": false,
+        "apply_transforms": false,
+        "lod_count": 2,
+        "ensure_material_slots": false,
+        "create_collision": true
+      },
+      "literal_value_provenance": {
+        "objects": "runtime_host_context",
+        "clean_names": "planned_value",
+        "apply_transforms": "planned_value",
+        "lod_count": "user_setting",
+        "ensure_material_slots": "operation_default",
+        "create_collision": "planned_value"
+      },
+      "literal_value_details": {
+        "objects": {
+          "source": "runtime_host_context",
+          "resolution": "Blender Prepare Meshes for Transfer resolves selected meshes, or scene meshes when nothing is selected from the live host when this pipeline runs.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "clean_names": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "apply_transforms": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "lod_count": {
+          "source": "user_setting",
+          "resolution": "Blender Prepare Meshes for Transfer uses the explicit pipeline setting for `lod_count`.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "int"
+        },
+        "ensure_material_slots": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "create_collision": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.pipeline.process_meshes_for_transfer",
+        "host": "blender",
+        "operation": "pipeline.process_meshes_for_transfer",
+        "label": "Blender Prepare Meshes for Transfer",
+        "callable": "blender_tools.pipeline_transfer.process_meshes_for_transfer",
+        "provider": "registered_operation",
+        "role": "process",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "objects"
+        ],
+        "produces": [
+          "blender_scene",
+          "export_objects",
+          "meshes",
+          "materials",
+          "collision",
+          "lods"
+        ],
+        "required": [],
+        "optional": {
+          "objects": [],
+          "clean_names": true,
+          "apply_transforms": true,
+          "lod_count": 0,
+          "ensure_material_slots": false,
+          "create_collision": false
+        },
+        "preconditions": [],
+        "validation": [
+          "processed mesh names, transforms, LODs, materials, and collision are reported"
+        ],
+        "rollback": [
+          "discard unsaved Blender scene changes or remove reported objects"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Clean mesh names, apply transforms, generate LOD copies, ensure material slots, and create UCX collision meshes before export.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 60,
+      "y": 60
+    },
+    {
+      "id": "step2",
+      "label": "stage_02_blender_io_export_fbx",
+      "name": "stage_02_blender_io_export_fbx",
+      "host": "blender",
+      "package": "blender",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "io.export_fbx",
+      "callable": "blender_tools.io.export_fbx",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_unit_scale",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "axis_forward",
+          "annotation": "str",
+          "required": false,
+          "default": "-Z"
+        },
+        {
+          "name": "axis_up",
+          "annotation": "str",
+          "required": false,
+          "default": "Y"
+        },
+        {
+          "name": "object_names",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": true,
+        "apply_unit_scale": true,
+        "axis_forward": "-Z",
+        "axis_up": "Y",
+        "object_names": {
+          "from_action": "stage_01_blender_pipeline_process_meshes_for_transfer",
+          "result_path": "export_objects"
+        },
+        "filepath": "C:/temp/tc_review_vehicle.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "apply_unit_scale": "operation_default",
+        "axis_forward": "operation_default",
+        "axis_up": "operation_default",
+        "object_names": "upstream_result_reference",
+        "filepath": "user_prompt"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "Blender Export FBX uses its registered default for `selected_only`: True.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "apply_unit_scale": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "axis_forward": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "axis_up": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "object_names": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "filepath": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.io.export_fbx",
+        "host": "blender",
+        "operation": "io.export_fbx",
+        "label": "Blender Export FBX",
+        "callable": "blender_tools.io.export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "export_objects"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": true,
+          "apply_unit_scale": true,
+          "axis_forward": "-Z",
+          "axis_up": "Y",
+          "object_names": []
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Export current scene or selection as FBX.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 360,
+      "y": 60
+    },
+    {
+      "id": "step3",
+      "label": "stage_03_unity_assets_import_fbx",
+      "name": "stage_03_unity_assets_import_fbx",
+      "host": "unity",
+      "package": "unity",
+      "type": "DCC Command",
+      "detail": "",
+      "operation": "assets.import_fbx",
+      "callable": "unity.command.assets.import_fbx",
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets/Models/TC_WorkflowAsset.fbx"
+        },
+        {
+          "name": "instantiate",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "gameobject_name",
+          "annotation": "str",
+          "required": false,
+          "default": "TC_WorkflowAsset"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "unity_asset_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "Assets/TechConnector/Vehicles/tc_review_vehicle.fbx",
+        "instantiate": true,
+        "gameobject_name": "TC_WorkflowAsset",
+        "filepath": {
+          "from_action": "stage_02_blender_io_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_setting",
+        "instantiate": "operation_default",
+        "gameobject_name": "operation_default",
+        "filepath": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_setting",
+          "resolution": "Unity Import FBX uses the explicit pipeline setting for `destination_path`.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "instantiate": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "gameobject_name": {
+          "source": "operation_default",
+          "resolution": "Unity Import FBX uses its registered default for `gameobject_name`: 'TC_WorkflowAsset'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "filepath": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unity.operations.assets.import_fbx",
+        "host": "unity",
+        "operation": "assets.import_fbx",
+        "label": "Unity Import FBX",
+        "callable": "unity.command.assets.import_fbx",
+        "provider": "registered_operation",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path"
+        ],
+        "produces": [
+          "unity_asset_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "destination_path": "Assets/Models/TC_WorkflowAsset.fbx",
+          "instantiate": true,
+          "gameobject_name": "TC_WorkflowAsset"
+        },
+        "preconditions": [],
+        "validation": [
+          "imported asset resolves in AssetDatabase"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unity",
+        "metadata": {
+          "description": "Import an FBX mesh or animation asset into the Unity project.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      },
+      "x": 660,
+      "y": 60
+    }
+  ],
+  "steps": [
+    {
+      "step_index": 1,
+      "symbol": {
+        "name": "stage_01_blender_pipeline_process_meshes_for_transfer",
+        "kind": "function",
+        "host": "blender",
+        "provider_id": "blender",
+        "pipeline_operation": "dcc_operation",
+        "operation": "pipeline.process_meshes_for_transfer",
+        "function_path": "blender_tools.pipeline_transfer.process_meshes_for_transfer",
+        "file_path": "C:\\depot\\tools\\blender_tools\\pipeline_transfer.py",
+        "start_line": 8,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "objects",
+            "annotation": "list[str]",
+            "required": false,
+            "default": []
+          },
+          {
+            "name": "clean_names",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          },
+          {
+            "name": "apply_transforms",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          },
+          {
+            "name": "lod_count",
+            "annotation": "int",
+            "required": false,
+            "default": 0
+          },
+          {
+            "name": "ensure_material_slots",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          },
+          {
+            "name": "create_collision",
+            "annotation": "bool",
+            "required": false,
+            "default": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "blender_scene",
+            "annotation": "Any"
+          },
+          {
+            "name": "export_objects",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "meshes",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "materials",
+            "annotation": "list[str]"
+          },
+          {
+            "name": "collision",
+            "annotation": "Any"
+          },
+          {
+            "name": "lods",
+            "annotation": "Any"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "objects",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "clean_names",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_transforms",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "lod_count",
+          "annotation": "int",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "ensure_material_slots",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "create_collision",
+          "annotation": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blender_scene",
+          "annotation": "Any"
+        },
+        {
+          "name": "export_objects",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "meshes",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "materials",
+          "annotation": "list[str]"
+        },
+        {
+          "name": "collision",
+          "annotation": "Any"
+        },
+        {
+          "name": "lods",
+          "annotation": "Any"
+        }
+      ],
+      "literal_values": {
+        "objects": {
+          "$pipeline_context": "dcc_export_scope_v1",
+          "host": "blender",
+          "scope": "selected_or_scene_meshes",
+          "subject": "static_mesh",
+          "label": "Selected meshes, or scene meshes when nothing is selected"
+        },
+        "clean_names": false,
+        "apply_transforms": false,
+        "lod_count": 2,
+        "ensure_material_slots": false,
+        "create_collision": true
+      },
+      "literal_value_provenance": {
+        "objects": "runtime_host_context",
+        "clean_names": "planned_value",
+        "apply_transforms": "planned_value",
+        "lod_count": "user_setting",
+        "ensure_material_slots": "operation_default",
+        "create_collision": "planned_value"
+      },
+      "literal_value_details": {
+        "objects": {
+          "source": "runtime_host_context",
+          "resolution": "Blender Prepare Meshes for Transfer resolves selected meshes, or scene meshes when nothing is selected from the live host when this pipeline runs.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "clean_names": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "apply_transforms": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "lod_count": {
+          "source": "user_setting",
+          "resolution": "Blender Prepare Meshes for Transfer uses the explicit pipeline setting for `lod_count`.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "int"
+        },
+        "ensure_material_slots": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "create_collision": {
+          "source": "planned_value",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.pipeline.process_meshes_for_transfer",
+        "host": "blender",
+        "operation": "pipeline.process_meshes_for_transfer",
+        "label": "Blender Prepare Meshes for Transfer",
+        "callable": "blender_tools.pipeline_transfer.process_meshes_for_transfer",
+        "provider": "registered_operation",
+        "role": "process",
+        "phase_order": 0,
+        "formats": [],
+        "subjects": [
+          "asset",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "objects"
+        ],
+        "produces": [
+          "blender_scene",
+          "export_objects",
+          "meshes",
+          "materials",
+          "collision",
+          "lods"
+        ],
+        "required": [],
+        "optional": {
+          "objects": [],
+          "clean_names": true,
+          "apply_transforms": true,
+          "lod_count": 0,
+          "ensure_material_slots": false,
+          "create_collision": false
+        },
+        "preconditions": [],
+        "validation": [
+          "processed mesh names, transforms, LODs, materials, and collision are reported"
+        ],
+        "rollback": [
+          "discard unsaved Blender scene changes or remove reported objects"
+        ],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Clean mesh names, apply transforms, generate LOD copies, ensure material slots, and create UCX collision meshes before export.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 2,
+      "symbol": {
+        "name": "stage_02_blender_io_export_fbx",
+        "kind": "function",
+        "host": "blender",
+        "provider_id": "blender",
+        "pipeline_operation": "dcc_operation",
+        "operation": "io.export_fbx",
+        "function_path": "blender_tools.io.export_fbx",
+        "file_path": "C:\\depot\\tools\\blender_tools\\io.py",
+        "start_line": 43,
+        "source_kind": "callable_definition",
+        "params": [
+          {
+            "name": "filepath",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "selected_only",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          },
+          {
+            "name": "apply_unit_scale",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          },
+          {
+            "name": "axis_forward",
+            "annotation": "str",
+            "required": false,
+            "default": "-Z"
+          },
+          {
+            "name": "axis_up",
+            "annotation": "str",
+            "required": false,
+            "default": "Y"
+          },
+          {
+            "name": "object_names",
+            "annotation": "list[str]",
+            "required": false,
+            "default": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "fbx_path",
+            "annotation": "str"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "selected_only",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "apply_unit_scale",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "axis_forward",
+          "annotation": "str",
+          "required": false,
+          "default": "-Z"
+        },
+        {
+          "name": "axis_up",
+          "annotation": "str",
+          "required": false,
+          "default": "Y"
+        },
+        {
+          "name": "object_names",
+          "annotation": "list[str]",
+          "required": false,
+          "default": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fbx_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "selected_only": true,
+        "apply_unit_scale": true,
+        "axis_forward": "-Z",
+        "axis_up": "Y",
+        "object_names": {
+          "from_action": "stage_01_blender_pipeline_process_meshes_for_transfer",
+          "result_path": "export_objects"
+        },
+        "filepath": "C:/temp/tc_review_vehicle.fbx"
+      },
+      "literal_value_provenance": {
+        "selected_only": "operation_default",
+        "apply_unit_scale": "operation_default",
+        "axis_forward": "operation_default",
+        "axis_up": "operation_default",
+        "object_names": "upstream_result_reference",
+        "filepath": "user_prompt"
+      },
+      "literal_value_details": {
+        "selected_only": {
+          "source": "operation_default",
+          "resolution": "Blender Export FBX uses its registered default for `selected_only`: True.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "apply_unit_scale": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "axis_forward": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "axis_up": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "object_names": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "list[str]"
+        },
+        "filepath": {
+          "source": "user_prompt",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "blender.operations.io.export_fbx",
+        "host": "blender",
+        "operation": "io.export_fbx",
+        "label": "Blender Export FBX",
+        "callable": "blender_tools.io.export_fbx",
+        "provider": "registered_operation",
+        "role": "export",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "export_objects"
+        ],
+        "produces": [
+          "fbx_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "selected_only": true,
+          "apply_unit_scale": true,
+          "axis_forward": "-Z",
+          "axis_up": "Y",
+          "object_names": []
+        },
+        "preconditions": [],
+        "validation": [
+          "export file exists"
+        ],
+        "rollback": [],
+        "mutates_project": false,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:blender",
+        "metadata": {
+          "description": "Export current scene or selection as FBX.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    },
+    {
+      "step_index": 3,
+      "symbol": {
+        "name": "stage_03_unity_assets_import_fbx",
+        "kind": "function",
+        "host": "unity",
+        "provider_id": "unity",
+        "pipeline_operation": "dcc_operation",
+        "operation": "assets.import_fbx",
+        "function_path": "unity.command.assets.import_fbx",
+        "file_path": "C:\\depot\\tools\\tech_connector\\game_engine\\integration\\dcc_operation_service.py",
+        "start_line": 695,
+        "source_kind": "operation_implementation",
+        "params": [
+          {
+            "name": "filepath",
+            "annotation": "str",
+            "required": true
+          },
+          {
+            "name": "destination_path",
+            "annotation": "str",
+            "required": false,
+            "default": "Assets/Models/TC_WorkflowAsset.fbx"
+          },
+          {
+            "name": "instantiate",
+            "annotation": "bool",
+            "required": false,
+            "default": true
+          },
+          {
+            "name": "gameobject_name",
+            "annotation": "str",
+            "required": false,
+            "default": "TC_WorkflowAsset"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "unity_asset_path",
+            "annotation": "str"
+          }
+        ],
+        "return_annotation": "dict[str, Any]"
+      },
+      "params": [
+        {
+          "name": "filepath",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "destination_path",
+          "annotation": "str",
+          "required": false,
+          "default": "Assets/Models/TC_WorkflowAsset.fbx"
+        },
+        {
+          "name": "instantiate",
+          "annotation": "bool",
+          "required": false,
+          "default": true
+        },
+        {
+          "name": "gameobject_name",
+          "annotation": "str",
+          "required": false,
+          "default": "TC_WorkflowAsset"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "unity_asset_path",
+          "annotation": "str"
+        }
+      ],
+      "literal_values": {
+        "destination_path": "Assets/TechConnector/Vehicles/tc_review_vehicle.fbx",
+        "instantiate": true,
+        "gameobject_name": "TC_WorkflowAsset",
+        "filepath": {
+          "from_action": "stage_02_blender_io_export_fbx",
+          "result_path": "fbx_path"
+        }
+      },
+      "literal_value_provenance": {
+        "destination_path": "user_setting",
+        "instantiate": "operation_default",
+        "gameobject_name": "operation_default",
+        "filepath": "upstream_result_reference"
+      },
+      "literal_value_details": {
+        "destination_path": {
+          "source": "user_setting",
+          "resolution": "Unity Import FBX uses the explicit pipeline setting for `destination_path`.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "instantiate": {
+          "source": "operation_default",
+          "resolution": "",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "bool"
+        },
+        "gameobject_name": {
+          "source": "operation_default",
+          "resolution": "Unity Import FBX uses its registered default for `gameobject_name`: 'TC_WorkflowAsset'.",
+          "required": false,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        },
+        "filepath": {
+          "source": "upstream_result_reference",
+          "resolution": "",
+          "required": true,
+          "missing": false,
+          "question": "",
+          "expected_type": "str"
+        }
+      },
+      "unresolved_inputs": [],
+      "operation_contract": {
+        "key": "unity.operations.assets.import_fbx",
+        "host": "unity",
+        "operation": "assets.import_fbx",
+        "label": "Unity Import FBX",
+        "callable": "unity.command.assets.import_fbx",
+        "provider": "registered_operation",
+        "role": "import",
+        "phase_order": 0,
+        "formats": [
+          "fbx"
+        ],
+        "subjects": [
+          "asset",
+          "animation",
+          "static_mesh",
+          "skeletal_mesh"
+        ],
+        "consumes": [
+          "fbx_path"
+        ],
+        "produces": [
+          "unity_asset_path"
+        ],
+        "required": [
+          "filepath"
+        ],
+        "optional": {
+          "destination_path": "Assets/Models/TC_WorkflowAsset.fbx",
+          "instantiate": true,
+          "gameobject_name": "TC_WorkflowAsset"
+        },
+        "preconditions": [],
+        "validation": [
+          "imported asset resolves in AssetDatabase"
+        ],
+        "rollback": [],
+        "mutates_project": true,
+        "implementation_state": "implemented",
+        "source": "tech_connector.game_engine.integration.dcc_operation_service:unity",
+        "metadata": {
+          "description": "Import an FBX mesh or animation asset into the Unity project.",
+          "implementation_evidence": [],
+          "validation_receipt": {},
+          "evidence_level": "registered_callable",
+          "live_validated": false
+        },
+        "executable": true
+      }
+    }
+  ],
+  "data_links": [
+    {
+      "from_step": 1,
+      "from_output": "export_objects",
+      "to_step": 2,
+      "to_input": "object_names",
+      "reason": "Bind typed `export_objects` output from the planned upstream action."
+    },
+    {
+      "from_step": 2,
+      "from_output": "fbx_path",
+      "to_step": 3,
+      "to_input": "filepath",
+      "reason": "Bind typed `fbx_path` output from the planned upstream action."
+    }
+  ],
+  "flow_links": [
+    {
+      "from_step": 1,
+      "to_step": 2,
+      "reason": "Preserve the planned cross-DCC execution order."
+    },
+    {
+      "from_step": 2,
+      "to_step": 3,
+      "reason": "Preserve the planned cross-DCC execution order."
+    }
+  ],
+  "prompt_flow_summary": {
+    "schema": "pipeline_prompt_flow_v1",
+    "route": "pipeline_graph",
+    "framework": "dynamic_typed_pipeline_v1",
+    "semantic_verification": {
+      "framework": "verified_pipeline_requirement_ledger_v1",
+      "ledger": {
+        "framework": "pipeline_requirement_ledger_v1",
+        "requirements": [
+          {
+            "id": "clause_1",
+            "requirement": "Process the selected Blender vehicle meshes",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_blender_io_export_fbx",
+              "operation": "io.export_fbx",
+              "score": 1.4,
+              "matched_terms": [
+                "blender",
+                "meshes",
+                "process",
+                "selected",
+                "vehicle"
+              ],
+              "active_parameter_terms": [
+                "selected"
+              ],
+              "evidence": "blender export io.export_fbx blender_tools.io.export_fbx {\"selected_only\": true, \"apply_unit_scale\": true, \"axis_forward\": \"-Z\", \"axis_up\": \"Y\", \"object_names\": {\"from_action\": \"stage_01_blender_pipeline_process_meshes_for_transfer\", \"result_path\": \"export_objects\"}, \"filepath\": \"C:/temp/tc_review_vehicle.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_01_blender_pipeline_process_meshes_for_transfer",
+                "operation": "pipeline.process_meshes_for_transfer",
+                "score": 1.0,
+                "matched_terms": [
+                  "blender",
+                  "meshes",
+                  "process",
+                  "selected"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "blender process pipeline.process_meshes_for_transfer blender_tools.pipeline_transfer.process_meshes_for_transfer {\"objects\": {\"$pipeline_context\": \"dcc_export_scope_v1\", \"host\": \"blender\", \"scope\": \"selected_or_scene_meshes\", \"subject\": \"static_mesh\", \"label\": \"Selected meshes, or scene meshes when nothing is selected\"}, \"clean_names\": false, \"apply_transforms\": false, \"lod_count\": 2, \"ensure_material_slots\": false, \"create_collision\": true} [\"blender_scene\", \"export_objects\", \"meshes\", \"materials\", \"collision\", \"lods\"] [\"processed mesh names, transforms, LODs, materials, and collision are reported\"]"
+              },
+              {
+                "stage": "stage_03_unity_assets_import_fbx",
+                "operation": "assets.import_fbx",
+                "score": 0.4,
+                "matched_terms": [
+                  "blender",
+                  "vehicle"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unity import assets.import_fbx unity.command.assets.import_fbx {\"destination_path\": \"Assets/TechConnector/Vehicles/tc_review_vehicle.fbx\", \"instantiate\": true, \"gameobject_name\": \"TC_WorkflowAsset\", \"filepath\": {\"from_action\": \"stage_02_blender_io_export_fbx\", \"result_path\": \"fbx_path\"}} [\"unity_asset_path\"] [\"imported asset resolves in AssetDatabase\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_2",
+            "requirement": "generate LOD0",
+            "role": "GOAL",
+            "action": "create",
+            "attaches_to": "goal_1",
+            "status": "needs_semantic_check",
+            "evidence": {},
+            "alternates": []
+          },
+          {
+            "id": "clause_3",
+            "requirement": "LOD1",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_1",
+            "status": "needs_semantic_check",
+            "evidence": {},
+            "alternates": []
+          },
+          {
+            "id": "clause_4",
+            "requirement": "add collision",
+            "role": "GOAL",
+            "action": "create",
+            "attaches_to": "goal_2",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_01_blender_pipeline_process_meshes_for_transfer",
+              "operation": "pipeline.process_meshes_for_transfer",
+              "score": 1.2,
+              "matched_terms": [
+                "collision"
+              ],
+              "active_parameter_terms": [
+                "collision"
+              ],
+              "evidence": "blender process pipeline.process_meshes_for_transfer blender_tools.pipeline_transfer.process_meshes_for_transfer {\"objects\": {\"$pipeline_context\": \"dcc_export_scope_v1\", \"host\": \"blender\", \"scope\": \"selected_or_scene_meshes\", \"subject\": \"static_mesh\", \"label\": \"Selected meshes, or scene meshes when nothing is selected\"}, \"clean_names\": false, \"apply_transforms\": false, \"lod_count\": 2, \"ensure_material_slots\": false, \"create_collision\": true} [\"blender_scene\", \"export_objects\", \"meshes\", \"materials\", \"collision\", \"lods\"] [\"processed mesh names, transforms, LODs, materials, and collision are reported\"]"
+            },
+            "alternates": []
+          },
+          {
+            "id": "clause_5",
+            "requirement": "export FBX to C:/temp/tc_review_vehicle.fbx",
+            "role": "GOAL",
+            "action": "export",
+            "attaches_to": "goal_3",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_02_blender_io_export_fbx",
+              "operation": "io.export_fbx",
+              "score": 1.0,
+              "matched_terms": [
+                "export",
+                "review",
+                "temp",
+                "vehicle"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "blender export io.export_fbx blender_tools.io.export_fbx {\"selected_only\": true, \"apply_unit_scale\": true, \"axis_forward\": \"-Z\", \"axis_up\": \"Y\", \"object_names\": {\"from_action\": \"stage_01_blender_pipeline_process_meshes_for_transfer\", \"result_path\": \"export_objects\"}, \"filepath\": \"C:/temp/tc_review_vehicle.fbx\"} [\"fbx_path\"] [\"export file exists\"]"
+            },
+            "alternates": [
+              {
+                "stage": "stage_03_unity_assets_import_fbx",
+                "operation": "assets.import_fbx",
+                "score": 0.75,
+                "matched_terms": [
+                  "export",
+                  "review",
+                  "vehicle"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "unity import assets.import_fbx unity.command.assets.import_fbx {\"destination_path\": \"Assets/TechConnector/Vehicles/tc_review_vehicle.fbx\", \"instantiate\": true, \"gameobject_name\": \"TC_WorkflowAsset\", \"filepath\": {\"from_action\": \"stage_02_blender_io_export_fbx\", \"result_path\": \"fbx_path\"}} [\"unity_asset_path\"] [\"imported asset resolves in AssetDatabase\"]"
+              },
+              {
+                "stage": "stage_01_blender_pipeline_process_meshes_for_transfer",
+                "operation": "pipeline.process_meshes_for_transfer",
+                "score": 0.25,
+                "matched_terms": [
+                  "export"
+                ],
+                "active_parameter_terms": [],
+                "evidence": "blender process pipeline.process_meshes_for_transfer blender_tools.pipeline_transfer.process_meshes_for_transfer {\"objects\": {\"$pipeline_context\": \"dcc_export_scope_v1\", \"host\": \"blender\", \"scope\": \"selected_or_scene_meshes\", \"subject\": \"static_mesh\", \"label\": \"Selected meshes, or scene meshes when nothing is selected\"}, \"clean_names\": false, \"apply_transforms\": false, \"lod_count\": 2, \"ensure_material_slots\": false, \"create_collision\": true} [\"blender_scene\", \"export_objects\", \"meshes\", \"materials\", \"collision\", \"lods\"] [\"processed mesh names, transforms, LODs, materials, and collision are reported\"]"
+              }
+            ]
+          },
+          {
+            "id": "clause_6",
+            "requirement": "import into Unity Assets/TechConnector/Vehicles.",
+            "role": "CONTEXT",
+            "action": "context",
+            "attaches_to": "goal_3",
+            "status": "evidence_found",
+            "evidence": {
+              "stage": "stage_03_unity_assets_import_fbx",
+              "operation": "assets.import_fbx",
+              "score": 1.2,
+              "matched_terms": [
+                "assets",
+                "import",
+                "techconnector",
+                "unity",
+                "vehicles"
+              ],
+              "active_parameter_terms": [],
+              "evidence": "unity import assets.import_fbx unity.command.assets.import_fbx {\"destination_path\": \"Assets/TechConnector/Vehicles/tc_review_vehicle.fbx\", \"instantiate\": true, \"gameobject_name\": \"TC_WorkflowAsset\", \"filepath\": {\"from_action\": \"stage_02_blender_io_export_fbx\", \"result_path\": \"fbx_path\"}} [\"unity_asset_path\"] [\"imported asset resolves in AssetDatabase\"]"
+            },
+            "alternates": []
+          }
+        ],
+        "requirement_count": 6,
+        "evidence_found": 4,
+        "needs_semantic_check": 2,
+        "all_requirements_accounted_for": false
+      },
+      "semantic_verdict": {
+        "matches_request": false,
+        "reason": "",
+        "covered": [],
+        "missing": [
+          {
+            "request_fragment": "Generate LOD0 and LOD1",
+            "reason": "The candidate plan sets `lod_count` to 2 but does not explicitly promise the generation of specific LOD levels (LOD0, LOD1) as distinct outputs or steps.",
+            "required_capability": ""
+          },
+          {
+            "request_fragment": "Add collision",
+            "reason": "The candidate plan sets `create_collision` to true but does not explicitly promise the addition of collision geometry as a verified step.",
+            "required_capability": ""
+          }
+        ],
+        "distorted": [],
+        "unsupported_claims": [
+          {
+            "plan_claim": "Export FBX to C:/temp/tc_review_vehicle.fbx",
+            "reason": "The candidate plan exports to 'C:/temp/tc_review_vehicle.fbx' but the Unity import step expects the file at 'Assets/TechConnector/Vehicles/tc_review_vehicle.fbx'. The pipeline does not explicitly show a move/copy operation between these two distinct paths."
+          }
+        ],
+        "confidence": 0.85,
+        "dismissed_missing": [],
+        "framework": "prompt_plan_alignment_v1",
+        "status": "mismatch",
+        "elapsed_ms": 7907.745,
+        "model_role": "semantic_plan_critic",
+        "verifier_tier": "semantic_1_5b",
+        "model_attempts": {
+          "primary_ms": 7907.219,
+          "primary_raw": "{\"match\":false,\"missing\":[{\"text\":\"Generate LOD0 and LOD1\",\"reason\":\"The candidate plan sets `lod_count` to 2 but does not explicitly promise the generation of specific LOD levels (LOD0, LOD1) as distinct outputs or steps.\",\"capability\":\"\"},{\"text\":\"Add collision\",\"reason\":\"The candidate plan sets `create_collision` to true but does not explicitly promise the addition of collision geometry as a verified step.\",\"capability\":\"\"}],\"wrong\":[],\"unsupported\":[{\"claim\":\"Export FBX to C:/temp/tc_review_vehicle.fbx\",\"reason\":\"The candidate plan exports to 'C:/temp/tc_review_vehicle.fbx' but the Unity import step expects the file at 'Assets/TechConnector/Vehicles/tc_review_vehicle.fbx'. The pipeline does not explicitly show a move/copy operation between these two distinct paths.\"}],\"confidence\":0.85}",
+          "fallback_ms": 0.0,
+          "fallback_raw": ""
+        }
+      },
+      "matches_request": false,
+      "verification_available": true
+    },
+    "timings": {
+      "context_build_ms": 11219.014,
+      "understanding_validation_ms": 0.54,
+      "route_classification_ms": 375.737,
+      "action_planning_ms": 7.73,
+      "plan_alignment_ms": 7908.79,
+      "workflow_materialization_ms": 2008.172,
+      "total_ms": 21528.835
+    },
+    "ui_materialization": {
+      "ok": true,
+      "node_count": 3,
+      "link_count": 4,
+      "execution_order": [
+        "stage_01_blender_pipeline_process_meshes_for_transfer",
+        "stage_02_blender_io_export_fbx",
+        "stage_03_unity_assets_import_fbx"
+      ]
+    },
+    "python_round_trip_node_count": 3,
+    "understanding_false_negative_waived": false,
+    "semantic_verifier_false_negative_waived": true
+  },
+  "review_scenario": {
+    "category": "vehicle_model",
+    "file_types": [
+      ".blend scene",
+      ".fbx",
+      "Unity model asset"
+    ]
+  }
+}

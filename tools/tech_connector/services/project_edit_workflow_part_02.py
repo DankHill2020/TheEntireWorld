@@ -1155,6 +1155,12 @@ def _repair_requested_python_contract_surface(
     )
     repair_docstrings = (
         "Requested useful docstrings are too vague:" in diagnostics
+        or bool(re.search(
+            r"\b(?:add|write|include|provide|ensure)\b[^.!?]{0,100}"
+            r"\bdocstrings?\b",
+            request_prompt,
+            flags=re.IGNORECASE,
+        ))
     )
     requested_docstring_symbols = set(re.findall(
         r"\.py:([A-Za-z_][A-Za-z0-9_.]*): Requested useful docstrings "
@@ -1223,6 +1229,19 @@ def _repair_requested_python_contract_surface(
             word.casefold() for word in words
         }) >= 5
 
+    def raised_exception_names(node: ast.AST) -> list[str]:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return []
+        return sorted({
+            raised.exc.func.id
+            for statement in node.body
+            for raised in ast.walk(statement)
+            if isinstance(raised, ast.Raise)
+            and isinstance(raised.exc, ast.Call)
+            and isinstance(raised.exc.func, ast.Name)
+            and raised.exc.func.id.endswith(("Error", "Exception"))
+        })
+
     def complete_docstring(name: str, node: ast.AST) -> bool:
         if not useful_docstring(name, node):
             return False
@@ -1276,6 +1295,14 @@ def _repair_requested_python_contract_surface(
                 docstring,
             )
             for parameter in parameters
+        ):
+            return False
+        if any(
+            not re.search(
+                rf":raises\s+{re.escape(exception_name)}\s*:",
+                docstring,
+            )
+            for exception_name in raised_exception_names(node)
         ):
             return False
         returns_value = any(
@@ -1931,7 +1958,18 @@ def _repair_requested_python_contract_surface(
         if leaf_name == "__init__":
             owner_aliases.update({"constructor", "initialization", "initialize"})
         relevant: list[str] = []
+        in_implementation_section = False
         for sentence in request_sentences:
+            section_start = re.search(
+                r"\bImplement\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            if section_start:
+                in_implementation_section = (
+                    section_start.group(1).casefold()
+                    in {alias.casefold() for alias in owner_aliases}
+                )
             before_must = re.split(
                 r"\bmust\b",
                 sentence,
@@ -1969,7 +2007,12 @@ def _repair_requested_python_contract_surface(
                 )
                 for alias in owner_aliases
             )
-            if named_before_must or called_explicitly or named_explicitly:
+            if (
+                named_before_must
+                or called_explicitly
+                or named_explicitly
+                or in_implementation_section
+            ):
                 relevant.append(sentence)
         class_method_summary = ""
         if class_methods:
@@ -2024,14 +2067,22 @@ def _repair_requested_python_contract_surface(
         if not class_method_summary:
             behavioral_sentence = next(
                 (
-                    sentence
+                    sentence.split(";", 1)[0].strip()
                     for sentence in relevant
-                    if not re.search(r"(?:[\\/]|\.py\b)", sentence)
+                    if not re.search(
+                        r"(?:[\\/]|\.py\b)",
+                        sentence.split(";", 1)[0],
+                    )
+                    and not re.search(
+                        r":(?:param|returns?|raises?)\b",
+                        sentence.split(";", 1)[0],
+                        flags=re.IGNORECASE,
+                    )
                     and re.search(
                         r"\b(?:implement|return|raise|preserve|store|remove|"
                         r"validate|compute|calculate|merge|schedule|execute|"
                         r"decode|encode|append|clear)\w*\b",
-                        sentence,
+                        sentence.split(";", 1)[0],
                         flags=re.IGNORECASE,
                     )
                 ),
@@ -2102,6 +2153,11 @@ def _repair_requested_python_contract_surface(
                     if returns_value
                     else ":return: None."
                 )
+            )
+        for exception_name in raised_exception_names(node):
+            structured_fields.append(
+                f":raises {exception_name}: If supplied values violate the "
+                "callable's validation constraints."
             )
         if structured_fields:
             documentation_lines.extend(["", *structured_fields])
@@ -2218,6 +2274,13 @@ def _repair_requested_python_contract_surface(
                 return "dict[str, object]"
             if isinstance(value, ast.Call):
                 called_name = ast.unparse(value.func).rsplit(".", 1)[-1]
+                if (
+                    called_name == "encode"
+                    and isinstance(value.func, ast.Attribute)
+                    and isinstance(value.func.value, ast.Call)
+                    and ast.unparse(value.func.value.func) in {"json.dumps", "str"}
+                ):
+                    return "bytes"
                 if called_name in {
                     "bool",
                     "bytes",
@@ -2248,6 +2311,23 @@ def _repair_requested_python_contract_surface(
                 sorted(annotations, key=lambda item: (item == "None", item))
             )
         return ast.parse(annotation_text, mode="eval").body
+
+    declared_data_classes: dict[str, set[str]] = {}
+    for _path, _original, candidate_source in generated_files:
+        try:
+            candidate_tree = ast.parse(candidate_source)
+        except SyntaxError:
+            continue
+        for candidate_class in candidate_tree.body:
+            if isinstance(candidate_class, ast.ClassDef):
+                fields = {
+                    statement.target.id
+                    for statement in candidate_class.body
+                    if isinstance(statement, ast.AnnAssign)
+                    and isinstance(statement.target, ast.Name)
+                }
+                if len(fields) >= 2:
+                    declared_data_classes[candidate_class.name] = fields
 
     updated = list(generated_files)
     repairs: list[str] = []
@@ -2474,6 +2554,42 @@ def _repair_requested_python_contract_surface(
                 for argument in arguments:
                     if argument.arg in {"self", "cls"}:
                         continue
+                    imported_names = {
+                        alias.asname or alias.name
+                        for import_node in tree.body
+                        if isinstance(import_node, ast.ImportFrom)
+                        for alias in import_node.names
+                    }
+                    local_names = {
+                        node.name for node in tree.body if isinstance(node, ast.ClassDef)
+                    }
+                    matching_classes = [
+                        class_name
+                        for class_name, fields in declared_data_classes.items()
+                        if class_name.casefold() == argument.arg.casefold()
+                        and class_name in imported_names | local_names
+                        and len({
+                            child.attr
+                            for child in ast.walk(function)
+                            if isinstance(child, ast.Attribute)
+                            and isinstance(child.value, ast.Name)
+                            and child.value.id == argument.arg
+                            and child.attr in fields
+                        }) >= 2
+                    ]
+                    if (
+                        public_surface
+                        and len(matching_classes) == 1
+                        and (
+                            argument.annotation is None
+                            or ast.unparse(argument.annotation) in {"Any", "object"}
+                        )
+                    ):
+                        argument.annotation = ast.Name(
+                            id=matching_classes[0], ctx=ast.Load()
+                        )
+                        changed = True
+                        continue
                     invalid_callable = (
                         argument.annotation is not None
                         and any(
@@ -2515,12 +2631,20 @@ def _repair_requested_python_contract_surface(
                             )
                             typing_names.add("Any")
                         changed = True
+                inferred_return = inferred_return_annotation(function) if public_surface else None
                 if function.returns is None or (
                     public_surface
-                    and annotation_contains_any(function.returns)
+                    and (
+                        annotation_contains_any(function.returns)
+                        or (
+                            ast.unparse(function.returns) == "object"
+                            and inferred_return is not None
+                            and ast.unparse(inferred_return) != "object"
+                        )
+                    )
                 ):
                     if public_surface:
-                        function.returns = inferred_return_annotation(function)
+                        function.returns = inferred_return
                     else:
                         has_value_return = any(
                             isinstance(child, ast.Return)
@@ -2581,7 +2705,10 @@ def _repair_requested_python_contract_surface(
                             or child.name == "__init__"
                         )
                     ]
-                    if not complete_docstring(node.name, node):
+                    if (
+                        node.name in requested_docstring_symbols
+                        or not complete_docstring(node.name, node)
+                    ):
                         docstring = requested_docstring(
                             node.name,
                             node=node,
@@ -2617,7 +2744,10 @@ def _repair_requested_python_contract_surface(
                         )
                     ):
                         qualified = f"{node.name}.{method.name}"
-                        if complete_docstring(qualified, method):
+                        if (
+                            qualified not in requested_docstring_symbols
+                            and complete_docstring(qualified, method)
+                        ):
                             continue
                         docstring = requested_docstring(
                             method.name,
@@ -2641,7 +2771,10 @@ def _repair_requested_python_contract_surface(
                 elif (
                     isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                     and not node.name.startswith("_")
-                    and not complete_docstring(node.name, node)
+                    and (
+                        node.name in requested_docstring_symbols
+                        or not complete_docstring(node.name, node)
+                    )
                 ):
                     docstring = requested_docstring(
                         node.name,
@@ -2730,7 +2863,7 @@ def _repair_standardized_local_quality_issues(
 
     updated = list(generated_files)
     repairs: list[str] = []
-    for path, _original, source in generated_files:
+    for file_index, (path, original, source) in enumerate(generated_files):
         try:
             tree = ast.parse(source, filename=path)
         except SyntaxError:
@@ -2926,7 +3059,16 @@ def _repair_standardized_local_quality_issues(
                                 "removed validator-proven unused local "
                                 + node.targets[0].id
                             )
-                            return None
+                            # Keep a nonempty suite when this was its only
+                            # statement. Evaluate nonliteral RHS expressions:
+                            # even a comprehension or attribute access can
+                            # invoke user code without an explicit AST Call.
+                            replacement: ast.stmt = (
+                                ast.Expr(value=node.value)
+                                if not isinstance(node.value, ast.Constant)
+                                else ast.Pass()
+                            )
+                            return ast.copy_location(replacement, node)
                         return self.generic_visit(node)
 
                     def visit_AnnAssign(
@@ -2941,7 +3083,14 @@ def _repair_standardized_local_quality_issues(
                                 "removed validator-proven unused local "
                                 + node.target.id
                             )
-                            return None
+                            if node.value is None:
+                                return ast.copy_location(ast.Pass(), node)
+                            replacement: ast.stmt = (
+                                ast.Expr(value=node.value)
+                                if not isinstance(node.value, ast.Constant)
+                                else ast.Pass()
+                            )
+                            return ast.copy_location(replacement, node)
                         return self.generic_visit(node)
 
                 UnusedLocalTransformer().visit(function)
@@ -3023,6 +3172,95 @@ def _repair_standardized_local_quality_issues(
                 f"{Path(path).name}:{symbol} "
                 + ", ".join(dict.fromkeys(changed_reasons))
             )
+        # A nested helper is not a top-level symbol-repair owner. Remove only
+        # validator-named dead locals from a uniquely identified local helper
+        # after parent repairs, preserving every other executable statement.
+        current_path, current_original, current_source = updated[file_index]
+        try:
+            current_tree = ast.parse(current_source, filename=path)
+        except SyntaxError:
+            continue
+        parent_by_node = {
+            child: parent
+            for parent in ast.walk(current_tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+        nested_helpers = [
+            node
+            for node, parent in parent_by_node.items()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in unused_by_symbol
+        ]
+        counts = {
+            name: sum(child.name == name for child in nested_helpers)
+            for name in {child.name for child in nested_helpers}
+        }
+        nested_notes: list[str] = []
+        for helper in nested_helpers:
+            if counts[helper.name] != 1:
+                continue
+            unused_names = unused_by_symbol[helper.name]
+
+            class NestedUnusedLocalTransformer(ast.NodeTransformer):
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+                    return self.generic_visit(node) if node is helper else node
+
+                def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+                    return self.generic_visit(node) if node is helper else node
+
+                def visit_Assign(self, node: ast.Assign) -> ast.AST:
+                    if (
+                        len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id in unused_names
+                    ):
+                        nested_notes.append(
+                            f"{helper.name}: removed validator-proven unused local "
+                            f"{node.targets[0].id}"
+                        )
+                        if isinstance(node.value, ast.Constant) or (
+                            isinstance(node.value, (ast.List, ast.Tuple, ast.Set))
+                            and not node.value.elts
+                        ) or (
+                            isinstance(node.value, ast.Dict)
+                            and not node.value.keys
+                        ) or (
+                            isinstance(node.value, ast.Call)
+                            and isinstance(node.value.func, ast.Name)
+                            and node.value.func.id in {"dict", "list", "set", "tuple"}
+                            and not node.value.args
+                            and not node.value.keywords
+                        ):
+                            return ast.copy_location(ast.Pass(), node)
+                        return ast.copy_location(ast.Expr(value=node.value), node)
+                    return self.generic_visit(node)
+
+                def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.AST:
+                    if isinstance(node.target, ast.Name) and node.target.id in unused_names:
+                        nested_notes.append(
+                            f"{helper.name}: removed validator-proven unused local "
+                            f"{node.target.id}"
+                        )
+                        return ast.copy_location(
+                            ast.Expr(value=node.value) if node.value is not None else ast.Pass(),
+                            node,
+                        )
+                    return self.generic_visit(node)
+
+            NestedUnusedLocalTransformer().visit(helper)
+        if nested_notes:
+            ast.fix_missing_locations(current_tree)
+            formatted_records, _format_notes = format_project_edit_generated_python(
+                [(current_path, current_original, ast.unparse(current_tree).rstrip() + "\n")]
+            )
+            candidate_source = formatted_records[0][2]
+            try:
+                compile(candidate_source, path, "exec")
+            except (SyntaxError, ValueError):
+                continue
+            updated[file_index] = (current_path, current_original, candidate_source)
+            repairs.extend(f"{Path(path).name}:{note}" for note in nested_notes)
     return updated, repairs
 
 

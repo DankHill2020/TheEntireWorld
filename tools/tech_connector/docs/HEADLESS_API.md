@@ -30,6 +30,376 @@ through `api.llm_queue_status()` and `api.cancel_llm_request(request_id)`. See
 [LLM_QUEUE_MANAGEMENT.md](LLM_QUEUE_MANAGEMENT.md) for scheduling categories,
 configuration, deadlines, superseding, and cancellation semantics.
 
+## Simple AI API
+
+For direct generation, use the provider-neutral `api.ai` namespace. It keeps
+credentials out of results and makes routing inspectable before a paid call:
+
+```python
+from tech_connector.api import create_api
+
+api = create_api(project_root="C:/project")
+
+catalog = api.ai.models()
+local = api.ai.local_recommendation()
+route = api.ai.route(depth="deep")
+result = api.ai.generate(
+    "Explain the safest way to refactor this Maya exporter.",
+    system="Be concise and cite affected symbols.",
+    depth="deep",
+)
+
+if not result.ok:
+    raise RuntimeError(result.error)
+print(result.result["text"])
+print(result.result["route"])
+```
+
+`local_recommendation()` reports the detected GPU, target models, currently
+active installed fallbacks, missing recommended downloads, and runtime guidance.
+Use `api.ai.benchmark_local()` for a short Ollama speed probe; it reports load
+time and generated tokens per second and does not contact a cloud provider.
+
+Depths are `fast`, `balanced`, `deep`, and `maximum`. With OpenAI automatic
+selection enabled they map to GPT-6 Luna, GPT-6.1 Sol, GPT-6.1 Sol with higher
+reasoning, and GPT-6 Astra respectively. An explicit unrelated model is
+preserved. Cloud failure never silently changes the model during a run;
+`allow_local_fallback=True` must be set explicitly.
+
+Use `api.reasoning` when you need project context, planning, tools, progress
+events, or the full Tech Connector orchestration pipeline.
+
+## Discovering operations and handling errors
+
+The API is self-describing, so integrations do not need to hard-code every
+feature or signature:
+
+```python
+overview = api.describe()
+matches = api.features.search("material generation")
+help_payload = api.features.describe("ai.generate", "generate")
+
+for parameter in help_payload["operations"][0]["parameters"]:
+    print(parameter["name"], parameter["required"], parameter["default"])
+```
+
+Every `APIResult` keeps the existing `ok`, `result`, and `error` fields and now
+also includes `error_detail` with a stable code, retry guidance, and a suggested
+next action. Small scripts can use `unwrap()`:
+
+```python
+try:
+    text = api.ai.generate("Summarize this scene").unwrap()["text"]
+except TechConnectorAPIError as exc:
+    print(exc.code, exc.retryable, exc.suggestion)
+```
+
+### Complete public surface inventory
+
+Use `api.surface()` when building wrappers, bindings, or documentation. It
+returns every supported core and namespace operation with its current Python
+signature and documentation. Dynamic catalogs are identified separately so a
+caller can enumerate them from their authoritative runtime source:
+
+```python
+surface = api.surface()
+
+for operation in surface["operations"]:
+    print(operation["path"], operation["signature"])
+
+# Dynamic surfaces
+dcc_functions = api.dcc.catalog()
+editor_operations = api.kingdom.editor_capabilities().unwrap()
+engine_coverage = api.kingdom.capability_report().unwrap()["value"]
+runtime_tools = api.reasoning.tools().unwrap()
+ui_actions = api.ui.catalog().unwrap()  # requires an attached UI for actions
+```
+
+`api.features.get("api.surface")` and
+`api.features.invoke("api.surface", "list")` expose the same inventory through
+the modular feature registry. The checked-in
+[API_FUNCTION_CATALOG.md](API_FUNCTION_CATALOG.md) is generated from the current
+DCC packages and documents every public module-level host function, including
+functions without a friendly alias.
+
+### Engine asset reimport and Level mesh binding
+
+The editor Python API can keep a source-linked imported mesh and bind it to a
+uniquely named Level actor. Reimport preserves the asset ID and advances its
+revision; the next cook/package uses the updated source:
+
+```python
+from tech_connector.game_engine.assets.editor_python_api import TCEditorAPI
+
+editor = TCEditorAPI("C:/project")
+mesh = editor.import_asset("C:/source/Character.obj", type_id="tc.static_mesh")
+editor.set_level_actor_render_mesh(level_asset_id, "Player", mesh.asset_id)
+
+# After editing C:/source/Character.obj:
+editor.reimport_asset(mesh.asset_id)
+```
+
+The current native graphical player imports OBJ render meshes. This binding is
+not a full skeletal DCC reimport workflow; preserve vertex topology when using
+an existing skin binding, and verify the packaged character before release.
+
+## Connected Services and Smart Functions
+
+`api.integrations` is the official boundary for Slack, Discord, Jira,
+Confluence, ClickUp, connected-account state, and chat smart references such as
+`@Slack.pipeline-alerts` and `@Maya.scene.select`.
+
+```python
+status = api.integrations.status("slack").unwrap()["value"]
+applications = api.integrations.applications().unwrap()["value"]
+
+suggestions = api.integrations.suggest("Slack.pipe").unwrap()["value"]
+context = api.integrations.resolve(
+    "Send the validation report to @Slack.pipeline-alerts"
+).unwrap()["value"]
+```
+
+Status results never return raw credentials. Secret fields are either empty or
+masked by the connected-account service.
+
+Cached channel/user discovery is side-effect free. Set `refresh=True` only when
+the caller wants a live provider request:
+
+```python
+cached = api.integrations.targets("slack").unwrap()["value"]
+live = api.integrations.targets("slack", refresh=True).unwrap()["value"]
+setup = api.integrations.oauth_url("slack").unwrap()["value"]
+```
+
+Dispatch is fail-closed. Previewing requires no mutation approval; execution
+requires `approved=True` and preserves explicit targets rather than silently
+falling back to a different Slack or Discord destination:
+
+```python
+preview = api.integrations.dispatch(
+    "@Slack.pipeline-alerts Build completed successfully",
+    dry_run=True,
+)
+
+sent = api.integrations.dispatch(
+    "@Slack.pipeline-alerts Build completed successfully",
+    approved=True,
+)
+```
+
+The same operations are discoverable as feature
+`integrations.connected_services`. Small scripts may import
+`integration_status`, `integration_suggestions`, and `dispatch_integration`
+directly from `tech_connector.api`.
+
+## Namespace Coverage
+
+The supported high-level namespaces are:
+
+| Namespace | Purpose | Dynamic discovery |
+| --- | --- | --- |
+| `api.ai` | Model catalog, routing, local recommendations, benchmarks, generation | `api.ai.models()` |
+| `api.reasoning` / `api.runtime` | Context preparation, reasoning, chains, tools | `api.reasoning.capabilities()`, `api.reasoning.tools()` |
+| `api.features` | Feature search, signatures, manifests, generic invocation | `api.features.manifest()` |
+| `api.integrations` | Connected services, smart references, targets, approved dispatch | `api.integrations.applications()` |
+| `api.dcc` | Host function aliases and bridge execution | `api.dcc.catalog()` |
+| `api.kingdom` / `api.game_engine` | Game-engine runtime and project editor | `api.kingdom.editor_capabilities()` |
+| `api.garden` / `api.scene_viewer` | Active scene-viewer commands | `api.garden.commands()` |
+| `api.ophanim` / `api.image_editor` | Viewport capture and image editing | `api.describe()` |
+| `api.ui` | Actions on an explicitly attached desktop window | `api.ui.catalog()` |
+
+Call `api.describe()` for the stable namespace map and `api.surface()` for the
+exact operation list used by the installed version.
+
+The Kingdom namespace also exposes the full project editor contract without
+requiring callers to import internal engine modules:
+
+```python
+operations = api.kingdom.editor_capabilities().unwrap()
+coverage = api.kingdom.capability_report().unwrap()["value"]
+help_payload = api.kingdom.editor_describe("asset_dependency_graph").unwrap()
+graph = api.kingdom.editor_call(
+    "asset_dependency_graph",
+    asset_id="tc.asset.example",
+).unwrap()["value"]
+```
+
+`capability_report()` lists all registered asset types by family and maturity,
+plus the declared editor operation groups and any missing callable handlers.
+`runtime_ready` describes a usable runtime path; only `production_ready` claims
+production qualification. Registry entries, editor pages, and API methods alone
+do not establish Unreal or Unity parity. See the
+[engine parity program](ENGINE_PARITY_PROGRAM.md) for the required workflows and
+evidence gates.
+
+The first UI authoring tranche is available through the same project editor
+surface. It creates and validates a widget hierarchy, evaluates anchor-based
+layouts at chosen viewport sizes, and stores a layout preview cook artifact:
+
+```python
+created = api.kingdom.editor_call("create_ui_document", name="MainMenu").unwrap()["value"]
+asset_id = created["asset_id"]
+preview = api.kingdom.editor_call(
+    "preview_ui_document", asset_id=asset_id, viewport=(390, 844)
+).unwrap()["value"]
+```
+
+`update_ui_document`, `validate_ui_document`, and `cook_ui_document` are also
+declared editor operations. A Level can bind the validated document's properties
+as `runtime_world.ui_document`; the Windows/D3D11 package compiler then embeds
+panel, text, button, and packaged-texture image records for the native player.
+An image widget must reference a registered `tc.texture` asset and the scene's
+`runtime_world.assets` must declare that texture's ID, source, and hash. Missing
+packaged textures fail compilation. A button with `on_activate: "save_game"`
+invokes the packaged save path. The player now reflows authored anchors and
+parent layout at window resize; legacy packages retain their scaled layout.
+The acceptance project checks real D3D11 captures at two window sizes. A UI
+Document may set `canvas.safe_area` to `[left, top, right, bottom]` pixel
+insets; preview and packaged runtime root anchors use the inset rectangle,
+including mouse hit-testing. Widgets may also set `min_viewport_width` in
+pixels; narrower viewports hide that widget and its descendants from drawing,
+mouse activation, and keyboard/gamepad focus. The acceptance project checks
+inset and narrow D3D11 captures plus Save button activation. This is still a
+limited runtime slice:
+platform accessibility, localization, DPI and narrow-device layout matrices,
+console-safe-area policies, and cross-platform player UI are not yet qualified,
+so the asset remains
+`authoring_preview`.
+
+### Player target selection
+
+The explicit target API prevents a Windows package from being mistaken for a
+console release:
+
+```python
+from tech_connector.game_engine.runtime.tc_player_build_service import (
+    build_player_for_target, runtime_platform_capabilities,
+)
+
+targets = runtime_platform_capabilities()["targets"]
+pc_build = build_player_for_target(scene_path, output_dir, target="windows_pc")
+```
+
+`windows_pc` builds the current D3D11/XInput player. `xbox_series_xs` and `ps5`
+are visible in the capabilities report but deliberately reject package builds
+until native platform implementations and device acceptance exist. The shared
+gamepad actions use south/east/west face-button positions; Xbox A/B/X and
+PlayStation Cross/Circle/Square are mapped to those positions by platform input
+adapters. Today, only the Windows XInput adapter is implemented. Xbox requires
+a GDKX console project and Xbox renderer/platform services; PS5 requires
+PlayStation partner SDK access and a native renderer/platform layer. Neither
+console has a shippable binary, certification result, or hardware acceptance
+receipt yet.
+
+Gameplay and UI buttons can be configured in a Level's `runtime_world` before
+compilation:
+
+```python
+runtime_world["gamepad_bindings"] = {
+    "jump": "NORTH", "crouch": "LEFT_SHOULDER", "crawl": "RIGHT_SHOULDER",
+    "ui_confirm": "WEST", "ui_cancel": "EAST", "ui_menu": "MENU",
+}
+```
+
+Supported button names are `SOUTH`, `EAST`, `WEST`, `NORTH`, `LEFT_SHOULDER`,
+`RIGHT_SHOULDER`, and `MENU`. Defaults are south/east/west for
+jump/crouch/crawl, and south/east/menu for UI confirm/cancel/menu. The compiler
+rejects unknown names and duplicate bindings within gameplay or UI context.
+In the Windows player, UI buttons with `on_activate` values `rebind_jump`,
+`rebind_crouch`, and `rebind_crawl` prompt for the next gamepad face or shoulder
+button and update the corresponding gameplay action; an
+occupied gameplay button or Menu is rejected without changing the mapping.
+The Windows player persists successful rebinds to a versioned, checksummed,
+atomically replaced per-scene profile under `%LOCALAPPDATA%/TechConnector/TCPlayer/profiles`.
+`--input-profile <path>` overrides that location, including for acceptance runs.
+Malformed or checksum-invalid profiles are rejected and authored bindings stay
+in force. A failed profile write also rejects the proposed rebind, leaving the
+current mapping and button label unchanged. The acceptance harness verifies
+save/load across two processes for Jump, Crouch, and Crawl, corrupt-load
+rejection, and failed-write rollback with simulated input only. The authored
+third-person HUD includes Save and Load buttons. A simulated Xbox Menu → D-pad
+→ Confirm route checks that Load receives focus, is visibly highlighted, and
+restores the saved slot across player processes. Save/Load actions and F5/F6
+now show a temporary HUD result (`Saved`, `Loaded`, `Save failed`, or
+`Load failed`); the missing-save path is exercised and captured separately.
+A complete settings screen and
+physical Xbox/PS5 controller qualification remain open.
+When Windows gamepad input is lost, controller-owned UI focus and a pending
+rebind are cleared so keyboard controls can resume. The packaged simulated
+disconnect check opens UI focus, drops input, then records movement from the
+keyboard. It also simulates reconnection and verifies the controller can
+reopen UI focus. On reconnect, already-held buttons and a deflected stick are
+ignored until released/neutral; fresh movement works before a deliberate Menu
+press refocuses the HUD. This does not prove physical hot-plug behavior.
+A second route starts a Jump rebind before input loss, then verifies that the
+pending capture is cancelled, the original Jump label returns, keyboard
+movement works, and reconnecting input can navigate the HUD again.
+When XInput ownership moves directly from one connected controller slot to
+another, the Windows player clears controller-owned focus and pending capture.
+It treats buttons already held on the new controller as held, not fresh presses;
+the new owner must release and press Menu again to focus the HUD. A packaged
+scripted slot-switch check verifies the owner-change signal, keyboard fallback,
+and visibly refocused Save button. Gameplay buttons and a deflected movement
+stick present at handoff are also ignored until each returns to neutral; a
+later deliberate stick input is accepted. This is simulated input, not physical
+multi-controller hot-plug qualification.
+The soak verifier accepts `--min-draw-calls` and `--require-motion-search`
+for an explicitly scoped imported-character package; the default remains the
+260-draw synthetic stress check. Timing and memory receipts must be interpreted
+within their named scene, hardware, renderer, and scripted route.
+`--require-mixed-motion` additionally checks each complete 240-frame route
+cycle for strafing, crouch, crawl, jump, and idle, plus bounded character
+position. The player provides `--scripted-motion-soak` to generate that route
+after the 380-frame traversal.
+The acceptance project also captures a 480×270 outer window (464×231 client)
+and clicks the lowest Crawl control, proving that the compact two-column
+controls remain reachable in this short Windows viewport. This is not a DPI
+or device-scale matrix.
+
+Save migration accepts v1 `POS` and v2 `BODY` records (plus `VAR`) only when records are
+complete, finite, non-duplicated, and newline-terminated. Malformed legacy
+primaries are rejected without changing the world; a valid `.bak` can still
+restore the prior state. This does not cover future save-schema versions or a
+full platform storage matrix.
+New v3 saves include the source scene ID in a checksummed `SCENE` record. A
+save bound to another scene is rejected before applying any world state, even
+if entity names match. Older v3 files without `SCENE` remain readable for
+migration; their scene origin cannot be authenticated retroactively. Backup
+rotation also refuses to copy a valid but foreign-scene primary over this
+scene's `.bak`, preserving the last compatible recovery point.
+
+Windows audio telemetry now distinguishes a buffer accepted by XAudio2
+(`submitted`) from a buffer-end callback (`completed`). Packaged acceptance
+requires a matching completion for the authored cue. This does not establish
+audible output quality, latency, or behavior across audio devices.
+Source-voice volume setup now fails the cue immediately if XAudio2 rejects it,
+rather than reporting a successfully submitted cue with an unusable voice.
+The exploration HUD has an `Audio: On` / `Audio: Muted` button that adjusts the
+Windows mastering voice volume. A short-window packaged test clicks it twice,
+checks both states, and still requires the cue buffer completion receipt. The
+mute preference is saved per scene under `%LOCALAPPDATA%/TechConnector/TCPlayer/profiles`
+as a versioned, checksummed `.tcaudio` file. `--audio-profile <path>` isolates
+acceptance runs. Corrupt preferences fall back to Audio On, and a failed write
+rolls the live mute state back. The desired mute state is retained if XAudio2
+has no output device at launch and applied when a mastering voice can be
+created later. The player opens XAudio2 lazily on the first cue, so a transient
+startup device outage is not treated as a failed launch; a failed cue is still
+reported as a failed `audio_event`. The audio-device matrix remains open.
+
+Windowed PC saves now use `%LOCALAPPDATA%/TechConnector/TCPlayer/saves/<scene-key>`
+instead of writing into installed `Content`. F5 saves and F6 loads the active
+slot; authored `save_game` and `load_game` UI actions use the same path.
+`--save-dir <path>` isolates a run or lets a distributor choose a stable
+location. New packages derive the key from the source scene's persistent ID,
+so moving an installation does not change it. On F6, a missing new-format save
+can be migrated from the previous path-keyed directory or legacy installed
+`Content`; existing legacy files are preserved. Older manifests without a
+scene ID retain path-keyed behavior. Headless `--verify-save-roundtrip` still
+writes its explicit fixture path.
+See Microsoft's [GDK/GDKX overview](https://learn.microsoft.com/en-us/gaming/gdk/_content/gc/intro/overviews/introduction)
+and Sony's [PlayStation partner onboarding](https://sonyinteractive.com/en/news/blog/showing-your-game-to-playstation/)
+for the platform access paths.
+
 ## Reasoning Runtime API
 
 API version 2 exposes the same shared reasoning runtime used by Tech Connector's
@@ -249,9 +619,11 @@ result = api.execute_prompt_chain(
 )
 ```
 
-`project_roots` is optional, but passing the tagged file/package/workspace scope
-keeps experimentation responsive and matches how the UI should narrow work when
-the user tags a specific source.
+`project_roots` is optional. By default Tech Connector uses the primary project,
+all secondary folders configured with **+ Add Folder**, and the installed tools
+root. The tools root is permanent so built-in APIs remain discoverable even when
+the user's project lives on another drive. Passing `project_roots` explicitly
+narrows one request to the tagged file/package/workspace scope.
 
 ## Calling Functions
 
@@ -475,6 +847,53 @@ Returns an execution report dictionary.
 
 Returns `APIResult` with `result["code"]`, `result["graph"]`, and
 `result["workflow_plan"]` when successful.
+
+### `api.integrations.status(account_id="")`
+
+- `account_id`: Optional connected-account ID such as `slack`, `discord`,
+  `atlassian`, `github`, or `perforce`. Empty returns every account.
+
+Returns a sanitized `APIResult`; configured secrets are masked.
+
+### `api.integrations.suggest(query="", active_hosts=(), limit=20)`
+
+- `query`: Text after the chat `@`, for example `Slack.pipe`, `Maya.scene`, or
+  `Jira.ART.b`.
+- `active_hosts`: Optional live DCC host identifiers used to prioritize roots.
+- `limit`: Maximum suggestions, clamped to 1–100.
+
+### `api.integrations.resolve(text)`
+
+Returns deterministic context for smart references, including connection
+readiness and unresolved-target warnings.
+
+### `api.integrations.targets(provider, refresh=False)`
+
+- `provider`: `slack` or `discord`.
+- `refresh`: When `False`, returns cached channels/users. When `True`, performs
+  live provider discovery and updates only this API instance's in-memory cache.
+
+### `api.integrations.oauth_url(provider, client_id="", redirect_uri="")`
+
+Returns the provider's official setup or OAuth authorization URL. Supported
+providers are Slack, Discord, Atlassian/Jira/Confluence, and ClickUp.
+
+### `api.integrations.dispatch(text, default_title="Tech Connector Output", approved=False, dry_run=False)`
+
+- `text`: Inline integration command containing one or more supported `@`
+  references.
+- `default_title`: Title applied to generated messages, issues, or pages.
+- `approved`: Required for external writes.
+- `dry_run`: Parses and returns references without contacting an external
+  service.
+
+Explicit Slack and Discord targets fail rather than using an unrelated default
+webhook.
+
+### `api.surface()`
+
+Returns the complete supported operation inventory, per-namespace counts,
+signatures, documentation, and links to dynamic discovery surfaces.
 
 ### `APIResult`
 

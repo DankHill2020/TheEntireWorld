@@ -3,11 +3,23 @@
 from pathlib import Path
 from typing import Optional
 
-from tech_connector.models.constants import ASSUMED_DIRS, EXTERNAL_TOOLS_DIR
+from tech_connector.models.constants import ASSUMED_DIRS, EXTERNAL_TOOLS_DIR, TOOLS_ROOT
+
+
+def _unique_roots(paths) -> list[str]:
+    """Normalize roots once while preserving their user-visible priority."""
+    roots: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = normalize_project_path(path)
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            seen.add(key)
+            roots.append(normalized)
+    return roots
 
 
 def all_roots(settings: dict) -> list[str]:
-    roots = []
     active_proj = settings.get("active_project", "")
     ext_tools = settings.get("external_tools_dir", "") or str(EXTERNAL_TOOLS_DIR)
     try:
@@ -21,12 +33,15 @@ def all_roots(settings: dict) -> list[str]:
         ]
     except Exception:
         workspace_roots = []
-    candidates = [active_proj, *workspace_roots, ext_tools]
-    for r in candidates + ASSUMED_DIRS + settings.get("extra_dirs", []):
-        normalized = normalize_project_path(r)
-        if normalized and normalized not in roots:
-            roots.append(normalized)
-    return [r for r in roots if r]
+    candidates = [
+        active_proj,
+        *settings.get("extra_dirs", []),
+        TOOLS_ROOT,
+        *workspace_roots,
+        ext_tools,
+        *ASSUMED_DIRS,
+    ]
+    return _unique_roots(candidates)
 
 
 
@@ -63,10 +78,16 @@ def set_active_project(settings: dict, path: str, limit: int = 12) -> str:
 
 
 def project_roots(settings: dict) -> list[str]:
+    """Return the ordered multi-folder project scope.
+
+    The active folder is the write/default root. Extra folders are user-owned
+    read/search roots. The installed Tech Connector tools root is permanent so
+    prompts and pipelines can always resolve the product's own APIs.
+    """
     active = normalize_project_path(settings.get("active_project", ""))
-    if active:
-        return [active]
-    return all_roots(settings)
+    return _unique_roots(
+        [active, *settings.get("extra_dirs", []), TOOLS_ROOT]
+    )
 
 
 def dcc_tool_roots(settings: Optional[dict] = None) -> list[str]:

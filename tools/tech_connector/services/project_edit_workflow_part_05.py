@@ -3062,6 +3062,80 @@ def _repair_shared_ttl_recency_index(
     return updated, notes
 
 
+def _repair_monotonic_clear_counter(
+    generated_files: list[tuple[str, str, str]],
+    errors: list[str],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Remove a proven counter reset from a bounded journal's clear method."""
+
+    diagnostics = "\n".join(str(error) for error in errors)
+    updated = list(generated_files)
+    repairs: list[str] = []
+    for index, (path, original, source) in enumerate(updated):
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        line_ranges: list[tuple[int, int]] = []
+        file_repairs: list[str] = []
+        for class_node in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+            if f"{path}:{class_node.name}.clear: clear must preserve" not in diagnostics:
+                continue
+            methods = {
+                node.name: node
+                for node in class_node.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            append = methods.get("append")
+            clear = methods.get("clear")
+            if append is None or clear is None:
+                continue
+            counters = {
+                node.attr
+                for node in ast.walk(append)
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and isinstance(node.ctx, ast.Store)
+                and any(token in node.attr.casefold() for token in (
+                    "sequence", "serial", "counter", "next",
+                ))
+            }
+            if len(counters) != 1:
+                continue
+            counter = next(iter(counters))
+            for node in ast.walk(clear):
+                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+                    continue
+                if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Attribute):
+                    continue
+                target = node.targets[0]
+                if (
+                    isinstance(target.value, ast.Name)
+                    and target.value.id == "self"
+                    and target.attr == counter
+                    and node.value.value in (0, 1)
+                ):
+                    line_ranges.append((node.lineno, node.end_lineno or node.lineno))
+            if line_ranges:
+                file_repairs.append(
+                    f"{class_node.name}.clear: preserved persistent {counter} counter"
+                )
+        if not line_ranges:
+            continue
+        lines = source.splitlines(keepends=True)
+        for start, end in sorted(line_ranges, reverse=True):
+            del lines[start - 1:end]
+        repaired = "".join(lines)
+        try:
+            ast.parse(repaired, filename=path)
+        except SyntaxError:
+            continue
+        updated[index] = (path, original, repaired)
+        repairs.extend(file_repairs)
+    return updated, repairs
+
+
 def _repair_explicit_bool_rejections(
     generated_files: list[tuple[str, str, str]],
     errors: list[str],
@@ -3305,6 +3379,110 @@ def _repair_pre_mutation_rejection_guards(
                     if isinstance(node, (ast.With, ast.AsyncWith))
                 )
                 for statements in blocks:
+                    # A missing-key zero initializer is observable state on a
+                    # rejected first attempt. Defer it by reading the same
+                    # default through get() until the limit guard succeeds.
+                    for index in range(len(statements) - 1):
+                        initializer = statements[index]
+                        candidate = statements[index + 1]
+                        if not (
+                            isinstance(initializer, ast.If)
+                            and isinstance(initializer.test, ast.Compare)
+                            and len(initializer.test.ops) == 1
+                            and isinstance(initializer.test.ops[0], ast.NotIn)
+                            and len(initializer.test.comparators) == 1
+                            and len(initializer.body) == 1
+                            and not initializer.orelse
+                            and isinstance(initializer.body[0], ast.Assign)
+                            and len(initializer.body[0].targets) == 1
+                            and isinstance(initializer.body[0].value, ast.Constant)
+                            and initializer.body[0].value.value == 0
+                            and isinstance(candidate, ast.Assign)
+                            and len(candidate.targets) == 1
+                            and isinstance(candidate.targets[0], ast.Name)
+                        ):
+                            continue
+                        stored = initializer.body[0].targets[0]
+                        mapping = initializer.test.comparators[0]
+                        key = initializer.test.left
+                        if not (
+                            isinstance(stored, ast.Subscript)
+                            and isinstance(mapping, ast.Attribute)
+                            and isinstance(mapping.value, ast.Name)
+                            and mapping.value.id == "self"
+                            and ast.unparse(stored.value) == ast.unparse(mapping)
+                            and ast.unparse(stored.slice) == ast.unparse(key)
+                        ):
+                            continue
+                        lookup = ast.unparse(stored)
+                        if not any(
+                            isinstance(node, ast.Subscript)
+                            and isinstance(node.ctx, ast.Load)
+                            and ast.unparse(node) == lookup
+                            for node in ast.walk(candidate.value)
+                        ):
+                            continue
+                        local_name = candidate.targets[0].id
+                        if not any(
+                            isinstance(later, ast.If)
+                            and isinstance(later.test, ast.Compare)
+                            and isinstance(later.test.left, ast.Name)
+                            and later.test.left.id == local_name
+                            and any(isinstance(child, ast.Raise) for child in ast.walk(later))
+                            for later in statements[index + 2:]
+                        ):
+                            continue
+
+                        class ReplaceLookup(ast.NodeTransformer):
+                            def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+                                if isinstance(node.ctx, ast.Load) and ast.unparse(node) == lookup:
+                                    return ast.Call(
+                                        func=ast.Attribute(value=node.value, attr="get", ctx=ast.Load()),
+                                        args=[node.slice, ast.Constant(value=0)],
+                                        keywords=[],
+                                    )
+                                return self.generic_visit(node)
+
+                        candidate.value = ReplaceLookup().visit(candidate.value)
+                        del statements[index]
+                        changed = True
+                        notes.append(
+                            f"{class_node.name}.{function.name}: deferred missing-key "
+                            "counter initialization until after the raising guard"
+                        )
+                        break
+                    # Also handle a computed next value stored immediately
+                    # before its rejection guard. The guard uses the local
+                    # candidate, so moving only the store is semantics-safe.
+                    direct_store_index = next((
+                        index
+                        for index in range(len(statements) - 1)
+                        if isinstance(statements[index], ast.Assign)
+                        and len(statements[index].targets) == 1
+                        and isinstance(statements[index].targets[0], ast.Subscript)
+                        and isinstance(statements[index].targets[0].value, ast.Attribute)
+                        and isinstance(statements[index].targets[0].value.value, ast.Name)
+                        and statements[index].targets[0].value.value.id == "self"
+                        and isinstance(statements[index].value, ast.Name)
+                        and isinstance(statements[index + 1], ast.If)
+                        and isinstance(statements[index + 1].test, ast.Compare)
+                        and isinstance(statements[index + 1].test.left, ast.Name)
+                        and statements[index + 1].test.left.id == statements[index].value.id
+                        and len(statements[index + 1].body) == 1
+                        and isinstance(statements[index + 1].body[0], ast.Raise)
+                        and not statements[index + 1].orelse
+                    ), -1)
+                    if direct_store_index >= 0:
+                        statements[direct_store_index:direct_store_index + 2] = [
+                            statements[direct_store_index + 1],
+                            statements[direct_store_index],
+                        ]
+                        changed = True
+                        notes.append(
+                            f"{class_node.name}.{function.name}: moved the counter "
+                            "store after its raising guard"
+                        )
+                        break
                     increment_index = next((
                         index
                         for index, statement in enumerate(statements)

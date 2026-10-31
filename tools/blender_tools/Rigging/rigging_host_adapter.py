@@ -6,24 +6,44 @@ the resulting rigs remain editable without the Tech Connector UI running.
 
 from __future__ import annotations
 
+import json
+import importlib
+import re
 from typing import Any
 
 import bpy
 
-from blender_tools.Rigging import surface_spatial_skin_brush as _surface_spatial_skin_brush
-
-_surface_spatial_skin_brush.register()
-
 from tech_connector.services.dcc.rigging_workspace_service import (
     CharacterDefinition,
+    FINGER_SLOTS,
     RiggingOperationResult,
     auto_map_character,
     mirror_character_slots,
+    thumb_rig_contract,
+    twist_driver_contract,
     validate_character_definition,
 )
 
 
 HOST = "blender"
+RIG_BEHAVIOR_REVISION = 7
+
+
+def reload_dependencies() -> int:
+    """Refresh the shared portable contract used by this live Blender host."""
+    global CharacterDefinition, FINGER_SLOTS, RiggingOperationResult
+    global auto_map_character, mirror_character_slots, thumb_rig_contract, twist_driver_contract
+    global validate_character_definition
+    contract = importlib.reload(importlib.import_module(
+        "tech_connector.services.dcc.rigging_workspace_service"
+    ))
+    for name in (
+        "CharacterDefinition", "FINGER_SLOTS", "RiggingOperationResult",
+        "auto_map_character", "mirror_character_slots", "thumb_rig_contract", "twist_driver_contract",
+        "validate_character_definition",
+    ):
+        globals()[name] = getattr(contract, name)
+    return RIG_BEHAVIOR_REVISION
 
 
 def _result(ok: bool, capability: str, message: str = "", **kwargs: Any) -> dict[str, Any]:
@@ -31,7 +51,18 @@ def _result(ok: bool, capability: str, message: str = "", **kwargs: Any) -> dict
 
 
 def _matrix_values(matrix: Any) -> list[float]:
-    return [float(matrix[row][column]) for row in range(4) for column in range(4)]
+    """Convert Blender's column-vector matrix to the portable row-vector layout."""
+    return [float(matrix[column][row]) for row in range(4) for column in range(4)]
+
+
+def _matrix_from_values(values: Any) -> Any:
+    """Convert a portable row-vector matrix to Blender's native layout."""
+    from mathutils import Matrix
+
+    data = [float(value) for value in values]
+    if len(data) != 16:
+        raise ValueError("A transform matrix requires 16 values")
+    return Matrix([data[index:index + 4] for index in range(0, 16, 4)]).transposed()
 
 
 def _bone_id(armature: Any, bone: Any) -> str:
@@ -68,18 +99,70 @@ def _definition(value: Any) -> CharacterDefinition:
     raise ValueError("A portable character definition is required.")
 
 
-def _control(name: str, target: str, module: str, *, display: str = "CIRCLE") -> Any:
-    armature, bone, _pose_bone = _resolve_bone(target)
+def _control(
+    name: str,
+    target: str,
+    module: str,
+    *,
+    display: str = "CIRCLE",
+    world_oriented: bool = False,
+) -> Any:
+    from mathutils import Matrix
+
+    armature, bone, pose_bone = _resolve_bone(target)
     existing = bpy.data.objects.get(name)
     control = existing or bpy.data.objects.new(name, None)
     if existing is None:
         bpy.context.scene.collection.objects.link(control)
     control.empty_display_type = display
     control.empty_display_size = max(float(getattr(bone, "length", 1.0)) * 0.35, 0.1)
-    control.matrix_world = armature.matrix_world @ bone.matrix_local
+    # Controls must be created on the character's current solved pose.  Using
+    # matrix_local here silently snapped a T-posed character back toward its
+    # authored rest pose as soon as an FK constraint became active.
+    target_matrix = armature.matrix_world @ pose_bone.matrix
+    control.matrix_world = (
+        Matrix.Translation(target_matrix.translation)
+        if world_oriented
+        else target_matrix
+    )
     control["tc_rig_module"] = module
     control["tc_target_bone"] = _bone_id(armature, bone)
     return control
+
+
+def _mapped_mesh_fit_positions(definition: CharacterDefinition, mesh: Any) -> dict[str, list[float]]:
+    """Fit mapped bone heads into a mesh bbox while preserving their proportions."""
+    from mathutils import Vector
+
+    if mesh is None or getattr(mesh, "type", "") != "MESH":
+        raise ValueError("Blender joint placement requires a mesh object or semantic world positions.")
+    rows = []
+    for slot, joint_id in definition.slots.items():
+        try:
+            armature, bone, _pose_bone = _resolve_bone(joint_id)
+        except ValueError:
+            continue
+        rows.append((slot, armature.matrix_world @ bone.head_local))
+    if not rows:
+        raise ValueError("The character definition has no resolvable Blender bones to place.")
+    mesh_points = [mesh.matrix_world @ Vector(corner) for corner in mesh.bound_box]
+    source_min = Vector(tuple(min(point[axis] for _slot, point in rows) for axis in range(3)))
+    source_max = Vector(tuple(max(point[axis] for _slot, point in rows) for axis in range(3)))
+    target_min = Vector(tuple(min(point[axis] for point in mesh_points) for axis in range(3)))
+    target_max = Vector(tuple(max(point[axis] for point in mesh_points) for axis in range(3)))
+    fitted = {}
+    for slot, point in rows:
+        values = []
+        for axis in range(3):
+            source_span = source_max[axis] - source_min[axis]
+            fraction = (
+                (point[axis] - source_min[axis]) / source_span
+                if abs(source_span) > 1.0e-8
+                else 0.5
+            )
+            values.append(target_min[axis] + fraction * (target_max[axis] - target_min[axis]))
+        fitted[slot] = values
+    return fitted
 
 
 def _constraint(pose_bone: Any, constraint_type: str, name: str, module: str) -> Any:
@@ -199,9 +282,28 @@ def execute(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
     handler = globals().get("_op_" + str(capability).replace(".", "_"))
     if handler is None:
         return _result(False, capability, f"Blender translation is not implemented: {capability}")
+    mutating = str(capability).startswith(("rig.", "skin.", "retarget."))
+    undo_started = False
     try:
-        return handler(dict(payload))
+        if mutating:
+            try:
+                bpy.ops.ed.undo_push(message="Before Tech Connector: {}".format(capability))
+                undo_started = True
+            except Exception:
+                pass
+        result = handler(dict(payload))
+        if mutating:
+            try:
+                bpy.ops.ed.undo_push(message="Tech Connector: {}".format(capability))
+            except Exception:
+                pass
+        return result
     except Exception as exc:
+        if undo_started:
+            try:
+                bpy.ops.ed.undo()
+            except Exception:
+                pass
         return _result(False, capability, str(exc))
 
 
@@ -289,6 +391,7 @@ def _module_targets(module: str, definition: CharacterDefinition) -> list[tuple[
         "right_arm": ("RightArm", "RightForeArm", "RightHand"),
         "left_leg": ("LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase"),
         "right_leg": ("RightUpLeg", "RightLeg", "RightFoot", "RightToeBase"),
+        "fingers": FINGER_SLOTS,
         "mouth": ("UpperLipCenter", "LowerLipCenter", "LeftLipCorner", "RightLipCorner"),
         "eyes": ("LeftEye", "RightEye"), "brows": ("LeftBrow", "RightBrow"),
         "jaw": ("Jaw",), "teeth": ("UpperTeeth", "LowerTeeth"),
@@ -323,6 +426,135 @@ def _build_nose_module(definition: CharacterDefinition) -> list[str]:
     return created
 
 
+def _build_thumb_rigs(definition: CharacterDefinition, blend: float) -> list[str]:
+    """Build Maya-parity thumb FK, world IK, and authored-plane PV controls."""
+    from mathutils import Vector
+
+    created = []
+    for contract in thumb_rig_contract(definition):
+        resolved = [_resolve_bone(joint_id) for joint_id in contract["joints"]]
+        armatures = {id(item[0]) for item in resolved}
+        if len(armatures) != 1:
+            raise ValueError("A Blender thumb chain must belong to one armature")
+        armature = resolved[0][0]
+        bones = [item[1] for item in resolved]
+        poses = [item[2] for item in resolved]
+        module = "fingers"
+
+        fk_parent = None
+        for bone, pose_bone, control_name in zip(
+            bones[:3], poses[:3], contract["fk_controls"]
+        ):
+            control = _control(
+                control_name,
+                _bone_id(armature, bone),
+                module,
+                display="CUBE",
+            )
+            if fk_parent is not None and control.parent != fk_parent:
+                world_matrix = control.matrix_world.copy()
+                control.parent = fk_parent
+                control.matrix_world = world_matrix
+            fk_parent = control
+            constraint = _constraint(
+                pose_bone, "COPY_TRANSFORMS", f"TC_{control_name}_fk", module
+            )
+            constraint.target = control
+            constraint.target_space = "WORLD"
+            constraint.owner_space = "WORLD"
+            constraint.influence = 1.0 - blend
+            created.extend((control.name, f"{armature.name}:{pose_bone.name}:{constraint.name}"))
+
+        ik_control = _control(
+            contract["ik_control"],
+            contract["endpoint_joint"],
+            module,
+            display="CUBE",
+            world_oriented=True,
+        )
+        pole_control = _control(
+            contract["pole_control"],
+            contract["joints"][1],
+            module,
+            display="CUBE",
+            world_oriented=True,
+        )
+
+        positions = [armature.matrix_world @ pose.head for pose in poses]
+        thumb_line = positions[-1] - positions[0]
+        pole_origin = positions[1].copy()
+        pole_direction = Vector((0.0, 0.0, 0.0))
+        if thumb_line.length_squared > 1.0e-12:
+            for position in positions[1:-1]:
+                projection = positions[0] + thumb_line * (
+                    (position - positions[0]).dot(thumb_line) / thumb_line.length_squared
+                )
+                candidate = position - projection
+                if candidate.length > pole_direction.length:
+                    pole_origin = projection
+                    pole_direction = candidate
+        if pole_direction.length <= 1.0e-8:
+            source_axis = armature.matrix_world.to_3x3() @ poses[0].z_axis
+            if thumb_line.length_squared > 1.0e-12:
+                pole_direction = source_axis - thumb_line * (
+                    source_axis.dot(thumb_line) / thumb_line.length_squared
+                )
+            else:
+                pole_direction = source_axis
+        if pole_direction.length <= 1.0e-8:
+            pole_direction = Vector((0.0, 0.0, 1.0))
+        pole_direction.normalize()
+        hand_slot = "LeftHand" if contract["side"] == "left" else "RightHand"
+        hand_id = definition.slots.get(hand_slot)
+        if hand_id:
+            hand_armature, _hand_bone, hand_pose = _resolve_bone(hand_id)
+            if hand_armature == armature:
+                dorsal_direction = -(
+                    hand_armature.matrix_world.to_3x3()
+                    @ hand_pose.matrix.to_3x3().col[2]
+                )
+                if dorsal_direction.dot(Vector((0.0, 0.0, 1.0))) < 0.0:
+                    dorsal_direction.negate()
+                if thumb_line.length_squared > 1.0e-12:
+                    dorsal_direction -= thumb_line * (
+                        dorsal_direction.dot(thumb_line)
+                        / thumb_line.length_squared
+                    )
+                if (
+                    dorsal_direction.length > 1.0e-8
+                    and pole_direction.dot(dorsal_direction) < 0.0
+                ):
+                    pole_direction.negate()
+        pole_control.matrix_world.translation = pole_origin + pole_direction * 5.0
+        pole_control["tc_pole_side"] = contract["pole_side"]
+
+        ik = _constraint(poses[-2], "IK", f"TC_{contract['side']}_thumb_ik", module)
+        ik.target = ik_control
+        ik.pole_target = pole_control
+        ik.chain_count = 3
+        pole_local = armature.matrix_world.inverted() @ pole_control.matrix_world.translation
+        chain_axis = poses[-1].head - poses[0].head
+        pole_axis = pole_local - poses[0].head
+        pole_normal = chain_axis.cross(pole_axis)
+        projected_pole_axis = pole_normal.cross(poses[0].vector)
+        if projected_pole_axis.length > 1.0e-8:
+            projected_pole_axis.normalize()
+            pole_angle = poses[0].x_axis.angle(projected_pole_axis)
+            if poses[0].x_axis.cross(projected_pole_axis).dot(poses[0].vector) < 0.0:
+                pole_angle = -pole_angle
+            ik.pole_angle = -pole_angle
+        ik.influence = blend
+        ik_control["ik_fk_blend"] = blend
+        ik_control["tc_thumb_contract_revision"] = contract["revision"]
+        armature["tc_control_rig"] = True
+        created.extend((
+            ik_control.name,
+            pole_control.name,
+            f"{armature.name}:{poses[-2].name}:{ik.name}",
+        ))
+    return created
+
+
 def _op_rig_build_module(payload: dict[str, Any]) -> dict[str, Any]:
     module = str(payload["module"]).lower()
     definition = _definition(payload["definition"])
@@ -332,10 +564,24 @@ def _op_rig_build_module(payload: dict[str, Any]) -> dict[str, Any]:
     created = []
     if module == "nose":
         created.extend(_build_nose_module(definition))
+    elif module == "fingers":
+        thumb_joint_ids = {
+            joint_id
+            for contract in thumb_rig_contract(definition)
+            for joint_id in contract["joints"]
+        }
+        created.extend(_build_thumb_rigs(
+            definition,
+            max(0.0, min(1.0, float(payload.get("blend", 1.0)))),
+        ))
+        for slot, target in targets:
+            if target not in thumb_joint_ids:
+                created.append(_copy_control(target, f"{slot}_ctrl", module))
     elif module in {"left_arm", "right_arm", "left_leg", "right_leg"} and len(targets) >= 3:
         limb = _op_rig_create_ik_fk_limb({
             "start": targets[0][1], "mid": targets[1][1], "end": targets[2][1], "module": module,
             "stretch": payload.get("stretch", 1.0),
+            "blend": payload.get("blend", 0.0),
         })
         if not limb["ok"]:
             raise RuntimeError(limb["message"])
@@ -362,8 +608,46 @@ def _op_rig_build_module(payload: dict[str, Any]) -> dict[str, Any]:
             "UpperLipCenter": "c_upper_lip_main_ctrl", "LowerLipCenter": "c_lower_lip_main_ctrl",
             "LeftLipCorner": "l_lip_corner_main_ctrl", "RightLipCorner": "r_lip_corner_main_ctrl",
         }
+        controls_by_slot = {}
         for slot, target in targets:
-            created.append(_copy_control(target, names.get(slot, f"{slot}_ctrl"), module))
+            control_name = _copy_control(target, names.get(slot, f"{slot}_ctrl"), module)
+            controls_by_slot[slot] = control_name
+            created.append(control_name)
+            if module == "spine" and slot != targets[-1][0]:
+                main = bpy.data.objects[control_name]
+                sub_name = control_name.removesuffix("_ctrl") + "_sub_ctrl"
+                sub = _control(sub_name, target, module, display="CIRCLE")
+                sub_world = sub.matrix_world.copy()
+                sub.parent = main
+                sub.matrix_world = sub_world
+                sub["tc_shape_rotation_x"] = 90.0
+                sub["tc_shape_rotation_space"] = "local_cvs"
+                armature, _bone, pose_bone = _resolve_bone(target)
+                constraint = _constraint(
+                    pose_bone, "COPY_TRANSFORMS", f"TC_{control_name}", module
+                )
+                constraint.target = sub
+                constraint.target_space = "WORLD"
+                constraint.owner_space = "WORLD"
+                armature["tc_control_rig"] = True
+                created.append(sub.name)
+            if module == "brows":
+                bpy.data.objects[control_name]["tc_shape_rotation_y"] = 90.0
+                bpy.data.objects[control_name]["tc_shape_rotation_space"] = "local_cvs"
+        if module == "brows":
+            for slot, prefix in (("LeftBrow", "l"), ("RightBrow", "r")):
+                target = dict(targets).get(slot)
+                child_name = controls_by_slot.get(slot)
+                if not target or not child_name:
+                    continue
+                main = _control(f"{prefix}_brow_main_ctrl", target, module)
+                main["tc_shape_rotation_y"] = 90.0
+                main["tc_shape_rotation_space"] = "local_cvs"
+                child = bpy.data.objects[child_name]
+                child_world = child.matrix_world.copy()
+                child.parent = main
+                child.matrix_world = child_world
+                created.append(main.name)
         if module == "mouth":
             parent = bpy.data.objects.get("lip_main_ctrl")
             if parent is None:
@@ -377,16 +661,433 @@ def _op_rig_build_module(payload: dict[str, Any]) -> dict[str, Any]:
                 child.parent = parent
                 child.matrix_world = world_matrix
             created.insert(0, parent.name)
-    return _result(True, "rig.build_module", f"Built Blender module {module}.", created_ids=created, data={"module": module})
+    return _result(
+        True,
+        "rig.build_module",
+        f"Built Blender module {module}.",
+        created_ids=created,
+        data={
+            "module": module,
+            "brow_shape_rotation_y": 90.0 if module == "brows" else None,
+            "spine_sub_shape_rotation_x": 90.0 if module == "spine" else None,
+        },
+    )
 
+
+def _delete_auto_joint_guides() -> list[str]:
+    """Remove the temporary placement guide object/collection hierarchy."""
+    removed = []
+    group = bpy.data.objects.get("auto_joint_guides_grp")
+    if group is not None:
+        descendants = []
+        pending = list(group.children)
+        while pending:
+            child = pending.pop()
+            descendants.append(child)
+            pending.extend(list(child.children))
+        for obj in reversed(descendants):
+            if obj.name in bpy.data.objects:
+                removed.append(obj.name)
+                bpy.data.objects.remove(obj, do_unlink=True)
+        removed.append(group.name)
+        bpy.data.objects.remove(group, do_unlink=True)
+    collection = bpy.data.collections.get("auto_joint_guides_grp")
+    if collection is not None:
+        for obj in list(collection.objects):
+            if obj.name in bpy.data.objects:
+                removed.append(obj.name)
+                bpy.data.objects.remove(obj, do_unlink=True)
+        removed.append(collection.name)
+        bpy.data.collections.remove(collection)
+    return list(dict.fromkeys(removed))
+
+
+def _op_rig_place_joints(payload: dict[str, Any]) -> dict[str, Any]:
+    """Place mapped edit bones from explicit points or a selected mesh fit."""
+    from mathutils import Vector
+
+    definition = _definition(payload["definition"])
+    positions = dict(payload.get("positions") or {})
+    mesh = bpy.data.objects.get(str(payload.get("mesh") or ""))
+    if not positions:
+        if mesh is None:
+            mesh = next(
+                (obj for obj in bpy.context.selected_objects if getattr(obj, "type", "") == "MESH"),
+                None,
+            )
+        positions = _mapped_mesh_fit_positions(definition, mesh)
+    if bool(payload.get("preview", False)):
+        return _result(
+            True,
+            "rig.place_joints",
+            "Previewed Blender character joint placement.",
+            data={"positions": positions, "applied": False, "behavior_revision": RIG_BEHAVIOR_REVISION},
+        )
+    grouped = {}
+    for key, value in positions.items():
+        joint_id = definition.slots.get(str(key), str(key))
+        armature, bone, _pose_bone = _resolve_bone(joint_id)
+        grouped.setdefault(armature, []).append((bone.name, Vector(tuple(value))))
+    changed = []
+    face_report = {
+        "brows": {},
+        "surface_face": {},
+        "eyelid_tip_zero_rotates": [],
+        "nose_base_translate_x": None,
+    }
+    previous_active = bpy.context.view_layer.objects.active
+    previous_mode = str(getattr(bpy.context, "mode", "OBJECT"))
+    try:
+        if previous_mode != "OBJECT" and bpy.context.object is not None:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        for armature, rows in grouped.items():
+            bpy.context.view_layer.objects.active = armature
+            armature.select_set(True)
+            bpy.ops.object.mode_set(mode="EDIT")
+            inverse = armature.matrix_world.inverted()
+            for bone_name, world_position in rows:
+                edit_bone = armature.data.edit_bones.get(bone_name)
+                if edit_bone is None:
+                    continue
+                target = inverse @ world_position
+                delta = target - edit_bone.head
+                edit_bone.head = target
+                edit_bone.tail += delta
+                changed.append(_bone_id(armature, edit_bone))
+            # Reconnect display tails to their placed primary child without
+            # changing any solved head/contact position.
+            placed_names = {name for name, _position in rows}
+            for bone_name, _world_position in rows:
+                edit_bone = armature.data.edit_bones.get(bone_name)
+                children = [child for child in edit_bone.children if child.name in placed_names]
+                if children:
+                    edit_bone.tail = children[0].head
+
+            # Blender bones use local Y as their native head-to-tail axis.
+            # Aim that native axis at the next brow landmark while recording
+            # the shared semantic contract (X aim, Y surface tangent).
+            for side in ("l", "r"):
+                brow_rows = []
+                for edit_bone in armature.data.edit_bones:
+                    short = edit_bone.name.rsplit(":", 1)[-1]
+                    match = re.match(rf"^{side}_brow(\d+|_end)$", short, re.IGNORECASE)
+                    if match:
+                        token = match.group(1).lower()
+                        brow_rows.append((6 if token == "_end" else int(token), edit_bone))
+                brow_rows.sort(key=lambda row: row[0])
+                brow_bones = [bone for _index, bone in brow_rows]
+                for index, edit_bone in enumerate(brow_bones):
+                    if len(brow_bones) < 2:
+                        continue
+                    direction = (
+                        brow_bones[index + 1].head - edit_bone.head
+                        if index < len(brow_bones) - 1
+                        else edit_bone.head - brow_bones[index - 1].head
+                    )
+                    if direction.length <= 1.0e-8:
+                        continue
+                    edit_bone.tail = edit_bone.head + direction
+                    surface_normal = None
+                    if mesh is not None and getattr(mesh, "type", "") == "MESH":
+                        world_origin = armature.matrix_world @ edit_bone.head
+                        hit, _location, normal, _face = mesh.closest_point_on_mesh(
+                            mesh.matrix_world.inverted() @ world_origin
+                        )
+                        if hit:
+                            world_normal = mesh.matrix_world.to_3x3() @ normal
+                            surface_normal = armature.matrix_world.inverted().to_3x3() @ world_normal
+                    if surface_normal is None or surface_normal.length <= 1.0e-8:
+                        surface_normal = edit_bone.z_axis.copy()
+                    edit_bone.align_roll(surface_normal)
+                    edit_bone["tc_semantic_aim_axis"] = "X"
+                    edit_bone["tc_native_aim_axis"] = "Y"
+                    edit_bone["tc_surface_tangent_axis"] = "X"
+                    face_report["brows"][edit_bone.name] = {
+                        "x_next_brow_alignment": 1.0,
+                        "native_aim_axis": "Y",
+                        "surface_roll_aligned": True,
+                    }
+                    changed.append(_bone_id(armature, edit_bone))
+
+            def surface_normal_for(edit_bone):
+                surface_normal = None
+                if mesh is not None and getattr(mesh, "type", "") == "MESH":
+                    world_origin = armature.matrix_world @ edit_bone.head
+                    hit, _location, normal, _face = mesh.closest_point_on_mesh(
+                        mesh.matrix_world.inverted() @ world_origin
+                    )
+                    if hit:
+                        world_normal = mesh.matrix_world.to_3x3() @ normal
+                        surface_normal = (
+                            armature.matrix_world.inverted().to_3x3() @ world_normal
+                        )
+                if surface_normal is None or surface_normal.length <= 1.0e-8:
+                    surface_normal = edit_bone.z_axis.copy()
+                return surface_normal.normalized()
+
+            def orient_surface_bone(edit_bone, _tangent_reference):
+                normal = surface_normal_for(edit_bone)
+                tangent_up = (
+                    armature.matrix_world.inverted().to_3x3()
+                    @ Vector((0.0, 0.0, 1.0))
+                )
+                tangent_up -= normal * tangent_up.dot(normal)
+                if tangent_up.length <= 1.0e-8:
+                    tangent_up = edit_bone.x_axis.copy()
+                    tangent_up -= normal * tangent_up.dot(normal)
+                if tangent_up.length <= 1.0e-8:
+                    return
+                tangent_up.normalize()
+                direction = tangent_up.cross(normal)
+                length = max(float(edit_bone.length), 1.0e-5)
+                edit_bone.tail = edit_bone.head + direction.normalized() * length
+                # Blender's native bone Y is the shared semantic X. With its
+                # native X used as semantic Y, -normal produces the same
+                # outward-view-up frame as the row-axis DCC backends.
+                edit_bone.align_roll(-normal)
+                if edit_bone.x_axis.dot(tangent_up) < 0.0:
+                    edit_bone.roll += 3.141592653589793
+                edit_bone["tc_semantic_aim_axis"] = "X"
+                edit_bone["tc_native_aim_axis"] = "Y"
+                edit_bone["tc_semantic_up_axis"] = "Y"
+                face_report["surface_face"][edit_bone.name] = {
+                    "x_surface_tangent_alignment": 1.0,
+                    "y_outward_view_up_alignment": float(
+                        edit_bone.x_axis.dot(tangent_up)
+                    ),
+                    "native_aim_axis": "Y",
+                    "surface_roll_aligned": True,
+                }
+                changed.append(_bone_id(armature, edit_bone))
+
+            for side in ("l", "r"):
+                under_rows = []
+                for edit_bone in armature.data.edit_bones:
+                    match = re.match(
+                        rf"^{side}_under_?eye_?(\d+)$",
+                        edit_bone.name.rsplit(":", 1)[-1],
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        under_rows.append((int(match.group(1)), edit_bone))
+                under_rows.sort(key=lambda row: row[0])
+                under_bones = [bone for _index, bone in under_rows]
+                for index, edit_bone in enumerate(under_bones):
+                    neighbor = (
+                        under_bones[index + 1]
+                        if index < len(under_bones) - 1
+                        else under_bones[index - 1] if index else None
+                    )
+                    if neighbor is not None:
+                        direction = (
+                            neighbor.head - edit_bone.head
+                            if index < len(under_bones) - 1
+                            else edit_bone.head - neighbor.head
+                        )
+                        orient_surface_bone(edit_bone, direction)
+                for edit_bone in armature.data.edit_bones:
+                    if re.match(
+                        rf"^{side}_.+cheek.*$",
+                        edit_bone.name.rsplit(":", 1)[-1],
+                        re.IGNORECASE,
+                    ):
+                        orient_surface_bone(
+                            edit_bone, edit_bone.tail - edit_bone.head
+                        )
+
+            nose_base = next((
+                edit_bone for edit_bone in armature.data.edit_bones
+                if edit_bone.name.rsplit(":", 1)[-1].lower() == "nose_base"
+            ), None)
+            if nose_base is not None:
+                delta = nose_base.tail - nose_base.head
+                if nose_base.parent is not None:
+                    local_head = nose_base.parent.matrix.inverted() @ nose_base.head
+                    local_head.x = 0.0
+                    nose_base.head = nose_base.parent.matrix @ local_head
+                else:
+                    nose_base.head.x = 0.0
+                nose_base.tail = nose_base.head + delta
+                nose_base["tc_translate_x"] = 0.0
+                face_report["nose_base_translate_x"] = 0.0
+                changed.append(_bone_id(armature, nose_base))
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+            tip_pattern = re.compile(
+                r"^(?:l|r)_(?:inner|outer|upper|lower)_eyelidTip\d*$",
+                re.IGNORECASE,
+            )
+            for pose_bone in armature.pose.bones:
+                if not tip_pattern.match(pose_bone.name.rsplit(":", 1)[-1]):
+                    continue
+                pose_bone.matrix_basis.identity()
+                pose_bone["tc_rotate_channels"] = (0.0, 0.0, 0.0)
+                face_report["eyelid_tip_zero_rotates"].append(_bone_id(armature, pose_bone.bone))
+                changed.append(_bone_id(armature, pose_bone.bone))
+    finally:
+        bpy.context.view_layer.objects.active = previous_active
+        if previous_active is not None:
+            previous_active.select_set(True)
+    removed_guides = _delete_auto_joint_guides()
+    return _result(
+        True,
+        "rig.place_joints",
+        "Placed Blender character joints.",
+        changed_ids=changed,
+        data={"positions": positions, "applied": True, "face_orientation": face_report,
+              "removed_auto_joint_guides": removed_guides,
+              "behavior_revision": RIG_BEHAVIOR_REVISION},
+    )
+
+
+def _op_rig_set_t_pose(payload: dict[str, Any]) -> dict[str, Any]:
+    """Set a mapped Blender armature to a world-axis T-pose."""
+    from mathutils import Matrix, Vector
+
+    definition = _definition(payload["definition"])
+    pose_matrices = dict(payload.get("pose_matrices") or {})
+    changed = []
+    if pose_matrices:
+        for key, values in pose_matrices.items():
+            joint_id = definition.slots.get(str(key), str(key))
+            armature, _bone, pose_bone = _resolve_bone(joint_id)
+            world = _matrix_from_values(values)
+            pose_bone.matrix = armature.matrix_world.inverted() @ world
+            changed.append(joint_id)
+        bpy.context.view_layer.update()
+        return _result(True, "rig.set_t_pose", "Applied portable Blender T-pose matrices.", changed_ids=changed)
+
+    # Always solve from the authored rest hierarchy.  Deriving each aim delta
+    # from the previously posed matrices caused small rotations to accumulate
+    # on production skeletons with non-trivial joint roll.
+    reset_bones = []
+    for joint_id in dict.fromkeys(definition.slots.values()):
+        try:
+            _armature, _bone, pose_bone = _resolve_bone(joint_id)
+        except ValueError:
+            continue
+        pose_bone.matrix_basis.identity()
+        reset_bones.append(joint_id)
+    bpy.context.view_layer.update()
+
+    def aim_ids(joint_id, child_id, world_direction):
+        if not joint_id or not child_id:
+            return
+        armature, _bone, pose_bone = _resolve_bone(joint_id)
+        child_armature, _child_bone, child_pose = _resolve_bone(child_id)
+        if child_armature != armature:
+            return
+        bpy.context.view_layer.update()
+        current = child_pose.head - pose_bone.head
+        target = armature.matrix_world.inverted().to_3x3() @ Vector(world_direction)
+        if current.length <= 1.0e-8 or target.length <= 1.0e-8:
+            return
+        delta = current.normalized().rotation_difference(target.normalized())
+        pivot = pose_bone.head.copy()
+        pose_bone.matrix = (
+            Matrix.Translation(pivot) @ delta.to_matrix().to_4x4()
+            @ Matrix.Translation(-pivot) @ pose_bone.matrix
+        )
+        changed.append(joint_id)
+
+    def aim(slot, child_slot, world_direction):
+        aim_ids(definition.slots.get(slot), definition.slots.get(child_slot), world_direction)
+
+    # Repeated calls start from the authored reference transforms instead of
+    # accumulating pose deltas. These are the native Z-up counterparts of the
+    # Maya origin/pelvis/hip-swing world-up contract.
+    for slot in ("Reference", "Hips"):
+        joint_id = definition.slots.get(slot)
+        if joint_id:
+            _armature, _bone, pose_bone = _resolve_bone(joint_id)
+            pose_bone.matrix_basis.identity()
+            changed.append(joint_id)
+
+    for side, sign in (("Left", 1.0), ("Right", -1.0)):
+        for slot in (side + "ForeArm", side + "Hand", side + "Leg"):
+            joint_id = definition.slots.get(slot)
+            if joint_id:
+                _armature, _bone, pose_bone = _resolve_bone(joint_id)
+                pose_bone.matrix_basis.identity()
+        aim(side + "Arm", side + "ForeArm", (sign, 0.0, 0.0))
+        aim(side + "ForeArm", side + "Hand", (sign, 0.0, 0.0))
+        aim(side + "UpLeg", side + "Leg", (0.0, 0.0, -1.0))
+        aim(side + "Leg", side + "Foot", (0.0, 0.0, -1.0))
+        foot_id = definition.slots.get(side + "Foot")
+        toe_id = definition.slots.get(side + "ToeBase")
+        if foot_id and toe_id:
+            foot_armature, _foot_bone, foot_pose = _resolve_bone(foot_id)
+            toe_armature, toe_bone, toe_pose = _resolve_bone(toe_id)
+            if foot_armature == toe_armature:
+                foot_world = foot_armature.matrix_world @ foot_pose.head
+                toe_world = toe_armature.matrix_world @ toe_pose.head
+                direction = toe_world - foot_world
+                direction.z = 0.0
+                if direction.length > 1.0e-8:
+                    aim_ids(foot_id, toe_id, direction)
+                terminal_children = list(toe_bone.children)
+                if terminal_children:
+                    tip_id = _bone_id(toe_armature, terminal_children[0])
+                    tip_pose = toe_armature.pose.bones.get(terminal_children[0].name)
+                    tip_world = toe_armature.matrix_world @ tip_pose.head
+                    toe_world = toe_armature.matrix_world @ toe_pose.head
+                    toe_direction = tip_world - toe_world
+                    toe_direction.z = 0.0
+                    if toe_direction.length > 1.0e-8:
+                        aim_ids(toe_id, tip_id, toe_direction)
+    bpy.context.view_layer.update()
+
+    grounded_by = 0.0
+    if bool(payload.get("ground", True)):
+        contact_heights = []
+        for side in ("Left", "Right"):
+            for slot in (side + "Foot", side + "ToeBase"):
+                joint_id = definition.slots.get(slot)
+                if not joint_id:
+                    continue
+                armature, _bone, pose_bone = _resolve_bone(joint_id)
+                contact_heights.append(float((armature.matrix_world @ pose_bone.head).z))
+        hips_id = definition.slots.get("Hips")
+        if contact_heights and hips_id:
+            armature, _bone, hips_pose = _resolve_bone(hips_id)
+            grounded_by = -min(contact_heights)
+            local_delta = armature.matrix_world.inverted().to_3x3() @ Vector((0.0, 0.0, grounded_by))
+            hips_matrix = hips_pose.matrix.copy()
+            hips_matrix.translation += local_delta
+            hips_pose.matrix = hips_matrix
+            changed.append(hips_id)
+            bpy.context.view_layer.update()
+    return _result(
+        True,
+        "rig.set_t_pose",
+        "Set Blender character T-pose.",
+        changed_ids=list(dict.fromkeys(changed)),
+        data={
+            "behavior_revision": RIG_BEHAVIOR_REVISION,
+            "world_up_axis": "Z",
+            "grounded_by": grounded_by,
+            "foot_alignment": "rotation_only",
+        },
+    )
 
 def _op_rig_build_full(payload: dict[str, Any]) -> dict[str, Any]:
     definition = _definition(payload["definition"])
+    options = dict(payload.get("options") or {})
+    t_pose_result = None
+    if bool(options.get("set_t_pose", True)):
+        t_pose_result = _op_rig_set_t_pose({
+            "definition": definition.to_dict(),
+            "ground": bool(options.get("ground", True)),
+            "pose_matrices": payload.get("pose_matrices") or {},
+        })
     requested_modules = payload.get("modules")
     if requested_modules:
         modules = list(requested_modules)
     else:
-        modules = ["root", "pelvis", "spine", "neck", "head", "left_arm", "right_arm", "left_leg", "right_leg"]
+        modules = [
+            "root", "pelvis", "spine", "neck", "head",
+            "left_arm", "right_arm", "left_leg", "right_leg", "fingers",
+        ]
         optional_modules = {
             "mouth": ("UpperLipCenter", "LowerLipCenter", "LeftLipCorner", "RightLipCorner"),
             "eyes": ("LeftEye", "RightEye"), "brows": ("LeftBrow", "RightBrow"),
@@ -399,13 +1100,22 @@ def _op_rig_build_full(payload: dict[str, Any]) -> dict[str, Any]:
         )
     created, warnings = [], []
     for module in modules:
-        result = _op_rig_build_module({"module": module, "definition": definition.to_dict()})
+        result = _op_rig_build_module({
+            "module": module,
+            "definition": definition.to_dict(),
+            "blend": float(options.get("ik_fk_blend", 1.0)),
+            "stretch": float(options.get("stretch", 0.0)),
+        })
         if result["ok"]:
             created.extend(result["created_ids"])
         else:
             warnings.append(f"{module}: {result['message']}")
     return _result(not warnings, "rig.build_full", f"Built {len(modules) - len(warnings)} Blender rig modules.",
-                   created_ids=created, warnings=warnings, data={"modules": modules})
+                   created_ids=created, warnings=warnings, data={
+                       "modules": modules,
+                       "t_pose": t_pose_result,
+                       "behavior_revision": RIG_BEHAVIOR_REVISION,
+                   })
 
 
 def _op_rig_remove_module(payload: dict[str, Any]) -> dict[str, Any]:
@@ -496,16 +1206,83 @@ def _op_rig_create_ik_fk_limb(payload: dict[str, Any]) -> dict[str, Any]:
     if start_armature != mid_armature or start_armature != end_armature:
         raise ValueError("A Blender IK chain must belong to one armature")
     module = str(payload.get("module") or f"{start_bone.name}_limb")
-    ik_control = _control(f"{end_bone.name}_ik_ctrl", str(payload["end"]), module, display="CUBE")
-    pole_control = _control(f"{end_bone.name}_pole_ctrl", str(payload["mid"]), module)
-    pole_control.location += pole_control.matrix_world.to_quaternion() @ Vector((0.0, 0.0, 2.0))
+    blend = max(0.0, min(1.0, float(payload.get("blend", 0.0))))
+
+    # Build a real FK hierarchy.  Parenting the controls makes rotating the
+    # upper control carry the elbow and wrist controls with it, while the
+    # world-space copy constraints keep the deform joints on that hierarchy.
+    fk_controls = []
+    fk_parent = None
+    for bone, pose_bone in ((start_bone, start_pose), (_mid_bone, mid_pose), (end_bone, end_pose)):
+        control = _control(
+            f"{module}_{bone.name}_fk_ctrl",
+            _bone_id(start_armature, bone),
+            module,
+        )
+        if fk_parent is not None and control.parent != fk_parent:
+            world_matrix = control.matrix_world.copy()
+            control.parent = fk_parent
+            control.matrix_world = world_matrix
+        fk_parent = control
+        fk_controls.append(control)
+        constraint = _constraint(pose_bone, "COPY_TRANSFORMS", f"TC_{module}_{bone.name}_fk", module)
+        constraint.target = control
+        constraint.target_space = "WORLD"
+        constraint.owner_space = "WORLD"
+        constraint.influence = 1.0 - blend
+
+    ik_control = _control(
+        f"{end_bone.name}_ik_ctrl",
+        str(payload["end"]),
+        module,
+        display="CUBE",
+        world_oriented=True,
+    )
+    pole_control = _control(
+        f"{end_bone.name}_pole_ctrl",
+        str(payload["mid"]),
+        module,
+        world_oriented=True,
+    )
+    start_world = start_armature.matrix_world @ start_pose.head
+    mid_world = mid_armature.matrix_world @ mid_pose.head
+    end_world = end_armature.matrix_world @ end_pose.head
+    limb_line = end_world - start_world
+    if limb_line.length > 1.0e-8:
+        projection = start_world + limb_line * (
+            (mid_world - start_world).dot(limb_line) / limb_line.length_squared
+        )
+        pole_direction = mid_world - projection
+    else:
+        pole_direction = Vector((0.0, -1.0, 0.0))
+    if pole_direction.length <= 1.0e-8:
+        pole_direction = Vector((0.0, -1.0, 0.0))
+    pole_direction.normalize()
+    pole_distance = max((mid_world - start_world).length + (end_world - mid_world).length, 0.1)
+    pole_control.matrix_world.translation = mid_world + pole_direction * pole_distance
     # Blender's IK owner is the final deforming segment (forearm/shin), while
     # the target is placed at the terminal hand/foot bone.
     ik = _constraint(mid_pose, "IK", f"TC_{module}_ik", module)
     ik.target = ik_control
     ik.pole_target = pole_control
     ik.chain_count = 2
-    ik.influence = float(payload.get("blend", 1.0))
+    # Match Blender's pole basis to the limb's current bend plane.  A pole in
+    # the geometrically correct position can still introduce a small axial
+    # roll unless pole_angle compensates for the start bone's local X axis.
+    pole_local = start_armature.matrix_world.inverted() @ pole_control.matrix_world.translation
+    chain_axis = end_pose.head - start_pose.head
+    pole_axis = pole_local - start_pose.head
+    pole_normal = chain_axis.cross(pole_axis)
+    projected_pole_axis = pole_normal.cross(start_pose.vector)
+    if projected_pole_axis.length > 1.0e-8:
+        projected_pole_axis.normalize()
+        pole_angle = start_pose.x_axis.angle(projected_pole_axis)
+        if start_pose.x_axis.cross(projected_pole_axis).dot(start_pose.vector) < 0.0:
+            pole_angle = -pole_angle
+        # Blender applies pole_angle opposite the geometric signed angle used
+        # above (its IK solve is expressed in owner-bone space).
+        ik.pole_angle = -pole_angle
+    ik.influence = blend
     ik_control["ik_fk_blend"] = ik.influence
     ik_control["stretch"] = max(0.0, min(1.0, float(payload.get("stretch", 0.0) or 0.0)))
     try:
@@ -522,11 +1299,47 @@ def _op_rig_create_ik_fk_limb(payload: dict[str, Any]) -> dict[str, Any]:
         pass
     for pose_bone in (start_pose, mid_pose):
         _drive_pose_bone_ik_stretch(pose_bone, ik_control)
+
+    # The two-bone IK solver positions the wrist/ankle, but it does not make
+    # the terminal joint follow the world-oriented IK control's rotation. Use
+    # an offset child as the rotation driver: the animator-facing IK control
+    # remains zero/world-oriented while the driven joint retains its exact
+    # current orientation at an FK/IK switch.
+    orient_driver_name = f"{end_bone.name}_ik_orient_driver"
+    orient_driver = bpy.data.objects.get(orient_driver_name)
+    if orient_driver is None:
+        orient_driver = bpy.data.objects.new(orient_driver_name, None)
+        bpy.context.scene.collection.objects.link(orient_driver)
+    orient_driver.empty_display_type = "PLAIN_AXES"
+    orient_driver.empty_display_size = max(float(getattr(end_bone, "length", 1.0)) * 0.1, 0.05)
+    orient_driver["tc_rig_module"] = module
+    orient_driver["tc_internal_driver"] = True
+    orient_world = end_armature.matrix_world @ end_pose.matrix
+    orient_driver.parent = ik_control
+    orient_driver.matrix_world = orient_world
+    orient_driver.hide_viewport = True
+    orient_driver.hide_render = True
+    end_rotation = _constraint(end_pose, "COPY_ROTATION", f"TC_{module}_ik_rotation", module)
+    end_rotation.target = orient_driver
+    end_rotation.target_space = "WORLD"
+    end_rotation.owner_space = "WORLD"
+    if hasattr(end_rotation, "mix_mode"):
+        end_rotation.mix_mode = "REPLACE"
+    end_rotation.influence = blend
     start_armature["tc_control_rig"] = True
     return _result(True, "rig.create_ik_fk_limb", "Created Blender IK/FK limb controls.",
-                   created_ids=[ik_control.name, pole_control.name, f"{mid_armature.name}:{mid_pose.name}:{ik.name}"],
-                   data={"limb": module, "ik_control": ik_control.name, "pole_control": pole_control.name,
-                         "stretch_control": ik_control.name, "stretch_attribute": "stretch"})
+                   created_ids=[control.name for control in fk_controls] + [
+                       ik_control.name,
+                       pole_control.name,
+                       orient_driver.name,
+                       f"{mid_armature.name}:{mid_pose.name}:{ik.name}",
+                       f"{end_armature.name}:{end_pose.name}:{end_rotation.name}",
+                   ],
+                   data={"limb": module, "fk_controls": [control.name for control in fk_controls],
+                         "ik_control": ik_control.name, "pole_control": pole_control.name,
+                         "stretch_control": ik_control.name, "stretch_attribute": "stretch",
+                         "controls_world_oriented": True, "bind_pose_preserved": True,
+                         "behavior_revision": RIG_BEHAVIOR_REVISION})
 
 
 def _op_rig_create_curve_joints(payload: dict[str, Any]) -> dict[str, Any]:
@@ -700,6 +1513,17 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
     if start_armature != end_armature:
         raise ValueError("A Blender twist distribution must belong to one armature")
     module = str(payload.get("module") or f"{start_bone.name}_twist")
+    default_world_up = (
+        _bone_id(start_armature, start_bone.parent)
+        if start_bone.parent is not None
+        else _bone_id(start_armature, start_bone)
+    )
+    settings = twist_driver_contract(
+        start_bone.name,
+        parent=str(payload.get("parent") or default_world_up),
+        module=module,
+        overrides=payload,
+    )
     base_name = start_bone.name
     name = base_name[:-7] + "_twist_driver" if base_name.endswith("_driver") else base_name + "_twist_driver"
     driver = _control(name, str(payload["end"]), module, display="SPHERE")
@@ -715,6 +1539,15 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
         driver.parent_bone = start_bone.name
         driver.matrix_world = world_matrix
     driver["tc_twist_driver"] = True
+    driver["tc_twist_contract_revision"] = settings["revision"]
+    driver["tc_world_up_bone"] = settings["world_up_object"]
+    driver["tc_aim_target_bone"] = settings["aim_target"]
+    driver["tc_world_up_vector"] = settings["world_up_vector"]
+    driver["tc_up_vector"] = settings["up_vector"]
+    driver["tc_maintain_offset"] = settings["maintain_offset"]
+    driver["tc_constraint_weight"] = settings["weight"]
+    if settings["aim_offset"] is not None:
+        driver["tc_aim_offset"] = settings["aim_offset"]
 
     created = [driver.name]
     twists = [str(value) for value in payload.get("twist_joints") or []]
@@ -734,7 +1567,12 @@ def _op_rig_create_twist(payload: dict[str, Any]) -> dict[str, Any]:
         created.append(f"{armature.name}:{bone.name}:{constraint.name}")
     return _result(
         True, "rig.create_twist", "Created Blender twist distribution.", created_ids=created,
-        data={"twist_driver": driver.name, "parent": _bone_id(start_armature, start_bone)},
+        data={
+            "twist_driver": driver.name,
+            "parent": _bone_id(start_armature, start_bone),
+            "world_up_object": settings["world_up_object"],
+            "constraint_settings": settings,
+        },
     )
 
 
@@ -745,9 +1583,26 @@ def _op_rig_set_ik_fk_blend(payload: dict[str, Any]) -> dict[str, Any]:
     for armature in [obj for obj in bpy.data.objects if getattr(obj, "type", "") == "ARMATURE"]:
         for pose_bone in armature.pose.bones:
             for constraint in pose_bone.constraints:
-                if constraint.type == "IK" and _constraint_module(constraint) == limb:
+                if _constraint_module(constraint) != limb:
+                    continue
+                if constraint.type == "IK" or constraint.name.endswith("_ik_rotation"):
                     constraint.influence = blend
-                    changed.append(f"{armature.name}:{pose_bone.name}:{constraint.name}")
+                elif constraint.type == "COPY_TRANSFORMS" and constraint.name.endswith("_fk"):
+                    constraint.influence = 1.0 - blend
+                else:
+                    continue
+                changed.append(f"{armature.name}:{pose_bone.name}:{constraint.name}")
+    ik_control = bpy.data.objects.get(str(payload.get("ik_control") or ""))
+    if ik_control is None:
+        ik_control = next(
+            (
+                obj for obj in bpy.data.objects
+                if str(obj.get("tc_rig_module") or "") == limb and "ik_fk_blend" in obj
+            ),
+            None,
+        )
+    if ik_control is not None:
+        ik_control["ik_fk_blend"] = blend
     return _result(bool(changed), "rig.set_ik_fk_blend", "Updated Blender IK/FK blend." if changed else "IK limb was not found.",
                    changed_ids=changed)
 
@@ -765,3 +1620,255 @@ def _op_skin_surface_spatial_smooth_brush(payload: dict[str, Any]) -> dict[str, 
     )
     return _result(True, "skin.surface_spatial_smooth_brush",
                    "Activated Blender surface-spatial skin smoothing brush.", data={"operator_result": list(result)})
+
+
+def _resolve_constraint_owner(value: str) -> tuple[Any, str]:
+    obj = bpy.data.objects.get(str(value))
+    if obj is not None:
+        return obj, obj.name
+    armature, bone, pose_bone = _resolve_bone(str(value))
+    return pose_bone, _bone_id(armature, bone)
+
+
+def _resolve_constraint_target(value: str) -> tuple[Any, str]:
+    obj = bpy.data.objects.get(str(value))
+    if obj is not None:
+        return obj, ""
+    armature, bone, _pose_bone = _resolve_bone(str(value))
+    return armature, bone.name
+
+
+def _op_rig_edit_control_shape(payload: dict[str, Any]) -> dict[str, Any]:
+    control = bpy.data.objects.get(str(payload["control"]))
+    if control is None:
+        raise ValueError(f"Blender control does not exist: {payload['control']}")
+    shape = str(payload.get("shape") or "").upper()
+    empty_shapes = {
+        "CIRCLE": "CIRCLE", "CUBE": "CUBE", "SPHERE": "SPHERE",
+        "ARROWS": "ARROWS", "PLAIN_AXES": "PLAIN_AXES", "CONE": "CONE",
+    }
+    if shape and control.type == "EMPTY":
+        control.empty_display_type = empty_shapes.get(shape, control.empty_display_type)
+    positions = payload.get("cv_positions") or []
+    if positions and control.type == "CURVE":
+        points = [point for spline in control.data.splines for point in spline.points]
+        bezier_points = [point for spline in control.data.splines for point in spline.bezier_points]
+        editable = points or bezier_points
+        for point, position in zip(editable, positions):
+            if hasattr(point, "co"):
+                values = list(position)
+                point.co = (*values[:3], 1.0) if len(point.co) == 4 else values[:3]
+    control["tc_control_shape"] = str(payload.get("shape") or control.get("tc_control_shape") or "")
+    control["tc_control_cv_positions"] = json.dumps(positions)
+    return _result(True, "rig.edit_control_shape", "Updated Blender control shape.", changed_ids=[control.name])
+
+
+def _op_rig_create_reverse_foot(payload: dict[str, Any]) -> dict[str, Any]:
+    module = str(payload.get("module") or f"{payload['ankle']}_reverse_foot")
+    targets = (("heel", str(payload["ankle"])), ("toe", str(payload["toe"])),
+               ("ball", str(payload["ball"])), ("ankle", str(payload["ankle"])))
+    created, parent = [], None
+    for role, target in targets:
+        control = _control(f"{module}_{role}_pivot", target, module, display="PLAIN_AXES")
+        control["tc_reverse_foot_role"] = role
+        if parent is not None:
+            world = control.matrix_world.copy()
+            control.parent = parent
+            control.matrix_world = world
+        created.append(control.name)
+        parent = control
+    armature, bone, pose_bone = _resolve_bone(str(payload["ankle"]))
+    constraint = _constraint(pose_bone, "COPY_TRANSFORMS", f"TC_{module}_reverse_foot", module)
+    constraint.target = parent
+    constraint.target_space = "WORLD"
+    constraint.owner_space = "WORLD"
+    created.append(f"{armature.name}:{bone.name}:{constraint.name}")
+    return _result(True, "rig.create_reverse_foot", "Created Blender reverse-foot pivots.", created_ids=created)
+
+
+def _op_rig_create_motion_path(payload: dict[str, Any]) -> dict[str, Any]:
+    curve = bpy.data.objects.get(str(payload["curve"]))
+    if curve is None or curve.type != "CURVE":
+        raise ValueError(f"Blender curve does not exist: {payload['curve']}")
+    owner, owner_id = _resolve_constraint_owner(str(payload["target"]))
+    module = str(payload.get("module") or "motion_path")
+    constraint = _constraint(owner, "FOLLOW_PATH", str(payload.get("name") or "TC_motion_path"), module)
+    constraint.target = curve
+    constraint.use_fixed_location = True
+    constraint.offset_factor = float(payload.get("parameter", 0.0) or 0.0)
+    constraint.use_curve_follow = bool(payload.get("follow", True))
+    return _result(True, "rig.create_motion_path", "Created Blender motion path.",
+                   created_ids=[f"{owner_id}:{constraint.name}"])
+
+
+def _op_rig_create_space_switch(payload: dict[str, Any]) -> dict[str, Any]:
+    owner, owner_id = _resolve_constraint_owner(str(payload["driven"]))
+    targets = [str(value) for value in payload["targets"]]
+    names = [str(value) for value in (payload.get("names") or targets)]
+    active = int(payload.get("active", 0) or 0)
+    module = str(payload.get("module") or "space_switch")
+    switch_id = str(payload.get("name") or f"TC_{str(payload['driven']).split(':')[-1]}_space")
+    created = []
+    for index, target_id in enumerate(targets):
+        target, subtarget = _resolve_constraint_target(target_id)
+        constraint = _constraint(owner, "CHILD_OF", f"{switch_id}__{index:02d}", module)
+        constraint.target = target
+        constraint.subtarget = subtarget
+        constraint.influence = 1.0 if index == active else 0.0
+        created.append(f"{owner_id}:{constraint.name}")
+    owner["tc_space_switch"] = json.dumps({"id": switch_id, "names": names, "targets": targets, "active": active})
+    return _result(True, "rig.create_space_switch", "Created Blender space switch.", created_ids=created,
+                   data={"space_switch": f"{owner_id}|{switch_id}"})
+
+
+def _op_rig_set_space(payload: dict[str, Any]) -> dict[str, Any]:
+    token = str(payload["space_switch"])
+    owner_id, switch_id = token.split("|", 1) if "|" in token else (token, "")
+    owner, resolved_id = _resolve_constraint_owner(owner_id)
+    metadata = json.loads(str(owner.get("tc_space_switch") or "{}"))
+    switch_id = switch_id or str(metadata.get("id") or "")
+    names = list(metadata.get("names") or [])
+    requested = payload["space"]
+    active = names.index(requested) if isinstance(requested, str) and requested in names else int(requested)
+    changed = []
+    for index, constraint in enumerate([item for item in owner.constraints if switch_id in item.name]):
+        constraint.influence = 1.0 if index == active else 0.0
+        changed.append(f"{resolved_id}:{constraint.name}")
+    if not changed:
+        raise ValueError(f"Blender space switch does not exist: {token}")
+    metadata["active"] = active
+    owner["tc_space_switch"] = json.dumps(metadata)
+    return _result(True, "rig.set_space", "Updated Blender active space.", changed_ids=changed)
+
+
+def _op_rig_create_mesh_attachment(payload: dict[str, Any]) -> dict[str, Any]:
+    mesh = bpy.data.objects.get(str(payload["mesh"]))
+    if mesh is None or mesh.type != "MESH":
+        raise ValueError(f"Blender mesh does not exist: {payload['mesh']}")
+    owner, owner_id = _resolve_constraint_owner(str(payload["driven"]))
+    module = str(payload.get("module") or "mesh_attachment")
+    constraint = _constraint(owner, "SHRINKWRAP", str(payload.get("name") or "TC_mesh_attachment"), module)
+    constraint.target = mesh
+    constraint.shrinkwrap_type = "NEAREST_SURFACE"
+    return _result(True, "rig.create_mesh_attachment", "Created Blender mesh attachment.",
+                   created_ids=[f"{owner_id}:{constraint.name}"])
+
+
+def _op_rig_create_pose_reader(payload: dict[str, Any]) -> dict[str, Any]:
+    driver, subtarget = _resolve_constraint_target(str(payload["driver"]))
+    name = str(payload.get("name") or f"{str(payload['driver']).split(':')[-1]}_pose_reader")
+    reader = bpy.data.objects.get(name) or bpy.data.objects.new(name, None)
+    if reader.name not in bpy.context.scene.collection.objects:
+        bpy.context.scene.collection.objects.link(reader)
+    reader.empty_display_type = "PLAIN_AXES"
+    reader["output"] = 0.0
+    reader["tc_pose_reader"] = True
+    reader["tc_pose_reader_driver"] = str(payload["driver"])
+    axis = str(payload.get("axis") or "x").lower()
+    limits = [float(value) for value in (payload.get("range") or (-90.0, 90.0))]
+    fcurve = reader.driver_add('["output"]')
+    variable = fcurve.driver.variables.new()
+    variable.name = "angle"
+    variable.type = "TRANSFORMS"
+    variable.targets[0].id = driver
+    variable.targets[0].bone_target = subtarget
+    variable.targets[0].transform_type = f"ROT_{axis.upper()}"
+    variable.targets[0].transform_space = "TRANSFORM_SPACE"
+    low, high = (value * 0.017453292519943295 for value in limits[:2])
+    span = high - low if abs(high - low) > 1.0e-8 else 1.0
+    fcurve.driver.expression = f"min(1,max(0,(angle-({low}))/{span}))"
+    return _result(True, "rig.create_pose_reader", "Created Blender pose reader.", created_ids=[reader.name])
+
+
+def _module_connection_snapshot(module: str) -> list[dict[str, Any]]:
+    rows = []
+    for armature in [obj for obj in bpy.data.objects if obj.type == "ARMATURE"]:
+        for pose_bone in armature.pose.bones:
+            for constraint in pose_bone.constraints:
+                if _constraint_module(constraint) == module:
+                    rows.append({"owner": _bone_id(armature, pose_bone.bone), "type": constraint.type,
+                                 "name": constraint.name, "target": getattr(getattr(constraint, "target", None), "name", ""),
+                                 "subtarget": str(getattr(constraint, "subtarget", "")),
+                                 "influence": float(getattr(constraint, "influence", 1.0))})
+    for obj in bpy.data.objects:
+        for constraint in obj.constraints:
+            if _constraint_module(constraint) == module:
+                rows.append({"owner": obj.name, "type": constraint.type, "name": constraint.name,
+                             "target": getattr(getattr(constraint, "target", None), "name", ""),
+                             "subtarget": str(getattr(constraint, "subtarget", "")),
+                             "influence": float(getattr(constraint, "influence", 1.0))})
+    return rows
+
+
+def _op_rig_store_connections(payload: dict[str, Any]) -> dict[str, Any]:
+    module = str(payload["module"])
+    rows = _module_connection_snapshot(module)
+    bpy.context.scene[f"tc_connections_{module}"] = json.dumps(rows)
+    return _result(True, "rig.store_connections", f"Stored {len(rows)} Blender module connections.",
+                   data={"connections": rows})
+
+
+def _op_rig_restore_connections(payload: dict[str, Any]) -> dict[str, Any]:
+    module = str(payload["module"])
+    rows = json.loads(str(bpy.context.scene.get(f"tc_connections_{module}") or "[]"))
+    restored = []
+    for row in rows:
+        try:
+            owner, owner_id = _resolve_constraint_owner(row["owner"])
+            constraint = _constraint(owner, row["type"], row["name"].split("__", 1)[-1], module)
+            target = bpy.data.objects.get(row.get("target") or "")
+            if target is not None and hasattr(constraint, "target"):
+                constraint.target = target
+            if hasattr(constraint, "subtarget"):
+                constraint.subtarget = str(row.get("subtarget") or "")
+            constraint.influence = float(row.get("influence", 1.0))
+            restored.append(f"{owner_id}:{constraint.name}")
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return _result(True, "rig.restore_connections", f"Restored {len(restored)} Blender module connections.",
+                   changed_ids=restored, data={"connections": rows})
+
+
+def _op_retarget_solve_pose(payload: dict[str, Any]) -> dict[str, Any]:
+    definition = _definition(payload["target"])
+    changed = []
+    for slot, values in dict(payload["source"]).items():
+        target_id = definition.slots.get(slot)
+        if not target_id or not isinstance(values, (list, tuple)) or len(values) != 16:
+            continue
+        armature, _bone, pose_bone = _resolve_bone(target_id)
+        pose_bone.matrix = armature.matrix_world.inverted() @ _matrix_from_values(values)
+        changed.append(target_id)
+    bpy.context.view_layer.update()
+    return _result(True, "retarget.solve_pose", f"Solved {len(changed)} Blender joints.", changed_ids=changed)
+
+
+def _op_retarget_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    result = _op_retarget_solve_pose(payload)
+    result["capability"] = "retarget.preview"
+    return result
+
+
+def _op_retarget_bake(payload: dict[str, Any]) -> dict[str, Any]:
+    definition = _definition(payload["target"])
+    start, end = (int(round(float(value))) for value in payload["range"])
+    step = max(1, int(round(float(payload.get("sample_rate", 1) or 1))))
+    changed = []
+    for target_id in definition.slots.values():
+        try:
+            _armature, _bone, pose_bone = _resolve_bone(target_id)
+        except ValueError:
+            continue
+        for frame in range(start, end + 1, step):
+            bpy.context.scene.frame_set(frame)
+            pose_bone.keyframe_insert("location", frame=frame)
+            pose_bone.keyframe_insert("rotation_quaternion", frame=frame)
+            pose_bone.keyframe_insert("scale", frame=frame)
+        changed.append(target_id)
+    return _result(True, "retarget.bake", "Baked retargeted Blender animation.", changed_ids=changed)
+
+
+def _op_retarget_transfer_take(payload: dict[str, Any]) -> dict[str, Any]:
+    take = payload["take"]
+    bpy.context.scene["tc_retarget_take"] = json.dumps(take, default=str)
+    return _result(True, "retarget.transfer_take", "Stored Blender retarget take metadata.", data={"take": take})

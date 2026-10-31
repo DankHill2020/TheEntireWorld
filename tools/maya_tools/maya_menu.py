@@ -22,19 +22,23 @@ _BRIDGE_CLIENT_SLOTS = threading.BoundedSemaphore(32)
 MENU_NAME = "theEntireWorldMenu"
 MENU_LABEL = "The Entire World Tools"
 
-TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "3"
+TECH_CONNECTOR_MAYA_BRIDGE_VERSION = "5"
 TECH_CONNECTOR_MAYA_BRIDGE_BOOT_SOURCE = str(globals().get("__file__", ""))
 _MAX_BRIDGE_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_BRIDGE_OUTPUT_CHARS = 8 * 1024 * 1024
 _MAX_BRIDGE_RESPONSE_BYTES = 32 * 1024 * 1024
 _BRIDGE_CONNECTION_TIMEOUT_SECONDS = 30.0
 
-COMMAND_PORT_START = 7001
-COMMAND_PORT_FILE = (
-    os.path.join(os.path.expanduser("~"), "temp", "maya_port.txt")
+try:
+    _configured_command_port = int(os.environ.get("MAYA_COMMAND_PORT", "7001"))
+except (TypeError, ValueError):
+    _configured_command_port = 7001
+COMMAND_PORT_START = _configured_command_port if 0 < _configured_command_port < 65536 else 7001
+COMMAND_PORT_FILE = os.environ.get("MAYA_COMMAND_PORT_FILE") or os.path.join(
+    os.path.expanduser("~"), "temp", "maya_port.txt"
 )
-COMMAND_PORT_SESSION_FILE = (
-    os.path.join(os.path.expanduser("~"), "temp", "maya_sessions.json")
+COMMAND_PORT_SESSION_FILE = os.environ.get("MAYA_COMMAND_SESSION_FILE") or os.path.join(
+    os.path.expanduser("~"), "temp", "maya_sessions.json"
 )
 
 
@@ -52,7 +56,7 @@ def maya_execute_and_capture(encoded_code, bridge_session=""):
         from tech_connector.bridges.session_authorization import validate_bridge_session
 
         if not validate_bridge_session(bridge_session, "maya"):
-            return "ERROR: Tech Connector activation is required for this Maya bridge."
+            return "ERROR: A valid local Tech Connector bridge session is required."
     except Exception:
         return "ERROR: Tech Connector licensing components are unavailable."
     class _BoundedCapture:
@@ -142,7 +146,7 @@ def _handle_bridge_client(connection):
                 authorized = False
             if not authorized:
                 response = _bridge_error(
-                    "Tech Connector activation is required for this Maya bridge.",
+                    "A valid local Tech Connector bridge session is required.",
                     "bridge_authorization_required",
                 )
             else:
@@ -355,7 +359,7 @@ def _close_legacy_tech_connector_command_ports():
                     recorded_ports.add(int(item.get("port", -1)))
             except Exception:
                 continue
-        active_ports = cmds.commandPort(listPorts=True) or []
+        active_ports = cmds.commandPort(query=True, listPorts=True) or []
         scan_end = COMMAND_PORT_START + max(
             1,
             int(os.environ.get("MAYA_COMMAND_PORT_SCAN_COUNT", "10")),
@@ -427,16 +431,22 @@ def create_command_port(port=COMMAND_PORT_START, stp="python"):
 
 
 def initialize_command_port():
+    """Start Maya's localhost bridge; authorize each request at execution.
+
+    The listener must be available from Maya startup even when Tech Connector
+    is activated later.  ``_handle_bridge_client`` validates the current
+    per-user session token before scheduling any code on Maya's main thread,
+    so opening the loopback socket itself does not grant execution access.
+    """
     _close_legacy_tech_connector_command_ports()
     try:
-        from tech_connector.bridges.session_authorization import load_bridge_session
+        from tech_connector.bridges.session_authorization import bridge_session_token
 
-        if load_bridge_session("maya") is None:
-            log("Activate Tech Connector before starting the Maya command bridge.")
-            return None
+        bridge_session_token("maya")
     except Exception:
-        log("Licensing components are unavailable; Maya command bridge not started.")
-        return None
+        # The listener is still safe to start: every request is rejected until
+        # a valid local token can be created and supplied.
+        pass
     return create_command_port(port=COMMAND_PORT_START)
 
 
@@ -536,6 +546,14 @@ def _show_hik_ui(*args):
         log_exception("Failed to launch Human IK UI.")
 
 
+def _transfer_fbx_animation_to_controls(*args):
+    try:
+        from maya_tools.Rigging.mocap.fbx_to_control_rig import transfer_fbx_animation_dialog
+        transfer_fbx_animation_dialog()
+    except Exception:
+        log_exception("Failed to transfer FBX animation to Maya controls.")
+
+
 def create_maya_menu():
     main_window = _get_maya_main_window()
 
@@ -568,6 +586,13 @@ def create_maya_menu():
             command=_show_hik_ui
         )
 
+        cmds.menuItem(
+            "fbxToControlRigItem",
+            label="Transfer FBX Animation to Control Rig",
+            parent=main_menu,
+            command=_transfer_fbx_animation_to_controls,
+        )
+
         log("Menu created.")
 
     except Exception:
@@ -578,6 +603,12 @@ def create_menu_once():
     initialize_command_port()
     _register_exit_cleanup()
     _register_before_save_job()
+    try:
+        from maya_tools.Rigging import vehicle_rig
+        vehicle_rig.install_scene_callbacks()
+        vehicle_rig.install_ground_callbacks()
+    except Exception:
+        log_exception("Failed to initialize live vehicle rig evaluation.")
     maya.utils.executeDeferred(create_maya_menu)
 
 

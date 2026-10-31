@@ -1241,7 +1241,7 @@ UNREAL_OPERATIONS: dict[str, UnrealOperation] = {
         optional={
             "max_results_per_query": 15,
             "use_reasoning": True,
-            "reasoning_model": "qwen2.5-coder:7b",
+            "reasoning_model": "qwen3.5:4b",
         },
         execution_host="desktop",
         description="Search live context-filtered Blueprint actions for semantic operations without selecting nodes or mutating assets.",

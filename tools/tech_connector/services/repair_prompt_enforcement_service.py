@@ -24,10 +24,29 @@ MAX_CLASS_REPAIR_CHARS = 11000
 
 ATOMIC_REPAIR_SYSTEM_PROMPT = """You repair one exact Python owner from supplied evidence.
 Return raw Python only: no Markdown, diff, imports, siblings, or explanation.
-Preserve the public signature and decorators unless the approved contract explicitly
-requires a signature change. Use only verified names and interfaces in the envelope.
+Write a complete declaration from its first line; never continue from the
+middle of the supplied source, docstring, or body.
+Output only executable implementation and any required docstring: no scratch-work
+comments, TODOs, placeholder `pass`, or narrated requirement-by-requirement trace.
+Preserve parameters, defaults, and decorators unless the approved contract explicitly
+requires a change. Correct annotations when a listed failure requires type hints.
+Use only verified names and interfaces in the envelope.
 Implement every listed failure while preserving unrelated established behavior.
-If the evidence is insufficient, return the exact owner unchanged; never invent an API.
+The stated pure-Python input and output contracts plus Python builtins and standard
+library are sufficient evidence for their implementation; do not return the
+rejected owner unchanged when those contracts specify the needed behavior.
+Never invent an external host or project API that the evidence does not verify.
+"""
+
+ATOMIC_CLASS_SET_REPAIR_SYSTEM_PROMPT = """You repair exactly the named Python classes from supplied evidence.
+Return raw Python only: the complete owned classes and only imports newly required
+by those classes. No Markdown, diff, unrelated declarations, or explanation.
+Preserve public signatures and decorators unless the approved contract requires
+a change. Use verified project interfaces and standard-library APIs; do not invent
+host or project APIs. Implement every listed failure while preserving unrelated
+established behavior. Pure-Python contracts and standard-library operations do
+not need external API evidence; implement them instead of returning the rejected
+classes unchanged. Never invent an unverified external host or project API.
 """
 
 
@@ -112,10 +131,19 @@ def validate_repair_response(stage: Any, response: str) -> str:
             if isinstance(node, ast.ClassDef)
             and node.name in expected_names
         ]
+        allowed_nodes = (
+            (ast.ClassDef, ast.Import, ast.ImportFrom)
+            if key == "class_set_repair"
+            else (ast.ClassDef,)
+        )
         if (
             len(matching_classes) == len(expected_names)
             and {node.name for node in matching_classes} == expected_names
-            and len(tree.body) == len(expected_names)
+            and all(
+                not isinstance(node, ast.ClassDef) or node.name in expected_names
+                for node in tree.body
+            )
+            and all(isinstance(node, allowed_nodes) for node in tree.body)
         ):
             extracted_nodes = matching_classes
     owned_nodes = (
@@ -285,7 +313,7 @@ def normalize_repair_response(stage: Any, response: str) -> tuple[str, bool]:
                     member_source, " " * 4
                 )
                 changed = True
-    if key in {"function_repair", "class_repair", "class_set_repair"}:
+    if key in {"function_repair", "class_repair"}:
         try:
             tree = ast.parse(text)
         except SyntaxError:
@@ -313,7 +341,13 @@ def _close_trailing_unterminated_triple_quote(text: str) -> tuple[str, bool]:
     try:
         ast.parse(text)
     except SyntaxError as exc:
-        if "unterminated triple-quoted string literal" not in str(exc.msg):
+        if not any(
+            marker in str(exc.msg)
+            for marker in (
+                "unterminated triple-quoted string literal",
+                "EOF while scanning triple-quoted string literal",
+            )
+        ):
             return text, False
     else:
         return text, False
@@ -423,6 +457,13 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             "refusing to repair from the complete package."
         )
 
+    owner_capsule = canonical_contract.get("atomic_owner_capsule_payload") or {}
+    owner_requirements = [
+        str(row.get("text") or row.get("requirement") or "").strip()
+        if isinstance(row, dict)
+        else str(row).strip()
+        for row in owner_capsule.get("requirements") or []
+    ]
     requirements = _section_bullets(
         user_prompt,
         (
@@ -432,6 +473,7 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         ),
     )
     requirements = list(dict.fromkeys([
+        *[value for value in owner_requirements if value],
         *requirements,
         *[
             str(value)
@@ -477,19 +519,22 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
         max_chars=600 if key == "function_repair" else len(user_prompt),
     )
     canonical_evidence = {
-        "module_imports": list(canonical_contract.get("module_imports") or []),
-        "module_symbols": list(canonical_contract.get("module_symbols") or []),
-        "generated_interfaces": list(
-            canonical_contract.get("generated_interfaces") or []
-        ),
+        # The approved sibling interface is the essential cross-file repair
+        # boundary. A large module inventory must not consume the bounded
+        # evidence window before the model sees that callable signature.
         "sibling_signatures": list(
             canonical_contract.get("sibling_signatures") or []
         ),
-        "state_context": list(canonical_contract.get("state_context") or []),
+        "generated_interfaces": list(
+            canonical_contract.get("generated_interfaces") or []
+        ),
         "callsite_excerpts": list(
             canonical_contract.get("callsite_excerpts")
             or []
         ),
+        "module_imports": list(canonical_contract.get("module_imports") or []),
+        "module_symbols": list(canonical_contract.get("module_symbols") or []),
+        "state_context": list(canonical_contract.get("state_context") or []),
     }
     canonical_evidence = {
         key: value for key, value in canonical_evidence.items() if value
@@ -553,10 +598,10 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
     if key == "function_repair":
         requirement_rows = _bound_atomic_requirement_rows(
             requirement_rows,
-            max_chars=3200,
+            max_chars=5000,
         )
         algorithmic_guidance = _algorithmic_repair_guidance(
-            [str(row.get("failure") or "") for row in requirement_rows]
+            [objective, *(str(row.get("failure") or "") for row in requirement_rows)]
         )
     compact_prompt = "\n".join(
         [
@@ -591,6 +636,7 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             "```python",
             current_source.rstrip(),
             "```",
+            "The source above is reference text, not a completion prefix.",
             "",
             "Owner-specific acceptance directives:",
             critical_directives or "(none beyond the failed requirements)",
@@ -598,14 +644,39 @@ def enforce_repair_prompt(stage: Any) -> tuple[Any, dict[str, Any]]:
             "Acceptance contract:",
             "- Return raw Python only.",
             f"- Return exactly the complete replacement for {symbol}.",
-            "- Preserve the exact public signature and decorators.",
+            (
+                "- Start at the decorator if one is required; otherwise start with "
+                f"`def {symbol.rsplit('.', 1)[-1]}(` or "
+                f"`async def {symbol.rsplit('.', 1)[-1]}(`. "
+                "Never start inside a docstring or indented body."
+                if key == "function_repair"
+                else "- Begin at the first line of the owned declaration."
+            ),
+            (
+                "- Use a concise implementation with one ordered pass over "
+                "each input when practical; avoid repeated validation loops "
+                "or scratch variables."
+                if key == "function_repair"
+                else "- Implement the owned declaration without scratch-work."
+            ),
+            "- Preserve parameters, defaults, and decorators; correct annotations "
+            "only when a listed failure requires type hints.",
             "- The executable AST must differ from the rejected source.",
             "- Address every failed requirement listed above.",
-            "- Do not return imports, unrelated symbols, a diff, Markdown, or explanation.",
+            (
+                "- Include only imports newly required by the owned classes; do not "
+                "return unrelated symbols, a diff, Markdown, or explanation."
+                if key == "class_set_repair"
+                else "- Do not return imports, unrelated symbols, a diff, Markdown, or explanation."
+            ),
         ]
     ).strip()
 
-    compact_system_prompt = ATOMIC_REPAIR_SYSTEM_PROMPT.strip()
+    compact_system_prompt = (
+        ATOMIC_CLASS_SET_REPAIR_SYSTEM_PROMPT
+        if key == "class_set_repair"
+        else ATOMIC_REPAIR_SYSTEM_PROMPT
+    ).strip()
     after_chars = len(compact_system_prompt) + len(compact_prompt)
     report.update(
         {
@@ -777,6 +848,93 @@ def _algorithmic_repair_guidance(failures: list[str]) -> str:
             "- If no remaining node is runnable, raise ValueError and include every remaining cycle-involved task in deterministic sorted form.",
             "- Work from copied sets; never mutate the caller's mapping or dependency collections.",
         ])
+    recursive_mapping_patch = (
+        "mapping patch" in text
+        and "non-mapping" in text
+        and "recurs" in text
+        and "delet" in text
+    )
+    if recursive_mapping_patch:
+        guidance.extend([
+            "- Branch on the patch type first: a non-mapping patch replaces the entire document with a deep copy of that patch.",
+            "- For a mapping patch, create a fresh mapping base before any key lookup: deep-copy the document only if it is a mapping; otherwise use an empty mapping.",
+            "- Iterate patch members on that base. A None member deletes only that key; every other member, including falsey values and nested mappings, recursively patches the base member.",
+            "- Return the fresh base. Never update the caller's document or retain nested references to either input.",
+        ])
+    if re.search(r"\b(?:falsey|falsy)\b", text) and re.search(
+        r"\b(?:payload|value|field|key)s?\b", text
+    ):
+        guidance.extend([
+            "- Test required mapping keys with `key in mapping` before reading values; `mapping.get(key)` cannot distinguish absent keys from a present None.",
+            "- Never reject a present value merely because it is None, False, zero, empty text, or an empty collection when falsey values are approved.",
+            "- Replace any `if not value` or `if value is None` missing-key guard with a key-presence check, while retaining all other validation.",
+        ])
+    if "canonical" in text and "json" in text and "compact" in text:
+        guidance.append(
+            "- For direct JSON serialization, use `json.dumps(value, sort_keys=True, separators=(',', ':')).encode('utf-8')`."
+        )
+    if "both paths" in text and "validat" in text and "json" in text:
+        guidance.append(
+            "- In the encoder, validate each required object field before `json.dumps`; "
+            "a decoder-only check, a constructor assumption, or an unrelated input "
+            "guard does not establish encoder validation."
+        )
+    if "json" in text and "exactly" in text and "keys" in text:
+        guidance.append(
+            "- For an exact JSON object schema, first require a mapping and then compare `set(obj) == required_keys`; `issubset` or individual key-presence checks admit unknown keys."
+        )
+    if re.search(r"\binteger\s+(?:other\s+than|excluding)\s+bool\b", text):
+        guidance.append(
+            "- Use `type(value) is int` (or explicitly reject bool) for integer-only fields; `isinstance(True, int)` is True. Then enforce the stated numeric bound."
+        )
+    if "nonblank string" in text or "non-blank string" in text:
+        guidance.append(
+            "- Check string type and `value.strip()` so whitespace-only strings are rejected."
+        )
+    if (
+        "case-insensitive duplicate" in text
+        and "first" in text
+        and "spelling" in text
+    ):
+        guidance.append(
+            "- Use `name.casefold()` only as the duplicate key; append the first "
+            "eligible stripped spelling to a separate result list in input order. "
+            "Do not lowercase result names or sort the output."
+        )
+    if (
+        "selected_names" in text
+        and "enabled" in text
+        and "project order" in text
+    ):
+        guidance.extend([
+            "- Distinguish `selected_names is None` (all eligible entries) from an "
+            "explicit empty selection (no entries). Never use `if not selected_names` "
+            "to choose the all-entries branch.",
+            "- Validate each project entry's name, then build an ordered list of "
+            "enabled, casefold-deduplicated entries. Disabled entries must not "
+            "appear in the result or claim the first enabled spelling.",
+            "- When selection is explicit, normalize requested names only for "
+            "matching with `{str(name).strip().casefold() for name in "
+            "selected_names}`. Reject any requested key absent from the "
+            "enabled-name lookup (including disabled names), and "
+            "filter the ordered project entries by that lookup. Do not return "
+            "selection order or ignore requested names.",
+        ])
+    if "tuple of dicts" in text or "tuple of dictionaries" in text:
+        guidance.append(
+            "- Build one dictionary per selected item using exactly the requested "
+            "field names and value derivations, then return a tuple of those "
+            "dictionaries. A tuple of names or keys is not the requested shape."
+        )
+        helper_match = re.search(r"\busing\s+([a-zA-Z_]\w*)\b", text)
+        if helper_match:
+            helper = helper_match.group(1)
+            guidance.append(
+                f"- Call the existing `{helper}` helper to obtain the selected "
+                "items, then create the requested dictionary rows from its "
+                "return value. Import the existing helper if needed; do not "
+                "redefine it as a nested function or return its names directly."
+            )
     return "\n".join(guidance)
 
 

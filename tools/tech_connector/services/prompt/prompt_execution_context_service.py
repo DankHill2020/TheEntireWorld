@@ -220,7 +220,7 @@ def _model_json(system: str, packet: dict[str, Any], *, timeout: int | None = No
             confidence=(packet.get("semantic_hypothesis") or {}).get("confidence"),
             settings=settings,
         )
-        model = os.environ.get("AI_STUDIO_PLANNING_MODEL", "qwen3:4b-instruct")
+        model = os.environ.get("AI_STUDIO_PLANNING_MODEL", "qwen3.5:4b")
         options = build_ollama_options(
             num_ctx=budget.num_ctx,
             num_predict=max(int(budget.num_predict), 2048),

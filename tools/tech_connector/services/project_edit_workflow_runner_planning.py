@@ -1,11 +1,138 @@
 """Project-edit workflow phase: _run_planning_phase."""
 
 from __future__ import annotations
+import re
+from typing import Any
+
 from tech_connector.services import project_edit_workflow_runner_dependencies as _deps
 from tech_connector.services.project_edit_requirement_semantics import (
     is_project_edit_quality_requirement as _is_project_edit_quality_requirement,
 )
 from tech_connector.services.project_edit_workflow_runner_control import _WorkflowReturn
+
+
+def _declaration_surface_timeout(selected_model: str) -> int:
+    """Allow an account-backed coding model a bounded cold-start margin."""
+
+    explicit_cloud = str(selected_model or "").lower().startswith(
+        ("anthropic:", "claude:", "openai:", "google:", "gemini:", "x:", "grok:")
+    )
+    return 90 if explicit_cloud else 60
+
+
+def _is_self_contained_offline_snapshot_request(prompt: str) -> bool:
+    """Do not resolve host APIs for explicitly host-free snapshot helpers."""
+
+    return bool(
+        re.search(r"\bpure[- ]python\b", prompt, flags=re.IGNORECASE)
+        and re.search(r"\bsnapshot\b", prompt, flags=re.IGNORECASE)
+        and re.search(
+            r"\bwithout\b[^.!?\n]{0,80}\b(?:installed|running)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        and not re.search(
+            r"\b(?:bpy|pyfbsdk|maya\.cmds|unreal|substance_painter)\."
+            r"|\b(?:use|using|call|invoke)\s+[A-Z][A-Za-z0-9_]*\."
+            r"[A-Za-z_]\w*"
+            r"|\b(?:use|using|call|invoke)\s+(?:\w+\s+){0,4}"
+            r"(?:host\s+)?(?:API|SDK|plugin)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_file_scope_requirement(text: str) -> bool:
+    """Identify a file-target directive with no executable behavior clause."""
+
+    if re.fullmatch(
+        r"\s*(?:modify|edit|change|touch)\s+only\s+"
+        r"(?:(?:those|these|the\s+(?:named|listed|specified|requested))\s+)?"
+        r"(?:files|modules|paths)\s*",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    text = re.sub(r",\s+and\s+", ", ", text, flags=re.IGNORECASE)
+    file_list = r"(?:[\w./\\-]+\.py\s*(?:(?:,|and|&)\s*)?)+"
+    if re.fullmatch(
+        r"\s*(?:fix|edit|modify|update|repair)\s+"
+        + file_list + r"\s*",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    umbrella = re.fullmatch(
+        r"\s*(?:fix|edit|modify|update|repair)\s+(?:the\s+)?"
+        r"(?P<subject>[\w -]{3,120}?)\s+across\s+" + file_list + r"\s*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not umbrella:
+        return False
+    # An umbrella scope sentence is not a second executable operation. Keep
+    # actual behavior clauses on the callable owners instead.
+    return not re.search(
+        r"\b(?:to|by|that|which|when|while|must|should)\b",
+        umbrella.group("subject"),
+        flags=re.IGNORECASE,
+    )
+
+
+def _is_module_constant_requirement(text: str) -> bool:
+    """Recognize a contract for a named module-level constant or registry."""
+
+    return bool(re.match(
+        r"\s*[A-Z][A-Z0-9_]*(?:\[['\"][^'\"]+['\"]\])?\s+"
+        r"(?:must|should)\b",
+        text,
+    ))
+
+
+def _recover_unique_callable_owner_assignments(
+    assignments: list[dict[str, Any]],
+    declarations: list[dict[str, Any]],
+) -> list[str]:
+    """Move executable module-only work to the sole approved owner in a file."""
+
+    by_id = {
+        str(row.get("declaration_id") or ""): row
+        for row in declarations
+        if isinstance(row, dict)
+    }
+    recovered: list[str] = []
+    for assignment in assignments:
+        if str(assignment.get("semantic_role") or "") not in {
+            "behavior", "integration", "interaction"
+        }:
+            continue
+        assigned_rows = [by_id.get(str(value)) for value in assignment.get("declaration_ids") or []]
+        if not assigned_rows or any(
+            row is None or str(row.get("owner") or "") != "<module>"
+            for row in assigned_rows
+        ):
+            continue
+        paths = {str(row.get("path") or "") for row in assigned_rows if row is not None}
+        if len(paths) != 1:
+            continue
+        path = next(iter(paths))
+        candidates = [
+            row for row in declarations
+            if str(row.get("path") or "") == path
+            and str(row.get("owner") or "") not in {"", "<module>"}
+        ]
+        if len({str(row.get("owner") or "") for row in candidates}) != 1:
+            continue
+        assignment["declaration_ids"] = list(dict.fromkeys(
+            str(row.get("declaration_id") or "") for row in candidates
+        ))
+        assignment["reason"] = (
+            "Recovered the file's unique approved callable owner from "
+            "module-only behavior assignment"
+        )
+        recovered.append(str(assignment.get("requirement_id") or ""))
+    return recovered
 
 
 class _ProjectEditPlanningPhase:
@@ -23,6 +150,14 @@ class _ProjectEditPlanningPhase:
         )
         if not self.resolved_route.cloud_active:
             self.selected_model = self.resolved_route.model
+            # Keep the installed quality coder resident for a project edit.
+            # Alternating fast and deep models across stages adds load stalls
+            # and leaves complex local-only repairs to the 4B chat lane.
+            from tech_connector.services.ollama_service import installed_local_quality_model
+
+            self.selected_model = installed_local_quality_model(
+                self.selected_model, self.settings
+            )
         self.root = str(_deps.Path(self.project_root).resolve())
         self.user_prompt = str(self.original_prompt or self.prompt)
         self.workflow_prompt = self.prompt
@@ -434,7 +569,7 @@ class _ProjectEditPlanningPhase:
                     self.user_prompt,
                     flags=_deps.re.IGNORECASE,
                 )
-            )
+            ) and not _is_self_contained_offline_snapshot_request(self.user_prompt)
             if self.requires_external_grounding:
                 self.preplan_grounding = self.build_symbol_evidence_packet(
                     self.user_prompt,
@@ -665,7 +800,7 @@ class _ProjectEditPlanningPhase:
                 model_tier="local_reasoning",
                 num_ctx=4096,
                 num_predict=900,
-                timeout=60,
+                timeout=_declaration_surface_timeout(self.selected_model),
                 no_progress_seconds=20,
                 prefer_coder=True,
                 coder_preference="standard",
@@ -1641,6 +1776,15 @@ class _ProjectEditPlanningPhase:
         self.artifact_file_stages = list(
             _deps.build_project_edit_artifact_file_stages(self.plan, self.manifest)
         )
+        for requirement in self.requirement_ledger:
+            if isinstance(requirement, dict) and _is_file_scope_requirement(
+                str(requirement.get("text") or "")
+            ):
+                requirement["semantic_role"] = "structure"
+            elif isinstance(requirement, dict) and _is_module_constant_requirement(
+                str(requirement.get("text") or "")
+            ):
+                requirement["semantic_role"] = "constant"
         self.chunk_generated_by_path: dict[str, str] = {}
         if self.early_cached_approval:
             self.chunk_plan = [
@@ -1687,12 +1831,10 @@ class _ProjectEditPlanningPhase:
                     flags=_deps.re.IGNORECASE,
                 ):
                     self.assignment["semantic_role"] = "structure"
-                elif _deps.re.search(
-                    "^\\s*(?:fix|edit|modify|update)\\s+[^.!?\\n]*\\.py\\s*$",
-                    self.requirement_text,
-                    flags=_deps.re.IGNORECASE,
-                ):
+                elif _is_file_scope_requirement(self.requirement_text):
                     self.assignment["semantic_role"] = "structure"
+                elif _is_module_constant_requirement(self.requirement_text):
+                    self.assignment["semantic_role"] = "constant"
                 elif _deps.re.search(
                     r"\bimports?\b",
                     self.requirement_text,
@@ -1864,6 +2006,35 @@ class _ProjectEditPlanningPhase:
                 if isinstance(item, _deps.Mapping)
                 and str(item.get("declaration_id") or "")
             ]
+            if _is_file_scope_requirement(
+                str(self.unresolved_requirement.get("text") or "")
+            ):
+                scope_text = str(self.unresolved_requirement.get("text") or "").casefold()
+                module_rows = [
+                    row for row in self.allowed_declarations
+                    if str(row.get("owner") or "") == "<module>"
+                    and _deps.Path(str(row.get("path") or "")).name.casefold()
+                    in scope_text
+                ]
+                module_names = [
+                    _deps.Path(str(row.get("path") or "")).name.casefold()
+                    for row in module_rows
+                ]
+                if module_rows and len(module_names) == len(set(module_names)):
+                    self.chunk_plan.append({
+                        "requirement_id": self.requirement_id,
+                        "declaration_ids": [
+                            str(row["declaration_id"]) for row in module_rows
+                        ],
+                        "semantic_role": "structure",
+                        "reason": "File-scope directive applies to named module files",
+                    })
+                    if self.status_callback:
+                        self.status_callback(
+                            f"Resolved file-scope requirement {self.requirement_id} "
+                            "to named modules without model ownership inference"
+                        )
+                    continue
             self.prior_failure_fingerprints: set[str] = set()
             for self.chunk_plan_attempt in range(1, 4):
                 if self.status_callback:
@@ -1893,6 +2064,16 @@ class _ProjectEditPlanningPhase:
                         self.chunk_plan_response, stage=self.requirement_stage
                     )
                 )
+                if _is_file_scope_requirement(
+                    str(self.unresolved_requirement.get("text") or "")
+                ):
+                    for assignment in self.resolved_assignment:
+                        assignment["semantic_role"] = "structure"
+                elif _is_module_constant_requirement(
+                    str(self.unresolved_requirement.get("text") or "")
+                ):
+                    for assignment in self.resolved_assignment:
+                        assignment["semantic_role"] = "constant"
                 self.chunk_plan_timing.update(
                     {
                         "attempt": self.chunk_plan_attempt,
@@ -1959,6 +2140,16 @@ class _ProjectEditPlanningPhase:
             else:
                 self.unresolved_plan_failures.append(
                     f"{self.requirement_id}: " + " | ".join(self.requirement_errors[:4])
+                )
+        recovered_ids = _recover_unique_callable_owner_assignments(
+            self.chunk_plan,
+            list((self.chunk_plan_stage.metadata or {}).get("declarations", [])),
+        )
+        if self.status_callback:
+            for requirement_id in recovered_ids:
+                self.status_callback(
+                    f"Recovered {requirement_id} from module-only behavior ownership "
+                    "to the file's unique approved callable owner."
                 )
         self.required_ids = {
             str(item.get("id") or item.get("requirement_id") or "")

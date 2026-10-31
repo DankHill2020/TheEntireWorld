@@ -1429,10 +1429,16 @@ def _rank_route_candidates_with_fnn(
     hosts: list[str],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     try:
-        from tech_connector.game_engine.integration.dcc_operation_service import dcc_prompt_to_operation
-        from tech_connector.services.reasoning.request_understanding_fnn_service import SUPPORTED_DCC_HOSTS, score_prompt_routes
+        from tech_connector.services.reasoning.request_understanding_fnn_service import score_prompt_routes
 
-        registered_dcc_hint = bool(host in SUPPORTED_DCC_HOSTS and dcc_prompt_to_operation(host, text))
+        # This registry has no Unreal operations. Importing it for every Unreal
+        # prompt eagerly loads the entire game-engine package (including GPU
+        # setup) just to obtain a hint that must be false.
+        registered_dcc_hint = False
+        if host in {"maya", "blender", "substance_painter", "motionbuilder", "unity", "houdini"}:
+            from tech_connector.game_engine.integration.dcc_operation_service import dcc_prompt_to_operation
+
+            registered_dcc_hint = bool(dcc_prompt_to_operation(host, text))
         result = score_prompt_routes(text, host=host, hosts=hosts, registered_dcc_hint=registered_dcc_hint)
     except Exception:
         return candidates, {}

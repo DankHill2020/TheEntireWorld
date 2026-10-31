@@ -252,6 +252,24 @@ def _normalize_manifest_contract(response: str, prompt: str) -> str:
 _REPAIR_FAILURE_HISTORY: dict[str, dict[str, Any]] = {}
 
 
+def _disable_local_thinking_for_code_repair(
+    model: str, stage_key: str
+) -> bool:
+    """Reserve bounded local output tokens for code or structured repair artifacts."""
+
+    return (
+        str(model).startswith(("qwen3.5:", "qwen3:4b"))
+        and stage_key in {
+            "function_repair",
+            "class_repair",
+            "class_set_repair",
+            "missing_symbol",
+            "artifact_missing_symbol",
+            "runtime_snapshot_repair_analysis",
+        }
+    )
+
+
 def _query_stage(
     stage: ProjectEditPromptStage,
     *,
@@ -268,6 +286,13 @@ def _query_stage(
             selected_model=None,
         )
     )
+    if stage.key in {
+        "class_repair", "class_set_repair", "function_repair",
+        "final_requirement_review",
+    }:
+        from tech_connector.services.ollama_service import installed_local_quality_model
+
+        model = installed_local_quality_model(model, settings)
     explicit_cloud = str(selected_model or "").lower().startswith(
         ("anthropic:", "claude:", "openai:", "google:", "gemini:", "x:", "grok:")
     )
@@ -281,6 +306,24 @@ def _query_stage(
         if selected_model and not explicit_cloud
         else None
     )
+    output_budget = stage.num_predict
+    if stage.key == "ephemeral_behavior_harness" and provider_route is not None:
+        # Unbounded local proof output can exhaust the call's wall limit and
+        # discard every generated test before the parser can salvage a batch.
+        output_budget = 2400 if output_budget < 0 else min(output_budget, 2400)
+    # An account-backed provider launches an official CLI for each stage. Its
+    # startup/auth/session overhead can exceed a local model stage's 45-second
+    # ceiling even while the request is making progress. Keep the caller's
+    # explicit budget authoritative, but give this transport enough time to
+    # finish one bounded call. API-key and local routes keep their stage caps.
+    account_cli_route = (
+        resolve_llm_provider_route(model, settings)
+        if explicit_cloud else None
+    )
+    stage_timeout = int(stage.timeout)
+    if account_cli_route is not None and account_cli_route.transport == "account":
+        stage_timeout = max(stage_timeout, 120)
+    call_timeout = min(int(timeout), stage_timeout)
     started = time.perf_counter()
     call_error = ""
     try:
@@ -365,6 +408,9 @@ def _query_stage(
         if response is not None:
             print(f"      Repair plan: deterministic ({stage.key}); model call skipped")
         else:
+            repair_effort = str(
+                stage_metadata.get("repair_reasoning_effort") or ""
+            ).strip().lower()
             response = generate_llm_response(
                 model=model,
                 system=compact_system_prompt,
@@ -373,17 +419,27 @@ def _query_stage(
                 options={
                     "temperature": repair_temperature,
                     "num_ctx": stage.num_ctx,
-                    "num_predict": stage.num_predict,
+                    "num_predict": output_budget,
+                    **(
+                        {"reasoning_effort": repair_effort}
+                        if explicit_cloud
+                        and model.lower().startswith("openai:")
+                        and repair_effort in {"low", "medium", "high"}
+                        else {}
+                    ),
                     "think": (
                         False
                         if stage_metadata.get("disable_thinking")
+                        or _disable_local_thinking_for_code_repair(model, stage.key)
                         else None
                     ),
                 },
-                timeout=max(int(timeout), int(stage.timeout)),
+                # Both limits are per-call ceilings. An explicit caller budget
+                # must not be extended by a stage's default timeout.
+                timeout=call_timeout,
                 provider_route=provider_route,
                 no_progress_seconds=stage.no_progress_seconds,
-                max_wall_seconds=max(int(timeout), int(stage.timeout)),
+                max_wall_seconds=call_timeout,
                 queue_category="repair",
             )
         response, normalized_fence = normalize_repair_response(stage, response)
@@ -2302,12 +2358,13 @@ def _production_callables_exercised_by_tests(
     generated_files: list[tuple[str, str, str]],
     test_targets: list[dict[str, str]],
 ) -> list[dict[str, str]]:
-    """Resolve production methods reached by failing tests through AST call links."""
+    """Resolve production callables used or introspected by failing tests."""
 
     source_by_path = {
         str(path): source for path, _original, source in generated_files
     }
     exercised: set[tuple[str, str]] = set()
+    referenced_functions: set[tuple[str, str]] = set()
     for target in test_targets:
         path = str(target.get("path") or "")
         symbol = str(target.get("symbol") or "")
@@ -2338,6 +2395,18 @@ def _production_callables_exercised_by_tests(
                 break
         if test_node is None:
             continue
+        imported_symbols: dict[str, tuple[str, str]] = {}
+        for import_node in tree.body:
+            if not isinstance(import_node, ast.ImportFrom) or not import_node.module:
+                continue
+            module_suffix = import_node.module.replace(".", "/") + ".py"
+            for alias in import_node.names:
+                imported_symbols[alias.asname or alias.name] = (module_suffix, alias.name)
+        for node in ast.walk(test_node):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                imported = imported_symbols.get(node.id)
+                if imported is not None:
+                    referenced_functions.add(imported)
         instance_types: dict[str, str] = {}
         for node in ast.walk(test_node):
             if (
@@ -2370,6 +2439,13 @@ def _production_callables_exercised_by_tests(
         except SyntaxError:
             continue
         for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                source_path.replace("\\", "/").endswith(module_suffix)
+                and node.name == function_name
+                for module_suffix, function_name in referenced_functions
+                for source_path in (str(path),)
+            ):
+                targets.append({"path": str(path), "symbol": node.name})
             if not isinstance(node, ast.ClassDef):
                 continue
             for member in node.body:

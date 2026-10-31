@@ -81,7 +81,9 @@ class ProceduralAnimationRuntime:
         delta_time: float,
         character_speed: float = 0.0,
         weight: float = 1.0,
+        foot_contacts: Optional[Mapping[str, bool]] = None,
     ) -> ProceduralAnimationFrame:
+        """Solve world-space feet; explicit per-foot contacts override the idle-speed heuristic."""
         dt = max(0.0, float(delta_time))
         blend_weight = _clamp(float(weight), 0.0, 1.0)
         results: dict[str, LimbIKResult] = {}
@@ -110,9 +112,10 @@ class ProceduralAnimationRuntime:
             alpha = 1.0 - math.exp(-max(0.0, settings.position_smoothing) * dt) if dt else 1.0
             smoothed = _lerp(previous, target, alpha)
             self._foot_targets[limb_id] = smoothed
-            planted = grounded and abs(float(character_speed)) <= max(0.0, settings.plant_speed_threshold)
+            planted = grounded and (bool(foot_contacts.get(limb_id, False)) if foot_contacts is not None
+                                    else abs(float(character_speed)) <= max(0.0, settings.plant_speed_threshold))
             if planted:
-                plant = self._plant_targets.setdefault(limb_id, smoothed)
+                plant = self._plant_targets.setdefault(limb_id, target if foot_contacts is not None else smoothed)
                 smoothed = _lerp(smoothed, plant, blend_weight)
             else:
                 self._plant_targets.pop(limb_id, None)
@@ -142,15 +145,23 @@ def solve_two_bone_ik(
     *,
     maximum_stretch: float = 1.0,
 ) -> tuple[Vector3, Vector3, float]:
+    """Solve a two-bone chain while preserving its authored bend in stretch.
+
+    Once the target passes the original bent root-to-end reach, both segments
+    scale from that chord. This retains the input bend angle instead of making
+    the scaled segment sum exactly equal to the target distance.
+    """
     root, joint, end, target = map(_vec, (root, joint, end, target))
     upper = max(1.0e-8, _length(_subtract(joint, root)))
     lower = max(1.0e-8, _length(_subtract(end, joint)))
     to_target = _subtract(target, root)
     distance = _length(to_target)
-    maximum = (upper + lower) * max(1.0, float(maximum_stretch))
+    rest_reach = max(1.0e-8, _length(_subtract(end, root)))
+    maximum_ratio = max(1.0, float(maximum_stretch))
+    stretch_ratio = _clamp(distance / rest_reach, 1.0, maximum_ratio)
+    maximum = rest_reach * maximum_ratio
     solved_distance = _clamp(distance, abs(upper - lower) + 1.0e-7, maximum)
     direction = _normalize(to_target, (0.0, -1.0, 0.0))
-    stretch_ratio = max(1.0, solved_distance / (upper + lower))
     effective_upper, effective_lower = upper * stretch_ratio, lower * stretch_ratio
     reach = min(solved_distance, effective_upper + effective_lower - 1.0e-7)
     along = (effective_upper * effective_upper - effective_lower * effective_lower + reach * reach) / (2.0 * reach)
@@ -159,7 +170,9 @@ def solve_two_bone_ik(
     plane_normal = _normalize(_cross(direction, pole_direction), (1.0, 0.0, 0.0))
     bend_direction = _normalize(_cross(plane_normal, direction), (0.0, 0.0, 1.0))
     solved_joint = _add(_add(root, _scale(direction, along)), _scale(bend_direction, height))
-    solved_end = _add(root, _scale(direction, min(distance, maximum)))
+    # An end target inside the limb's minimum reach must be projected outward;
+    # otherwise the returned joint and end violate the original bone lengths.
+    solved_end = _add(root, _scale(direction, solved_distance))
     return solved_joint, solved_end, stretch_ratio
 
 

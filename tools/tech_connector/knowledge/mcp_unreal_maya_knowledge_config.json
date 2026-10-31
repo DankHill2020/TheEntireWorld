@@ -11,30 +11,97 @@
     },
     "knowledge": {
       "type": "stdio",
-      "command": "python",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\knowledge\\knowledge_mcp_server_v2.py"
       ]
     },
+    "maya": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "maya"
+      ]
+    },
+    "blender": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "blender"
+      ]
+    },
+    "houdini": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "houdini"
+      ]
+    },
+    "unity": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "unity"
+      ]
+    },
     "motionbuilder": {
       "type": "stdio",
-      "command": "python",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
-        "C:\\depot\\tools\\tech_connector\\bridges\\motionbuilder\\motionbuilder_mcp_server.py"
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "motionbuilder"
+      ]
+    },
+    "3dsmax": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "3dsmax"
+      ]
+    },
+    "substance_painter": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "substance_painter"
+      ]
+    },
+    "photoshop": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "photoshop"
+      ]
+    },
+    "gimp": {
+      "type": "stdio",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\depot\\tools\\tech_connector\\bridges\\host_mcp_server.py",
+        "--host",
+        "gimp"
       ]
     },
     "unreal": {
       "type": "stdio",
-      "command": "python",
+      "command": "C:\\depot\\tools\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\depot\\tools\\tech_connector\\bridges\\unreal\\unreal_mcp_server.py"
-      ]
-    },
-    "maya": {
-      "type": "stdio",
-      "command": "python",
-      "args": [
-        "C:\\Desktop\\UnrealGenAISupport\\Content\\Python\\maya_mcp_server_quiet.py"
       ]
     }
   }

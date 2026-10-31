@@ -201,15 +201,50 @@ def _result_path(value: Any, path: str) -> Any:
     return current if found else None
 
 
-def resolve_output_references(value: Any, results: dict[str, Any]) -> Any:
+class OutputReferenceResolutionError(RuntimeError):
+    """Raised when a planned downstream input cannot resolve its upstream artifact."""
+
+
+def resolve_output_references(
+    value: Any,
+    results: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> Any:
     if isinstance(value, dict):
         if "from_action" in value and "result_path" in value:
             source = results.get(str(value.get("from_action"))) or {}
-            result = source.get("result", source)
-            return _result_path(result, str(value.get("result_path") or ""))
-        return {key: resolve_output_references(item, results) for key, item in value.items()}
+            path = str(value.get("result_path") or "")
+            queue = [source]
+            visited: set[int] = set()
+            while queue:
+                candidate = queue.pop(0)
+                identity = id(candidate)
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                found, resolved = _result_path_state(candidate, path)
+                if found:
+                    return resolved
+                if isinstance(candidate, dict):
+                    for envelope in (
+                        "result", "raw_result", "data", "structured_data", "python_result"
+                    ):
+                        nested = candidate.get(envelope)
+                        if isinstance(nested, (dict, list)):
+                            queue.append(nested)
+            if strict:
+                raise OutputReferenceResolutionError(
+                    f"Dependency output `{path}` was not produced by action "
+                    f"`{value.get('from_action')}`."
+                )
+            return None
+        return {
+            key: resolve_output_references(item, results, strict=strict)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [resolve_output_references(item, results) for item in value]
+        return [resolve_output_references(item, results, strict=strict) for item in value]
     return value
 
 
@@ -592,21 +627,69 @@ class ActionExecutionEngine:
         graph = normalize_action_graph(plan)
         actions = graph.get("actions") or []
         mutating = [a for a in actions if a.get("requires_approval")]
+        mutation_details = []
+        for action in mutating:
+            args = dict(action.get("args") or {})
+            contract = dict(args.get("operation_contract") or {})
+            host = str(args.get("host") or contract.get("host") or "local")
+            operation = str(
+                args.get("operation") or contract.get("operation") or action.get("type") or "operation"
+            )
+            mutation_details.append({
+                "action_id": action["id"],
+                "action_type": action["type"],
+                "title": action.get("title"),
+                "mutability": action.get("mutability"),
+                "host": host,
+                "operation": operation,
+                "callable": str(args.get("callable") or contract.get("callable") or ""),
+                "effect": (
+                    f"Run `{operation}` in {host}; this may change the open scene or project."
+                    if action.get("type") == "execute_dcc"
+                    else f"Run `{action.get('title') or action.get('type')}`."
+                ),
+                "rollback": list(args.get("rollback") or contract.get("rollback") or []),
+                "targets": action.get("target_refs") or [],
+                "warnings": action.get("warnings") or [],
+            })
         return {
             "approval_required": bool(mutating),
             "read_only_actions": [a["id"] for a in actions if not a.get("requires_approval")],
-            "mutating_actions": [
-                {
-                    "action_id": a["id"],
-                    "action_type": a["type"],
-                    "title": a.get("title"),
-                    "mutability": a.get("mutability"),
-                    "targets": a.get("target_refs") or [],
-                    "warnings": a.get("warnings") or [],
-                }
-                for a in mutating
-            ],
+            "mutating_actions": mutation_details,
+            "summary": (
+                f"Confirmation covers {len(mutating)} mutating operation"
+                f"{'s' if len(mutating) != 1 else ''} across "
+                f"{len({row['host'] for row in mutation_details})} host"
+                f"{'s' if len({row['host'] for row in mutation_details}) != 1 else ''}."
+                if mutating else "No mutating operations require confirmation."
+            ),
         }
+
+    @staticmethod
+    def _pipeline_preflight(
+        graph: dict[str, Any],
+        context: ExecutionContext,
+        *,
+        require_live_sessions: bool,
+    ) -> dict[str, Any]:
+        from tech_connector.game_engine.integration.pipeline_execution_preflight_service import (
+            preflight_pipeline_execution,
+        )
+
+        ports = dict(
+            context.policy.get("dcc_session_ports")
+            or context.service("dcc_session_ports", {})
+            or {}
+        )
+        bridge_factory = context.service("pipeline_preflight_bridge_factory")
+        return preflight_pipeline_execution(
+            graph,
+            session_ports=ports,
+            require_live_sessions=require_live_sessions,
+            timeout_seconds=float(context.policy.get("pipeline_preflight_timeout_seconds", 5.0)),
+            bridge_factory=bridge_factory,
+            verify_live_context=require_live_sessions,
+        )
 
     def preflight_plan(self, plan: dict[str, Any], context: ExecutionContext | None = None) -> dict[str, Any]:
         context = context or ExecutionContext(dry_run=True)
@@ -620,11 +703,20 @@ class ActionExecutionEngine:
                 action_validations.append({"action_id": action["id"], "valid": False, "errors": ["unsupported action"]})
                 continue
             action_validations.append({"action_id": action["id"], **handler.validate(action, context)})
+        live_mode = str(context.policy.get("pipeline_live_preflight") or "structural").casefold()
+        pipeline_preflight = self._pipeline_preflight(
+            validation["graph"], context, require_live_sessions=live_mode == "required",
+        )
         return {
-            "valid": validation["valid"] and all(item.get("valid", True) for item in action_validations),
+            "valid": (
+                validation["valid"]
+                and all(item.get("valid", True) for item in action_validations)
+                and pipeline_preflight["ready"]
+            ),
             "validation": validation,
             "approval": approval,
             "action_validations": action_validations,
+            "pipeline_preflight": pipeline_preflight,
             "dry_run": True,
         }
 
@@ -644,9 +736,27 @@ class ActionExecutionEngine:
 
         self._emit(context, ActionEvent("plan_validated", execution_id, plan_id, status="ok", summary="Action plan validated"))
         approval = self.analyze_approval_requirements(graph)
+        structural_preflight = self._pipeline_preflight(
+            graph, context, require_live_sessions=False,
+        )
+        if not structural_preflight["ready"]:
+            report = self._final_report(
+                execution_id, plan_id, graph, "preflight_failed", validation,
+                approval, {}, preflight=structural_preflight,
+            )
+            self._executions[execution_id]["report"] = report
+            self._emit(context, ActionEvent(
+                "execution_completed", execution_id, plan_id, status="preflight_failed",
+                summary="Pipeline structural preflight failed",
+                diagnostics=structural_preflight,
+            ))
+            return report
         if approval["approval_required"] and not context.approved and not context.dry_run:
             self._emit(context, ActionEvent("approval_required", execution_id, plan_id, status="blocked", summary="Approval required before executing mutating actions", diagnostics=approval))
-            report = self._final_report(execution_id, plan_id, graph, "approval_required", validation, approval, {})
+            report = self._final_report(
+                execution_id, plan_id, graph, "approval_required", validation,
+                approval, {}, preflight=structural_preflight,
+            )
             self._executions[execution_id]["report"] = report
             return report
 
@@ -655,6 +765,28 @@ class ActionExecutionEngine:
             report = self._final_report(execution_id, plan_id, graph, "dry_run", validation, approval, {}, preflight=preflight)
             self._executions[execution_id]["report"] = report
             return report
+
+        live_mode = str(context.policy.get("pipeline_live_preflight") or "structural").casefold()
+        if live_mode == "required":
+            live_preflight = self._pipeline_preflight(
+                graph, context, require_live_sessions=True,
+            )
+            if not live_preflight["ready"]:
+                report = self._final_report(
+                    execution_id, plan_id, graph, "preflight_failed", validation,
+                    approval, {}, preflight=live_preflight,
+                )
+                self._executions[execution_id]["report"] = report
+                self._emit(context, ActionEvent(
+                    "execution_completed", execution_id, plan_id, status="preflight_failed",
+                    summary="One or more pipeline hosts are not ready",
+                    diagnostics=live_preflight,
+                ))
+                return report
+            context.policy["dcc_session_ports"] = {
+                **dict(context.policy.get("dcc_session_ports") or {}),
+                **dict(live_preflight.get("resolved_session_ports") or {}),
+            }
 
         self._emit(context, ActionEvent("execution_started", execution_id, plan_id, status="running", summary="Executing action plan"))
         results: dict[str, Any] = {}
@@ -694,7 +826,21 @@ class ActionExecutionEngine:
         previous_results = previous_results or {}
         handler = self.registry.require(action["type"])
         action = copy.deepcopy(action)
-        action["args"] = resolve_output_references(action.get("args") or {}, previous_results)
+        try:
+            action["args"] = resolve_output_references(
+                action.get("args") or {}, previous_results, strict=True,
+            )
+        except OutputReferenceResolutionError as exc:
+            raw = {
+                "ok": False,
+                "status": "dependency_failed",
+                "error": str(exc),
+                "retryable": False,
+            }
+            supervised = self._normalize_action_result(
+                action, handler, raw, context=execution_context, retry_count=0,
+            )
+            return supervised.to_dict()
         action["input"] = action["args"]
         if execution_id and plan_id:
             self._emit(execution_context, ActionEvent("action_started", execution_id, plan_id, action["id"], action["type"], "running", f"Running {action['type']}"))
@@ -1909,6 +2055,73 @@ def _handle_execute_dcc(
     if not operation and params.get("code") and host in {"maya", "blender", "houdini"}:
         operation = "script.run"
     query_only = force_query or str(args.get("operation_mode") or "").lower() == "query"
+
+    if operation_contract and callable_name and not context.dry_run:
+        mutates_project = bool(operation_contract.get("mutates_project", action.get("requires_approval")))
+        if mutates_project and not query_only and not context.approved:
+            return {
+                "ok": False,
+                "status": "approval_required",
+                "error": f"Approval is required before `{host}:{operation}` mutates the host project.",
+            }
+
+        def resolve_runtime_values(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: resolve_runtime_values(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [resolve_runtime_values(item) for item in value]
+            if isinstance(value, str) and "${pipeline_workspace}" in value:
+                configured = str(context.policy.get("pipeline_workspace") or "").strip()
+                workspace = Path(configured) if configured else temp_output_path(
+                    "artifacts", subdir="dcc_pipelines"
+                ).parent
+                workspace.mkdir(parents=True, exist_ok=True)
+                return value.replace("${pipeline_workspace}", str(workspace).replace("\\", "/"))
+            return value
+
+        from tech_connector.game_engine.integration.pipeline_operation_runtime_service import (
+            execute_pipeline_operation,
+        )
+
+        session_ports = dict(
+            context.policy.get("dcc_session_ports")
+            or context.service("dcc_session_ports", {})
+            or {}
+        )
+        session_port = session_ports.get(host)
+        retry_attempts = max(0, int(context.policy.get("dcc_retry_attempts", 1)))
+        try:
+            result = execute_pipeline_operation(
+                host,
+                operation,
+                callable_name,
+                resolve_runtime_values(params),
+                session_port=int(session_port) if session_port not in (None, "") else None,
+                timeout_seconds=float(context.policy.get(
+                    "dcc_timeout_seconds",
+                    300.0 if host == "maya" and operation == "animation.fbx_to_engine" else 120.0,
+                )),
+                cancel_token=context.cancellation_token,
+                retry_attempts=retry_attempts,
+                retry_safe=not mutates_project,
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": str(exc),
+                "host": host,
+                "operation": operation,
+                "session_port": session_port,
+            }
+        return {
+            "ok": True,
+            "status": "completed",
+            "host": host,
+            "operation": operation,
+            "session_port": session_port,
+            "result": result,
+        }
 
     route_decision = {
         "route": "dcc_query" if query_only else "dcc_execute",

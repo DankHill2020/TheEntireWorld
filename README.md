@@ -20,7 +20,7 @@ Repository model: **complete public source-available monorepo**
 > must also be registered.
 >
 > Copyright remains with **The Entire World, LLC**. Read the repository
-> [LICENSE](LICENSE), the controlling
+> [LICENSE](LICENSE.md), the controlling
 > [Tech Connector Community Source License](tools/tech_connector/LICENSE.md),
 > and the [source-access model](tools/tech_connector/docs/SOURCE_ACCESS_MODEL.md).
 
@@ -217,6 +217,11 @@ import. Current repository validation covers licensing, startup enforcement,
 offline entitlement policy, device/project authorization, DCC workflows,
 authoring/runtime behavior, package staging, and release gates.
 
+Official Windows release candidates also carry an Authenticode publisher
+signature, SHA-256 sidecar, release manifest, and GitHub artifact attestation.
+See [release verification](tools/tech_connector/docs/operations/SIGNED_RELEASES.md#verifying-a-downloaded-release)
+for the independent checks to perform before running an installer.
+
 ## Documentation
 
 - [Core overview](tools/tech_connector/README.md)
@@ -229,6 +234,8 @@ authoring/runtime behavior, package staging, and release gates.
 - [Federated DCC viewport](tools/tech_connector/docs/FEDERATED_DCC_VIEWPORT.md)
 - [Headless API](tools/tech_connector/docs/HEADLESS_API.md)
 - [Licensing launch readiness](tools/tech_connector/docs/LICENSING_LAUNCH_READINESS.md)
+- [Release signature and provenance verification](tools/tech_connector/docs/operations/SIGNED_RELEASES.md#verifying-a-downloaded-release)
+- [Security policy and private reporting](SECURITY.md)
 - [Contribution policy](tools/tech_connector/CONTRIBUTING.md)
 
 ## Release-status note

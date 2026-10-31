@@ -1,0 +1,148 @@
+{
+  "schema": "tech_connector.windows_player_build.v1",
+  "target": "windows_pc",
+  "controller_backend": "XInput",
+  "source_scene": "C:\\depot\\tools\\test_tmp_long_path_save_exploration_acceptance_20261023\\runs\\exploration-1792781792334586900\\workspace\\Assets\\Levels\\L_ThirdPersonAcceptance_Default.tcscene",
+  "runtime_manifest": "Content/main.tcruntime",
+  "player": "TCPlayer.exe",
+  "entities": 7,
+  "assets": [
+    "tc.asset.14f25a3cd6b19714",
+    "tc.asset.18a2820c6f8e3210",
+    "tc.asset.2c6d4b5e99bbe921",
+    "tc.asset.44f8a2b5dbf54e5b",
+    "tc.asset.4cd74032d68e9dd0",
+    "tc.asset.5926f39e31ea4c68a1b15d6e438f0855",
+    "tc.asset.6e8bcd96b27d64bd",
+    "tc.asset.851fa84d330c4b84",
+    "tc.asset.b149d1e3e6d76ae8",
+    "tc.asset.b33fdae4154ef7ad",
+    "tc.asset.c09f6d274b427cad",
+    "tc.asset.e30c1421ed919668"
+  ],
+  "graph_operations": 8,
+  "warnings": [],
+  "platform_capabilities": {
+    "schema": "tech_connector.runtime_platform_capabilities.v1",
+    "build_host": "windows",
+    "targets": {
+      "windows": {
+        "package_builder": true,
+        "windowed_player": true,
+        "headless_player": true,
+        "renderer": "Direct3D 11"
+      },
+      "xbox_series_xs": {
+        "package_builder": false,
+        "windowed_player": false,
+        "headless_player": false,
+        "renderer": "none",
+        "requirements": [
+          "GDKX project and Xbox-compatible platform services",
+          "Xbox D3D12 renderer and shader pipeline",
+          "console input, audio, storage, lifecycle, and packaging adapters",
+          "Xbox development hardware and acceptance runs"
+        ]
+      },
+      "ps5": {
+        "package_builder": false,
+        "windowed_player": false,
+        "headless_player": false,
+        "renderer": "none",
+        "requirements": [
+          "PlayStation partner SDK and project",
+          "PS5 graphics and shader backend",
+          "console input, audio, storage, lifecycle, and packaging adapters",
+          "PS5 development hardware and acceptance runs"
+        ]
+      },
+      "linux": {
+        "package_builder": false,
+        "windowed_player": false,
+        "headless_player": true,
+        "renderer": "none"
+      },
+      "macos": {
+        "package_builder": false,
+        "windowed_player": false,
+        "headless_player": true,
+        "renderer": "none"
+      }
+    },
+    "limitations": [
+      "Packaged graphical builds currently target Windows and Direct3D 11 only.",
+      "Xbox Series X|S and PS5 console packages are not implemented or qualified.",
+      "Non-Windows native builds provide the headless runtime; Vulkan and Metal backends are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "passed",
+    "frames": 2,
+    "exit_code": 0,
+    "profile": "Content/build-validation-profile.jsonl",
+    "profile_summary": {
+      "frames": 2,
+      "frame": {
+        "average_ms": 0.05235,
+        "p95_ms": 0.0697,
+        "maximum_ms": 0.0697
+      },
+      "graph": {
+        "average_ms": 0.0253,
+        "p95_ms": 0.0286,
+        "maximum_ms": 0.0286
+      },
+      "physics": {
+        "average_ms": 0.027,
+        "p95_ms": 0.041,
+        "maximum_ms": 0.041
+      },
+      "gpu": {
+        "average_ms": 0.0,
+        "p95_ms": 0.0,
+        "maximum_ms": 0.0
+      },
+      "diagnostics": [],
+      "graph_trace": [
+        "OK template_ready event.emit",
+        "OK locomotion_idle animation.play",
+        "OK acceptance_audio audio.play",
+        "OK acceptance_stereo_audio audio.play",
+        "OK player_move character.move",
+        "OK player_jump character.jump",
+        "OK locomotion_animation animation.locomotion",
+        "OK camera_follow camera.follow",
+        "OK player_move character.move",
+        "OK player_jump character.jump",
+        "OK locomotion_animation animation.locomotion",
+        "OK camera_follow camera.follow"
+      ]
+    },
+    "assets": {
+      "status": "passed",
+      "verified_assets": [
+        "tc.asset.14f25a3cd6b19714",
+        "tc.asset.18a2820c6f8e3210",
+        "tc.asset.2c6d4b5e99bbe921",
+        "tc.asset.44f8a2b5dbf54e5b",
+        "tc.asset.4cd74032d68e9dd0",
+        "tc.asset.5926f39e31ea4c68a1b15d6e438f0855",
+        "tc.asset.6e8bcd96b27d64bd",
+        "tc.asset.851fa84d330c4b84",
+        "tc.asset.b149d1e3e6d76ae8",
+        "tc.asset.b33fdae4154ef7ad"
+      ],
+      "verified_count": 10,
+      "verified_bytes": 6922355
+    }
+  },
+  "manual_preview_overlay": {
+    "source_validation_note": "The validation block above was copied from the source acceptance package before this WASD preview overlay.",
+    "scene_id": "6ceca4e099a946faa31d87c9",
+    "runtime_manifest_sha256": "EC90553F40B188483B6AB00109E73451B3C748F2498D14443E94B1E9D6CD37F1",
+    "player_sha256": "57E9E070BE093AD5345C48B9CEFB6B40A49F716D481BC25A39D723D7C3E9EC01",
+    "headless_preview_validation": "120 frames and isolated save/reload, migration, corruption, semantic, pending-write, and backup recovery checks passed on the current Player build on 2026-10-24",
+    "windowed_preview_validation": "not run at user request",
+    "release_qualification": "not established"
+  }
+}

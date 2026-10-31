@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +133,9 @@ def create_character(character_name: str, definition_file: str = "") -> dict[str
 
 def plot_animation(character_name: str, plot_to_rig: bool = True, fps: int = 30) -> dict[str, Any]:
     sdk = _sdk()
+    frame_rate = float(fps)
+    if not math.isfinite(frame_rate) or frame_rate <= 0:
+        raise ValueError("fps must be a positive finite number")
     character = _character(sdk, str(character_name))
     if character is None:
         raise ValueError(f"MotionBuilder character does not exist: {character_name}")
@@ -140,7 +144,9 @@ def plot_animation(character_name: str, plot_to_rig: bool = True, fps: int = 30)
     options = sdk.FBPlotOptions()
     options.PlotAllTakes = False
     options.PlotOnFrame = True
-    options.PlotPeriod = sdk.FBTime(0, 0, 0, 1)
+    plot_period = sdk.FBTime()
+    plot_period.SetSecondDouble(1.0 / frame_rate)
+    options.PlotPeriod = plot_period
     options.PlotTranslationOnRootOnly = False
     options.PreciseTimeDiscontinuities = False
     options.UseConstantKeyReducer = False
@@ -155,7 +161,7 @@ def plot_animation(character_name: str, plot_to_rig: bool = True, fps: int = 30)
         "ok": True,
         "character": str(character.Name),
         "plot_destination": "control_rig" if plot_to_rig else "skeleton",
-        "fps": int(fps),
+        "fps": frame_rate,
         "take": str(getattr(sdk.FBSystem().CurrentTake, "Name", "")),
     }
 

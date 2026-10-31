@@ -404,6 +404,42 @@ def enrich_implementation_plan(
             ).split("(", 1)[0].strip()
         return str(symbol or "").split("(", 1)[0].strip()
 
+    def _existing_dataclass(path: str, owner: str) -> ast.ClassDef | None:
+        """Ground a preserved data model in its source, not requirement prose."""
+
+        source_path = Path(path)
+        if not source_path.is_file():
+            return None
+        try:
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, SyntaxError):
+            return None
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.name != owner:
+                continue
+            if any(
+                (
+                    isinstance(decorator, ast.Name)
+                    and decorator.id == "dataclass"
+                )
+                or (
+                    isinstance(decorator, ast.Attribute)
+                    and decorator.attr == "dataclass"
+                )
+                or (
+                    isinstance(decorator, ast.Call)
+                    and (
+                        isinstance(decorator.func, ast.Name)
+                        and decorator.func.id == "dataclass"
+                        or isinstance(decorator.func, ast.Attribute)
+                        and decorator.func.attr == "dataclass"
+                    )
+                )
+                for decorator in node.decorator_list
+            ):
+                return node
+        return None
+
     def _explicit_dependency_policy(source: str) -> dict[str, Any]:
         """Extract request-specific dependency rules that override defaults."""
 
@@ -877,6 +913,37 @@ def enrich_implementation_plan(
                 if str(item.get("method_name") or "")
             ],
         ]))
+        existing_data_class = (
+            _existing_dataclass(str(chunk.get("path") or ""), owner)
+            if kind == "class"
+            else None
+        )
+        if existing_data_class is not None:
+            existing_methods = {
+                node.name
+                for node in existing_data_class.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            # A bare encode_envelope(...) in a requirement for a preserved
+            # dataclass is a module function, not a new method on that class.
+            required_methods = [
+                name
+                for name in required_methods
+                if name in existing_methods
+                or re.search(rf"\b{re.escape(owner)}\.{re.escape(name)}\s*\(", text)
+                or re.search(
+                    rf"\b(?:method|classmethod|staticmethod)\s+(?:named\s+)?{re.escape(name)}\b"
+                    rf"|\b{re.escape(name)}\s+(?:method|classmethod|staticmethod)\b",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            ]
+            callable_signatures = [
+                signature
+                for signature in callable_signatures
+                if (name := parsed_signature_name(signature))
+                and (name == "__init__" or name in required_methods)
+            ]
         chunk["declaration_contract"] = {
             "owner": owner,
             "kind": kind,
@@ -906,7 +973,7 @@ def enrich_implementation_plan(
             "fields": [],
             "decorators": (
                 ["dataclass"]
-                if re.search(
+                if existing_data_class is not None or re.search(
                     rf"\b{re.escape(owner)}\b\s+dataclass\b"
                     rf"|\bdataclass\s+{re.escape(owner)}\b",
                     text,
@@ -1018,6 +1085,16 @@ def enrich_implementation_plan(
                 if str(method) != owner
             ]
         if "dataclass" in chunk["declaration_contract"]["decorators"]:
+            if existing_data_class is not None:
+                chunk["declaration_contract"]["fields"].extend(
+                    {
+                        "name": field.target.id,
+                        "type": ast.unparse(field.annotation),
+                    }
+                    for field in existing_data_class.body
+                    if isinstance(field, ast.AnnAssign)
+                    and isinstance(field.target, ast.Name)
+                )
             typed_field_clause = re.search(
                 rf"\b(?:immutable\s+)?{re.escape(owner)}\s+dataclass\s+with\s+"
                 r"(.+?)(?=;\s*|\.\s+[A-Z]|\Z)",
@@ -1043,11 +1120,27 @@ def enrich_implementation_plan(
                         normalized_typed_fields,
                     )
                 )
+            chunk["declaration_contract"]["fields"] = list({
+                str(field["name"]): field
+                for field in chunk["declaration_contract"]["fields"]
+            }.values())
             chunk["declaration_contract"]["immutable"] = bool(re.search(
                 rf"\bimmutable\s+{re.escape(owner)}\s+dataclass\b",
                 text,
                 flags=re.IGNORECASE,
-            ))
+            )) or bool(
+                existing_data_class is not None
+                and any(
+                    isinstance(decorator, ast.Call)
+                    and any(
+                        keyword.arg == "frozen"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value is True
+                        for keyword in decorator.keywords
+                    )
+                    for decorator in existing_data_class.decorator_list
+                )
+            )
             mutable_field_names = [
                 str(field.get("name") or "")
                 for field in chunk["declaration_contract"]["fields"]
@@ -2690,6 +2783,7 @@ def validate_implementation_plan_completeness(
                     "structure",
                     "file_contract",
                     "package_contract",
+                    "constant",
                     "module",
                     "quality",
                     "documentation",

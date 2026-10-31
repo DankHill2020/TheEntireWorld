@@ -16,6 +16,7 @@ from tech_connector.game_engine.runtime.tc_player_build_service import (
     build_windows_player,
     compile_tcscene_for_runtime,
     validate_player_package,
+    validate_windowed_player,
 )
 
 
@@ -70,6 +71,12 @@ def qualify_playable_project(
         deterministic = first_bytes == second_bytes
         packaged = build_windows_player(level.source_path, package, player_executable=player)
         runtime = validate_player_package(package, frames=max(2, int(frames)))
+        graphical_error = ""
+        try:
+            graphical = validate_windowed_player(package, frames=max(3, int(frames)))
+        except (OSError, RuntimeError, ValueError) as exc:
+            graphical = {"status": "blocked", "profile_summary": {}, "screenshot": ""}
+            graphical_error = str(exc)
         profile = dict(runtime.get("profile_summary") or {})
         frame_p95 = float(dict(profile.get("frame") or {}).get("p95_ms") or 0.0)
         graph_p95 = float(dict(profile.get("graph") or {}).get("p95_ms") or 0.0)
@@ -81,6 +88,8 @@ def qualify_playable_project(
             "deterministic_compile": deterministic,
             "asset_integrity": dict(packaged.validation.get("assets") or {}).get("status") == "passed",
             "native_runtime": runtime.get("status") == "passed",
+            "windowed_d3d11": graphical.get("status") == "passed",
+            "starter_character_rendered": int(graphical.get("skinned_draws_min") or 0) > 0,
             "frame_budget": frame_p95 <= budgets["frame_p95"],
             "graph_budget": graph_p95 <= budgets["graph_p95"],
             "physics_budget": physics_p95 <= budgets["physics_p95"],
@@ -97,6 +106,9 @@ def qualify_playable_project(
             "graph_operations": packaged.graph_operations,
             "manifest_sha256": hashlib.sha256(first_bytes).hexdigest(),
             "profile_summary": profile,
+            "graphical_profile_summary": graphical["profile_summary"],
+            "graphical_screenshot": graphical["screenshot"],
+            "graphical_error": graphical_error,
             "elapsed_seconds": round(time.perf_counter() - started, 6),
         })
     qualified_asset_types = sorted({
@@ -129,16 +141,25 @@ def validate_playable_project_qualification(
     receipt: Mapping[str, Any] | None,
     *,
     max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+    source_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     row = dict(receipt or {}); gates: list[str] = []
     if row.get("schema") != PLAYABLE_PROJECT_QUALIFICATION_SCHEMA: gates.append("schema")
     if row.get("status") != "passed": gates.append("status")
     variants = list(row.get("variants") or ())
-    if not variants or any(dict(item).get("status") != "passed" for item in variants): gates.append("production_variants")
+    if not variants or any(
+        dict(item).get("status") != "passed"
+        or dict(dict(item).get("checks") or {}).get("windowed_d3d11") is not True
+        or dict(dict(item).get("checks") or {}).get("starter_character_rendered") is not True
+        for item in variants
+    ): gates.append("production_variants")
     verified_at = _timestamp(row.get("verified_at"))
     now = datetime.now(timezone.utc).timestamp()
     if verified_at <= 0.0 or now - verified_at > max(0.0, float(max_age_seconds)): gates.append("freshness")
-    expected_fingerprint = playable_project_source_fingerprint(source_root)
+    expected_fingerprint = (
+        playable_project_source_fingerprint(source_root)
+        if source_fingerprint is None else source_fingerprint
+    )
     if str(row.get("source_fingerprint") or "") != expected_fingerprint: gates.append("source_fingerprint")
     player = Path(str(row.get("player_executable") or ""))
     if not player.is_file() or str(row.get("player_sha256") or "") != _file_hash(player): gates.append("player_binary")

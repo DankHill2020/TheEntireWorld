@@ -15,26 +15,29 @@ from PySide6.QtCore import QThread, Signal
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
 OLLAMA_BASE_URL = f"http://{OLLAMA_HOST}"
+_INSTALLED_MODELS_CACHE_TTL_SECONDS = 5.0
+_installed_models_cache: tuple[float, tuple[str, ...]] = (0.0, ())
+_installed_models_lock = threading.Lock()
 
 
-FAST_GENERAL_MODEL = "qwen3:4b-instruct"
-FALLBACK_GENERAL_MODEL = "qwen3:4b-instruct"
-VISUAL_MEDIA_MODEL = os.environ.get("AI_STUDIO_VISUAL_MEDIA_MODEL", "qwen3:4b-instruct")
+FAST_GENERAL_MODEL = "qwen3.5:4b"
+FALLBACK_GENERAL_MODEL = "qwen3.5:4b"
+VISUAL_MEDIA_MODEL = os.environ.get("AI_STUDIO_VISUAL_MEDIA_MODEL", "qwen3.5:4b")
 
 # The semantic pass is intentionally small and cheap. A separate planning pass
 # receives its hypothesis plus resolved context and performs the deeper reasoning.
-SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_INTENT_MODEL", "qwen3:4b-instruct")
-FALLBACK_SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_VERIFY_MODEL", "qwen3:4b-instruct")
-SEMANTIC_ALIGNMENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_ALIGNMENT_MODEL", "qwen3:4b-instruct")
+SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_INTENT_MODEL", "qwen3.5:4b")
+FALLBACK_SEMANTIC_INTENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_VERIFY_MODEL", "qwen3.5:4b")
+SEMANTIC_ALIGNMENT_MODEL = os.environ.get("AI_STUDIO_SEMANTIC_ALIGNMENT_MODEL", "qwen3.5:4b")
 
-FAST_CODE_MODEL = os.environ.get("AI_STUDIO_FAST_CODE_MODEL", "qwen2.5-coder:7b")
-FALLBACK_CODE_MODEL = "qwen2.5-coder:7b"
+FAST_CODE_MODEL = os.environ.get("AI_STUDIO_FAST_CODE_MODEL", "qwen3.5:4b")
+FALLBACK_CODE_MODEL = "qwen3.5:4b"
 CODE_MODEL_PROFILES = {
-    "micro": os.environ.get("AI_STUDIO_MICRO_CODE_MODEL", "qwen2.5-coder:3b"),
-    "small": os.environ.get("AI_STUDIO_SMALL_CODE_MODEL", "qwen2.5-coder:3b"),
-    "standard": os.environ.get("AI_STUDIO_STANDARD_CODE_MODEL", "qwen2.5-coder:7b"),
-    "quality": os.environ.get("AI_STUDIO_QUALITY_CODE_MODEL", "qwen2.5-coder:7b"),
-    "deep": os.environ.get("AI_STUDIO_DEEP_CODE_MODEL", "qwen2.5-coder:7b"),
+    "micro": os.environ.get("AI_STUDIO_MICRO_CODE_MODEL", "qwen3.5:4b"),
+    "small": os.environ.get("AI_STUDIO_SMALL_CODE_MODEL", "qwen3.5:4b"),
+    "standard": os.environ.get("AI_STUDIO_STANDARD_CODE_MODEL", "qwen3.5:4b"),
+    "quality": os.environ.get("AI_STUDIO_QUALITY_CODE_MODEL", "qwen3.5:9b"),
+    "deep": os.environ.get("AI_STUDIO_DEEP_CODE_MODEL", "qwen3.5:9b"),
 }
 
 EMBEDDING_MODEL = "nomic-embed-text:latest"
@@ -122,22 +125,31 @@ def _build_local_model_candidates(model_name: str) -> list[str]:
     if requested in aliases:
         return [aliases[requested]]
 
-    if requested in {"qwen2.5-coder:3b", "qwen2.5-coder:3b", "qwen2.5-coder:7b", "qwen2.5-coder:7b", "qwen2.5-coder:30b"}:
+    if requested in {
+        "qwen3-coder:30b",
+        "qwen2.5-coder:3b", "qwen2.5-coder:7b", "qwen2.5-coder:30b",
+    }:
         return [requested]
 
-    families = ["qwen2.5-coder", "qwen2.5", "qwen3-coder", "qwen3", "qwen"]
+    families = ["qwen3.5", "qwen3", "qwen3-coder", "qwen2.5-coder", "qwen2.5", "qwen"]
     if "qwen2.5" in requested:
-        families = ["qwen2.5", "qwen2.5-coder", "qwen3-coder", "qwen3", "qwen"]
+        families = ["qwen2.5", "qwen2.5-coder", "qwen3.5", "qwen3-coder", "qwen3", "qwen"]
+    elif "qwen3.5" in requested:
+        families = ["qwen3.5", "qwen3", "qwen3-coder", "qwen2.5-coder", "qwen2.5", "qwen"]
     elif "qwen3" in requested:
-        families = ["qwen3", "qwen3-coder", "qwen2.5-coder", "qwen2.5", "qwen"]
+        families = ["qwen3", "qwen3.5", "qwen3-coder", "qwen2.5-coder", "qwen2.5", "qwen"]
 
     candidates = [requested]
     if size_token:
         for family in families:
             candidates.append(f"{family}:{size_token}")
             candidates.append(f"{family}:{size_token.replace('.', '')}b")
-        candidates.extend([
-            "qwen2.5-coder:7b",
+        compatibility_fallbacks = (
+            ["qwen3.5:9b", "qwen2.5-coder:7b", "qwen3.5:4b", "qwen3:4b-instruct"]
+            if requested_size >= 8
+            else ["qwen3.5:4b", "qwen3:4b-instruct", "qwen2.5-coder:7b"]
+        )
+        candidates.extend([*compatibility_fallbacks,
             "qwen2.5:latest",
             "qwen3-coder:latest",
             "qwen3:latest",
@@ -191,6 +203,28 @@ def estimated_ollama_generation_timeout(model: str) -> int:
 def as_mcphost_model(model):
     return "ollama:" + normalize_ollama_model_name(model)
 
+def hardware_aware_local_models(settings: dict | None = None) -> dict[str, str]:
+    """Return role models sized for the detected GPU, preferring installed models."""
+    values = dict(settings or {})
+    if settings is None:
+        try:
+            from tech_connector.services.settings_service import load_settings
+
+            values = load_settings()
+        except Exception:
+            values = {}
+    if str(values.get("local_model_policy") or "").lower() != "hardware_aware":
+        return {}
+    try:
+        from tech_connector.services.local_model_optimizer_service import (
+            recommend_local_models,
+        )
+
+        return dict(recommend_local_models(installed_ollama_models())["active"])
+    except Exception:
+        return {}
+
+
 
 def model_for_role(role, default=None):
     """Return the canonical Ollama model for an application role.
@@ -233,6 +267,21 @@ def model_for_role(role, default=None):
             return settings.get(model_key)
     except Exception:
         pass
+
+    role_groups = {
+        "intent": "intent", "semantic_router": "intent",
+        "request_understanding": "intent", "task_splitter": "intent",
+        "route_disambiguation": "intent", "general": "general",
+        "plan": "general", "docs": "general", "visual": "visual",
+        "visual_media": "visual", "image": "visual", "video": "visual",
+        "camera": "visual", "code": "code", "debug": "code",
+        "dcc": "code", "maya": "code", "unreal": "code",
+        "blender": "code", "substance_painter": "code",
+        "motionbuilder": "code",
+    }
+    active = hardware_aware_local_models(settings)
+    if active.get(role_groups.get(normalized_role, "")):
+        return active[role_groups[normalized_role]]
 
     return AI_MODELS.get(normalized_role, default or FAST_GENERAL_MODEL)
 
@@ -303,17 +352,39 @@ def code_model_for_profile(
         except Exception:
             resolved_settings = {}
     try:
-        if target_profile == "quality" and resolved_settings.get("fast_code_model"):
-            return resolved_settings.get("fast_code_model")
-        # Check custom mappings for specific profile names as roles
+        # An explicit per-profile mapping always wins over automatic sizing.
         custom_mappings = resolved_settings.get("custom_model_mappings", {})
         profile_role = f"profile_{target_profile}"
         if profile_role in custom_mappings:
             return custom_mappings[profile_role]
+
+        active = hardware_aware_local_models(resolved_settings)
+        role = "deep" if target_profile in {"quality", "deep"} else "code"
+        if active.get(role):
+            return active[role]
+
+        if target_profile == "quality" and resolved_settings.get("fast_code_model"):
+            return resolved_settings.get("fast_code_model")
     except Exception:
         pass
 
     return CODE_MODEL_PROFILES.get(target_profile, CODE_MODEL_PROFILES["small"])
+
+
+def installed_local_quality_model(selected_model: str, settings: dict | None = None) -> str:
+    """Select an installed quality coder for automatic local code work."""
+
+    chosen = str(selected_model or "").removeprefix("ollama:").strip()
+    values = dict(settings or {})
+    if not (
+        values.get("model_source_mode") == "local_only"
+        and values.get("local_model_policy") == "hardware_aware"
+        and chosen.casefold() == "qwen3.5:4b"
+    ):
+        return chosen
+    deep_model = str(code_model_for_profile("quality", values)).removeprefix("ollama:")
+    installed = {name.casefold() for name in installed_ollama_models()}
+    return deep_model if deep_model.casefold() in installed else chosen
 
 
 def is_ollama_running(timeout=2):
@@ -356,24 +427,37 @@ def ensure_ollama_server(wait_seconds=8):
     return False, "Ollama did not become ready in time."
 
 
-def installed_ollama_models():
+def installed_ollama_models(*, refresh: bool = False, timeout_seconds: float = 1.5):
+    """Return installed models without allowing Ollama discovery to stall routing."""
+    global _installed_models_cache
+    now = time.monotonic()
+    with _installed_models_lock:
+        cached_at, cached_models = _installed_models_cache
+        if not refresh and now - cached_at < _INSTALLED_MODELS_CACHE_TTL_SECONDS:
+            return list(cached_models)
     try:
-        result = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            check=True,
-            creationflags=_creationflags(),
+        request = urllib.request.Request(
+            f"{OLLAMA_BASE_URL}/api/tags",
+            headers={"Accept": "application/json"},
         )
+        with urllib.request.urlopen(
+            request, timeout=max(0.1, float(timeout_seconds)),
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
     except Exception:
-        return []
+        return list(cached_models)
 
-    models = []
-    for line in result.stdout.splitlines()[1:]:
-        line = line.strip()
-        if line:
-            models.append(line.split()[0])
-    return models
+    models = tuple(
+        dict.fromkeys(
+            str(item.get("name") or item.get("model") or "").strip()
+            for item in payload.get("models") or ()
+            if isinstance(item, dict)
+            and str(item.get("name") or item.get("model") or "").strip()
+        )
+    )
+    with _installed_models_lock:
+        _installed_models_cache = (time.monotonic(), models)
+    return list(models)
 
 
 def missing_required_models():
@@ -502,7 +586,7 @@ def unload_ollama_models(models):
     }
 
 
-def warm_required_models_async(keep_alive="10m"):
+def warm_required_models_async(keep_alive="30m"):
     """Warm at most one model in the background.
 
     Multiple concurrent warm requests caused Ollama to load and evict models on
